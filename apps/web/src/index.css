@@ -1,0 +1,138 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/nunito';
+@import '@fontsource-variable/jetbrains-mono';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+:root {
+  --bg: #fbf7f2;
+  --surface: #ffffff;
+  --surface-2: #f5eee6;
+  --surface-3: #ece2d7;
+  --line: #e4d9cd;
+  --ink: #2b2433;
+  --ink-2: #625a6b;
+  --ink-3: #7f7687;
+  --accent: #c2406f;
+  --accent-ink: #ffffff;
+  --accent-soft: #fbe3ec;
+  --up: #0d8a63;
+  --up-soft: #d9f2e8;
+  --down: #c8324f;
+  --down-soft: #fbe1e6;
+  --warn: #8a5f00;
+  --warn-soft: #f8ecc9;
+  --info: #1f73c4;
+  --info-soft: #dcebfa;
+  --series-1: #c2406f;
+  --series-2: #1f73c4;
+  --series-3: #9a6a00;
+  --series-4: #0d8a63;
+  --series-5: #6e4fd1;
+  --series-6: #bc4f2a;
+}
+
+[data-theme='dark'] {
+  --bg: #100e16;
+  --surface: #17151f;
+  --surface-2: #201d2a;
+  --surface-3: #2b2737;
+  --line: #2f2a3b;
+  --ink: #f4eee7;
+  --ink-2: #b7aebf;
+  --ink-3: #9085a0;
+  --accent: #f29bbb;
+  --accent-ink: #2b1420;
+  --accent-soft: #3a2230;
+  --up: #6fd6ae;
+  --up-soft: #17322a;
+  --down: #f58a9e;
+  --down-soft: #3a1d26;
+  --warn: #efc56b;
+  --warn-soft: #362a12;
+  --info: #8cc4f5;
+  --info-soft: #182c40;
+  --series-1: #db5f8a;
+  --series-2: #3c93d6;
+  --series-3: #c08a20;
+  --series-4: #23a57c;
+  --series-5: #9374e0;
+  --series-6: #d2603f;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-up: var(--up);
+  --color-up-soft: var(--up-soft);
+  --color-down: var(--down);
+  --color-down-soft: var(--down-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --font-display: 'Nunito Variable', 'Inter Variable', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+  --radius-card: 18px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@keyframes mochi-breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.03, 0.97); }
+}
+@keyframes mochi-hop {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  40% { transform: translateY(-7%) scale(0.97, 1.03); }
+}
+@keyframes mochi-shake {
+  0%, 100% { transform: rotate(0); }
+  25% { transform: rotate(-3deg); }
+  75% { transform: rotate(3deg); }
+}
+.mochi-sleeping, .mochi-thinking { animation: mochi-breathe 3s ease-in-out infinite; transform-origin: 50% 90%; }
+.mochi-happy { animation: mochi-hop 1s ease-in-out infinite; transform-origin: 50% 90%; }
+.mochi-alert, .mochi-confused { animation: mochi-shake 0.9s ease-in-out infinite; transform-origin: 50% 90%; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

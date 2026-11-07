@@ -5,22 +5,25 @@
 | 負責 | 範圍 |
 | --- | --- |
 | Codex | `packages/*/test/**`、`apps/server/test/**`、`docs/**`、`README.md` |
-| Claude Code | `apps/web/**`、Playwright 瀏覽器 E2E、最終驗收 |
+| Claude Code | `apps/web/**`、`e2e/**`、最終驗收 |
 
 Codex 的工作分支：`codex/tests-docs`，完成後開 PR 到 `main`，不要直接 push `main`。
 
 ## 目前狀態
 
-後端已實作完成，但**目前一個自動化測試都沒有**。已驗證過的只有：
+後端和前端都已實作完成，但**單元與整合測試仍是 0 個**，這正是任務 1、2 要補的。已驗證過的：
 
-- 所有後端 package 的型別檢查通過。
-- 手動 smoke test：demo 跑 7 天 replay，3 個 agent 共 2,016 個週期，有成交、有風控拒單，4 個帳戶 ledger 稽核一致。
-- 安全檢查：未帶 token 回 401，錯誤的 Origin 或 Host 回 403。
-- OKX 公開行情：WS 連線、報價、K 線可用。
+- 全部 package 型別檢查、`pnpm build`、Playwright E2E（`pnpm test:e2e`，需要本機安裝 Chrome）通過，並在全新目錄從 `pnpm install` 重跑過。
+- E2E 走完 Demo → 行情 → agent → 風控核准與拒絕 → 手動下單 → 部位 → PnL → 平倉 → Demo reset。
+- 手動驗證：重啟後資料與 replay 時間點保留、agent 變 PAUSED；OKX 即時行情模擬下單與重複單防護；用本地假 OpenAI 相容伺服器走完 BYOK；金鑰未寫入 SQLite。
+- 這些手動驗證都還沒變成自動化測試。
 
-沒驗證過的路徑，不要因為程式碼看起來合理就當作正確：限價單、部位翻轉、強平、重啟復原、真實 AI provider。
+只手動走過或完全沒測過的路徑，不要因為程式碼看起來合理就當作正確：限價單成交、部位翻轉、強平、資金費邊界、OKX 斷線重連、Anthropic 與 Gemini 的真實 API。
 
-`apps/web` 還沒建立，所以根目錄的 `pnpm typecheck` 目前會失敗，這是預期內的。請改跑單一 package 的 `tsc`（見 `AGENTS.md`）。
+驗證過程已修掉、請補回歸測試的 bug：
+
+- `mock-reckless-v1` 用分鐘編號取餘數，15 分鐘排程永遠落在同一分支，改用週期編號。
+- SSE 長連線讓 `app.close()` 卡住，後端無法正常關閉。現在由 `preClose` 結束串流。
 
 ## 修 bug 的規則
 

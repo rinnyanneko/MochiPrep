@@ -48,6 +48,12 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   const token = randomBytes(32).toString('hex');
   const allowedHosts = new Set(config.allowedOrigins.map((origin) => new URL(origin).host));
 
+  const streams = new Set<NodeJS.WritableStream & { end(): void }>();
+  // Open event streams would otherwise hold app.close() forever.
+  app.addHook('preClose', async () => {
+    for (const stream of streams) stream.end();
+  });
+
   const hostAllowed = (request: FastifyRequest) => allowedHosts.has(request.headers.host ?? '');
 
   app.addHook('onRequest', async (request, reply) => {
@@ -100,12 +106,14 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
     });
     const send = (event: ServerEvent) => raw.write(`data: ${JSON.stringify(event)}\n\n`);
     const unsubscribe = runtime.subscribe(send);
-    const heartbeat = setInterval(() => raw.write(': ping\n\n'), 15_000);
+    const heartbeat = setInterval(() => send({ type: 'heartbeat' }), 15_000);
+    streams.add(raw);
     for (const status of runtime.feeds()) send({ type: 'feed', status });
     send({ type: 'replay', state: runtime.replayState() });
     request.raw.on('close', () => {
       clearInterval(heartbeat);
       unsubscribe();
+      streams.delete(raw);
     });
   });
 

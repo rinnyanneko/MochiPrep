@@ -84,11 +84,12 @@ function reversion(c: MarketContext): AiDecisionData {
 
 /** Misbehaves on purpose so the demo shows the risk engine saying no. */
 function reckless(c: MarketContext): AiDecisionData {
-  const bar = Math.floor(c.now / 60_000);
-  const side = bar % 2 === 0 ? 'LONG' : 'SHORT';
-  if (c.position) return bar % 4 === 0 ? close(c, 'Bored of this position.') : hold(c, 'Letting it ride.');
+  // Counted in cycles, not minutes: a 15m schedule would otherwise always land on one branch.
+  const cycle = Math.floor(c.now / (c.horizonSec * 1000));
+  const side = cycle % 2 === 0 ? 'LONG' : 'SHORT';
+  if (c.position) return cycle % 4 === 0 ? close(c, 'Bored of this position.') : hold(c, 'Letting it ride.');
   const entry = enter(c, side, 1.5, 3, 'Feeling lucky, trading every bar.', 0.95);
-  switch (bar % 3) {
+  switch (cycle % 3) {
     case 0:
       return { ...entry, stopLoss: null, reason: `${LABEL} Stops are for the timid. No stop loss on this one.` };
     case 1: {

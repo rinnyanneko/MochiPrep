@@ -461,6 +461,7 @@ export interface ReplayState {
 }
 
 export type ServerEvent =
+  | { type: 'heartbeat' }
   | { type: 'quote'; quote: Quote }
   | { type: 'feed'; status: FeedStatus }
   | { type: 'replay'; state: ReplayState }
