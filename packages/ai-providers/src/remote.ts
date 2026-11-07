@@ -13,14 +13,20 @@ const DEFAULT_BASE: Partial<Record<ProviderKind, string>> = {
 /** Providers confirmed to honour JSON mode. Elsewhere the prompt alone asks for JSON. */
 const JSON_MODE: ProviderKind[] = ['OPENAI', 'DEEPSEEK'];
 
-async function post(
+/** Waits before each retry. A failed request has produced nothing, so asking again is safe. */
+const RETRY_DELAYS_MS = [1_000, 3_000];
+
+const isTransient = (error: unknown) =>
+  error instanceof ProviderError && (error.code === 'NETWORK' || error.code === 'RATE_LIMIT' || error.code === 'SERVER');
+
+async function postOnce(
   url: string,
   headers: Record<string, string>,
   body: unknown,
   request: AiRequest,
-  apiKey: string,
+  secrets: string[],
   fetchImpl: typeof fetch,
-  extraHeaders: Record<string, string> = {},
+  extraHeaders: Record<string, string>,
 ): Promise<any> {
   const timeout = AbortSignal.timeout(TIMEOUT_MS);
   const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
@@ -34,12 +40,13 @@ async function post(
     });
   } catch (error) {
     if (signal.aborted) throw new ProviderError('TIMEOUT', 'The model did not answer in time');
-    throw new ProviderError('NETWORK', redactSecrets(`Could not reach the provider: ${(error as Error).message}`, [apiKey, ...Object.values(extraHeaders)]));
+    throw new ProviderError('NETWORK', redactSecrets(`Could not reach the provider: ${(error as Error).message}`, secrets));
   }
   if (!response.ok) {
-    const text = redactSecrets((await response.text().catch(() => '')).slice(0, 400), [apiKey, ...Object.values(extraHeaders)]);
-    const code = response.status === 401 || response.status === 403 ? 'AUTH' : response.status === 429 ? 'RATE_LIMIT' : 'HTTP';
-    throw new ProviderError(code, `Provider returned HTTP ${response.status}: ${text}`);
+    const text = redactSecrets((await response.text().catch(() => '')).slice(0, 400), secrets);
+    const { status } = response;
+    const code = status === 401 || status === 403 ? 'AUTH' : status === 429 ? 'RATE_LIMIT' : status >= 500 ? 'SERVER' : 'HTTP';
+    throw new ProviderError(code, `Provider returned HTTP ${status}: ${text}`);
   }
   try {
     return await response.json();
@@ -48,9 +55,34 @@ async function post(
   }
 }
 
+async function post(
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+  request: AiRequest,
+  apiKey: string,
+  fetchImpl: typeof fetch,
+  extraHeaders: Record<string, string> = {},
+  retryDelays: number[] = RETRY_DELAYS_MS,
+): Promise<any> {
+  const secrets = [apiKey, ...Object.values(extraHeaders)];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await postOnce(url, headers, body, request, secrets, fetchImpl, extraHeaders);
+    } catch (error) {
+      const delay = retryDelays[attempt];
+      if (delay === undefined || !isTransient(error)) {
+        if (attempt > 0 && error instanceof ProviderError) throw new ProviderError(error.code, `${error.message} (after ${attempt + 1} attempts)`);
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
 const trimBase = (url: string) => url.replace(/\/+$/, '');
 
-export function createRemoteProvider(config: ProviderConfig, apiKey: string, fetchImpl: typeof fetch = fetch): AiProvider {
+export function createRemoteProvider(config: ProviderConfig, apiKey: string, fetchImpl: typeof fetch = fetch, retryDelays?: number[]): AiProvider {
   switch (config.kind) {
     case 'OPENAI':
     case 'DEEPSEEK':
@@ -76,6 +108,7 @@ export function createRemoteProvider(config: ProviderConfig, apiKey: string, fet
             apiKey,
             fetchImpl,
             config.extraHeaders,
+            retryDelays,
           );
           const text = json?.choices?.[0]?.message?.content;
           // DeepSeek's JSON mode can answer with blank content, which its docs say to expect.
@@ -102,6 +135,7 @@ export function createRemoteProvider(config: ProviderConfig, apiKey: string, fet
             apiKey,
             fetchImpl,
             config.extraHeaders,
+            retryDelays,
           );
           const text = (json?.content ?? [])
             .filter((block: { type: string }) => block.type === 'text')
@@ -129,6 +163,7 @@ export function createRemoteProvider(config: ProviderConfig, apiKey: string, fet
             apiKey,
             fetchImpl,
             config.extraHeaders,
+            retryDelays,
           );
           const text = (json?.candidates?.[0]?.content?.parts ?? [])
             .map((part: { text?: string }) => part.text ?? '')

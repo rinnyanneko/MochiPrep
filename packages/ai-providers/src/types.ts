@@ -48,7 +48,7 @@ export interface AiProvider {
   complete(request: AiRequest): Promise<AiResponse>;
 }
 
-export type ProviderErrorCode = 'NO_KEY' | 'AUTH' | 'RATE_LIMIT' | 'TIMEOUT' | 'NETWORK' | 'HTTP' | 'BAD_RESPONSE';
+export type ProviderErrorCode = 'NO_KEY' | 'AUTH' | 'RATE_LIMIT' | 'TIMEOUT' | 'NETWORK' | 'SERVER' | 'HTTP' | 'BAD_RESPONSE';
 
 export class ProviderError extends Error {
   constructor(readonly code: ProviderErrorCode, message: string) {

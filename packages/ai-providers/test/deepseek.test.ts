@@ -59,8 +59,56 @@ describe('extra headers', () => {
 
   it('are redacted from provider errors', async () => {
     const fetchImpl = vi.fn(async () => new Response('rejected header gateway-secret-value', { status: 500 }));
-    const provider = createRemoteProvider({ ...config, extraHeaders: { 'x-org': 'gateway-secret-value' } }, 'key', fetchImpl as unknown as typeof fetch);
+    const provider = createRemoteProvider({ ...config, extraHeaders: { 'x-org': 'gateway-secret-value' } }, 'key', fetchImpl as unknown as typeof fetch, [0]);
     await expect(provider.complete(request)).rejects.toThrow(/\[REDACTED\]/);
     await expect(provider.complete(request)).rejects.not.toThrow(/gateway-secret-value/);
+  });
+});
+
+describe('retries', () => {
+  const ok = () => new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }));
+  const status = (code: number) => new Response('{"error":"busy"}', { status: code });
+  const provider = (fetchImpl: unknown) => createRemoteProvider(config, 'key', fetchImpl as typeof fetch, [0, 0]);
+
+  it.each([500, 502, 503, 429])('recovers from a passing HTTP %i', async (code) => {
+    const fetchImpl = vi.fn<() => Promise<Response>>().mockResolvedValueOnce(status(code)).mockResolvedValueOnce(ok());
+    expect((await provider(fetchImpl).complete(request)).text).toBe('{"ok":true}');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('recovers from a dropped connection', async () => {
+    const fetchImpl = vi.fn<() => Promise<Response>>().mockRejectedValueOnce(new TypeError('socket hang up')).mockResolvedValueOnce(ok());
+    await expect(provider(fetchImpl).complete(request)).resolves.toBeDefined();
+  });
+
+  it('gives up after the last delay and says how often it tried', async () => {
+    const fetchImpl = vi.fn(async () => status(500));
+    await expect(provider(fetchImpl).complete(request)).rejects.toThrow('after 3 attempts');
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([[400, 'HTTP'], [401, 'AUTH'], [403, 'AUTH'], [404, 'HTTP']])('does not retry HTTP %i, which would fail the same way', async (code, errorCode) => {
+    const fetchImpl = vi.fn(async () => status(code as number));
+    await expect(provider(fetchImpl).complete(request)).rejects.toMatchObject({ code: errorCode });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a reply it could not read', async () => {
+    const fetchImpl = vi.fn(async () => new Response('not json'));
+    await expect(provider(fetchImpl).complete(request)).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an auth failure critical after a retried server error', async () => {
+    const fetchImpl = vi.fn<() => Promise<Response>>().mockResolvedValueOnce(status(500)).mockResolvedValueOnce(status(401));
+    const error = await provider(fetchImpl).complete(request).catch((e) => e as ProviderError);
+    expect((error as ProviderError).critical).toBe(true);
+  });
+
+  it('retries on every provider type', async () => {
+    const body = { content: [{ type: 'text', text: 'hi' }] };
+    const fetchImpl = vi.fn<() => Promise<Response>>().mockResolvedValueOnce(status(500)).mockResolvedValueOnce(new Response(JSON.stringify(body)));
+    await createRemoteProvider({ ...config, kind: 'ANTHROPIC' }, 'key', fetchImpl as unknown as typeof fetch, [0]).complete(request);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
