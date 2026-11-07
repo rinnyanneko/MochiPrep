@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DEFAULT_SYMBOLS, INSTRUMENTS } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database.js';
+import { newDataKey, seal, wrapWithPassword } from '../src/vault.js';
 
 const ROUND_CASES = [
   0.5, 1.5, 2.5, -0.5, -1.5, -2.5, 2.4999999999999996, 0.49999999999999994, -0.49999999999999994,
@@ -58,6 +59,25 @@ function nodeCreatedDatabase(): Buffer {
   }
 }
 
+const VAULT_PASSWORD = 'mochi-pässwörd-é';
+const VAULT_FAST_KDF = { N: 1024, r: 8, p: 1 };
+
+/** Secrets sealed by Node, so Rust can prove it opens what existing installs have stored. */
+async function vaultFixture() {
+  const dataKey = newDataKey();
+  const sealedCase = (context: string, plaintext: string) => ({ context, plaintext, sealed: seal(dataKey, plaintext, context) });
+  return {
+    password: VAULT_PASSWORD,
+    passwordNfc: VAULT_PASSWORD.normalize('NFC'),
+    dataKeyHex: dataKey.toString('hex'),
+    wrap: await wrapWithPassword(dataKey, VAULT_PASSWORD, VAULT_FAST_KDF),
+    sealed: [
+      sealedCase('provider-key:prov_1', 'sk-golden-ai-key'),
+      sealedCase('okx-credentials:acct_1', '{"apiKey":"k","secretKey":"s","passphrase":"p","environment":"OKX_DEMO"}'),
+    ],
+  };
+}
+
 /**
  * Golden fixtures: what the TypeScript backend produces, saved so the Rust port can be tested
  * against it. Each key is a file name under crates/golden; a Buffer is written as raw bytes and
@@ -72,11 +92,12 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     },
     'schema.json': schemaFixture(),
     'node-created.sqlite': nodeCreatedDatabase(),
+    'vault.json': await vaultFixture(),
   };
 }
 
 /** Entries whose bytes legitimately differ per run (random salts, nonces). The freshness test skips them. */
-export const RANDOMIZED = new Set<string>(['node-created.sqlite']);
+export const RANDOMIZED = new Set<string>(['node-created.sqlite', 'vault.json']);
 
 const GOLDEN_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../crates/golden');
 

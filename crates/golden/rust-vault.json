@@ -1,0 +1,26 @@
+{
+  "dataKeyHex": "7f2e907097da7d8443ba62879084164661b225a0deb1472bce4a466ff2ec167e",
+  "password": "mochi-pässwörd-é",
+  "passwordNfc": "mochi-pässwörd-é",
+  "sealed": [
+    {
+      "context": "provider-key:prov_1",
+      "plaintext": "sk-rust-ai-key",
+      "sealed": "v1./0NiOyWImtRxcK/H.Y82j1ie583Z0YvmZqTPB5Q==.1KYGaEuG5pkuwn/eVz8="
+    },
+    {
+      "context": "okx-credentials:acct_1",
+      "plaintext": "{\"apiKey\":\"k\",\"secretKey\":\"s\",\"passphrase\":\"p\",\"environment\":\"OKX_DEMO\"}",
+      "sealed": "v1.NOqmw0NpQpFvjtUe.eg/UZe32h3XWj5TbB1OmlA==.LnvH8lgoWATdPQtcq3opWZgu6vlaVJRiULRawNgiKNGS4ymmPsuU5T5tKNG+unmJ46I3freIfJAUiaRpbQfvtLXgZr4cZsPA"
+    }
+  ],
+  "wrap": {
+    "kdf": {
+      "N": 1024,
+      "p": 1,
+      "r": 8
+    },
+    "salt": "s0pLuTMu+dZeIOQGG/N0MA==",
+    "wrappedKey": "v1.m8XnPb+Tg57qrWj1.PaRBiq/zE48Iw/myUO8ybQ==.lzM0nuRVOmPn7KtAyvBIbN+oPFVssh06VtAAxMyD0uCRR6NXQBPPLZJmeFY="
+  }
+}

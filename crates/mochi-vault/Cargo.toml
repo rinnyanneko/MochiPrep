@@ -1,0 +1,18 @@
+[package]
+name = "mochi-vault"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+aes-gcm = "0.10"
+base64 = "0.22"
+rand = "0.8"
+scrypt = "0.11"
+serde = { workspace = true }
+thiserror = { workspace = true }
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+serde_json = { workspace = true }

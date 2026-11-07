@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { RANDOMIZED, buildGolden } from '../golden/generate.js';
+import { open, unwrapWithPassword, type PasswordWrap } from '../src/vault.js';
 
 const GOLDEN_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../crates/golden');
 
@@ -17,6 +18,20 @@ describe('golden fixtures', () => {
       } else {
         expect(JSON.parse(committed.toString('utf8')), message).toEqual(fresh);
       }
+    }
+  });
+
+  it('Node opens what Rust sealed', async () => {
+    const rustVault = JSON.parse(readFileSync(join(GOLDEN_DIR, 'rust-vault.json'), 'utf8')) as {
+      passwordNfc: string;
+      dataKeyHex: string;
+      wrap: PasswordWrap;
+      sealed: Array<{ context: string; plaintext: string; sealed: string }>;
+    };
+    const key = await unwrapWithPassword(rustVault.wrap, rustVault.passwordNfc);
+    expect(key.toString('hex')).toBe(rustVault.dataKeyHex);
+    for (const entry of rustVault.sealed) {
+      expect(open(key, entry.sealed, entry.context)).toBe(entry.plaintext);
     }
   });
 });
