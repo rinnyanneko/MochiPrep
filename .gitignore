@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.mochiprep/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.local
+*.log
+.DS_Store
+coverage/
+test-results/
+playwright-report/
+.vite/
+.claude/settings.local.json
+.idea/

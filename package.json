@@ -1,0 +1,25 @@
+{
+  "name": "mochiprep",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Your cute little AI trading companion. Local-first, BYOK, paper-trading crypto perpetuals.",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@11.24.0",
+  "engines": { "node": ">=22.13.0", "pnpm": ">=9" },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @mochiprep/server --filter @mochiprep/web dev",
+    "build": "pnpm --filter @mochiprep/web build",
+    "start": "pnpm --filter @mochiprep/server start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "typecheck": "pnpm -r --parallel typecheck"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.1.0"
+  }
+}

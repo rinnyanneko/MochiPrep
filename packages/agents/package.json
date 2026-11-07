@@ -1,0 +1,9 @@
+{
+  "name": "@mochiprep/agents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc -p tsconfig.json" },
+  "dependencies": { "@mochiprep/shared": "workspace:*", "@mochiprep/core": "workspace:*", "@mochiprep/ai-providers": "workspace:*", "@mochiprep/market-data": "workspace:*" }
+}
