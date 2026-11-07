@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { generateTape, ReplayMarketData } from '@mochiprep/market-data';
-import { DEFAULT_SYMBOLS, INSTRUMENTS, TIMEFRAMES } from '@mochiprep/shared';
+import { DEFAULT_SYMBOLS, INSTRUMENTS, TIMEFRAMES, type Candle } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database.js';
 import { newDataKey, seal, wrapWithPassword } from '../src/vault.js';
 
@@ -64,6 +64,8 @@ function nodeCreatedDatabase(): Buffer {
 }
 
 // Decomposed on purpose (a + U+0308, o + U+0308, e + U+0301): the vault must normalize to NFC before scrypt.
+// Not a credential: it is published with the fixtures it seals, which hold only fake keys, so the
+// Rust tests can derive the same data key. Nothing real is ever sealed with it.
 const VAULT_PASSWORD = 'mochi-pa\u0308sswo\u0308rd-e\u0301';
 const VAULT_FAST_KDF = { N: 1024, r: 8, p: 1 };
 
@@ -102,61 +104,84 @@ function tapeFixture() {
   return { head, sha256: hash.digest('hex') };
 }
 
+const HASH_CURSORS = [5760, 9000, 20000, 25919];
+
+/** Every quote of a full replay, hashed as JSON text one line each; Rust must produce the same bytes. */
+function stepsHash() {
+  const hash = createHash('sha256');
+  const feed = new ReplayMarketData();
+  let stepCount = 0;
+  for (let quotes = feed.step(); quotes.length > 0; quotes = feed.step()) {
+    stepCount++;
+    for (const quote of quotes) hash.update(JSON.stringify(quote) + '\n');
+  }
+  return { stepCount, stepsSha256: hash.digest('hex') };
+}
+
+/** Raw bytes (int64 time, float64 OHLCV, one closed byte), so no text formatting sits between TS and Rust. */
+function candleBytes(candle: Candle): Buffer {
+  const bytes = Buffer.alloc(8 * 6 + 1);
+  bytes.writeBigInt64LE(BigInt(candle.time), 0);
+  bytes.writeDoubleLE(candle.open, 8);
+  bytes.writeDoubleLE(candle.high, 16);
+  bytes.writeDoubleLE(candle.low, 24);
+  bytes.writeDoubleLE(candle.close, 32);
+  bytes.writeDoubleLE(candle.volume, 40);
+  bytes.writeUInt8(candle.closed ? 1 : 0, 48);
+  return bytes;
+}
+
+/**
+ * Candles for every symbol and timeframe at one cursor, in symbol-then-timeframe order. getCandles
+ * reads the cursor synchronously when called, so the requests can start together after one seek.
+ */
+function candlesAt(feed: ReplayMarketData, cursor: number, limit: number) {
+  feed.seek(cursor);
+  return Promise.all(DEFAULT_SYMBOLS.flatMap((symbol) => TIMEFRAMES.map((tf) => feed.getCandles(symbol, tf, limit))));
+}
+
+async function candlesHash() {
+  const hash = createHash('sha256');
+  const feed = new ReplayMarketData();
+  // Each candlesAt call seeks and starts its requests before the next call runs, so one feed serves every cursor.
+  const perCursor = await Promise.all(HASH_CURSORS.map((cursor) => candlesAt(feed, cursor, 300)));
+  for (const candle of perCursor.flat(2)) hash.update(candleBytes(candle));
+  return { candlesSha256: hash.digest('hex') };
+}
+
 /**
  * Hashes of the whole replay output, so a change anywhere in the tape or quote model is caught
  * and not only at the few spots the readable samples cover.
  */
 async function fullOutputHashes() {
-  // Quotes are hashed as JSON text, one line each; Rust must produce the same bytes.
-  const stepsHash = createHash('sha256');
-  const stepFeed = new ReplayMarketData();
-  let stepCount = 0;
-  for (let quotes = stepFeed.step(); quotes.length > 0; quotes = stepFeed.step()) {
-    stepCount++;
-    for (const quote of quotes) stepsHash.update(JSON.stringify(quote) + '\n');
-  }
+  return { ...stepsHash(), ...(await candlesHash()) };
+}
 
-  // Candles are hashed as raw bytes (int64 time, float64 OHLCV, one closed byte) to avoid text formatting.
-  const candlesHash = createHash('sha256');
-  const candleFeed = new ReplayMarketData();
-  for (const cursor of [5760, 9000, 20000, 25919]) {
-    candleFeed.seek(cursor);
-    for (const symbol of DEFAULT_SYMBOLS) {
-      for (const tf of TIMEFRAMES) {
-        for (const candle of await candleFeed.getCandles(symbol, tf, 300)) {
-          const bytes = Buffer.alloc(8 * 6 + 1);
-          bytes.writeBigInt64LE(BigInt(candle.time), 0);
-          bytes.writeDoubleLE(candle.open, 8);
-          bytes.writeDoubleLE(candle.high, 16);
-          bytes.writeDoubleLE(candle.low, 24);
-          bytes.writeDoubleLE(candle.close, 32);
-          bytes.writeDoubleLE(candle.volume, 40);
-          bytes.writeUInt8(candle.closed ? 1 : 0, 48);
-          candlesHash.update(bytes);
-        }
-      }
-    }
-  }
-  return { stepCount, stepsSha256: stepsHash.digest('hex'), candlesSha256: candlesHash.digest('hex') };
+const SNAPSHOT_SYMBOLS = ['BTCUSDT', 'SOLUSDT'] as const;
+
+/**
+ * Readable quotes and candles at one cursor. Everything before the first await runs at call time,
+ * so mapping several cursors over one feed still reads each cursor's own state.
+ */
+async function snapshotAt(feed: ReplayMarketData, cursor: number) {
+  feed.seek(cursor);
+  const now = feed.now();
+  const quotes = DEFAULT_SYMBOLS.map((s) => feed.getQuote(s));
+  const pending = SNAPSHOT_SYMBOLS.map((symbol) => Promise.all(TIMEFRAMES.map((tf) => feed.getCandles(symbol, tf, 50))));
+  const lists = await Promise.all(pending);
+  const candles = Object.fromEntries(
+    SNAPSHOT_SYMBOLS.map((symbol, s) => [symbol, Object.fromEntries(TIMEFRAMES.map((tf, t) => [tf, lists[s]![t]]))]),
+  );
+  return { cursor, now, quotes, candles };
 }
 
 /** The replay feed: cursor edges, step quotes, and quotes plus aggregated candles at fixed cursors. */
 async function replayFixture() {
-  const timeframes = TIMEFRAMES;
   const r = new ReplayMarketData();
   const meta = { len: r.length, firstPlayableTime: r.firstPlayableTime, endTime: r.endTime, nowAtStart: r.now() };
   const fresh = new ReplayMarketData();
   const steps = [fresh.step(), fresh.step(), fresh.step()];
-  const snapshots = [];
-  for (const cursor of [5760, 9000, 20000, 25919]) {
-    r.seek(cursor);
-    const candles: Record<string, Record<string, unknown>> = {};
-    for (const symbol of ['BTCUSDT', 'SOLUSDT'] as const) {
-      candles[symbol] = {};
-      for (const tf of timeframes) candles[symbol][tf] = await r.getCandles(symbol, tf, 50);
-    }
-    snapshots.push({ cursor, now: r.now(), quotes: DEFAULT_SYMBOLS.map((s) => r.getQuote(s)), candles });
-  }
+  const snapshots = await Promise.all(HASH_CURSORS.map((cursor) => snapshotAt(r, cursor)));
   const edges: Record<string, number> = {};
   r.seek(-5);
   edges.afterSeekNegative = r.position;
