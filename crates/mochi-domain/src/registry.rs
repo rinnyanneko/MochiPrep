@@ -34,3 +34,32 @@ impl Instruments {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn register_replaces_a_default_spec() {
+        let mut instruments = Instruments::with_defaults();
+        let mut btc = instruments.get("BTCUSDT").unwrap().clone();
+        assert_ne!(btc.max_leverage, 20);
+        btc.max_leverage = 20;
+        instruments.register(btc.clone());
+        assert_eq!(instruments.get("BTCUSDT"), Some(&btc));
+        // Replacing a default does not make it removable.
+        instruments.unregister("BTCUSDT");
+        assert_eq!(instruments.get("BTCUSDT"), Some(&btc));
+    }
+
+    #[test]
+    fn register_adds_and_unregister_removes_a_new_symbol() {
+        let mut instruments = Instruments::with_defaults();
+        let mut doge = instruments.get("SOLUSDT").unwrap().clone();
+        doge.symbol = "DOGEUSDT".into();
+        instruments.register(doge.clone());
+        assert_eq!(instruments.get("DOGEUSDT"), Some(&doge));
+        instruments.unregister("DOGEUSDT");
+        assert_eq!(instruments.get("DOGEUSDT"), None);
+    }
+}

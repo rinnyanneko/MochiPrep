@@ -268,6 +268,16 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
         &self.store
     }
 
+    pub fn instruments(&self) -> &Instruments {
+        &self.instruments
+    }
+
+    /// TypeScript registers OKX instruments into a global the engine reads live, so pairs added
+    /// after startup must reach the engine's own registry through here.
+    pub fn instruments_mut(&mut self) -> &mut Instruments {
+        &mut self.instruments
+    }
+
     pub(super) fn next_id(&self, prefix: &str) -> String {
         (self.new_id.borrow_mut())(prefix)
     }
