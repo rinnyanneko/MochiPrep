@@ -110,12 +110,6 @@ pub fn js_number_string(x: f64) -> String {
     }
 }
 
-/// An f64 as a JSON value the way `JSON.stringify` writes it. A `Value` re-parses the text into
-/// a number, so use `js_number_raw` when the exact text matters (writing to the wire).
-pub fn js_number_json(x: f64) -> serde_json::Value {
-    serde_json::from_str(&js_number_string(x)).expect("a JS number string is valid JSON")
-}
-
 /// The same number as raw JSON text. serde_json would re-format an f64 (`1.5e-6`, `3.0`), but a
 /// `RawValue` is written through unchanged, which is the simplest way to keep JS formatting.
 pub fn js_number_raw(x: f64) -> Box<serde_json::value::RawValue> {

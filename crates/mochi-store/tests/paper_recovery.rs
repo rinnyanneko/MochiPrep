@@ -11,7 +11,7 @@ use mochi_core::paper::{
     CreateAccountArgs, EngineEvent, PaperEngineDeps, PaperExecutionEngine, PaperStore,
 };
 use mochi_domain::registry::Instruments;
-use mochi_domain::{DataSource, OrderRequest, OrderStatus, Quote};
+use mochi_domain::{DataSource, LedgerEventType, OrderRequest, OrderStatus, OrderType, Quote};
 use mochi_store::{open_database, SqlitePaperStore};
 use serde_json::{json, Value};
 
@@ -135,17 +135,42 @@ fn reopened_database_restores_engine_state() {
     assert_eq!(state(&engine, &account_id), before);
 
     // The stop survived the reopen and still fires on a quote through it.
+    let open_orders = engine.open_orders(&account_id).unwrap();
+    let stop_id = open_orders
+        .iter()
+        .find(|o| o.order_type == OrderType::StopMarket)
+        .unwrap()
+        .id
+        .clone();
+    let ledger_before = engine.store().list_ledger(&account_id, None).unwrap().len();
     events.lock().unwrap().clear();
     let crash = quote("BTCUSDT", "94");
     quotes.lock().unwrap().insert(key("BTCUSDT"), crash.clone());
     engine.on_quote(&crash).unwrap();
-    assert!(events
+    let filled: Vec<String> = events
         .lock()
         .unwrap()
         .iter()
-        .any(|e| matches!(e, EngineEvent::Fill { .. })));
+        .filter_map(|e| match e {
+            EngineEvent::Fill { order, .. } => Some(order.id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(filled, [stop_id.as_str()]);
     assert!(engine.position_views(&account_id).unwrap().is_empty());
-    let account = engine.store().get_account(&account_id).unwrap().unwrap();
+    // The ETH limit at 1 is untouched by the BTC stop.
+    let still_open = engine.open_orders(&account_id).unwrap();
+    assert_eq!(still_open.len(), 1);
+    assert_eq!(still_open[0].client_order_id, "pending");
+    assert_eq!(still_open[0].status, OrderStatus::Open);
+    // Entry at 100, the stop sells 1 at the bid of 94.
     let ledger = engine.store().list_ledger(&account_id, None).unwrap();
+    assert!(ledger.len() > ledger_before);
+    assert!(ledger[ledger_before..].iter().any(|e| {
+        e.event_type == LedgerEventType::RealizedPnl
+            && e.order_id.as_deref() == Some(stop_id.as_str())
+            && e.amount == "-6"
+    }));
+    let account = engine.store().get_account(&account_id).unwrap().unwrap();
     assert!(audit_ledger(&account, &ledger).unwrap().is_empty());
 }

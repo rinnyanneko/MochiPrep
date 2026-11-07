@@ -85,9 +85,9 @@ impl Checks {
 /// Pure function: same input, same verdict. It sees AI output only as untrusted data, and
 /// nothing the model says can change a limit.
 ///
-/// Input TypeScript would throw on (a malformed decimal string, an unparseable expiry, an
-/// unknown instrument, a zero divisor) is rejected here with a failed `input` check, so the gate
-/// fails closed rather than panicking or approving.
+/// Input on which TypeScript would throw or produce Infinity/NaN (a malformed decimal string, an
+/// unparseable expiry, an unknown instrument, a zero divisor) is rejected here with a failed
+/// `input` check, so the gate fails closed rather than panicking or approving.
 pub fn evaluate_risk(input: &RiskInput, instruments: &Instruments) -> RiskResult {
     let mut checks = Checks(Vec::new());
     match run_checks(input, instruments, &mut checks) {

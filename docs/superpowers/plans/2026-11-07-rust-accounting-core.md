@@ -290,3 +290,24 @@ interface Scenario { name: string; snapshot: 'every' | 'end'; ops: Op[] }
 - [ ] **Step 3: Update the docs** listed in Files.
 - [ ] **Step 4: Full verification:** `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `pnpm test`, `pnpm typecheck`. Expected: all clean.
 - [ ] **Step 5: Commit** with the message `Add paper recovery test and document the Rust accounting core`.
+
+---
+
+## Carried forward from Plan 2 reviews
+
+Real findings that nothing in Plan 2 builds on. The plan named for each must pick it up.
+
+| Plan | Item |
+|---|---|
+| 3 | Split `engine.rs` into impl-block modules (`types.rs` for events, errors, deps and helpers; `fills.rs` for `fill_order`, posting and `refresh_liquidation`; `protection.rs` for replace/cancel protection and `close_order`) as a pure move in Plan 3's first commit, verified by the unchanged scenario suite |
+| 3 | TS `onQuote` applies no quote-age check. The 60 000 ms rule for quote-driven fills rests on the Runtime/feed and must stay identical |
+| 3 | Settle `on_quote` event semantics on error (flush per committed step, drop on rollback), consistent with `set_protection` |
+| 3 | All writes go through `PaperStore::transaction` or a shared depth. `SqlitePaperStore::connection()` must not be used to `BEGIN` |
+| 3 | Keep the rusqlite error kind in `StoreFailure` (BUSY/retry detection) |
+| 3 | `Dec::parse` deliberately rejects `0x…`/Infinity/NaN and caps exponents. Document this where untrusted strings first reach `Dec`, and accept leading-zero exponents |
+| 3 | `OrderRequest` explicit-null inputs and byte-level API JSON goldens |
+| 4 | Risk `now - quote.ts` should use `checked_sub`. Reject non-finite `RiskInput` numbers up front, mapped to `input`. The zero-ask unit test should reach the /0 path. Comment `expiresAt ""` |
+| 4 | Decide the recorded outcome label when the risk engine returns `input` (TS throws, so the runner records an error) |
+| 4 | `AiDecisionData` goes through the JS number serializers when stored |
+| 3/5 | Exotic JS numbers in `live_limits`/config, covered when live limits become editable |
+| any | Cleanup: `sub_exact` duplication, `zero()` re-parse, `side_text`/`status_text`/`liquidity_text` duplication, `queued` mutated from `market.rs`, `DAY_MS`, `first_difference` on arrays, `last_funding_time` comment, `query_one` |
