@@ -54,6 +54,7 @@ import {
 import { openDatabase } from '../src/db/database.js';
 import { SqliteStore } from '../src/db/store.js';
 import { newDataKey, seal, wrapWithPassword } from '../src/vault.js';
+import { paperScenariosFixture } from './paper-scenarios.js';
 
 const ROUND_CASES = [
   0.5, 1.5, 2.5, -0.5, -1.5, -2.5, 2.4999999999999996, 0.49999999999999994, -0.49999999999999994,
@@ -1380,6 +1381,7 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     'replay.json': await replayFixture(),
     'schema.json': schemaFixture(),
     'store-rows.json': storeRowsFixture(),
+    'paper-scenarios.json': paperScenariosFixture(),
     'node-created.sqlite': nodeCreatedDatabase(),
     'vault.json': await vaultFixture(),
   };
