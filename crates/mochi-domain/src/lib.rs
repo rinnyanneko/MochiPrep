@@ -2,6 +2,7 @@
 //! and the golden fixtures in `crates/golden` keep the two in step.
 
 mod instruments;
+pub mod jsnum;
 mod market;
 
 pub use instruments::{

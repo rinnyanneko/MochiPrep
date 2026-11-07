@@ -3,6 +3,19 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DEFAULT_SYMBOLS, INSTRUMENTS } from '@mochiprep/shared';
 
+const ROUND_CASES = [
+  0.5, 1.5, 2.5, -0.5, -1.5, -2.5, 2.4999999999999996, 0.49999999999999994, -0.49999999999999994,
+  1e15 + 0.5, 0, 7.000000000000001,
+];
+const FIXED_CASES: Array<[number, number]> = [
+  [0.125, 2], [0.375, 2], [-0.125, 2], [1.005, 2], [2.5, 0], [-2.5, 0], [68000, 1], [1e-7, 6],
+  [0.0000005, 6], [123.456, 3], [0.1 + 0.2, 17], [-0, 2], [99.995, 2], [0.0005, 6], [-0.0005, 6],
+  [-1e-7, 6], [12345.6789, 0],
+];
+
+// JSON cannot carry -0, so the fixture stores 0 and the freshness test (toEqual) must see the same.
+const noNegativeZero = (x: number): number => x + 0;
+
 /**
  * Golden fixtures: what the TypeScript backend produces, saved so the Rust port can be tested
  * against it. Each key is a file name under crates/golden; a Buffer is written as raw bytes and
@@ -11,6 +24,10 @@ import { DEFAULT_SYMBOLS, INSTRUMENTS } from '@mochiprep/shared';
 export async function buildGolden(): Promise<Record<string, unknown>> {
   return {
     'instruments.json': DEFAULT_SYMBOLS.map((s) => INSTRUMENTS[s]),
+    'jsnum.json': {
+      round: ROUND_CASES.map((x) => [noNegativeZero(x), noNegativeZero(Math.round(x))]),
+      toFixed: FIXED_CASES.map(([x, d]) => [noNegativeZero(x), d, x.toFixed(d)]),
+    },
   };
 }
 
