@@ -1,7 +1,4 @@
-import {
-  evaluateRisk,
-  type PaperExecutionEngine,
-} from '@mochiprep/core';
+import { evaluateRisk, type ExecutionEngine } from '@mochiprep/core';
 import { ProviderError, redactSecrets, type AiProvider, type MarketContext } from '@mochiprep/ai-providers';
 import type { MarketDataProvider } from '@mochiprep/market-data';
 import {
@@ -16,6 +13,7 @@ import {
   type PaperAccount,
   type ProviderConfig,
   type Quote,
+  type RiskSettings,
   type Topic,
 } from '@mochiprep/shared';
 import { parseDecision } from './parse';
@@ -35,7 +33,8 @@ export interface AgentStore {
 
 export interface AgentRunnerDeps {
   store: AgentStore;
-  engine: PaperExecutionEngine;
+  /** Paper or exchange engine for an account. Throws if the exchange is not connected. */
+  execution(accountId: string): ExecutionEngine;
   market(source: DataSource): MarketDataProvider;
   account(id: string): PaperAccount | undefined;
   /** Throws ProviderError('NO_KEY') when the key is not loaded. */
@@ -190,14 +189,15 @@ export class AgentRunner {
     source: DataSource,
     trigger: CycleTrigger,
   ): Promise<DecisionRecord> {
-    const { engine } = this.deps;
     const now = market.now();
+    const account = this.deps.account(agent.accountId)!;
     const record: DecisionRecord = {
       id: this.newId(),
       agentId: agent.id,
       agentName: agent.name,
       accountId: agent.accountId,
       source,
+      venue: account.venue,
       ts: now,
       trigger,
       providerKind: null,
@@ -226,6 +226,13 @@ export class AgentRunner {
       return record;
     };
 
+    let engine: ExecutionEngine;
+    try {
+      engine = this.deps.execution(agent.accountId);
+    } catch (error) {
+      return conclude('DATA_ERROR', (error as Error).message);
+    }
+
     // 1-3. Market data, freshness, indicators.
     const quote = market.getQuote(agent.symbol);
     if (!quote) return conclude('DATA_ERROR', 'No quote available yet');
@@ -241,9 +248,15 @@ export class AgentRunner {
     if (closed.length < MIN_CANDLES) return conclude('DATA_ERROR', `Only ${closed.length} closed candles, need ${MIN_CANDLES}`);
 
     // 4-5. Account state. Unfilled entries from the last cycle expire here.
-    this.cancelStaleEntries(agent);
-    const balance = engine.balanceOf(agent.accountId);
-    const positions = await engine.getPositions(agent.accountId);
+    let balance;
+    let positions;
+    try {
+      await this.cancelStaleEntries(agent, engine);
+      balance = await engine.getBalance(agent.accountId);
+      positions = await engine.getPositions(agent.accountId);
+    } catch (error) {
+      return conclude('DATA_ERROR', `Could not read the account: ${(error as Error).message}`);
+    }
     const position = positions.find((p) => p.symbol === agent.symbol) ?? null;
 
     const stale = isStale(quote, closed[closed.length - 1]!.time, TIMEFRAME_MS[agent.timeframe], now, agent.risk.maxQuoteAgeSec);
@@ -301,15 +314,14 @@ export class AgentRunner {
 
     // 8. Risk. Time and quote are re-read: the model may have taken a while.
     const latestQuote = market.getQuote(agent.symbol) ?? null;
-    const daily = engine.dailyRisk(agent.accountId);
-    const account = this.deps.account(agent.accountId)!;
+    const daily = await engine.dailyRisk(agent.accountId);
     record.risk = evaluateRisk({
       decision: parsed.decision,
       symbol: agent.symbol,
-      settings: agent.risk,
+      settings: effectiveRisk(agent.risk, account.liveLimits),
       quote: stale ? null : latestQuote,
       now: market.now(),
-      balance: engine.balanceOf(agent.accountId),
+      balance: await engine.getBalance(agent.accountId),
       openPositions: await engine.getPositions(agent.accountId),
       dailyPnl: daily.dailyPnl,
       dayStartEquity: daily.dayStartEquity,
@@ -327,7 +339,12 @@ export class AgentRunner {
 
     // 9. Execute.
     this.update(agent, { status: 'EXECUTING' });
-    const result = await engine.placeOrder(this.toOrder(agent, parsed.decision, record));
+    let result;
+    try {
+      result = await engine.placeOrder(await this.toOrder(agent, parsed.decision, record, engine));
+    } catch (error) {
+      return conclude('ORDER_REJECTED', redactSecrets((error as Error).message, this.deps.secrets()));
+    }
     record.orderId = result.order.id;
     record.fillIds = result.fills.map((f) => f.id);
     switch (result.order.status) {
@@ -340,7 +357,7 @@ export class AgentRunner {
     }
   }
 
-  private toOrder(agent: Agent, decision: AiDecisionData, record: DecisionRecord): OrderRequest {
+  private async toOrder(agent: Agent, decision: AiDecisionData, record: DecisionRecord, engine: ExecutionEngine): Promise<OrderRequest> {
     const common = {
       accountId: agent.accountId,
       clientOrderId: `agent:${agent.id}:${record.id}`,
@@ -349,7 +366,7 @@ export class AgentRunner {
       decisionId: record.id,
     };
     if (decision.action === 'CLOSE') {
-      const position = this.deps.engine.positionViews(agent.accountId).find((p) => p.symbol === agent.symbol)!;
+      const position = (await engine.getPositions(agent.accountId)).find((p) => p.symbol === agent.symbol)!;
       return {
         ...common,
         side: position.side === 'LONG' ? 'SELL' : 'BUY',
@@ -372,12 +389,25 @@ export class AgentRunner {
     };
   }
 
-  private cancelStaleEntries(agent: Agent) {
-    const { engine } = this.deps;
-    for (const order of engine.openOrders(agent.accountId)) {
-      if (order.agentId === agent.id && order.type === 'LIMIT' && !order.reduceOnly) engine.cancelOrderSync(order.id);
+  private async cancelStaleEntries(agent: Agent, engine: ExecutionEngine) {
+    for (const order of await engine.getOpenOrders(agent.accountId)) {
+      if (order.agentId === agent.id && order.type === 'LIMIT' && !order.reduceOnly) await engine.cancelOrder(order.id);
     }
   }
+}
+
+/** An exchange account's ceilings win over an agent's settings, so sizing stays inside them. */
+export function effectiveRisk(agent: RiskSettings, ceiling: RiskSettings | null): RiskSettings {
+  if (!ceiling) return agent;
+  return {
+    maxLeverage: Math.min(agent.maxLeverage, ceiling.maxLeverage),
+    maxRiskPerTradePct: Math.min(agent.maxRiskPerTradePct, ceiling.maxRiskPerTradePct),
+    maxDailyLossPct: Math.min(agent.maxDailyLossPct, ceiling.maxDailyLossPct),
+    maxOpenPositions: Math.min(agent.maxOpenPositions, ceiling.maxOpenPositions),
+    requireStopLoss: agent.requireStopLoss || ceiling.requireStopLoss,
+    maxQuoteAgeSec: Math.min(agent.maxQuoteAgeSec, ceiling.maxQuoteAgeSec),
+    maxNotional: Math.min(agent.maxNotional, ceiling.maxNotional),
+  };
 }
 
 /** Returns why the data is stale, or null when it is fresh. */

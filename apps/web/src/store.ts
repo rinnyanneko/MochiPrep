@@ -6,6 +6,7 @@ import type {
   ArenaRow,
   DataSource,
   DecisionRecord,
+  ExchangeStatus,
   FeedStatus,
   PaperAccount,
   ProviderView,
@@ -36,6 +37,7 @@ interface State {
   providers: ProviderView[];
   decisions: DecisionRecord[];
   arena: ArenaRow[];
+  exchange: ExchangeStatus[];
   versions: Record<Topic, number>;
   page: Page;
   source: DataSource;
@@ -72,7 +74,7 @@ const remember = (key: string, value: string) => {
 };
 
 let toastId = 0;
-const ALL_TOPICS: Topic[] = ['accounts', 'orders', 'positions', 'agents', 'decisions', 'providers', 'arena'];
+const ALL_TOPICS: Topic[] = ['accounts', 'orders', 'positions', 'agents', 'decisions', 'providers', 'arena', 'exchange'];
 
 export const useApp = create<State>((set, get) => ({
   connected: false,
@@ -85,7 +87,8 @@ export const useApp = create<State>((set, get) => ({
   providers: [],
   decisions: [],
   arena: [],
-  versions: { accounts: 0, orders: 0, positions: 0, agents: 0, decisions: 0, providers: 0, arena: 0 },
+  exchange: [],
+  versions: { accounts: 0, orders: 0, positions: 0, agents: 0, decisions: 0, providers: 0, arena: 0, exchange: 0 },
   page: (location.hash.slice(1) as Page) || 'dashboard',
   source: remembered('mochi.source', 'REPLAY') as DataSource,
   accountId: null,
@@ -148,6 +151,7 @@ export const useApp = create<State>((set, get) => ({
         }),
       );
     }
+    if (topics.includes('exchange')) jobs.push(api.get<ExchangeStatus[]>('/exchange/status').then((exchange) => set({ exchange })));
     if (topics.includes('arena')) jobs.push(api.get<ArenaRow[]>('/arena').then((arena) => set({ arena })));
     await Promise.allSettled(jobs);
     set((s) => {

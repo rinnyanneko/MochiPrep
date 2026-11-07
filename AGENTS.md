@@ -1,7 +1,7 @@
 # MochiPrep agent guide
 
-Local-first, BYOK AI paper-trading terminal for USDT-margined crypto perpetuals. Paper trading only:
-there is no live order path. OKX is the first exchange; every other venue is a roadmap milestone.
+Local-first, BYOK AI trading terminal for USDT-margined crypto perpetuals. Agents trade paper accounts,
+OKX Demo Trading, or real OKX accounts. OKX is the only exchange; every other venue is a roadmap milestone.
 
 ## Layout
 
@@ -10,7 +10,7 @@ there is no live order path. OKX is the first exchange; every other venue is a r
 - `packages/market-data`: `MarketDataProvider`, OKX public adapter, deterministic replay tape.
 - `packages/ai-providers`: mock, OpenAI-compatible, OpenAI, Anthropic, Gemini, secret redaction.
 - `packages/agents`: prompt, output parsing, `AgentRunner` cycle.
-- `packages/exchanges`: live interfaces only, nothing implemented.
+- `packages/exchanges`: signed OKX client and `OkxExecutionEngine`. Real money: see docs/OKX_TRADING.md.
 - `apps/server`: Fastify routes, `Runtime`, SQLite store and migrations.
 - `apps/web`: React UI.
 
@@ -29,6 +29,9 @@ Needs Node >= 22.13 (`node:sqlite`). Workspace packages export TypeScript source
 - Every wallet or margin change goes through the ledger, inside one store transaction.
 - AI output is untrusted. Only `AgentRunner` turns it into orders, and only after Zod and the risk engine.
 - The paper engine must never invent a price: fills come from observed quotes, never OHLC paths.
-- API keys stay in `Runtime` memory: never in SQLite, logs, errors or the browser.
+- AI keys live in SQLite by the owner's choice, and never in logs, errors or the browser.
+- OKX credentials stay in `Runtime` memory only. Never write them to disk or show them to a model.
+- Never resend an order after an unknown outcome: resolve it by lookup. Every OKX order passes `preTradeRefusal`.
+- A key that can withdraw is always refused. Exits stay possible when disarmed.
 - Never present simulated results as predictive, and never claim an unimplemented feature works.
 - Comments explain why. Do not add placeholder code for future markets.

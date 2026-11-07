@@ -5,6 +5,8 @@ const usdt = (text: string | null) => Number((text ?? '').replace(/[^\d.-]/g, ''
 test('market data to agent decision to risk to paper order to position to PnL in the UI', async ({ page }) => {
   await page.goto('/');
 
+  await expect(page.getByTestId('dyor-notice')).toContainText('DYOR');
+
   await page.getByTestId('try-demo').click();
   await expect(page.getByTestId('demo-banner')).toBeVisible();
   await expect(page.getByTestId('total-equity')).toHaveText('40,000.00');

@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import type { ArenaRow, DataSource } from '@mochiprep/shared';
 import { EquityChart } from '@/components/charts';
 import { PageTitle } from '@/components/Shell';
+import { VenueBadge } from '@/components/trading';
 import { Badge, Card, CardHeader, Segmented, Table } from '@/components/ui';
 import { money, pct, pnlClass, signedMoney } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -36,7 +37,7 @@ export function ArenaPage() {
             label="Arena market"
             value={source}
             onChange={setSource}
-            options={[{ value: 'REPLAY', label: 'Historical replay' }, { value: 'LIVE', label: 'Live paper' }]}
+            options={[{ value: 'REPLAY', label: 'Historical replay' }, { value: 'LIVE', label: 'Live market' }]}
           />
         }
       />
@@ -45,8 +46,8 @@ export function ArenaPage() {
         <span>
           {source === 'REPLAY'
             ? 'Synthetic replay results. Every agent saw the same tape, so runs are comparable, but they say nothing about real markets.'
-            : 'Simulated fills on live OKX prices. Agents started at different times are not directly comparable.'}{' '}
-          Short-term simulated returns do not predict future performance.
+            : 'Live OKX prices. Accounts marked OKX demo or Real money trade on the exchange; the rest are simulated. Agents started at different times are not directly comparable.'}{' '}
+          Short-term returns do not predict future performance.
           {capitals.size > 1 && ' Starting capital differs between these agents, so compare returns, not USDT.'}
         </span>
       </div>
@@ -69,6 +70,7 @@ export function ArenaPage() {
                       <span className="size-2 rounded-full" style={{ background: colors.get(r.agentId) ? `var(${colors.get(r.agentId)})` : 'var(--ink-3)' }} />
                       {r.agentName}
                       {r.isMock && <Badge tone="info">Mock</Badge>}
+                      {r.venue !== 'PAPER' && <VenueBadge venue={r.venue} />}
                     </span>
                   </td>
                   <td className="text-ink-2">{r.providerName}<span className="block text-xs text-ink-3">{r.model}</span></td>

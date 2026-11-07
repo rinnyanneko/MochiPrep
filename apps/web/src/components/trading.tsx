@@ -1,6 +1,7 @@
 import { CircleCheck, CircleX, Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import type {
+  AccountVenue,
   DecisionOutcome,
   DecisionRecord,
   Fill,
@@ -25,10 +26,18 @@ export function AccountPicker({ allowAll, className }: { allowAll?: boolean; cla
       {allowAll && <option value="">All accounts</option>}
       {accounts.length === 0 && !allowAll && <option value="">No accounts yet</option>}
       {accounts.map((a) => (
-        <option key={a.id} value={a.id}>{a.name}</option>
+        <option key={a.id} value={a.id}>{a.name}{VENUE_SUFFIX[a.venue]}</option>
       ))}
     </Select>
   );
+}
+
+const VENUE_SUFFIX: Record<AccountVenue, string> = { PAPER: '', OKX_DEMO: ' (OKX demo)', OKX_LIVE: ' (REAL MONEY)' };
+
+export function VenueBadge({ venue }: { venue: AccountVenue }) {
+  if (venue === 'OKX_LIVE') return <Badge tone="down">Real money</Badge>;
+  if (venue === 'OKX_DEMO') return <Badge tone="info">OKX demo</Badge>;
+  return <Badge>Paper</Badge>;
 }
 
 /** The account in view: the picked one if it belongs to this source, else the first. */
@@ -67,7 +76,7 @@ function ProtectionDialog({ position, onClose }: { position: PositionView; onClo
   );
 }
 
-export function PositionsTable({ positions, actions = true, accountNames }: { positions: PositionView[]; actions?: boolean; accountNames?: Map<string, string> }) {
+export function PositionsTable({ positions, actions = true, editable = true, accountNames }: { positions: PositionView[]; actions?: boolean; editable?: boolean; accountNames?: Map<string, string> }) {
   const [editing, setEditing] = useState<PositionView | null>(null);
   const close = (p: PositionView, fraction: number) =>
     attempt(() => api.post(`/positions/${p.accountId}/${p.symbol}/close`, { fraction, clientOrderId: `ui:${crypto.randomUUID()}` }));
@@ -93,7 +102,7 @@ export function PositionsTable({ positions, actions = true, accountNames }: { po
             {actions && (
               <td>
                 <div className="flex justify-end gap-1">
-                  <Button size="icon" variant="ghost" aria-label={`Edit stop and target for ${p.symbol}`} onClick={() => setEditing(p)}><Pencil /></Button>
+                  {editable && <Button size="icon" variant="ghost" aria-label={`Edit stop and target for ${p.symbol}`} onClick={() => setEditing(p)}><Pencil /></Button>}
                   <Button size="sm" onClick={() => close(p, 0.5)}>Close 50%</Button>
                   <Button size="sm" variant="danger" onClick={() => close(p, 1)}>Close</Button>
                 </div>
@@ -259,6 +268,7 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
         {ai && <Badge tone={actionTone(ai.action)}>{ai.action}</Badge>}
         <OutcomeBadge outcome={d.outcome} />
         <Badge tone={d.source === 'REPLAY' ? 'info' : 'accent'}>{d.source === 'REPLAY' ? 'Replay' : 'Live data'}</Badge>
+        <VenueBadge venue={d.venue} />
         {d.isMock && <Badge tone="info">Mock AI</Badge>}
       </div>
 
@@ -276,7 +286,7 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
         <section>
           <h3 className="mb-1 text-xs font-semibold text-ink-2">AI proposal</h3>
           <p className="rounded-xl bg-surface-2 px-3 py-2 text-[13px] leading-relaxed">{ai.reason}</p>
-          <p className="mt-1 text-[11px] text-ink-3">The model's own explanation. It is unverified and does not show the trade is sound.</p>
+          <p className="mt-1 text-[11px] text-ink-3">The model's own explanation. It is unverified and does not show the trade is sound. DYOR.</p>
           <div className="mt-2">
             <Row label="Order">{ai.orderType}{ai.entryPrice ? ` @ ${ai.entryPrice}` : ''}</Row>
             <Row label="Stop / Target">{ai.stopLoss ?? '–'} / {ai.takeProfit ?? '–'}</Row>

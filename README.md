@@ -2,7 +2,11 @@
 
 *Your cute little AI trading companion.*
 
-MochiPrep is a local-first, bring-your-own-key AI paper-trading terminal for USDT-margined crypto perpetuals. It combines deterministic replay, public OKX market data, strict risk checks, an auditable ledger, and multiple model providers. There is no live order path, and simulated performance is not predictive.
+MochiPrep is a local-first, bring-your-own-key AI trading terminal for USDT-margined crypto perpetuals. AI agents place orders on their own, on a simulated paper account, on OKX Demo Trading, or on a real OKX account. It combines deterministic replay, OKX market data, strict risk checks, an auditable paper ledger, and multiple model providers. Simulated performance is not predictive.
+
+> **DYOR: do your own research.** MochiPrep is not financial advice. AI output can be wrong, and you are responsible for your own trades.
+
+> **Real money:** OKX trading has only been tested against a simulated exchange, never with real funds. Read [Trading on OKX](docs/OKX_TRADING.md) first. AI decisions can be wrong, and you are responsible for every order.
 
 ## Prerequisites
 
@@ -34,17 +38,21 @@ Press **Try Demo Mode** on the Dashboard. It needs no API key and no internet: e
 
 ## Live OKX prices
 
-Switch the top bar to **Live OKX** to paper trade against OKX public market data. No exchange key is involved: orders are still simulated locally.
+Switch the top bar to **Live OKX** to paper trade against OKX public market data. No exchange key is involved: orders on a paper account are simulated locally.
+
+## Trading on OKX
+
+Connect an account in **Settings**, using Demo Trading or a real account. Agents on that account then trade it automatically, with every order inside the account's ceilings. See [Trading on OKX](docs/OKX_TRADING.md).
 
 ## BYOK providers
 
-Add a provider in **Settings**, paste its key, then pick it when creating an agent. You can configure OpenAI-compatible, OpenAI, Anthropic, or Gemini providers. Keys remain only in server process memory: they are never stored in SQLite, logged, returned to the browser, or restored after restart. Model output is strictly validated and must pass server-side risk checks before the paper engine can accept an order.
+Add a provider in **Settings**, paste its key, then pick it when creating an agent. You can configure OpenAI-compatible, OpenAI, Anthropic, Gemini, or DeepSeek providers. AI keys are saved **unencrypted** in the local SQLite file, so they survive restarts. The database lives in `.mochiprep/`, which only your user can read and git ignores. Anyone who can read that file, including backups of it, can read the keys. They are never logged or returned to the browser. Model output is strictly validated and must pass server-side risk checks before the paper engine can accept an order.
 
 ## Current limits
 
-- Paper trading only; `packages/exchanges` has interfaces but no live implementation.
-- Linear USDT perpetual math only, with OKX as the first public market-data venue.
+- OKX is the only exchange. Linear USDT perpetuals only, isolated margin, one-way position mode.
+- OKX order handling is untested against the real exchange.
 - Simplified fills, funding, and isolated liquidation; no order-book queue, partial liquidity, maintenance tiers, cross margin, or exchange-identical liquidation.
-- API keys disappear on restart by design.
+- OKX credentials and arming disappear on restart by design. AI keys do not.
 
-See [paper engine rules](docs/PAPER_ENGINE.md), [architecture](docs/ARCHITECTURE.md), and [roadmap](docs/ROADMAP.md).
+See [Trading on OKX](docs/OKX_TRADING.md), [paper engine rules](docs/PAPER_ENGINE.md), [architecture](docs/ARCHITECTURE.md), and [roadmap](docs/ROADMAP.md).

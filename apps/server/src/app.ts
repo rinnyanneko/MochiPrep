@@ -6,9 +6,11 @@ import fastifyStatic from '@fastify/static';
 import { auditLedger } from '@mochiprep/core';
 import {
   AgentInputSchema,
+  ArmSchema,
   ClosePositionSchema,
   CreateAccountSchema,
   INSTRUMENTS,
+  OkxConnectSchema,
   PlaceOrderSchema,
   ProtectionSchema,
   ProviderInputSchema,
@@ -125,7 +127,7 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   app.get('/api/market/quotes', async (request) => runtime.quotes(SourceQuery.parse(request.query).source));
 
   // ---- accounts -------------------------------------------------------------------------
-  const accountView = (id: string) => ({ ...runtime.store.getAccount(id)!, balance: runtime.engine.balanceOf(id) });
+  const accountView = (id: string) => ({ ...runtime.store.getAccount(id)!, balance: runtime.balanceOf(id) });
   const requireAccount = (id: string) => {
     if (!runtime.store.getAccount(id)) throw Object.assign(new Error('Unknown account'), { statusCode: 404 });
     return id;
@@ -145,11 +147,12 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   app.delete<{ Params: IdParams }>('/api/accounts/:id', async (request) => {
     const id = requireAccount(request.params.id);
     if (runtime.store.listAgents().some((a) => a.accountId === id)) throw new Error('Delete the agents using this account first');
+    runtime.disconnectExchange(id);
     runtime.store.transaction(() => runtime.store.deleteAccountData(id, false));
     runtime.invalidate('accounts', 'orders', 'positions');
     return { ok: true };
   });
-  app.get<{ Params: IdParams }>('/api/accounts/:id/positions', async (r) => runtime.engine.positionViews(requireAccount(r.params.id)));
+  app.get<{ Params: IdParams }>('/api/accounts/:id/positions', async (r) => runtime.positionsOf(requireAccount(r.params.id)));
   app.get<{ Params: IdParams }>('/api/accounts/:id/closed-positions', async (r) => {
     return runtime.store.listClosedPositions(requireAccount(r.params.id), LimitQuery.parse(r.query).limit);
   });
@@ -159,6 +162,8 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   app.get<{ Params: IdParams }>('/api/accounts/:id/equity', async (r) => runtime.store.listEquity(requireAccount(r.params.id), LimitQuery.parse(r.query).limit));
   app.get<{ Params: IdParams }>('/api/accounts/:id/audit', async (r) => {
     const id = requireAccount(r.params.id);
+    // The exchange keeps the books for its accounts, so there is no local ledger to audit.
+    if (runtime.store.getAccount(id)!.venue !== 'PAPER') return { consistent: true, issues: [], notApplicable: true };
     const issues = auditLedger(runtime.store.getAccount(id)!, runtime.store.listLedger(id));
     return { consistent: issues.length === 0, issues };
   });
@@ -167,26 +172,31 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   app.post('/api/orders', async (request) => {
     const input = PlaceOrderSchema.parse(request.body);
     requireAccount(input.accountId);
-    const result = await runtime.engine.placeOrder(input);
+    const result = await runtime.execution(input.accountId).placeOrder(input);
     runtime.invalidate('accounts', 'orders', 'positions', 'arena');
     return result;
   });
   app.delete<{ Params: IdParams }>('/api/orders/:id', async (request) => {
-    await runtime.engine.cancelOrder(request.params.id);
+    const order = runtime.store.getOrder(request.params.id);
+    if (!order) throw Object.assign(new Error('Unknown order'), { statusCode: 404 });
+    await runtime.execution(order.accountId).cancelOrder(order.id);
     runtime.invalidate('accounts', 'orders');
     return { ok: true };
   });
   app.post<{ Params: PositionParams }>('/api/positions/:accountId/:symbol/close', async (request) => {
     const { fraction, clientOrderId } = ClosePositionSchema.parse(request.body);
     const symbol = z.enum(SYMBOLS).parse(request.params.symbol);
-    const result = runtime.engine.closePosition(requireAccount(request.params.accountId), symbol, fraction, clientOrderId);
+    const accountId = requireAccount(request.params.accountId);
+    const result = await runtime.execution(accountId).closePosition(accountId, symbol, fraction, clientOrderId);
     runtime.invalidate('accounts', 'orders', 'positions', 'arena');
     return result;
   });
   app.put<{ Params: PositionParams }>('/api/positions/:accountId/:symbol/protection', async (request) => {
     const { stopLoss, takeProfit } = ProtectionSchema.parse(request.body);
     const symbol = z.enum(SYMBOLS).parse(request.params.symbol);
-    runtime.engine.setProtection(requireAccount(request.params.accountId), symbol, stopLoss, takeProfit);
+    const accountId = requireAccount(request.params.accountId);
+    if (runtime.store.getAccount(accountId)!.venue !== 'PAPER') throw new Error('Change stops for exchange positions on OKX');
+    runtime.engine.setProtection(accountId, symbol, stopLoss, takeProfit);
     runtime.invalidate('orders', 'positions');
     return { ok: true };
   });
@@ -275,7 +285,9 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   const lifecycle = { start: 'start', pause: 'pause', resume: 'resume', stop: 'stop' } as const;
   for (const action of Object.keys(lifecycle) as (keyof typeof lifecycle)[]) {
     app.post<{ Params: IdParams }>(`/api/agents/:id/${action}`, async (request) => {
-      runtime.runner[action](requireAgent(request.params.id).id);
+      const agent = requireAgent(request.params.id);
+      if (action === 'start' || action === 'resume') runtime.assertCanRun(agent);
+      runtime.runner[action](agent.id);
       return requireAgent(request.params.id);
     });
   }
@@ -289,7 +301,27 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   app.post('/api/agents/stop-all', async () => {
     const stopped = runtime.runner.stopAll();
     runtime.setPlaying(false);
+    runtime.disarm();
     return { stopped };
+  });
+
+  // ---- exchange accounts ----------------------------------------------------------------
+  app.get('/api/exchange/status', async () => runtime.exchangeStatuses());
+  app.post('/api/exchange/okx/connect', async (request) => {
+    const account = await runtime.connectOkx(OkxConnectSchema.parse(request.body));
+    return accountView(account.id);
+  });
+  app.post<{ Params: IdParams }>('/api/exchange/okx/:id/disconnect', async (request) => {
+    runtime.disconnectExchange(requireAccount(request.params.id));
+    return { ok: true };
+  });
+  app.post<{ Params: IdParams }>('/api/exchange/okx/:id/arm', async (request) => {
+    runtime.arm(requireAccount(request.params.id), ArmSchema.parse(request.body).confirmation);
+    return { ok: true };
+  });
+  app.post<{ Params: IdParams }>('/api/exchange/okx/:id/disarm', async (request) => {
+    runtime.disarm(requireAccount(request.params.id));
+    return { ok: true };
   });
 
   app.get('/api/decisions', async (request) => {

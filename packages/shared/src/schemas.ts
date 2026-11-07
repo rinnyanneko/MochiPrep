@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SYMBOLS, TIMEFRAMES, DEFAULT_RISK_SETTINGS } from './domain';
+import { SYMBOLS, TIMEFRAMES, DEFAULT_LIVE_LIMITS, DEFAULT_RISK_SETTINGS } from './domain';
 
 const positive = z.number().finite().positive();
 
@@ -70,7 +70,7 @@ export const ClosePositionSchema = z.strictObject({
 
 export const ProviderInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(60),
-  kind: z.enum(['OPENAI_COMPATIBLE', 'OPENAI', 'ANTHROPIC', 'GEMINI']),
+  kind: z.enum(['OPENAI_COMPATIBLE', 'OPENAI', 'ANTHROPIC', 'GEMINI', 'DEEPSEEK']),
   baseUrl: z.url().max(300).nullable(),
   defaultModel: z.string().trim().min(1).max(120),
   inputPricePerMTok: z.number().min(0).nullable(),
@@ -90,6 +90,18 @@ export const AgentInputSchema = z.strictObject({
   risk: RiskSettingsSchema.default(DEFAULT_RISK_SETTINGS),
   intervalSec: z.number().int().min(10).max(86_400),
 });
+
+const secret = z.string().trim().min(1).max(200);
+
+export const OkxCredentialsSchema = z.strictObject({ apiKey: secret, secretKey: secret, passphrase: secret });
+
+export const OkxConnectSchema = OkxCredentialsSchema.extend({
+  name: z.string().trim().min(1).max(60),
+  environment: z.enum(['OKX_DEMO', 'OKX_LIVE']),
+  limits: RiskSettingsSchema.default(DEFAULT_LIVE_LIMITS),
+});
+
+export const ArmSchema = z.strictObject({ confirmation: z.string().max(100) });
 
 export const ReplayControlSchema = z.strictObject({
   playing: z.boolean().optional(),

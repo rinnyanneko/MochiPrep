@@ -20,6 +20,7 @@ import {
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '@/lib/api';
 import { dateTime } from '@/lib/format';
+import { DYOR_NOTICE } from '@/lib/notices';
 import { cn } from '@/lib/utils';
 import { attempt, useApp, type Page } from '@/store';
 import { Mochi, MOOD_LABEL, type MochiMood } from './Mochi';
@@ -54,21 +55,22 @@ function useMood(): MochiMood {
 
 function StopAllButton({ className, compact }: { className?: string; compact?: boolean }) {
   const agents = useApp((s) => s.agents);
+  const armed = useApp((s) => s.exchange.some((e) => e.venue === 'OKX_LIVE' && e.armed));
   const [confirming, setConfirming] = useState(false);
   const active = agents.filter((a) => a.running).length;
 
   const stopAll = async () => {
     const result = await attempt(() => api.post<{ stopped: number }>('/agents/stop-all'));
     setConfirming(false);
-    if (result) useApp.getState().toast('info', `Stopped ${result.stopped} agent(s) and paused the replay.`);
+    if (result) useApp.getState().toast('info', `Stopped ${result.stopped} agent(s), disarmed real orders, paused the replay.`);
   };
 
   return (
     <>
-      <Button variant="danger" size={compact ? 'sm' : 'md'} className={className} onClick={() => setConfirming(true)} disabled={active === 0}>
+      <Button variant="danger" size={compact ? 'sm' : 'md'} className={className} onClick={() => setConfirming(true)} disabled={active === 0 && !armed}>
         <OctagonX /> {compact ? 'Stop all' : 'Stop all agents'}{active > 0 ? ` (${active})` : ''}
       </Button>
-      <Dialog open={confirming} onOpenChange={setConfirming} title="Stop all agents?" description="Every running agent stops and the replay pauses. Open positions, their stops and resting orders stay in place.">
+      <Dialog open={confirming} onOpenChange={setConfirming} title="Stop all agents?" description="Every running agent stops, real orders are disarmed, and the replay pauses. Open positions, their stops and resting orders stay in place, on OKX too.">
         <div className="flex justify-end gap-2">
           <Button onClick={() => setConfirming(false)}>Keep running</Button>
           <Button variant="danger" onClick={stopAll}>
@@ -178,6 +180,8 @@ function TopBar() {
   const theme = useApp((s) => s.theme);
   const toggleTheme = useApp((s) => s.toggleTheme);
   const connected = useApp((s) => s.connected);
+  const armedReal = useApp((s) => s.exchange.filter((e) => e.venue === 'OKX_LIVE' && e.armed).length);
+  const anyExchange = useApp((s) => s.exchange.some((e) => e.connected));
   return (
     <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line bg-surface px-4 py-2.5">
       <Segmented
@@ -193,7 +197,11 @@ function TopBar() {
       {source === 'REPLAY' && <ReplayControls />}
       <div className="ml-auto flex items-center gap-2">
         <StopAllButton compact className="lg:hidden" />
-        <Badge tone="accent">Paper only</Badge>
+        {armedReal > 0 ? (
+          <Badge tone="down" data-testid="real-money-badge"><TriangleAlert /> Real money armed</Badge>
+        ) : (
+          <Badge tone="accent">{anyExchange ? 'Real orders off' : 'Paper only'}</Badge>
+        )}
         {!connected && <Badge tone="down">Backend offline</Badge>}
         <Button size="icon" variant="ghost" aria-label="Toggle theme" onClick={toggleTheme}>
           {theme === 'dark' ? <Sun /> : <Moon />}
@@ -248,6 +256,9 @@ export function Shell({ children }: { children: ReactNode }) {
         <main className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-5">
           <div className="mx-auto max-w-[1400px]">{children}</div>
         </main>
+        <p className="border-t border-line bg-surface px-4 py-1.5 text-center text-[11px] text-ink-3" data-testid="dyor-notice">
+          {DYOR_NOTICE}
+        </p>
       </div>
       <Toasts />
     </div>

@@ -1,9 +1,9 @@
-import { Plus, RotateCcw } from 'lucide-react';
+import { Plus, RotateCcw, TriangleAlert } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { INSTRUMENTS, SYMBOLS, type Fill, type LedgerEvent, type Order, type Position, type PositionView, type SymbolId, type Timeframe } from '@mochiprep/shared';
 import { MarketChart, type PriceLineSpec } from '@/components/charts';
 import { PageTitle } from '@/components/Shell';
-import { AccountPicker, ClosedPositionsTable, FillsTable, LedgerTable, OrdersTable, PositionsTable, useCurrentAccount } from '@/components/trading';
+import { AccountPicker, ClosedPositionsTable, FillsTable, LedgerTable, OrdersTable, PositionsTable, useCurrentAccount, VenueBadge } from '@/components/trading';
 import { Badge, Button, Card, Dialog, Field, Input, Segmented, Select, Stat, Tabs } from '@/components/ui';
 import { api } from '@/lib/api';
 import { money, pnlClass, price, qty, signedMoney } from '@/lib/format';
@@ -152,8 +152,13 @@ function OrderTicket({ account, symbol }: { account: AccountView; symbol: Symbol
         open={confirmId !== null}
         onOpenChange={(open) => !open && setConfirmId(null)}
         title={`Confirm ${side === 'BUY' ? 'long' : 'short'} ${symbol}`}
-        description="Simulated order. Estimates only: the engine fills against the live quote, with spread and slippage."
+        description={account.venue === 'PAPER' ? 'Simulated order. Estimates only: the engine fills against the live quote, with spread and slippage.' : 'Sent to OKX. Estimates only: the exchange decides the fill.'}
       >
+        {account.venue === 'OKX_LIVE' && (
+          <p className="mb-3 rounded-xl bg-down-soft px-3 py-2 text-[13px] font-semibold text-down" data-testid="real-order-warning">
+            This is a real order with real money. It cannot be undone.
+          </p>
+        )}
         <dl className="num space-y-1 text-[13px]">
           {[
             ['Type', `${type}${reduceOnly ? ' · reduce only' : ''}`],
@@ -170,7 +175,7 @@ function OrderTicket({ account, symbol }: { account: AccountView; symbol: Symbol
         </dl>
         <div className="mt-4 flex justify-end gap-2">
           <Button onClick={() => setConfirmId(null)}>Cancel</Button>
-          <Button variant={side === 'BUY' ? 'long' : 'short'} onClick={submit}>Place order</Button>
+          <Button variant={side === 'BUY' ? 'long' : 'short'} onClick={submit}>{account.venue === 'OKX_LIVE' ? 'Place real order' : 'Place order'}</Button>
         </div>
       </Dialog>
     </Card>
@@ -210,7 +215,7 @@ export function PaperPage() {
     <div className="flex flex-wrap items-center gap-2">
       <AccountPicker />
       <CreateAccount />
-      {account && <ResetAccount account={account} />}
+      {account?.venue === 'PAPER' && <ResetAccount account={account} />}
     </div>
   );
 
@@ -224,9 +229,20 @@ export function PaperPage() {
   }
 
   const b = account.balance;
+  const exchange = account.venue !== 'PAPER';
   return (
     <>
-      <PageTitle title="Paper Trading" description="Everything here is simulated locally. No order ever reaches an exchange." action={actions} />
+      <PageTitle
+        title={exchange ? 'OKX Trading' : 'Paper Trading'}
+        description={exchange ? 'Orders on this account go to OKX. Balances and positions come from the exchange.' : 'Everything here is simulated locally. No order on this account reaches an exchange.'}
+        action={actions}
+      />
+      {account.venue === 'OKX_LIVE' && (
+        <div className="mb-3 flex items-center gap-2 rounded-2xl bg-down-soft px-4 py-2.5 text-[13px] font-semibold text-down" data-testid="real-money-banner">
+          <TriangleAlert className="size-4 shrink-0" />
+          Real money. Orders here, and from any agent on this account, are placed on your OKX account.
+        </div>
+      )}
       <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Stat label="Equity" value={<span data-testid="account-equity">{money(b.equity)}</span>} />
         <Stat label="Wallet" value={money(b.walletBalance)} />
@@ -243,7 +259,7 @@ export function PaperPage() {
             </Select>
             <span className="num text-lg font-semibold">{price(quote?.last, symbol)}</span>
             <span className="num text-xs text-ink-3">{price(quote?.bid, symbol)} / {price(quote?.ask, symbol)}</span>
-            {source === 'REPLAY' ? <Badge tone="info">Synthetic</Badge> : <Badge tone="accent">Live prices, paper fills</Badge>}
+            {source === 'REPLAY' ? <Badge tone="info">Synthetic</Badge> : exchange ? <VenueBadge venue={account.venue} /> : <Badge tone="accent">Live prices, paper fills</Badge>}
           </div>
           <div className="h-[470px]"><MarketChart candles={candles ?? []} symbol={symbol} timeframe={timeframe} quote={quote} showIndicators={false} priceLines={lines} /></div>
         </Card>
@@ -259,15 +275,15 @@ export function PaperPage() {
             { id: 'fills', label: 'Fills' },
             { id: 'closed', label: 'Closed positions' },
             { id: 'all', label: 'Order history' },
-            { id: 'ledger', label: 'Ledger' },
+            ...(exchange ? [] : [{ id: 'ledger', label: 'Ledger' }]),
           ]}
         >
-          {tab === 'positions' && <PositionsTable positions={positions ?? []} />}
+          {tab === 'positions' && <PositionsTable positions={positions ?? []} editable={!exchange} />}
           {tab === 'orders' && <OrdersTable orders={open} cancellable emptyText="No pending orders." />}
           {tab === 'fills' && <FillsTable fills={fills ?? []} />}
           {tab === 'closed' && <ClosedPositionsTable positions={closed ?? []} />}
           {tab === 'all' && <OrdersTable orders={orders ?? []} emptyText="No orders yet." />}
-          {tab === 'ledger' && <LedgerTable events={ledger ?? []} />}
+          {tab === 'ledger' && !exchange && <LedgerTable events={ledger ?? []} />}
         </Tabs>
       </Card>
     </>

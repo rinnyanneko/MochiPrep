@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { DEFAULT_RISK_SETTINGS, SYMBOLS, TIMEFRAMES, type Agent, type AgentStatus, type DecisionRecord, type RiskSettings, type SymbolId, type Timeframe } from '@mochiprep/shared';
 import { Mochi, type MochiMood } from '@/components/Mochi';
 import { PageTitle } from '@/components/Shell';
-import { DecisionDetail, DecisionList } from '@/components/trading';
+import { DecisionDetail, DecisionList, VenueBadge } from '@/components/trading';
 import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Select, Textarea, type Tone } from '@/components/ui';
 import { api } from '@/lib/api';
 import { dateTime, money, pct, pnlClass } from '@/lib/format';
@@ -60,6 +60,7 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
   const setRisk = (patch: Partial<RiskSettings>) => setForm((f) => ({ ...f, risk: { ...f.risk, ...patch } }));
   const provider = providers.find((p) => p.id === form.providerId);
+  const selectedAccount = accounts.find((a) => a.id === form.accountId);
 
   const save = async () => {
     const done = await attempt(async () => {
@@ -108,7 +109,7 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
         <Field label="Paper account">
           <Select value={form.accountId} onChange={(e) => set({ accountId: e.target.value })}>
             {!agent && <option value="NEW">Create a new 10,000 USDT account</option>}
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.venue === 'OKX_LIVE' ? ' (REAL MONEY)' : a.venue === 'OKX_DEMO' ? ' (OKX demo)' : ''}</option>)}
           </Select>
         </Field>
         <Field label="Symbol">
@@ -139,6 +140,11 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
         <input type="checkbox" checked={form.risk.requireStopLoss} onChange={(e) => setRisk({ requireStopLoss: e.target.checked })} className="accent-[var(--accent)]" />
         Require a stop loss on new positions
       </label>
+      {selectedAccount?.venue === 'OKX_LIVE' && (
+        <p className="mt-3 rounded-xl bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">
+          This agent will place real orders on its own while running. The account's limits in Settings cap everything above.
+        </p>
+      )}
       <div className="mt-4 flex justify-end gap-2">
         <Button onClick={onClose}>Cancel</Button>
         <Button variant="primary" disabled={!form.name.trim() || !form.model.trim()} onClick={save}>{agent ? 'Save' : 'Create agent'}</Button>
@@ -172,6 +178,7 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
           <span className="flex items-center gap-2">
             <span className="truncate font-display text-[15px] font-extrabold">{agent.name}</span>
             <Badge tone={status.tone} data-testid="agent-status">{status.label}</Badge>
+            {account && account.venue !== 'PAPER' && <VenueBadge venue={account.venue} />}
           </span>
           <span className="mt-0.5 block truncate text-xs text-ink-3">{provider?.name} · {agent.model}</span>
           <span className="block text-xs text-ink-3">{agent.symbol} · {agent.timeframe} · every {agent.intervalSec >= 60 ? `${agent.intervalSec / 60}m` : `${agent.intervalSec}s`}</span>

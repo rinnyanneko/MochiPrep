@@ -147,6 +147,8 @@ export interface Order {
   attachedStopLoss: string | null;
   attachedTakeProfit: string | null;
   rejectReason: string | null;
+  /** OKX ordId once the exchange has acknowledged the order. */
+  exchangeOrderId: string | null;
   agentId: string | null;
   decisionId: string | null;
   createdAt: number;
@@ -220,10 +222,17 @@ export const DEFAULT_ACCOUNT_CONFIG: PaperAccountConfig = {
   impactBpsPerMillion: '5',
 };
 
+/** PAPER is simulated locally. OKX_DEMO uses OKX virtual funds. OKX_LIVE is real money. */
+export type AccountVenue = 'PAPER' | 'OKX_DEMO' | 'OKX_LIVE';
+
 export interface PaperAccount {
   id: string;
   name: string;
   source: DataSource;
+  venue: AccountVenue;
+  exchangeUid: string | null;
+  /** Hard ceilings on every order for an exchange account, whoever places it. */
+  liveLimits: RiskSettings | null;
   isDemo: boolean;
   initialBalance: string;
   walletBalance: string;
@@ -355,7 +364,7 @@ export interface Agent {
   createdAt: number;
 }
 
-export type ProviderKind = 'MOCK' | 'OPENAI_COMPATIBLE' | 'OPENAI' | 'ANTHROPIC' | 'GEMINI';
+export type ProviderKind = 'MOCK' | 'OPENAI_COMPATIBLE' | 'OPENAI' | 'ANTHROPIC' | 'GEMINI' | 'DEEPSEEK';
 
 export interface ProviderConfig {
   id: string;
@@ -370,7 +379,7 @@ export interface ProviderConfig {
 }
 
 export interface ProviderView extends ProviderConfig {
-  /** Whether a key is loaded in backend memory right now. The key itself is never returned. */
+  /** Whether a key is saved. The key itself is never returned. */
   hasKey: boolean;
   requiresKey: boolean;
 }
@@ -404,6 +413,7 @@ export interface DecisionRecord {
   agentName: string;
   accountId: string;
   source: DataSource;
+  venue: AccountVenue;
   ts: number;
   trigger: 'SCHEDULE' | 'RUN_ONCE' | 'ANALYZE';
   providerKind: ProviderKind | null;
@@ -432,6 +442,7 @@ export interface ArenaRow {
   agentName: string;
   accountId: string;
   source: DataSource;
+  venue: AccountVenue;
   isMock: boolean;
   providerName: string;
   model: string;
@@ -448,6 +459,35 @@ export interface ArenaRow {
   estimatedAiCost: string | null;
   curve: { ts: number; equity: number }[];
 }
+
+export interface ExchangeStatus {
+  accountId: string;
+  name: string;
+  venue: AccountVenue;
+  /** Credentials are in memory for this process. False after every restart. */
+  connected: boolean;
+  /** Real orders allowed. Always true for OKX_DEMO once connected. */
+  armed: boolean;
+  /** Last sync with the exchange succeeded recently enough to trade on. */
+  healthy: boolean;
+  lastSyncAt: number | null;
+  error: string | null;
+  limits: RiskSettings;
+}
+
+/** Typed by the user to arm real-money orders. */
+export const ARM_PHRASE = 'TRADE REAL MONEY';
+
+/** Starting ceilings for exchange accounts: deliberately far below the paper defaults. */
+export const DEFAULT_LIVE_LIMITS: RiskSettings = {
+  maxLeverage: 3,
+  maxRiskPerTradePct: 0.5,
+  maxDailyLossPct: 2,
+  maxOpenPositions: 2,
+  requireStopLoss: true,
+  maxQuoteAgeSec: 10,
+  maxNotional: 100,
+};
 
 export interface ReplayState {
   loaded: boolean;
@@ -468,4 +508,4 @@ export type ServerEvent =
   | { type: 'invalidate'; topics: Topic[] }
   | { type: 'toast'; level: 'info' | 'warn' | 'error'; message: string };
 
-export type Topic = 'accounts' | 'orders' | 'positions' | 'agents' | 'decisions' | 'providers' | 'arena';
+export type Topic = 'accounts' | 'orders' | 'positions' | 'agents' | 'decisions' | 'providers' | 'arena' | 'exchange';

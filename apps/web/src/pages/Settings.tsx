@@ -1,4 +1,5 @@
 import { KeyRound, Pencil, Plug, Plus, RotateCcw, ShieldCheck, Trash2, X } from 'lucide-react';
+import { ExchangeCard } from '@/components/ExchangeCard';
 import { useState } from 'react';
 import type { ProviderKind, ProviderView } from '@mochiprep/shared';
 import { PageTitle } from '@/components/Shell';
@@ -11,6 +12,7 @@ const KINDS: { value: Exclude<ProviderKind, 'MOCK'>; label: string; baseUrl: str
   { value: 'OPENAI', label: 'OpenAI', baseUrl: '', model: '' },
   { value: 'ANTHROPIC', label: 'Anthropic Claude', baseUrl: '', model: 'claude-sonnet-5-5' },
   { value: 'GEMINI', label: 'Google Gemini', baseUrl: '', model: '' },
+  { value: 'DEEPSEEK', label: 'DeepSeek', baseUrl: '', model: 'deepseek-flash' },
 ];
 
 function ProviderDialog({ provider, onClose }: { provider: ProviderView | null; onClose(): void }) {
@@ -25,7 +27,7 @@ function ProviderDialog({ provider, onClose }: { provider: ProviderView | null; 
     const preset = KINDS.find((k) => k.value === value)!;
     setKind(value);
     setBaseUrl(preset.baseUrl);
-    if (preset.model && !model) setModel(preset.model);
+    if (!provider) setModel(preset.model);
   };
 
   const save = async () => {
@@ -77,7 +79,7 @@ function ProviderRow({ provider, onEdit }: { provider: ProviderView; onEdit(): v
     const ok = await attempt(() => api.put(`/providers/${provider.id}/key`, { apiKey: key }));
     if (ok) {
       setKey('');
-      toast('info', 'Key loaded into backend memory.');
+      toast('info', 'Key saved.');
     }
   };
   const test = async () => {
@@ -93,7 +95,7 @@ function ProviderRow({ provider, onEdit }: { provider: ProviderView; onEdit(): v
         <span className="font-semibold">{provider.name}</span>
         <Badge>{provider.kind.replaceAll('_', ' ')}</Badge>
         {provider.requiresKey ? (
-          provider.hasKey ? <Badge tone="up"><KeyRound /> Key in memory</Badge> : <Badge tone="warn"><KeyRound /> Key needed</Badge>
+          provider.hasKey ? <Badge tone="up"><KeyRound /> Key saved</Badge> : <Badge tone="warn"><KeyRound /> Key needed</Badge>
         ) : (
           <Badge tone="info">No key needed</Badge>
         )}
@@ -109,9 +111,9 @@ function ProviderRow({ provider, onEdit }: { provider: ProviderView; onEdit(): v
       {provider.requiresKey && (
         <div className="mt-2 flex max-w-lg gap-2">
           <Input type="password" autoComplete="off" aria-label={`API key for ${provider.name}`} value={key} onChange={(e) => setKey(e.target.value)} placeholder={provider.hasKey ? 'Replace the key' : 'Paste your API key'} />
-          <Button disabled={!key.trim()} onClick={saveKey}>Load key</Button>
+          <Button disabled={!key.trim()} onClick={saveKey}>Save key</Button>
           {provider.hasKey && (
-            <Button variant="ghost" onClick={() => attempt(() => api.del(`/providers/${provider.id}/key`))}><X /> Forget</Button>
+            <Button variant="ghost" onClick={() => attempt(() => api.del(`/providers/${provider.id}/key`))}><X /> Delete key</Button>
           )}
         </div>
       )}
@@ -143,8 +145,8 @@ export function SettingsPage() {
           />
           {providers.map((p) => <ProviderRow key={p.id} provider={p} onEdit={() => setEditing(p)} />)}
           <p className="flex items-center gap-2 border-t border-line px-5 py-3 text-xs text-ink-3">
-            <ShieldCheck className="size-4 shrink-0 text-up" />
-            Keys are held in backend memory only, never written to SQLite or the browser. Re-enter them after every restart.
+            <ShieldCheck className="size-4 shrink-0 text-warn" />
+            AI keys are saved unencrypted in the local database (.mochiprep, readable only by your user) and survive restarts. They are never sent to the browser. Anyone who can read that file can read them.
           </p>
         </Card>
 
@@ -158,9 +160,7 @@ export function SettingsPage() {
           )}
         </Card>
 
-        <Card>
-          <CardHeader title="Live trading" description="Not implemented. MochiPrep has no way to place a real order, and it never asks for exchange keys. Live prices come from the OKX public feed." />
-        </Card>
+        <ExchangeCard />
       </div>
       {editing && <ProviderDialog provider={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
       <Dialog

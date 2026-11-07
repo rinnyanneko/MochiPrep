@@ -96,7 +96,7 @@ export function DashboardPage() {
     <>
       <PageTitle
         title="Dashboard"
-        description={`${scope.length} ${source === 'REPLAY' ? 'replay' : 'live-data'} paper account${scope.length === 1 ? '' : 's'}. Every number comes from the paper engine's ledger.`}
+        description={`${scope.length} ${source === 'REPLAY' ? 'replay' : 'live-data'} account${scope.length === 1 ? '' : 's'}. Paper numbers come from the local ledger, exchange numbers from OKX.`}
         action={<AccountPicker allowAll />}
       />
       {scope.length === 0 ? (

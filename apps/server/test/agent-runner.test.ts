@@ -76,6 +76,24 @@ describe('AgentRunner integration', () => {
     expect(record!.outcomeDetail).toContain('stopped');
   });
 
+  it('turns a risk rejection into no order at all', async () => {
+    const unprotected = JSON.stringify({ ...JSON.parse(long), stopLoss: null });
+    complete = async () => ({ text: unprotected, inputTokens: null, outputTokens: null });
+    const record = await runtime.runner.runCycle(agentId, 'RUN_ONCE');
+    expect(record!.outcome).toBe('RISK_REJECTED');
+    expect(runtime.store.listOrders(runtime.store.getAgent(agentId)!.accountId, 10)).toHaveLength(0);
+  });
+
+  it('blocks a rejected CLOSE too, which needs no sizing to reach the engine', async () => {
+    const accountId = runtime.store.getAgent(agentId)!.accountId;
+    runtime.engine.placeOrderSync({ accountId, clientOrderId: 'open', symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET', quantity: '0.01', leverage: 3 });
+    const expired = JSON.stringify({ ...JSON.parse(hold), action: 'CLOSE', expiresAt: '2020-01-01T00:00:00Z' });
+    complete = async () => ({ text: expired, inputTokens: null, outputTokens: null });
+    const record = await runtime.runner.runCycle(agentId, 'RUN_ONCE');
+    expect(record!.outcome).toBe('RISK_REJECTED');
+    expect(runtime.store.getOpenPosition(accountId, 'BTCUSDT')).toBeDefined();
+  });
+
   it('does not call AI for stale data while flat', async () => {
     let called = false;
     complete = async () => { called = true; return { text: hold, inputTokens: null, outputTokens: null }; };

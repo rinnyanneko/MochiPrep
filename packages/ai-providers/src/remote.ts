@@ -43,8 +43,10 @@ const trimBase = (url: string) => url.replace(/\/+$/, '');
 export function createRemoteProvider(config: ProviderConfig, apiKey: string, fetchImpl: typeof fetch = fetch): AiProvider {
   switch (config.kind) {
     case 'OPENAI':
+    case 'DEEPSEEK':
     case 'OPENAI_COMPATIBLE': {
-      const base = trimBase(config.baseUrl ?? 'https://api.openai.com/v1');
+      const fallback = config.kind === 'DEEPSEEK' ? 'https://api.deepseek.com' : 'https://api.openai.com/v1';
+      const base = trimBase(config.baseUrl ?? fallback);
       return {
         kind: config.kind,
         async complete(request): Promise<AiResponse> {
@@ -58,14 +60,15 @@ export function createRemoteProvider(config: ProviderConfig, apiKey: string, fet
                 { role: 'user', content: request.user },
               ],
               // Not every compatible server implements this, and the prompt demands JSON anyway.
-              ...(config.kind === 'OPENAI' ? { response_format: { type: 'json_object' } } : {}),
+              ...(config.kind === 'OPENAI_COMPATIBLE' ? {} : { response_format: { type: 'json_object' } }),
             },
             request,
             apiKey,
             fetchImpl,
           );
           const text = json?.choices?.[0]?.message?.content;
-          if (typeof text !== 'string') throw new ProviderError('BAD_RESPONSE', 'No message content in the response');
+          // DeepSeek's JSON mode can answer with blank content, which its docs say to expect.
+          if (typeof text !== 'string' || !text.trim()) throw new ProviderError('BAD_RESPONSE', 'No message content in the response');
           return { text, inputTokens: json.usage?.prompt_tokens ?? null, outputTokens: json.usage?.completion_tokens ?? null };
         },
       };

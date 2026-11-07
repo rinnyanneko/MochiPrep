@@ -21,6 +21,9 @@ const toAccount = (r: Row): PaperAccount => ({
   id: r.id,
   name: r.name,
   source: r.source,
+  venue: r.venue,
+  exchangeUid: r.exchange_uid,
+  liveLimits: r.live_limits ? JSON.parse(r.live_limits) : null,
   isDemo: !!r.is_demo,
   initialBalance: r.initial_balance,
   walletBalance: r.wallet_balance,
@@ -52,6 +55,7 @@ const toOrder = (r: Row): Order => ({
   attachedStopLoss: r.attached_stop_loss,
   attachedTakeProfit: r.attached_take_profit,
   rejectReason: r.reject_reason,
+  exchangeOrderId: r.exchange_order_id,
   agentId: r.agent_id,
   decisionId: r.decision_id,
   createdAt: r.created_at,
@@ -185,9 +189,10 @@ export class SqliteStore implements PaperStore, AgentStore {
   // accounts
   insertAccount(a: PaperAccount) {
     this.run(
-      `INSERT INTO accounts (id,name,source,is_demo,initial_balance,wallet_balance,used_margin,realized_pnl,fees_paid,funding_paid,config,created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-      a.id, a.name, a.source, a.isDemo ? 1 : 0, a.initialBalance, a.walletBalance, a.usedMargin, a.realizedPnl,
+      `INSERT INTO accounts (id,name,source,venue,exchange_uid,live_limits,is_demo,initial_balance,wallet_balance,used_margin,realized_pnl,fees_paid,funding_paid,config,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      a.id, a.name, a.source, a.venue, a.exchangeUid, a.liveLimits ? JSON.stringify(a.liveLimits) : null, a.isDemo ? 1 : 0,
+      a.initialBalance, a.walletBalance, a.usedMargin, a.realizedPnl,
       a.feesPaid, a.fundingPaid, JSON.stringify(a.config), a.createdAt,
     );
   }
@@ -200,6 +205,9 @@ export class SqliteStore implements PaperStore, AgentStore {
   getAccount(id: string) {
     const r = this.one('SELECT * FROM accounts WHERE id=?', id);
     return r && toAccount(r);
+  }
+  saveAccountProfile(a: PaperAccount) {
+    this.run('UPDATE accounts SET name=?, initial_balance=?, live_limits=? WHERE id=?', a.name, a.initialBalance, a.liveLimits ? JSON.stringify(a.liveLimits) : null, a.id);
   }
   listAccounts() {
     return this.all('SELECT * FROM accounts ORDER BY created_at, id').map(toAccount);
@@ -216,17 +224,17 @@ export class SqliteStore implements PaperStore, AgentStore {
   insertOrder(o: Order) {
     this.run(
       `INSERT INTO orders (id,account_id,client_order_id,symbol,side,type,quantity,price,trigger_price,leverage,reduce_only,close_position,status,
-        filled_quantity,avg_fill_price,reserved_margin,attached_stop_loss,attached_take_profit,reject_reason,agent_id,decision_id,created_at,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        filled_quantity,avg_fill_price,reserved_margin,attached_stop_loss,attached_take_profit,reject_reason,exchange_order_id,agent_id,decision_id,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       o.id, o.accountId, o.clientOrderId, o.symbol, o.side, o.type, o.quantity, o.price, o.triggerPrice, o.leverage,
       o.reduceOnly ? 1 : 0, o.closePosition ? 1 : 0, o.status, o.filledQuantity, o.avgFillPrice, o.reservedMargin,
-      o.attachedStopLoss, o.attachedTakeProfit, o.rejectReason, o.agentId, o.decisionId, o.createdAt, o.updatedAt,
+      o.attachedStopLoss, o.attachedTakeProfit, o.rejectReason, o.exchangeOrderId, o.agentId, o.decisionId, o.createdAt, o.updatedAt,
     );
   }
   saveOrder(o: Order) {
     this.run(
-      'UPDATE orders SET quantity=?, status=?, filled_quantity=?, avg_fill_price=?, reserved_margin=?, reject_reason=?, updated_at=? WHERE id=?',
-      o.quantity, o.status, o.filledQuantity, o.avgFillPrice, o.reservedMargin, o.rejectReason, o.updatedAt, o.id,
+      'UPDATE orders SET quantity=?, status=?, filled_quantity=?, avg_fill_price=?, reserved_margin=?, reject_reason=?, exchange_order_id=?, updated_at=? WHERE id=?',
+      o.quantity, o.status, o.filledQuantity, o.avgFillPrice, o.reservedMargin, o.rejectReason, o.exchangeOrderId, o.updatedAt, o.id,
     );
   }
   getOrder(id: string) {
@@ -401,6 +409,21 @@ export class SqliteStore implements PaperStore, AgentStore {
   }
   deleteProvider(id: string) {
     this.run('DELETE FROM providers WHERE id=?', id);
+  }
+
+  // AI provider keys
+  getProviderKeys(): Map<string, string> {
+    return new Map(this.all('SELECT provider_id, api_key FROM provider_keys').map((r) => [r.provider_id, r.api_key]));
+  }
+  saveProviderKey(providerId: string, key: string) {
+    this.run(
+      `INSERT INTO provider_keys (provider_id,api_key,updated_at) VALUES (?,?,?)
+       ON CONFLICT(provider_id) DO UPDATE SET api_key=excluded.api_key, updated_at=excluded.updated_at`,
+      providerId, key, Date.now(),
+    );
+  }
+  deleteProviderKey(providerId: string) {
+    this.run('DELETE FROM provider_keys WHERE provider_id=?', providerId);
   }
 
   // settings

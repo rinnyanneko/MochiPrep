@@ -79,6 +79,9 @@ export class PaperExecutionEngine implements ExecutionEngine {
       id: this.newId('acct'),
       name: args.name,
       source: args.source,
+      venue: 'PAPER',
+      exchangeUid: null,
+      liveLimits: null,
       isDemo: args.isDemo ?? false,
       initialBalance: args.initialBalance ?? '10000',
       walletBalance: '0',
@@ -99,6 +102,7 @@ export class PaperExecutionEngine implements ExecutionEngine {
   /** Wipes orders, fills, positions, ledger and equity history, then redeposits the initial balance. */
   resetAccount(accountId: string): PaperAccount {
     const account = this.requireAccount(accountId);
+    if (account.venue !== 'PAPER') throw new Error('Exchange accounts cannot be reset');
     const now = this.deps.now(account.source);
     this.store.transaction(() => {
       this.store.deleteAccountData(accountId, true);
@@ -136,8 +140,8 @@ export class PaperExecutionEngine implements ExecutionEngine {
     this.cancelOrderSync(orderId);
   }
 
-  async getPositions(accountId: string): Promise<Position[]> {
-    return this.store.listOpenPositions(accountId);
+  async getPositions(accountId: string): Promise<PositionView[]> {
+    return this.positionViews(accountId);
   }
 
   async getOpenOrders(accountId: string): Promise<Order[]> {
@@ -237,6 +241,7 @@ export class PaperExecutionEngine implements ExecutionEngine {
       attachedStopLoss: request.stopLoss ?? null,
       attachedTakeProfit: request.takeProfit ?? null,
       rejectReason: null,
+      exchangeOrderId: null,
       agentId: request.agentId ?? null,
       decisionId: request.decisionId ?? null,
       createdAt: now,
@@ -798,8 +803,12 @@ export class PaperExecutionEngine implements ExecutionEngine {
     });
   }
 
+  async dailyRisk(accountId: string) {
+    return this.dailyRiskSync(accountId);
+  }
+
   /** Loss since 00:00 UTC, from the ledger plus open PnL, for the daily-loss limit. */
-  dailyRisk(accountId: string): { dailyPnl: string; dayStartEquity: string } {
+  dailyRiskSync(accountId: string): { dailyPnl: string; dayStartEquity: string } {
     const account = this.requireAccount(accountId);
     const now = this.deps.now(account.source);
     const dayStart = Math.floor(now / 86_400_000) * 86_400_000;

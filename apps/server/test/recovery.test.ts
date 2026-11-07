@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AiProvider } from '@mochiprep/ai-providers';
@@ -19,18 +19,18 @@ const holdProvider: AiProvider = {
   }),
 };
 
-describe('file database recovery and secret lifetime', () => {
+describe('file database recovery', () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
     dirs.length = 0;
   });
 
-  it('restores paper state and replay cursor, pauses agents, and loses keys', async () => {
+  it('restores paper state, replay cursor and AI keys, and pauses agents', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mochiprep-recovery-'));
     dirs.push(dir);
     const path = join(dir, 'state.sqlite');
-    const secret = 'custom-secret-never-persist-987654321';
+    const secret = 'custom-ai-key-987654321';
 
     const firstDb = openDatabase(path);
     const first = new Runtime({ db: firstDb, replayMinutes: 5_900, providerFactory: () => holdProvider });
@@ -63,10 +63,8 @@ describe('file database recovery and secret lifetime', () => {
     await first.stop();
     firstDb.close();
 
-    expect(readFileSync(path).includes(Buffer.from(secret))).toBe(false);
-
     const secondDb = openDatabase(path);
-    const second = new Runtime({ db: secondDb, replayMinutes: 5_900 });
+    const second = new Runtime({ db: secondDb, replayMinutes: 5_900, providerFactory: () => holdProvider });
     expect(second.store.getAccount(account.id)?.name).toBe('persistent');
     expect(second.store.getOpenPosition(account.id, 'BTCUSDT')).toBeDefined();
     expect(second.store.getOrder(pending.id)?.status).toBe('OPEN');
@@ -74,7 +72,8 @@ describe('file database recovery and secret lifetime', () => {
     expect(second.store.getAgent(agent.id)).toMatchObject({
       status: 'PAUSED', running: false, nextRunAt: null, statusDetail: 'Paused because the backend restarted',
     });
-    expect(second.providerViews().find((p) => p.id === 'remote')?.hasKey).toBe(false);
+    expect(second.providerViews().find((p) => p.id === 'remote')?.hasKey).toBe(true);
+    expect(second.providerFor(second.store.getProvider('remote')!)).toBe(holdProvider);
     await second.stop();
     secondDb.close();
   });
