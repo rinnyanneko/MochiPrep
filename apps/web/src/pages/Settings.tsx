@@ -5,6 +5,7 @@ import { PairsCard } from '@/components/PairsCard';
 import { useState } from 'react';
 import type { ProviderKind, ProviderView } from '@mochiprep/shared';
 import { PageTitle } from '@/components/Shell';
+import { VaultCard } from '@/components/VaultCard';
 import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Select, Textarea } from '@/components/ui';
 import { api } from '@/lib/api';
 import { attempt, useApp } from '@/store';
@@ -77,7 +78,7 @@ function ProviderDialog({ provider, onClose }: { provider: ProviderView | null; 
         </div>
         <Field
           label="Extra headers"
-          hint={savedHeaders.length ? `Saved: ${savedHeaders.join(', ')}. Leave empty to keep them, or enter new ones to replace them.` : 'Optional, for gateways that need them. One "Name: value" per line. Saved unencrypted, like API keys.'}
+          hint={savedHeaders.length ? `Saved: ${savedHeaders.join(', ')}. Leave empty to keep them, or enter new ones to replace them.` : 'Optional, for gateways that need them. One "Name: value" per line. Saved unencrypted, even with a master password.'}
         >
           <Textarea className="num h-20 text-xs" autoComplete="off" spellCheck={false} value={headers} onChange={(e) => setHeaders(e.target.value)} placeholder={'HTTP-Referer: https://example.com\nX-Title: MochiPrep'} />
         </Field>
@@ -146,6 +147,7 @@ function ProviderRow({ provider, onEdit }: { provider: ProviderView; onEdit(): v
 export function SettingsPage() {
   const providers = useApp((s) => s.providers);
   const demoActive = useApp((s) => s.demoActive);
+  const vault = useApp((s) => s.vault);
   const [editing, setEditing] = useState<ProviderView | 'new' | null>(null);
   const [confirm, setConfirm] = useState<'reset' | 'exit' | null>(null);
 
@@ -167,10 +169,15 @@ export function SettingsPage() {
           />
           {providers.map((p) => <ProviderRow key={p.id} provider={p} onEdit={() => setEditing(p)} />)}
           <p className="flex items-center gap-2 border-t border-line px-5 py-3 text-xs text-ink-3">
-            <ShieldCheck className="size-4 shrink-0 text-warn" />
-            AI keys are saved unencrypted in the local database (.mochiprep, readable only by your user) and survive restarts. They are never sent to the browser. Anyone who can read that file can read them.
+            <ShieldCheck className={`size-4 shrink-0 ${vault === 'OFF' ? 'text-warn' : 'text-up'}`} />
+            {vault === 'OFF'
+              ? 'AI keys are saved unencrypted in the local database (.mochiprep, readable only by your user) and survive restarts. Anyone who can read that file can read them. Set a master password below to encrypt them.'
+              : 'AI keys are saved encrypted with your master password and load when you unlock.'}{' '}
+            They are never sent to the browser.
           </p>
         </Card>
+
+        <VaultCard />
 
         <Card>
           <CardHeader title="Demo Mode" description={demoActive ? 'Active: synthetic tape, mock agents, 10,000 virtual USDT per account.' : 'Not active. Start it from the Dashboard.'} />

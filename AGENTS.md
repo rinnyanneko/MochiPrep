@@ -29,8 +29,9 @@ Needs Node >= 22.13 (`node:sqlite`). Workspace packages export TypeScript source
 - Every wallet or margin change goes through the ledger, inside one store transaction.
 - AI output is untrusted. Only `AgentRunner` turns it into orders, and only after Zod and the risk engine.
 - The paper engine must never invent a price: fills come from observed quotes, never OHLC paths.
-- AI keys live in SQLite by the owner's choice, and never in logs, errors or the browser.
-- OKX credentials stay in `Runtime` memory only. Never write them to disk or show them to a model.
+- AI keys live in SQLite by the owner's choice, and never in logs, errors or the browser. With a master password set they are only stored sealed (`apps/server/src/vault.ts`).
+- OKX credentials stay in `Runtime` memory, unless the owner opts to save them sealed by the master password. Never write them to disk in plaintext or show them to a model. The master password and data key are never written anywhere.
+- Unlocking reconnects saved OKX keys through the full connect checks and never arms: arming always takes the typed phrase.
 - Never resend an order after an unknown outcome: resolve it by lookup. Every OKX order passes `preTradeRefusal`.
 - Contract specs come from OKX, never from guesses. `SymbolId` is open-ended: use `getInstrument`, and remember replay has only `DEFAULT_SYMBOLS`.
 - A key that can withdraw is always refused. Exits stay possible when disarmed.

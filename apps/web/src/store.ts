@@ -17,6 +17,7 @@ import type {
   ServerEvent,
   SymbolId,
   Topic,
+  VaultStatus,
 } from '@mochiprep/shared';
 import { api, forgetToken, getToken } from './lib/api';
 
@@ -31,6 +32,8 @@ export interface Toast {
 interface State {
   connected: boolean;
   demoActive: boolean;
+  /** Master password state. LOCKED means saved keys are sealed until the user unlocks. */
+  vault: VaultStatus;
   replay: ReplayState | null;
   feeds: Partial<Record<DataSource, FeedStatus>>;
   quotes: Record<DataSource, Partial<Record<SymbolId, Quote>>>;
@@ -80,11 +83,12 @@ const remember = (key: string, value: string) => {
 };
 
 let toastId = 0;
-const ALL_TOPICS: Topic[] = ['accounts', 'orders', 'positions', 'agents', 'decisions', 'providers', 'arena', 'exchange', 'instruments'];
+const ALL_TOPICS: Topic[] = ['accounts', 'orders', 'positions', 'agents', 'decisions', 'providers', 'arena', 'exchange', 'instruments', 'vault'];
 
 export const useApp = create<State>((set, get) => ({
   connected: false,
   demoActive: false,
+  vault: 'OFF',
   replay: null,
   feeds: {},
   quotes: { REPLAY: {}, LIVE: {} },
@@ -96,7 +100,7 @@ export const useApp = create<State>((set, get) => ({
   exchange: [],
   signals: [],
   symbols: [...DEFAULT_SYMBOLS],
-  versions: { accounts: 0, orders: 0, positions: 0, agents: 0, decisions: 0, providers: 0, arena: 0, exchange: 0, instruments: 0, news: 0 },
+  versions: { accounts: 0, orders: 0, positions: 0, agents: 0, decisions: 0, providers: 0, arena: 0, exchange: 0, instruments: 0, news: 0, vault: 0 },
   page: (location.hash.slice(1) as Page) || 'dashboard',
   source: remembered('mochi.source', 'REPLAY') as DataSource,
   accountId: null,
@@ -134,9 +138,10 @@ export const useApp = create<State>((set, get) => ({
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
   },
   async refreshState() {
-    const state = await api.get<{ demoActive: boolean; replay: ReplayState; feeds: FeedStatus[] }>('/state');
+    const state = await api.get<{ demoActive: boolean; vault: VaultStatus; replay: ReplayState; feeds: FeedStatus[] }>('/state');
     set({
       demoActive: state.demoActive,
+      vault: state.vault,
       replay: state.replay,
       feeds: Object.fromEntries(state.feeds.map((f) => [f.source, f])),
     });
@@ -168,6 +173,7 @@ export const useApp = create<State>((set, get) => ({
         }),
       );
     }
+    if (topics.includes('vault')) jobs.push(api.get<{ status: VaultStatus }>('/vault').then(({ status }) => set({ vault: status })));
     if (topics.includes('exchange')) jobs.push(api.get<ExchangeStatus[]>('/exchange/status').then((exchange) => set({ exchange })));
     if (topics.includes('arena')) jobs.push(api.get<ArenaRow[]>('/arena').then((arena) => set({ arena })));
     await Promise.allSettled(jobs);

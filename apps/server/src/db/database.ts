@@ -13,7 +13,8 @@ export function openDatabase(path: string): DatabaseSync {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
   const db = new DatabaseSync(path);
-  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL;');
+  // secure_delete zeroes freed content, so a key removed when sealing does not linger in free pages.
+  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; PRAGMA secure_delete = ON;');
   if (!memory) {
     for (const file of [path, `${path}-wal`, `${path}-shm`]) {
       if (existsSync(file)) chmodSync(file, 0o600);

@@ -174,6 +174,14 @@ export class SqliteStore implements PaperStore, AgentStore {
     this.q(sql).run(...params);
   }
 
+  /**
+   * Folds the WAL into the main file and empties it. With secure_delete on, this is what makes
+   * deleted plaintext actually gone: until then old page images still sit in the WAL.
+   */
+  scrub() {
+    if (this.txDepth === 0) this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  }
+
   transaction<T>(fn: () => T): T {
     const savepoint = `sp_${this.txDepth}`;
     this.db.exec(this.txDepth === 0 ? 'BEGIN IMMEDIATE' : `SAVEPOINT ${savepoint}`);
@@ -453,6 +461,56 @@ export class SqliteStore implements PaperStore, AgentStore {
   }
   deleteProviderKey(providerId: string) {
     this.run('DELETE FROM provider_keys WHERE provider_id=?', providerId);
+    this.run('DELETE FROM sealed_provider_keys WHERE provider_id=?', providerId);
+  }
+  getSealedProviderKeys(): Map<string, string> {
+    return new Map(this.all('SELECT provider_id, sealed FROM sealed_provider_keys').map((r) => [r.provider_id, r.sealed]));
+  }
+  saveSealedProviderKey(providerId: string, sealed: string) {
+    this.run(
+      `INSERT INTO sealed_provider_keys (provider_id,sealed,updated_at) VALUES (?,?,?)
+       ON CONFLICT(provider_id) DO UPDATE SET sealed=excluded.sealed, updated_at=excluded.updated_at`,
+      providerId, sealed, Date.now(),
+    );
+    this.run('DELETE FROM provider_keys WHERE provider_id=?', providerId);
+  }
+
+  // vault
+  getVaultKey<T>(id: string): T | undefined {
+    const r = this.one('SELECT params FROM vault_keys WHERE id=?', id);
+    return r ? (JSON.parse(r.params) as T) : undefined;
+  }
+  hasVault() {
+    return !!this.one('SELECT 1 AS x FROM vault_keys LIMIT 1');
+  }
+  saveVaultKey(id: string, kind: string, params: unknown) {
+    this.run(
+      `INSERT INTO vault_keys (id,kind,params,created_at) VALUES (?,?,?,?)
+       ON CONFLICT(id) DO UPDATE SET params=excluded.params`,
+      id, kind, JSON.stringify(params), Date.now(),
+    );
+  }
+  /** Drops the vault and everything only it could open. */
+  deleteVault() {
+    this.run('DELETE FROM sealed_exchange_credentials');
+    this.run('DELETE FROM sealed_provider_keys');
+    this.run('DELETE FROM vault_keys');
+  }
+  listSealedExchangeCredentials(): { accountId: string; sealed: string }[] {
+    return this.all('SELECT account_id, sealed FROM sealed_exchange_credentials').map((r) => ({ accountId: r.account_id, sealed: r.sealed }));
+  }
+  hasSealedExchangeCredentials(accountId: string) {
+    return !!this.one('SELECT 1 AS x FROM sealed_exchange_credentials WHERE account_id=?', accountId);
+  }
+  saveSealedExchangeCredentials(accountId: string, sealed: string) {
+    this.run(
+      `INSERT INTO sealed_exchange_credentials (account_id,sealed,updated_at) VALUES (?,?,?)
+       ON CONFLICT(account_id) DO UPDATE SET sealed=excluded.sealed, updated_at=excluded.updated_at`,
+      accountId, sealed, Date.now(),
+    );
+  }
+  deleteSealedExchangeCredentials(accountId: string) {
+    this.run('DELETE FROM sealed_exchange_credentials WHERE account_id=?', accountId);
   }
 
   // settings

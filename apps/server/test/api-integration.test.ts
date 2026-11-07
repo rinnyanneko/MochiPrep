@@ -25,6 +25,7 @@ describe('API decision-to-position integration', () => {
     db = openDatabase(':memory:');
     runtime = new Runtime({
       db, replayMinutes: 5_800,
+      kdf: { N: 2 ** 10, r: 8, p: 1 },
       providerFactory: () => ({
         kind: 'OPENAI',
         async complete(request) {
@@ -116,5 +117,22 @@ describe('API decision-to-position integration', () => {
       new Promise((resolve) => setTimeout(() => resolve('hung'), 3000)),
     ]);
     expect(outcome).toBe('closed');
+  });
+
+  it('manages the master password over HTTP without echoing it', async () => {
+    const post = (url: string, payload: Record<string, string>) => app.inject({ method: 'POST', url, headers: headers(), payload });
+    expect((await app.inject({ method: 'GET', url: '/api/state', headers: headers() })).json().vault).toBe('OFF');
+
+    expect((await post('/api/vault', { password: 'short' })).statusCode).toBe(400);
+    const created = await post('/api/vault', { password: 'long-enough-password' });
+    expect(created.json()).toEqual({ status: 'UNLOCKED' });
+
+    const wrong = await post('/api/vault/password', { current: 'guess-123456', next: 'another-long-password' });
+    // 403, not 401: the browser client treats 401 as a stale session token and retries.
+    expect(wrong.statusCode).toBe(403);
+    expect(wrong.body).not.toContain('guess-123456');
+
+    expect((await post('/api/vault/reset', { confirmation: 'nope' })).statusCode).toBe(400);
+    expect((await post('/api/vault/reset', { confirmation: 'DELETE SAVED KEYS' })).json()).toEqual({ status: 'OFF' });
   });
 });

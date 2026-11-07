@@ -52,7 +52,9 @@ Specs are read from OKX when a pair is added and rechecked on every connect, whi
 
 ## Restarts
 
-OKX credentials are held only in memory. After a restart the account stays listed but is disconnected and disarmed, and its agents are paused. Positions and stops remain on OKX. Reconnect in **Settings**, then arm again.
+By default OKX credentials are held only in memory. After a restart the account stays listed but is disconnected and disarmed, and its agents are paused. Positions and stops remain on OKX. Reconnect in **Settings**, then arm again.
+
+With a master password set, you can tick **Save encrypted with my master password** when connecting. The key is then stored sealed with AES-256-GCM, and reconnects when you unlock after a restart. Reconnecting runs every check a manual connect does, so a key that has gained withdrawal permission, or OKX contract specs that changed, still stop it. A real account always comes back **disarmed**: arm it again yourself. Disconnecting an account, reconnecting it without the box ticked, or turning the master password off deletes the saved key.
 
 ## Limits
 

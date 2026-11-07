@@ -171,6 +171,7 @@ describe('OKX execution', () => {
       replayMinutes: 5_800,
       providerFactory: () => longDecision,
       okx: { fetchImpl: okx.fetch, baseUrl: 'https://okx.invalid' },
+      kdf: { N: 2 ** 10, r: 8, p: 1 },
     });
     if (!runtime.store.getProvider('remote')) {
       runtime.store.insertProvider({ id: 'remote', name: 'r', kind: 'OPENAI', baseUrl: null, defaultModel: 'm', inputPricePerMTok: null, outputPricePerMTok: null, createdAt: 1 });
@@ -617,5 +618,123 @@ describe('OKX execution', () => {
     const reconnected = await connect('OKX_LIVE');
     expect(reconnected.id).toBe(account.id);
     expect(runtime.exchangeStatuses()[0]).toMatchObject({ connected: true, armed: false });
+  });
+
+  describe('master password', () => {
+    const PASSWORD = 'mochi-master-password';
+    const AI_KEY = 'sk-ai-key-distinctive-0123456789';
+
+    const restart = async () => {
+      await runtime.stop();
+      db.close();
+      boot();
+    };
+    const fileHolds = (value: string) =>
+      [dbPath, `${dbPath}-wal`].some((file) => existsSync(file) && readFileSync(file).includes(Buffer.from(value)));
+
+    beforeEach(() => runtime.setKey('remote', AI_KEY));
+
+    it('seals saved AI keys, scrubs the plaintext, and loads them only after unlock', async () => {
+      expect(fileHolds(AI_KEY)).toBe(true);
+      await runtime.enableVault(PASSWORD);
+      expect(runtime.vaultStatus()).toBe('UNLOCKED');
+      expect(fileHolds(AI_KEY)).toBe(false);
+      expect(fileHolds(PASSWORD)).toBe(false);
+
+      await restart();
+      expect(runtime.vaultStatus()).toBe('LOCKED');
+      const config = runtime.store.getProvider('remote')!;
+      expect(() => runtime.providerFor(config)).toThrow(/Unlock MochiPrep/);
+      expect(() => runtime.setKey('remote', 'other')).toThrow(/Unlock/);
+      expect(runtime.providerViews().find((p) => p.id === 'remote')?.hasKey).toBe(false);
+
+      await expect(runtime.unlock('not the password')).rejects.toThrow(/Wrong master password/);
+      expect(runtime.vaultStatus()).toBe('LOCKED');
+      await runtime.unlock(PASSWORD);
+      expect(runtime.vaultStatus()).toBe('UNLOCKED');
+      expect(runtime.providerFor(config)).toBe(longDecision);
+    });
+
+    it('keys saved while unlocked are sealed too', async () => {
+      await runtime.enableVault(PASSWORD);
+      runtime.setKey('remote', 'sk-replaced-key-abcdef0123456789');
+      runtime.store.scrub();
+      expect(fileHolds('sk-replaced-key-abcdef0123456789')).toBe(false);
+      await restart();
+      await runtime.unlock(PASSWORD);
+      expect(runtime.providerViews().find((p) => p.id === 'remote')?.hasKey).toBe(true);
+    });
+
+    it('saves OKX keys only on request, sealed, and reconnects them on unlock without arming', async () => {
+      await expect(runtime.connectOkx({ ...CREDS, name: 'OKX', environment: 'OKX_LIVE', limits: DEFAULT_LIVE_LIMITS, remember: true })).rejects.toThrow(/master password/);
+      expect(okx.placed).toHaveLength(0);
+
+      await runtime.enableVault(PASSWORD);
+      const account = await runtime.connectOkx({ ...CREDS, name: 'OKX', environment: 'OKX_LIVE', limits: DEFAULT_LIVE_LIMITS, remember: true });
+      runtime.arm(account.id, ARM_PHRASE);
+      expect(runtime.exchangeStatuses()[0]).toMatchObject({ saved: true, armed: true });
+      runtime.store.scrub();
+      for (const value of Object.values(CREDS)) expect(fileHolds(value)).toBe(false);
+
+      await restart();
+      expect(runtime.exchangeStatuses()[0]).toMatchObject({ connected: false, saved: true });
+      const { failed } = await runtime.unlock(PASSWORD);
+      expect(failed).toEqual([]);
+      expect(runtime.exchangeStatuses()[0]).toMatchObject({ connected: true, armed: false, saved: true });
+    });
+
+    it('still refuses a saved key that gained withdrawal permission', async () => {
+      await runtime.enableVault(PASSWORD);
+      await runtime.connectOkx({ ...CREDS, name: 'OKX', environment: 'OKX_LIVE', limits: DEFAULT_LIVE_LIMITS, remember: true });
+      await restart();
+      okx.perm = 'read_only,withdraw,trade';
+      const { failed } = await runtime.unlock(PASSWORD);
+      expect(failed).toEqual(['OKX']);
+      expect(runtime.exchangeStatuses()[0]).toMatchObject({ connected: false });
+      // Unlock itself succeeded: AI keys work even when an exchange cannot reconnect.
+      expect(runtime.vaultStatus()).toBe('UNLOCKED');
+    });
+
+    it('forgets saved OKX keys on disconnect or when reconnected without saving', async () => {
+      await runtime.enableVault(PASSWORD);
+      const account = await runtime.connectOkx({ ...CREDS, name: 'OKX', environment: 'OKX_DEMO', limits: DEFAULT_LIVE_LIMITS, remember: true });
+      await connect('OKX_DEMO');
+      expect(runtime.exchangeStatuses()[0]!.saved).toBe(false);
+      await runtime.connectOkx({ ...CREDS, name: 'OKX', environment: 'OKX_DEMO', limits: DEFAULT_LIVE_LIMITS, remember: true });
+      runtime.disconnectExchange(account.id);
+      expect(runtime.exchangeStatuses()[0]!.saved).toBe(false);
+    });
+
+    it('changes the password without re-entering keys', async () => {
+      await runtime.enableVault(PASSWORD);
+      await expect(runtime.changePassword('wrong', 'new-master-password')).rejects.toThrow(/Wrong/);
+      await runtime.changePassword(PASSWORD, 'new-master-password');
+      await restart();
+      await expect(runtime.unlock(PASSWORD)).rejects.toThrow(/Wrong/);
+      await runtime.unlock('new-master-password');
+      expect(runtime.providerViews().find((p) => p.id === 'remote')?.hasKey).toBe(true);
+    });
+
+    it('turning it off restores plaintext AI keys and deletes saved OKX keys', async () => {
+      await runtime.enableVault(PASSWORD);
+      await runtime.connectOkx({ ...CREDS, name: 'OKX', environment: 'OKX_DEMO', limits: DEFAULT_LIVE_LIMITS, remember: true });
+      await runtime.disableVault(PASSWORD);
+      expect(runtime.vaultStatus()).toBe('OFF');
+      expect(runtime.exchangeStatuses()[0]!.saved).toBe(false);
+      await restart();
+      expect(runtime.vaultStatus()).toBe('OFF');
+      expect(runtime.providerViews().find((p) => p.id === 'remote')?.hasKey).toBe(true);
+    });
+
+    it('a lost password can only be reset by deleting what it sealed', async () => {
+      await runtime.enableVault(PASSWORD);
+      await runtime.connectOkx({ ...CREDS, name: 'OKX', environment: 'OKX_DEMO', limits: DEFAULT_LIVE_LIMITS, remember: true });
+      await restart();
+      expect(() => runtime.resetVault('yes')).toThrow(/Type exactly/);
+      runtime.resetVault('DELETE SAVED KEYS');
+      expect(runtime.vaultStatus()).toBe('OFF');
+      expect(runtime.providerViews().find((p) => p.id === 'remote')?.hasKey).toBe(false);
+      expect(runtime.exchangeStatuses()[0]!.saved).toBe(false);
+    });
   });
 });

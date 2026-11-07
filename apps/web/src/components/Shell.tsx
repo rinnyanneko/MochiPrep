@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils';
 import { attempt, useApp, useSourceSignals, type Page } from '@/store';
 import { Mochi, MOOD_LABEL, type MochiMood } from './Mochi';
 import { Badge, Button, Dialog, Segmented, Select, type Tone } from './ui';
+import { UnlockBanner } from './VaultCard';
 
 const NAV: { id: Page; label: string; icon: typeof Bot }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -256,6 +257,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <Sidebar />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <TopBar />
+        <UnlockBanner />
         <DemoBanner />
         <main className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-5">
           <div className="mx-auto max-w-[1400px]">{children}</div>

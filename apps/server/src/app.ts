@@ -21,12 +21,17 @@ import {
   ReplayControlSchema,
   SymbolSchema,
   TIMEFRAMES,
+  VaultChangeSchema,
+  VaultCreateSchema,
+  VaultPasswordSchema,
+  VaultResetSchema,
   type ServerEvent,
 } from '@mochiprep/shared';
 import { randomUUID } from 'node:crypto';
 import { z, ZodError } from 'zod';
 import { REPO_ROOT, type ServerConfig } from './config';
 import { MOCK_PROVIDER_ID, type Runtime } from './runtime';
+import { WrongPasswordError } from './vault';
 
 const CandleQuery = z.object({
   source: z.enum(['REPLAY', 'LIVE']),
@@ -79,6 +84,8 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
       const message = error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; ');
       return reply.code(400).send({ error: message });
     }
+    // Not 401: the browser client reads 401 as an expired session token and retries.
+    if (error instanceof WrongPasswordError) return reply.code(403).send({ error: error.message });
     const message = runtime.redact(error.message);
     if ((error.statusCode ?? 400) >= 500) app.log.error({ message });
     return reply.code(error.statusCode ?? 400).send({ error: message });
@@ -96,6 +103,7 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
 
   app.get('/api/state', async () => ({
     demoActive: runtime.isDemoActive(),
+    vault: runtime.vaultStatus(),
     replay: runtime.replayState(),
     feeds: runtime.feeds(),
     instruments: INSTRUMENTS,
@@ -339,6 +347,30 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
     runtime.setPlaying(false);
     runtime.disarm();
     return { stopped };
+  });
+
+  // ---- master password ------------------------------------------------------------------
+  app.get('/api/vault', async () => ({ status: runtime.vaultStatus() }));
+  app.post('/api/vault', async (request) => {
+    await runtime.enableVault(VaultCreateSchema.parse(request.body).password);
+    return { status: runtime.vaultStatus() };
+  });
+  app.post('/api/vault/unlock', async (request) => {
+    const { failed } = await runtime.unlock(VaultPasswordSchema.parse(request.body).password);
+    return { status: runtime.vaultStatus(), failed };
+  });
+  app.post('/api/vault/password', async (request) => {
+    const { current, next } = VaultChangeSchema.parse(request.body);
+    await runtime.changePassword(current, next);
+    return { status: runtime.vaultStatus() };
+  });
+  app.post('/api/vault/disable', async (request) => {
+    await runtime.disableVault(VaultPasswordSchema.parse(request.body).password);
+    return { status: runtime.vaultStatus() };
+  });
+  app.post('/api/vault/reset', async (request) => {
+    runtime.resetVault(VaultResetSchema.parse(request.body).confirmation);
+    return { status: runtime.vaultStatus() };
   });
 
   // ---- exchange accounts ----------------------------------------------------------------
