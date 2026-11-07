@@ -67,16 +67,58 @@ fn add_one_in_last_place(int_part: &str, frac: &str) -> String {
     }
 }
 
-/// An f64 as a JSON value the way `JSON.stringify` writes it: 3 rather than 3.0. serde_json
-/// always keeps the `.0`, which would make Rust output differ from the TypeScript backend's.
-pub fn js_number_json(x: f64) -> serde_json::Value {
-    // Below 2^53 every integral f64 converts to i64 exactly. Larger magnitudes are left to
-    // serde_json (JS switches to exponent notation from 1e21, which we do not mirror).
-    if x.is_finite() && x.fract() == 0.0 && x.abs() < 9_007_199_254_740_992.0 {
-        // `as i64` turns -0 into 0, and JSON.stringify(-0) is "0" as well.
-        serde_json::Value::from(x as i64)
-    } else {
-        // NaN and infinities become null, which is also what JSON.stringify does.
-        serde_json::Value::from(x)
+/// `JSON.stringify(x)` for a number: the shortest round-trip digits laid out by the
+/// `Number::toString` rules. Rust's own formatting differs (serde_json writes `3.0` and `1e-6`),
+/// so the text is built here from the shortest digits of `{:e}`.
+pub fn js_number_string(x: f64) -> String {
+    if !x.is_finite() {
+        return "null".to_string();
     }
+    if x == 0.0 {
+        // Covers -0 as well: JSON.stringify(-0) is "0".
+        return "0".to_string();
+    }
+    // `{:e}` gives the shortest digits that round-trip, e.g. "1.5e-6" or "1e21".
+    let scientific = format!("{:e}", x.abs());
+    let (mantissa, exponent) = scientific
+        .split_once('e')
+        .expect("`{:e}` output always contains an exponent");
+    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+    let exponent: i32 = exponent.parse().expect("`{:e}` exponent is an integer");
+    // `n` is the position of the decimal point relative to the digits, as in the ECMAScript spec.
+    let n = exponent + 1;
+    let k = digits.len() as i32;
+    let body = if k <= n && n <= 21 {
+        format!("{digits}{}", "0".repeat((n - k) as usize))
+    } else if 0 < n && n <= 21 {
+        format!("{}.{}", &digits[..n as usize], &digits[n as usize..])
+    } else if -6 < n && n <= 0 {
+        format!("0.{}{digits}", "0".repeat((-n) as usize))
+    } else {
+        let sign = if n - 1 < 0 { '-' } else { '+' };
+        let power = (n - 1).abs();
+        if k == 1 {
+            format!("{digits}e{sign}{power}")
+        } else {
+            format!("{}.{}e{sign}{power}", &digits[..1], &digits[1..])
+        }
+    };
+    if x < 0.0 {
+        format!("-{body}")
+    } else {
+        body
+    }
+}
+
+/// An f64 as a JSON value the way `JSON.stringify` writes it. A `Value` re-parses the text into
+/// a number, so use `js_number_raw` when the exact text matters (writing to the wire).
+pub fn js_number_json(x: f64) -> serde_json::Value {
+    serde_json::from_str(&js_number_string(x)).expect("a JS number string is valid JSON")
+}
+
+/// The same number as raw JSON text. serde_json would re-format an f64 (`1.5e-6`, `3.0`), but a
+/// `RawValue` is written through unchanged, which is the simplest way to keep JS formatting.
+pub fn js_number_raw(x: f64) -> Box<serde_json::value::RawValue> {
+    serde_json::value::RawValue::from_string(js_number_string(x))
+        .expect("a JS number string is valid JSON")
 }

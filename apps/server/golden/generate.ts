@@ -45,6 +45,11 @@ const FIXED_CASES: Array<[number, number]> = [
   [0.5, 0], [9.5, 0], [99.5, 0], [9.875, 2], [1.5, 20],
 ];
 
+const JS_NUMBER_CASES = [
+  0, -0, -3, -2.5, 1e-7, 1e-6, 0.0000015, 0.00001234, 1e15, 2 ** 53, 2 ** 53 + 2, 1e17, 1e21, 1.5e21, 1.5e300,
+  0.1 + 0.2, 123.456, -1e-7, 1e20, 123456789012345680000, 5e-324,
+];
+
 // JSON cannot carry -0, so the fixture stores 0 and the freshness test (toEqual) must see the same.
 const noNegativeZero = (x: number): number => x + 0;
 
@@ -596,6 +601,16 @@ function accountingTypesFixture() {
     positionId: null,
     memo: '',
   };
+  // Every variant of every enum, so a mistyped rename cannot hide.
+  const orderTypes: Order['type'][] = ['MARKET', 'LIMIT', 'STOP_MARKET', 'TAKE_PROFIT_MARKET'];
+  const orderStatuses: Order['status'][] = ['OPEN', 'FILLED', 'CANCELED', 'REJECTED'];
+  const orderSides: Order['side'][] = ['BUY', 'SELL'];
+  const positionSides: Position['side'][] = ['LONG', 'SHORT'];
+  const positionStatuses: Position['status'][] = ['OPEN', 'CLOSED', 'LIQUIDATED'];
+  const venues: PaperAccount['venue'][] = ['PAPER', 'OKX_DEMO', 'OKX_LIVE'];
+  const sources: PaperAccount['source'][] = ['REPLAY', 'LIVE'];
+  const actions: AiDecisionData['action'][] = ['LONG', 'SHORT', 'CLOSE', 'HOLD'];
+  const entryTypes: AiDecisionData['orderType'][] = ['MARKET', 'LIMIT'];
   const ledgerTypes: LedgerEvent['type'][] = [
     'DEPOSIT', 'TRADE_FEE', 'REALIZED_PNL', 'FUNDING', 'LIQUIDATION_PENALTY', 'MARGIN_LOCK', 'MARGIN_RELEASE',
   ];
@@ -669,19 +684,45 @@ function accountingTypesFixture() {
       liveLimits: DEFAULT_LIVE_LIMITS,
     },
     samples: {
-      paperAccount: [paperAccountFull, paperAccountMinimal],
+      paperAccount: [
+        paperAccountFull,
+        paperAccountMinimal,
+        ...venues.map((venue) => ({ ...paperAccountFull, venue })),
+        ...sources.map((source) => ({ ...paperAccountFull, source })),
+      ],
       paperAccountConfig: [config, { ...DEFAULT_ACCOUNT_CONFIG }],
-      order: [orderFull, orderMinimal],
-      orderRequest: [requestFull, requestMinimal],
+      order: [
+        orderFull,
+        orderMinimal,
+        ...orderTypes.map((type) => ({ ...orderFull, type })),
+        ...orderStatuses.map((status) => ({ ...orderFull, status })),
+        ...orderSides.map((side) => ({ ...orderFull, side })),
+      ],
+      orderRequest: [
+        requestFull,
+        requestMinimal,
+        ...entryTypes.map((type) => ({ ...requestFull, type })),
+        ...orderSides.map((side) => ({ ...requestFull, side })),
+      ],
       orderResult: [resultFull, resultMinimal],
       fill: [fillFull, fillTaker, fillLiquidation],
-      position: [positionFull, positionOpen],
+      position: [
+        positionFull,
+        positionOpen,
+        ...positionSides.map((side) => ({ ...positionFull, side })),
+        ...positionStatuses.map((status) => ({ ...positionFull, status })),
+      ],
       positionView: [viewFull, viewMinimal],
       ledgerEvent: [ledgerFull, ledgerMinimal, ...ledgerTypes.map((type) => ({ ...ledgerFull, type }))],
       equityPoint: [equity],
       accountBalance: [balance],
       riskSettings: [risk, riskMinimal],
-      aiDecisionData: [decisionFull, decisionMinimal],
+      aiDecisionData: [
+        decisionFull,
+        decisionMinimal,
+        ...actions.map((action) => ({ ...decisionFull, action })),
+        ...entryTypes.map((orderType) => ({ ...decisionFull, orderType })),
+      ],
       riskCheck: [check],
       riskResult: [riskResultFull, riskResultMinimal],
       sizedTrade: [sized],
@@ -699,6 +740,7 @@ function accountingTypesFixture() {
 export async function buildGolden(): Promise<Record<string, unknown>> {
   return {
     'instruments.json': DEFAULT_SYMBOLS.map((s) => INSTRUMENTS[s]),
+    'jsnumber.json': JS_NUMBER_CASES.map((x) => [noNegativeZero(x), JSON.stringify(x)]),
     'jsnum.json': {
       round: ROUND_CASES.map((x) => [noNegativeZero(x), noNegativeZero(Math.round(x))]),
       toFixed: FIXED_CASES.map(([x, d]) => [noNegativeZero(x), d, x.toFixed(d)]),

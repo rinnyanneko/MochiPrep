@@ -8,12 +8,12 @@
 
 use serde::{Deserialize, Serialize, Serializer};
 
-use crate::jsnum::js_number_json;
+use crate::jsnum::js_number_raw;
 use crate::market::DataSource;
 
-/// JSON.stringify writes 3, not 3.0, so f64 fields go through `js_number_json`.
+/// JSON.stringify writes 3, not 3.0, so f64 fields go through `js_number_raw`.
 fn serialize_js_number<S: Serializer>(x: &f64, serializer: S) -> Result<S::Ok, S::Error> {
-    js_number_json(*x).serialize(serializer)
+    js_number_raw(*x).serialize(serializer)
 }
 
 fn serialize_js_number_or_null<S: Serializer>(
@@ -21,7 +21,7 @@ fn serialize_js_number_or_null<S: Serializer>(
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     match x {
-        Some(x) => js_number_json(*x).serialize(serializer),
+        Some(x) => js_number_raw(*x).serialize(serializer),
         None => serializer.serialize_none(),
     }
 }
