@@ -233,3 +233,25 @@ if x < 0.0 { s.insert(0, '-'); }                    // JS: sign whenever x < 0, 
 - [ ] **Step 1: Run the full verification:** `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`, `pnpm test`, `pnpm typecheck`. Expected: all clean.
 - [ ] **Step 2: Update the docs** as listed in Files.
 - [ ] **Step 3: Commit** with the message `Document the Rust foundation and golden fixtures`.
+
+---
+
+## Carried forward from Plan 1 reviews
+
+Real findings that nothing in Plan 1 builds on. The plan named for each must pick it up.
+
+| Plan | Item |
+|---|---|
+| 2 | `migrations.rs` `failed_migration_leaves_nothing`: also assert `conn.is_autocommit()` |
+| 3 | `js_to_fixed`: return JS strings for NaN/±Infinity instead of panicking; `debug_assert!(digits <= 20)` |
+| 3 | `js_round` returns +0 where JS gives -0 for results in (-0.5, 0); decide before it reaches API output |
+| 3 | `ReplayMarketData::new`: validate `minutes > WARMUP_MINUTES`, return `Result`; test a short tape stepped to its last index (Runtime passes `replayMinutes`, Node tests use 5_800) |
+| 3 | `Tape` public columns can diverge in length; `candle()` indexes unchecked |
+| 5 | `unwrap_with_password` maps malformed wrap data to `Malformed`; Node maps every post-derivation failure to `WrongPasswordError` (HTTP 403). Make the API responses identical |
+| 5 | `DataKey` is a bare `[u8; 32]`, so `Debug` prints key bytes: make it a newtype with a redacting `Debug`, add `zeroize` for password copies and derived keys |
+| 5 | Cap the scrypt cost read from stored params (a tampered DB could abort on a huge allocation); accept every value Node can write |
+| 5 | Tamper tests assert only `is_err()`: assert the variant; comment that `open` is deliberately stricter than Node |
+| 7 | Pin `rust-toolchain.toml` to an exact version when CI lands (`clippy -D warnings` breaks on new lints) |
+| 7 | CI: regenerate `rust-vault.json` (`MOCHI_UPDATE_GOLDEN=1 cargo test -p mochi-vault`) before the Node golden test; make the writer test `#[ignore]` + `--ignored` |
+| 7 | Test the Unix 0700/0600 permission code on Linux/macOS CI |
+| any | `golden_tape.rs` head test compares `Option<i64>` times; comment host-endian hashing in generate.ts; `from_utf8_lossy` in jsnum; mochi-market lib.rs doc |
