@@ -2,9 +2,9 @@
 //! against the Node engine) through the Rust paper engine, and compares every op's result, error,
 //! events and raw rows.
 
-use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use mochi_core::ledger::audit_ledger;
 use mochi_core::paper::{
@@ -109,32 +109,35 @@ fn first_difference(path: &str, expected: &Value, actual: &Value) -> Option<Stri
 /// The engine plus the quote book, clock and event log the ops drive.
 struct Harness {
     engine: PaperExecutionEngine<SqlitePaperStore>,
-    quotes: Rc<RefCell<HashMap<String, Quote>>>,
-    clock: Rc<RefCell<HashMap<String, i64>>>,
-    events: Rc<RefCell<Vec<EngineEvent>>>,
+    quotes: Arc<Mutex<HashMap<String, Quote>>>,
+    clock: Arc<Mutex<HashMap<String, i64>>>,
+    events: Arc<Mutex<Vec<EngineEvent>>>,
 }
 
 impl Harness {
     fn new() -> Self {
-        let quotes: Rc<RefCell<HashMap<String, Quote>>> = Rc::default();
-        let clock: Rc<RefCell<HashMap<String, i64>>> = Rc::default();
-        let events: Rc<RefCell<Vec<EngineEvent>>> = Rc::default();
-        let counter = Rc::new(Cell::new(0u64));
+        let quotes: Arc<Mutex<HashMap<String, Quote>>> = Arc::default();
+        let clock: Arc<Mutex<HashMap<String, i64>>> = Arc::default();
+        let events: Arc<Mutex<Vec<EngineEvent>>> = Arc::default();
+        let counter = AtomicU64::new(0);
         let (q, c, e) = (quotes.clone(), clock.clone(), events.clone());
         let engine = PaperExecutionEngine::new(PaperEngineDeps {
             store: SqlitePaperStore::new(open_in_memory().unwrap()),
             instruments: Instruments::with_defaults(),
             get_quote: Box::new(move |source, symbol| {
-                q.borrow().get(&source_key(source, symbol)).cloned()
+                q.lock().unwrap().get(&source_key(source, symbol)).cloned()
             }),
             now: Box::new(move |source| {
-                c.borrow().get(&format!("{source:?}")).copied().unwrap_or(0)
+                c.lock()
+                    .unwrap()
+                    .get(&format!("{source:?}"))
+                    .copied()
+                    .unwrap_or(0)
             }),
             new_id: Box::new(move |prefix| {
-                counter.set(counter.get() + 1);
-                format!("{prefix}_{}", counter.get())
+                format!("{prefix}_{}", counter.fetch_add(1, Ordering::Relaxed) + 1)
             }),
-            on_event: Box::new(move |event| e.borrow_mut().push(event)),
+            on_event: Box::new(move |event| e.lock().unwrap().push(event)),
         });
         Harness {
             engine,
@@ -152,7 +155,7 @@ impl Harness {
             "quote" => {
                 let quote: Quote = parse(&op["quote"]);
                 let key = source_key(quote.source, &quote.symbol);
-                self.quotes.borrow_mut().insert(key, quote.clone());
+                self.quotes.lock().unwrap().insert(key, quote.clone());
                 if op["feed"] == json!(true) {
                     engine.on_quote(&quote).map(|()| None)
                 } else {
@@ -184,13 +187,13 @@ impl Harness {
             "clearQuote" => {
                 let source: DataSource = parse(&op["source"]);
                 let key = source_key(source, &text("symbol"));
-                self.quotes.borrow_mut().remove(&key);
+                self.quotes.lock().unwrap().remove(&key);
                 Ok(None)
             }
             "now" => {
                 let source: DataSource = parse(&op["source"]);
                 let ts = op["ts"].as_i64().unwrap();
-                self.clock.borrow_mut().insert(format!("{source:?}"), ts);
+                self.clock.lock().unwrap().insert(format!("{source:?}"), ts);
                 Ok(None)
             }
             "createAccount" => engine
@@ -236,9 +239,9 @@ fn scenarios_match_typescript() {
         assert_eq!(ops.len(), steps.len(), "{name}: ops and steps differ");
         let mut harness = Harness::new();
         for (i, (op, step)) in ops.iter().zip(steps).enumerate() {
-            harness.events.borrow_mut().clear();
+            harness.events.lock().unwrap().clear();
             let outcome = harness.apply(op);
-            let events = serde_json::to_value(&*harness.events.borrow()).unwrap();
+            let events = serde_json::to_value(&*harness.events.lock().unwrap()).unwrap();
             let (result, error) = match outcome {
                 Ok(result) => (result, None),
                 Err(message) => (None, Some(message)),

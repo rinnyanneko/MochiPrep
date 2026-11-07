@@ -1,10 +1,10 @@
 //! Mirrors the paper part of `apps/server/test/recovery.test.ts`: reopening a file database must
 //! give back the same account, positions, orders and ledger, and the engine must keep working.
 
-use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::Path;
-use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use mochi_core::ledger::audit_ledger;
 use mochi_core::paper::{
@@ -15,7 +15,7 @@ use mochi_domain::{DataSource, OrderRequest, OrderStatus, Quote};
 use mochi_store::{open_database, SqlitePaperStore};
 use serde_json::{json, Value};
 
-type Quotes = Rc<RefCell<HashMap<String, Quote>>>;
+type Quotes = Arc<Mutex<HashMap<String, Quote>>>;
 
 /// Quotes are keyed by the source's Debug name, as the engine's `get_quote` closure looks them up.
 fn key(symbol: &str) -> String {
@@ -40,22 +40,24 @@ fn request(value: Value) -> OrderRequest {
 fn open_engine(
     path: &Path,
     quotes: &Quotes,
-    ids: &Rc<Cell<u64>>,
-    events: &Rc<RefCell<Vec<EngineEvent>>>,
+    ids: &Arc<AtomicU64>,
+    events: &Arc<Mutex<Vec<EngineEvent>>>,
 ) -> PaperExecutionEngine<SqlitePaperStore> {
     let (q, ids, e) = (quotes.clone(), ids.clone(), events.clone());
     PaperExecutionEngine::new(PaperEngineDeps {
         store: SqlitePaperStore::new(open_database(path).unwrap()),
         instruments: Instruments::with_defaults(),
         get_quote: Box::new(move |source, symbol| {
-            q.borrow().get(&format!("{source:?}:{symbol}")).cloned()
+            q.lock()
+                .unwrap()
+                .get(&format!("{source:?}:{symbol}"))
+                .cloned()
         }),
         now: Box::new(|_| 3_600_000),
         new_id: Box::new(move |prefix| {
-            ids.set(ids.get() + 1);
-            format!("{prefix}_{}", ids.get())
+            format!("{prefix}_{}", ids.fetch_add(1, Ordering::Relaxed) + 1)
         }),
-        on_event: Box::new(move |event| e.borrow_mut().push(event)),
+        on_event: Box::new(move |event| e.lock().unwrap().push(event)),
     })
 }
 
@@ -80,12 +82,13 @@ fn state(engine: &PaperExecutionEngine<SqlitePaperStore>, account_id: &str) -> V
 fn reopened_database_restores_engine_state() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("state.sqlite");
-    let quotes: Quotes = Rc::default();
-    let ids = Rc::new(Cell::new(0u64));
-    let events: Rc<RefCell<Vec<EngineEvent>>> = Rc::default();
+    let quotes: Quotes = Arc::default();
+    let ids = Arc::new(AtomicU64::new(0));
+    let events: Arc<Mutex<Vec<EngineEvent>>> = Arc::default();
     for (symbol, price) in [("BTCUSDT", "100"), ("ETHUSDT", "50")] {
         quotes
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .insert(key(symbol), quote(symbol, price));
     }
 
@@ -132,12 +135,13 @@ fn reopened_database_restores_engine_state() {
     assert_eq!(state(&engine, &account_id), before);
 
     // The stop survived the reopen and still fires on a quote through it.
-    events.borrow_mut().clear();
+    events.lock().unwrap().clear();
     let crash = quote("BTCUSDT", "94");
-    quotes.borrow_mut().insert(key("BTCUSDT"), crash.clone());
+    quotes.lock().unwrap().insert(key("BTCUSDT"), crash.clone());
     engine.on_quote(&crash).unwrap();
     assert!(events
-        .borrow()
+        .lock()
+        .unwrap()
         .iter()
         .any(|e| matches!(e, EngineEvent::Fill { .. })));
     assert!(engine.position_views(&account_id).unwrap().is_empty());

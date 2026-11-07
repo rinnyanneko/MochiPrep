@@ -60,12 +60,14 @@ pub enum EngineError {
     Store(#[from] StoreFailure),
 }
 
+// The callbacks are `Send` so the engine can move between async tasks with its owner.
+
 /// The latest observed quote for a source and symbol, if any.
-pub type QuoteLookup = Box<dyn Fn(DataSource, &str) -> Option<Quote>>;
-pub type Clock = Box<dyn Fn(DataSource) -> i64>;
+pub type QuoteLookup = Box<dyn Fn(DataSource, &str) -> Option<Quote> + Send>;
+pub type Clock = Box<dyn Fn(DataSource) -> i64 + Send>;
 /// Returns a fresh id for a prefix such as `ord` or `fill`.
-pub type IdSource = Box<dyn FnMut(&str) -> String>;
-pub type EventSink = Box<dyn FnMut(EngineEvent)>;
+pub type IdSource = Box<dyn FnMut(&str) -> String + Send>;
+pub type EventSink = Box<dyn FnMut(EngineEvent) + Send>;
 
 pub struct PaperEngineDeps<S: PaperStore> {
     pub store: S,
