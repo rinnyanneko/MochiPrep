@@ -963,7 +963,13 @@ function coreMathFixture() {
   const pick = <T>(items: readonly T[]): T => items[Math.floor(rand() * items.length)]!;
   const num = (lo: number, hi: number, dp: number) => (lo + rand() * (hi - lo)).toFixed(dp);
   const sides: PositionSide[] = ['LONG', 'SHORT'];
-  const instruments = DEFAULT_SYMBOLS.map((s) => INSTRUMENTS[s]);
+  // INSTRUMENTS is open-ended (index lookups may miss), so resolve explicitly rather than assert at each use.
+  const instrumentOf = (symbol: string) => {
+    const spec = INSTRUMENTS[symbol];
+    if (!spec) throw new Error(`No instrument specification for ${symbol}`);
+    return spec;
+  };
+  const instruments = DEFAULT_SYMBOLS.map(instrumentOf);
   const rest = (hand: number) => MATH_CASES - hand;
 
   const notional = [{ quantity: '2', price: '100', out: str(linearPerp.notional('2', '100')) }];
@@ -1019,7 +1025,7 @@ function coreMathFixture() {
     side, markPrice, quantity, rate, out: str(linearPerp.funding(side, markPrice, quantity, rate)),
   }));
 
-  const mathForCases = [...instruments, { ...instruments[0]!, marketType: 'SPOT' as never }].map((instrument) => {
+  const mathForCases = [...instruments, { ...instrumentOf(DEFAULT_SYMBOLS[0]!), marketType: 'SPOT' as never }].map((instrument) => {
     try {
       mathFor(instrument);
       return { marketType: instrument.marketType as string, error: null as string | null };
@@ -1034,7 +1040,7 @@ function coreMathFixture() {
     source: 'REPLAY', symbol: 'BTCUSDT', bid: '99', ask: '101', last: '100', mark: '100',
     markEstimated: false, fundingRate: '0.001', nextFundingTime: null, ts: 1_000,
   };
-  const handInstrument = { ...INSTRUMENTS.BTCUSDT, priceTick: '0.1' };
+  const handInstrument = { ...instrumentOf('BTCUSDT'), priceTick: '0.1' };
   const randomQuote = (instrument: (typeof instruments)[number]): Quote => {
     const tick = d(instrument.priceTick);
     const mid = d(num(1, 90000, 2)).div(tick).floor().mul(tick);
