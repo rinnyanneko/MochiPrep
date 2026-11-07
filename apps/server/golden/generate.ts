@@ -3,7 +3,25 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ceilToStep, d, floorToStep, roundToStep, str, type Dec } from '@mochiprep/core';
+import {
+  auditLedger,
+  ceilToStep,
+  d,
+  floorToStep,
+  foldLedger,
+  isMarketable,
+  isRestingLimitFilled,
+  isStopTriggered,
+  isTakeProfitTriggered,
+  linearPerp,
+  marketFillPrice,
+  mathFor,
+  maxDrawdownPct,
+  roundToStep,
+  str,
+  winRatePct,
+  type Dec,
+} from '@mochiprep/core';
 import { generateTape, ReplayMarketData } from '@mochiprep/market-data';
 import {
   DEFAULT_ACCOUNT_CONFIG,
@@ -24,7 +42,9 @@ import {
   type PaperAccount,
   type PaperAccountConfig,
   type Position,
+  type PositionSide,
   type PositionView,
+  type Quote,
   type RiskCheck,
   type RiskResult,
   type RiskSettings,
@@ -732,6 +752,235 @@ function accountingTypesFixture() {
   };
 }
 
+const MATH_SEED = 0x6d617468;
+const MATH_CASES = 150;
+
+/**
+ * Pure trading math: every call the Rust port makes, with the TypeScript answer. The first entries of
+ * each list are assertions from packages/core/test/perp.test.ts; the rest are seeded random inputs
+ * built from the default instruments and the default account config.
+ */
+function coreMathFixture() {
+  const rand = mulberry32(MATH_SEED);
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(rand() * items.length)]!;
+  const num = (lo: number, hi: number, dp: number) => (lo + rand() * (hi - lo)).toFixed(dp);
+  const sides: PositionSide[] = ['LONG', 'SHORT'];
+  const instruments = DEFAULT_SYMBOLS.map((s) => INSTRUMENTS[s]);
+  const rest = (hand: number) => MATH_CASES - hand;
+
+  const notional = [{ quantity: '2', price: '100', out: str(linearPerp.notional('2', '100')) }];
+  for (let i = 0; i < rest(1); i++) {
+    const quantity = num(0, 50, pick([0, 2, 4, 8]));
+    const price = num(0.01, 100000, pick([0, 2, 4, 8]));
+    notional.push({ quantity, price, out: str(linearPerp.notional(quantity, price)) });
+  }
+
+  const pnlInputs: Array<[PositionSide, string, string, string]> = [
+    ['LONG', '100', '110', '2'],
+    ['SHORT', '100', '110', '2'],
+  ];
+  for (let i = 0; i < rest(2); i++) {
+    pnlInputs.push([pick(sides), num(1, 90000, 2), num(1, 90000, 2), num(0.0001, 20, 4)]);
+  }
+  const pnl = pnlInputs.map(([side, entry, exit, quantity]) => ({
+    side, entry, exit, quantity, out: str(linearPerp.pnl(side, entry, exit, quantity)),
+  }));
+
+  const marginInputs: Array<[string, number]> = [['200', 4]];
+  for (let i = 0; i < rest(1); i++) {
+    marginInputs.push([num(1, 1_000_000, pick([0, 2, 6])), 1 + Math.floor(rand() * 125)]);
+  }
+  const initialMargin = marginInputs.map(([n, leverage]) => ({
+    notional: n, leverage, out: str(linearPerp.initialMargin(d(n), leverage)),
+  }));
+
+  const liqInputs = [
+    { side: 'LONG' as PositionSide, entry: '100', quantity: '2', margin: '50', maintenanceRate: '0.005' },
+    { side: 'SHORT' as PositionSide, entry: '100', quantity: '2', margin: '50', maintenanceRate: '0.005' },
+  ];
+  for (let i = 0; i < rest(2); i++) {
+    const instrument = pick(instruments);
+    const entry = num(1, 90000, 2);
+    const quantity = num(0.001, 20, 4);
+    const leverage = 1 + Math.floor(rand() * instrument.maxLeverage);
+    // Margin near entry*quantity/leverage, so some positions are already past liquidation (price clamps to 0).
+    const margin = d(entry).mul(quantity).div(leverage).mul(num(0.2, 3, 3)).toFixed(8);
+    liqInputs.push({ side: pick(sides), entry, quantity, margin, maintenanceRate: instrument.maintenanceMarginRate });
+  }
+  const liquidationPrice = liqInputs.map((input) => ({ ...input, out: str(linearPerp.liquidationPrice(input)) }));
+
+  const fundingInputs: Array<[PositionSide, string, string, string]> = [
+    ['LONG', '100', '2', '0.001'],
+    ['SHORT', '100', '2', '0.001'],
+    ['LONG', '100', '2', '-0.001'],
+  ];
+  for (let i = 0; i < rest(3); i++) {
+    fundingInputs.push([pick(sides), num(1, 90000, 2), num(0.001, 20, 4), num(-0.003, 0.003, 6)]);
+  }
+  const funding = fundingInputs.map(([side, markPrice, quantity, rate]) => ({
+    side, markPrice, quantity, rate, out: str(linearPerp.funding(side, markPrice, quantity, rate)),
+  }));
+
+  const mathForCases = [...instruments, { ...instruments[0]!, marketType: 'SPOT' as never }].map((instrument) => {
+    try {
+      mathFor(instrument);
+      return { marketType: instrument.marketType as string, error: null as string | null };
+    } catch (e) {
+      return { marketType: instrument.marketType as string, error: (e as Error).message };
+    }
+  });
+
+  // Fill model.
+  const hand: PaperAccountConfig = { ...DEFAULT_ACCOUNT_CONFIG, slippageBps: '10', impactBpsPerMillion: '0' };
+  const handQuote: Quote = {
+    source: 'REPLAY', symbol: 'BTCUSDT', bid: '99', ask: '101', last: '100', mark: '100',
+    markEstimated: false, fundingRate: '0.001', nextFundingTime: null, ts: 1_000,
+  };
+  const handInstrument = { ...INSTRUMENTS.BTCUSDT, priceTick: '0.1' };
+  const randomQuote = (instrument: (typeof instruments)[number]): Quote => {
+    const tick = d(instrument.priceTick);
+    const mid = d(num(1, 90000, 2)).div(tick).floor().mul(tick);
+    const half = tick.mul(1 + Math.floor(rand() * 6));
+    const bid = mid.minus(half);
+    return {
+      source: 'REPLAY', symbol: instrument.symbol, bid: str(bid.lt(tick) ? tick : bid), ask: str(mid.plus(half)),
+      last: str(mid), mark: str(mid), markEstimated: false, fundingRate: null, nextFundingTime: null, ts: 1_000,
+    };
+  };
+
+  const marketFillInputs: Array<{
+    side: 'BUY' | 'SELL'; quantity: string; quote: Quote; config: PaperAccountConfig; instrument: typeof handInstrument;
+  }> = [
+    { side: 'BUY', quantity: '1', quote: handQuote, config: hand, instrument: handInstrument },
+    { side: 'SELL', quantity: '1', quote: handQuote, config: hand, instrument: handInstrument },
+  ];
+  for (let i = 0; i < rest(2); i++) {
+    const instrument = pick(instruments);
+    marketFillInputs.push({
+      side: pick(['BUY', 'SELL'] as const),
+      quantity: num(0.0001, 500, 4),
+      quote: randomQuote(instrument),
+      config: {
+        ...DEFAULT_ACCOUNT_CONFIG,
+        slippageBps: pick([DEFAULT_ACCOUNT_CONFIG.slippageBps, '0', '10', num(0, 50, 2)]),
+        impactBpsPerMillion: pick([DEFAULT_ACCOUNT_CONFIG.impactBpsPerMillion, '0', num(0, 100, 3)]),
+      },
+      instrument: instrument as typeof handInstrument,
+    });
+  }
+  const marketFill = marketFillInputs.map((input) => ({
+    ...input,
+    out: str(marketFillPrice(input.side, input.quantity, input.quote, input.config, input.instrument)),
+  }));
+
+  // Limits sit on, just inside and just outside the touch, so the comparison direction is exercised.
+  const limitInputs: Array<{ side: 'BUY' | 'SELL'; limit: string; quote: Quote }> = [
+    { side: 'BUY', limit: '101', quote: handQuote },
+    { side: 'BUY', limit: '100.9', quote: handQuote },
+    { side: 'SELL', limit: '99', quote: handQuote },
+  ];
+  for (let i = 0; i < rest(3); i++) {
+    const quote = randomQuote(pick(instruments));
+    const side = pick(['BUY', 'SELL'] as const);
+    const touch = d(side === 'BUY' ? quote.ask : quote.bid);
+    const limit = i % 3 === 0 ? touch : touch.plus(num(-5, 5, 2));
+    limitInputs.push({ side, limit: str(limit), quote });
+  }
+  const marketable = limitInputs.map((input) => ({ ...input, out: isMarketable(input.side, input.limit, input.quote) }));
+  const restingLimit = limitInputs.map((input) => ({
+    ...input, out: isRestingLimitFilled(input.side, input.limit, input.quote),
+  }));
+
+  const triggerInputs: Array<{ positionIsLong: boolean; trigger: string; last: string }> = [];
+  for (let i = 0; i < MATH_CASES; i++) {
+    const trigger = num(1, 90000, 2);
+    // Every third case lands exactly on the trigger: both comparisons are inclusive.
+    const last = i % 3 === 0 ? trigger : num(1, 90000, 2);
+    triggerInputs.push({ positionIsLong: rand() < 0.5, trigger, last });
+  }
+  const stop = triggerInputs.map((i) => ({ ...i, out: isStopTriggered(i.positionIsLong, i.trigger, i.last) }));
+  const takeProfit = triggerInputs.map((i) => ({ ...i, out: isTakeProfitTriggered(i.positionIsLong, i.trigger, i.last) }));
+
+  return {
+    perp: { notional, pnl, initialMargin, liquidationPrice, funding, mathFor: mathForCases },
+    fill: { marketFill, marketable, restingLimit, stop, takeProfit },
+    ledger: ledgerStreams(),
+    performance: performanceCases(rand),
+  };
+}
+
+/** Event streams with the fold and audit output TypeScript gives. */
+function ledgerStreams() {
+  const base = { accountId: 'acct', symbol: null, orderId: null, fillId: null, positionId: null };
+  const steps: Array<[LedgerEvent['type'], string, string]> = [
+    ['DEPOSIT', '10000', '0'],
+    ['MARGIN_LOCK', '0', '250.5'],
+    ['TRADE_FEE', '-1.2345', '0'],
+    ['FUNDING', '-0.0173', '0'],
+    ['REALIZED_PNL', '84.37', '0'],
+    ['MARGIN_RELEASE', '0', '-250.5'],
+    ['FUNDING', '0.0042', '0'],
+    ['LIQUIDATION_PENALTY', '-12.5', '0'],
+  ];
+  let running = d(0);
+  const events: LedgerEvent[] = steps.map(([type, amount, marginDelta], i) => {
+    running = running.plus(amount);
+    return {
+      ...base, seq: i + 1, id: `evt-${i + 1}`, type, amount, marginDelta, walletAfter: str(running),
+      memo: `step ${i + 1}`, ts: 1_000 + i,
+    };
+  });
+  const totals = foldLedger(events);
+  const account = (over: Partial<PaperAccount>): PaperAccount => ({
+    id: 'acct', name: 'Golden', source: 'REPLAY', venue: 'PAPER', exchangeUid: null, liveLimits: null, isDemo: false,
+    initialBalance: '10000', walletBalance: totals.wallet, usedMargin: totals.usedMargin,
+    realizedPnl: totals.realizedPnl, feesPaid: totals.feesPaid, fundingPaid: totals.fundingPaid,
+    config: DEFAULT_ACCOUNT_CONFIG, createdAt: 1_000, ...over,
+  });
+  const brokenEvents = events.map((e) => (e.seq === 3 ? { ...e, walletAfter: str(d(e.walletAfter).plus('0.5')) } : e));
+  const streams: Array<[string, PaperAccount, LedgerEvent[]]> = [
+    ['consistent', account({}), events],
+    ['wallet-off-by-1e-8', account({ walletBalance: str(d(totals.wallet).plus('0.00000001')) }), events],
+    ['wallet-after-broken-at-seq-3', account({}), brokenEvents],
+    // Same values, different spelling: the audit compares numbers, not text.
+    [
+      'unnormalised-stored-strings',
+      account({ walletBalance: totals.wallet + '000', usedMargin: '0.0', feesPaid: '+' + totals.feesPaid }),
+      events,
+    ],
+    ['empty', account({ walletBalance: '0', usedMargin: '0', realizedPnl: '0', feesPaid: '0', fundingPaid: '0' }), []],
+  ];
+  return streams.map(([name, acct, evts]) => ({
+    name, account: acct, events: evts, fold: foldLedger(evts), audit: auditLedger(acct, evts),
+  }));
+}
+
+function performanceCases(rand: () => number) {
+  const equities: number[][] = [
+    [], [100], [0], [0, 0, 0], [0, 100, 50], [-5, 10, 5], [100, 90, 95, 80, 120, 60], [100, 100, 100],
+    [10000, 10100.5, 9950.25, 10200, 9800.75], [1, 2, 3, 4], [5, 4, 3, 2, 1],
+  ];
+  for (let i = 0; i < 100; i++) {
+    const length = 1 + Math.floor(rand() * 40);
+    let value = 10000;
+    const series: number[] = [];
+    for (let j = 0; j < length; j++) {
+      value = Math.max(0, value * (1 + (rand() - 0.5) * 0.1));
+      series.push(Number(value.toFixed(2)));
+    }
+    equities.push(series);
+  }
+  const pnls: number[][] = [[], [0], [1], [-1], [1, -1], [0, 0, 1], [5.5, -2.25, 0, 3, -8], [-1, -2, -3]];
+  for (let i = 0; i < 100; i++) {
+    const length = 1 + Math.floor(rand() * 30);
+    pnls.push(Array.from({ length }, () => (rand() < 0.1 ? 0 : Number(((rand() - 0.45) * 200).toFixed(2)))));
+  }
+  return {
+    maxDrawdown: equities.map((equity) => ({ equity, out: noNegativeZero(maxDrawdownPct(equity)) })),
+    winRate: pnls.map((closedNetPnl) => ({ closedNetPnl, out: winRatePct(closedNetPnl) })),
+  };
+}
+
 /**
  * Golden fixtures: what the TypeScript backend produces, saved so the Rust port can be tested
  * against it. Each key is a file name under crates/golden; a Buffer is written as raw bytes and
@@ -747,6 +996,7 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     },
     'accounting-types.json': accountingTypesFixture(),
     'decimal.json': decimalFixture(),
+    'core-math.json': coreMathFixture(),
     'tape.json': tapeFixture(),
     'replay.json': await replayFixture(),
     'schema.json': schemaFixture(),

@@ -1,0 +1,15 @@
+[package]
+name = "mochi-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mochi-decimal = { path = "../mochi-decimal" }
+mochi-domain = { path = "../mochi-domain" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
