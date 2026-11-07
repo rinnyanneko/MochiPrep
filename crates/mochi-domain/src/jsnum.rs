@@ -4,7 +4,8 @@
 /// Rust's `f64::round` rounds ties away from zero, which differs for negatives.
 pub fn js_round(x: f64) -> f64 {
     let f = x.floor();
-    // `x - f` is exact for every finite f64, so the 0.5 comparison has no rounding error
+    // `x - f` can round for tiny negatives (e.g. -0.49999999999999994), but rounding is
+    // monotonic and 0.5 is exactly representable, so the comparison with 0.5 is still right
     // (unlike `(x + 0.5).floor()`, which is wrong for 0.49999999999999994).
     if x - f >= 0.5 {
         f + 1.0

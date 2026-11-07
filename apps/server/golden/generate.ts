@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { generateTape, ReplayMarketData } from '@mochiprep/market-data';
-import { DEFAULT_SYMBOLS, INSTRUMENTS, type Timeframe } from '@mochiprep/shared';
+import { DEFAULT_SYMBOLS, INSTRUMENTS, TIMEFRAMES } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database.js';
 import { newDataKey, seal, wrapWithPassword } from '../src/vault.js';
 
@@ -16,6 +16,8 @@ const FIXED_CASES: Array<[number, number]> = [
   [0.125, 2], [0.375, 2], [-0.125, 2], [1.005, 2], [2.5, 0], [-2.5, 0], [68000, 1], [1e-7, 6],
   [0.0000005, 6], [123.456, 3], [0.1 + 0.2, 17], [-0, 2], [99.995, 2], [0.0005, 6], [-0.0005, 6],
   [-1e-7, 6], [12345.6789, 0],
+  // Carry paths: rounding up must carry through a run of 9s.
+  [0.5, 0], [9.5, 0], [99.5, 0], [9.875, 2], [1.5, 20],
 ];
 
 // JSON cannot carry -0, so the fixture stores 0 and the freshness test (toEqual) must see the same.
@@ -100,9 +102,47 @@ function tapeFixture() {
   return { head, sha256: hash.digest('hex') };
 }
 
+/**
+ * Hashes of the whole replay output, so a change anywhere in the tape or quote model is caught
+ * and not only at the few spots the readable samples cover.
+ */
+async function fullOutputHashes() {
+  // Quotes are hashed as JSON text, one line each; Rust must produce the same bytes.
+  const stepsHash = createHash('sha256');
+  const stepFeed = new ReplayMarketData();
+  let stepCount = 0;
+  for (let quotes = stepFeed.step(); quotes.length > 0; quotes = stepFeed.step()) {
+    stepCount++;
+    for (const quote of quotes) stepsHash.update(JSON.stringify(quote) + '\n');
+  }
+
+  // Candles are hashed as raw bytes (int64 time, float64 OHLCV, one closed byte) to avoid text formatting.
+  const candlesHash = createHash('sha256');
+  const candleFeed = new ReplayMarketData();
+  for (const cursor of [5760, 9000, 20000, 25919]) {
+    candleFeed.seek(cursor);
+    for (const symbol of DEFAULT_SYMBOLS) {
+      for (const tf of TIMEFRAMES) {
+        for (const candle of await candleFeed.getCandles(symbol, tf, 300)) {
+          const bytes = Buffer.alloc(8 * 6 + 1);
+          bytes.writeBigInt64LE(BigInt(candle.time), 0);
+          bytes.writeDoubleLE(candle.open, 8);
+          bytes.writeDoubleLE(candle.high, 16);
+          bytes.writeDoubleLE(candle.low, 24);
+          bytes.writeDoubleLE(candle.close, 32);
+          bytes.writeDoubleLE(candle.volume, 40);
+          bytes.writeUInt8(candle.closed ? 1 : 0, 48);
+          candlesHash.update(bytes);
+        }
+      }
+    }
+  }
+  return { stepCount, stepsSha256: stepsHash.digest('hex'), candlesSha256: candlesHash.digest('hex') };
+}
+
 /** The replay feed: cursor edges, step quotes, and quotes plus aggregated candles at fixed cursors. */
 async function replayFixture() {
-  const timeframes: Timeframe[] = ['1m', '5m', '15m', '1h', '4h'];
+  const timeframes = TIMEFRAMES;
   const r = new ReplayMarketData();
   const meta = { len: r.length, firstPlayableTime: r.firstPlayableTime, endTime: r.endTime, nowAtStart: r.now() };
   const fresh = new ReplayMarketData();
@@ -125,7 +165,7 @@ async function replayFixture() {
   edges.stepLengthAtEnd = r.step().length;
   r.seek(5760);
   edges.hugeLimitCandles = (await r.getCandles('BTCUSDT', '4h', 100000)).length;
-  return { meta, steps, snapshots, edges };
+  return { meta, steps, ...(await fullOutputHashes()), snapshots, edges };
 }
 
 /**
@@ -153,9 +193,11 @@ export const RANDOMIZED = new Set<string>(['node-created.sqlite', 'vault.json'])
 
 const GOLDEN_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../crates/golden');
 
-async function writeGolden(): Promise<void> {
+async function writeGolden(all: boolean): Promise<void> {
   mkdirSync(GOLDEN_DIR, { recursive: true });
   for (const [name, value] of Object.entries(await buildGolden())) {
+    // Randomized files differ on every run, so rewriting them only churns git. `--all` forces it.
+    if (!all && RANDOMIZED.has(name) && existsSync(join(GOLDEN_DIR, name))) continue;
     const bytes = Buffer.isBuffer(value) ? value : JSON.stringify(value, null, 1) + '\n';
     writeFileSync(join(GOLDEN_DIR, name), bytes);
   }
@@ -163,5 +205,5 @@ async function writeGolden(): Promise<void> {
 
 // The freshness test imports this file, so only write when it is run as a script.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await writeGolden();
+  await writeGolden(process.argv.includes('--all'));
 }

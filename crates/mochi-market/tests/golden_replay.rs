@@ -2,6 +2,7 @@ use mochi_domain::{Timeframe, DEFAULT_SYMBOLS};
 use mochi_market::replay::ReplayMarketData;
 use mochi_market::tape::WARMUP_MINUTES;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 fn golden(name: &str) -> Value {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../golden/");
@@ -106,6 +107,67 @@ fn edges_match() {
     assert_eq!(
         all.len() as i64,
         edges["hugeLimitCandles"].as_i64().unwrap()
+    );
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[test]
+fn full_step_sequence_hash_matches() {
+    let golden = golden("replay.json");
+    let mut feed = ReplayMarketData::new(None);
+    let mut hash = Sha256::new();
+    let mut step_count = 0;
+    loop {
+        let quotes = feed.step();
+        if quotes.is_empty() {
+            break;
+        }
+        step_count += 1;
+        for quote in quotes {
+            // Quote's field order and value types match the TS object literal, so this is
+            // byte-identical to JSON.stringify.
+            hash.update(serde_json::to_string(&quote).unwrap().as_bytes());
+            hash.update(b"\n");
+        }
+    }
+    assert_eq!(step_count, golden["stepCount"].as_i64().unwrap());
+    assert_eq!(
+        hex(&hash.finalize()),
+        golden["stepsSha256"].as_str().unwrap()
+    );
+}
+
+#[test]
+fn candle_hash_matches() {
+    let golden = golden("replay.json");
+    let mut feed = ReplayMarketData::new(None);
+    let mut hash = Sha256::new();
+    for cursor in [5760, 9000, 20000, 25919] {
+        feed.seek(cursor);
+        for symbol in DEFAULT_SYMBOLS {
+            for (timeframe, _) in TIMEFRAMES {
+                for candle in feed.get_candles(symbol, timeframe, 300) {
+                    hash.update(candle.time.to_le_bytes());
+                    for value in [
+                        candle.open,
+                        candle.high,
+                        candle.low,
+                        candle.close,
+                        candle.volume,
+                    ] {
+                        hash.update(value.to_le_bytes());
+                    }
+                    hash.update([u8::from(candle.closed)]);
+                }
+            }
+        }
+    }
+    assert_eq!(
+        hex(&hash.finalize()),
+        golden["candlesSha256"].as_str().unwrap()
     );
 }
 

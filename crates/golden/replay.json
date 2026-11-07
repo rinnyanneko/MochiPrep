@@ -121,6 +121,9 @@
    }
   ]
  ],
+ "stepCount": 20159,
+ "stepsSha256": "57a2e0a151dcb77949014984e5c737794e4a8c6cec49145061b32cfc6660760e",
+ "candlesSha256": "d35beb23a87f2387887bb6e40ed9124e7cec357eacbcfd46ced2c4ebf0a09d46",
  "snapshots": [
   {
    "cursor": 5760,
