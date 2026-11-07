@@ -31,6 +31,9 @@ export type Op =
   | { op: 'closePosition'; accountId: string; symbol: string; fraction: number; clientOrderId: string }
   | { op: 'setProtection'; accountId: string; symbol: string; stopLoss: string | null; takeProfit: string | null }
   | { op: 'recordEquity'; accountId: string }
+  // Writes a trigger price straight to the orders table, to reach states the validated API
+  // refuses to create (a stop and a target that overlap).
+  | { op: 'setTrigger'; orderId: string; triggerPrice: string }
   | { op: 'read'; what: 'balance' | 'positions' | 'openOrders' | 'dailyRisk'; accountId: string };
 
 export interface Scenario {
@@ -61,6 +64,19 @@ const quote = (ts: number, bid?: string, ask?: string, mark?: string): Op => ({
   op: 'quote',
   quote: makeQuote(ts, bid, ask, mark),
   feed: false,
+});
+
+/** Sets the latest quote and passes it to onQuote. */
+const feed = (ts: number, bid?: string, ask?: string, mark?: string, extra: Partial<Quote> = {}): Op => ({
+  op: 'quote',
+  quote: { ...makeQuote(ts, bid, ask, mark), ...extra },
+  feed: true,
+});
+
+const read = (what: 'balance' | 'positions' | 'openOrders' | 'dailyRisk', accountId = ACCOUNT): Op => ({
+  op: 'read',
+  what,
+  accountId,
 });
 
 const place = (overrides: Partial<OrderRequest> & Pick<OrderRequest, 'clientOrderId'>): Op => ({
@@ -109,13 +125,25 @@ export const SCENARIOS: Scenario[] = [
   scenario('rolls back an insufficient-margin attempt and leaves only a rejected order', [
     place({ clientOrderId: 'too-big', quantity: '10000', leverage: 1 }),
   ]),
-  scenario('reserves a resting limit and releases it on cancel', [
+  scenario('reserves a resting limit, releases on cancel, and fills maker at its limit', [
     place({ clientOrderId: 'rest', type: 'LIMIT', price: '90' }),
+    read('balance'),
     { op: 'cancelOrder', orderId: 'ord_3' },
+    read('balance'),
     place({ clientOrderId: 'maker', type: 'LIMIT', price: '90' }),
+    read('openOrders'),
+    feed(T + 1, '89', '90', '90'),
+    read('positions'),
+    read('balance'),
   ]),
   scenario('fills a marketable limit as taker and never worse than its limit', [
     place({ clientOrderId: 'cross', type: 'LIMIT', price: '101' }),
+  ]),
+  scenario('charges the maker rate when a resting reduce-only exit fills', [
+    place({ clientOrderId: 'entry' }),
+    place({ clientOrderId: 'maker-exit', side: 'SELL', type: 'LIMIT', price: '110', reduceOnly: true }),
+    feed(T + 1, '110', '111', '105'),
+    read('balance'),
   ]),
   scenario('caps reduce-only quantity and rejects it when flat', [
     place({ clientOrderId: 'flat', side: 'SELL', reduceOnly: true }),
@@ -126,6 +154,94 @@ export const SCENARIOS: Scenario[] = [
     place({ clientOrderId: 'open' }),
     quote(T, '109', '110', '110'),
     place({ clientOrderId: 'flip', side: 'SELL', quantity: '2' }),
+  ]),
+  scenario('triggers protection at the next observed quote and cancels its sibling', [
+    place({ clientOrderId: 'protected', stopLoss: '95', takeProfit: '110' }),
+    read('positions'),
+    feed(T + 1, '93', '94', '94'),
+    read('positions'),
+    read('openOrders'),
+  ]),
+  scenario('evaluates stop-loss before take-profit when both are triggered on one quote', [
+    place({ clientOrderId: 'protected', stopLoss: '95', takeProfit: '110' }),
+    // Ids: ord_3 is the entry, protect_8/ord_9 the stop and protect_10/ord_11 the target.
+    { op: 'setTrigger', orderId: 'ord_9', triggerPrice: '105' },
+    { op: 'setTrigger', orderId: 'ord_11', triggerPrice: '95' },
+    feed(T + 1, '99', '101', '100'),
+  ]),
+  scenario('applies positive and negative funding once per boundary with opposite long/short direction', [
+    place({ clientOrderId: 'long' }),
+    { op: 'now', source: 'REPLAY', ts: 8 * HOUR },
+    feed(8 * HOUR, '99', '101', '100', { fundingRate: '0.001' }),
+    feed(8 * HOUR, '99', '101', '100', { fundingRate: '0.001' }),
+    read('balance'),
+    place({ clientOrderId: 'close', side: 'SELL', reduceOnly: true }),
+    place({ clientOrderId: 'short', side: 'SELL' }),
+    { op: 'now', source: 'REPLAY', ts: 16 * HOUR },
+    feed(16 * HOUR, '99', '101', '100', { fundingRate: '-0.001' }),
+    read('balance'),
+    read('dailyRisk'),
+  ]),
+  scenario('credits shorts at positive funding and longs at negative funding', [
+    {
+      op: 'createAccount',
+      args: { name: 'funding-credit', source: 'REPLAY', initialBalance: '10000', config: { slippageBps: '0', impactBpsPerMillion: '0' } },
+    },
+    place({ clientOrderId: 'short', side: 'SELL', accountId: 'acct_3' }),
+    { op: 'now', source: 'REPLAY', ts: 8 * HOUR },
+    feed(8 * HOUR, undefined, undefined, undefined, { fundingRate: '0.001' }),
+    read('balance', 'acct_3'),
+    place({ clientOrderId: 'close-short', side: 'BUY', reduceOnly: true, accountId: 'acct_3' }),
+    place({ clientOrderId: 'long', accountId: 'acct_3' }),
+    { op: 'now', source: 'REPLAY', ts: 16 * HOUR },
+    feed(16 * HOUR, undefined, undefined, undefined, { fundingRate: '-0.001' }),
+    read('balance', 'acct_3'),
+  ]),
+  scenario('liquidates on mark, caps gap loss at isolated margin, and cancels reduce-only orders', [
+    place({ clientOrderId: 'open', stopLoss: '80' }),
+    place({ clientOrderId: 'reduce', side: 'SELL', type: 'LIMIT', price: '120', reduceOnly: true }),
+    feed(T + 1, '99', '101', '1', { last: '100' }),
+    read('balance'),
+  ]),
+  scenario('takes exactly the isolated margin from the wallet when a gap passes the liquidation price', [
+    place({ clientOrderId: 'open' }),
+    feed(T + 1, '1', '2', '1'),
+    read('balance'),
+  ]),
+  scenario('forfeits the maintenance remainder as a penalty when liquidated at the threshold', [
+    place({ clientOrderId: 'open' }),
+    read('positions'),
+    // 91.405 is this long's liquidation price: entry 101, margin 10.1, maintenance 0.5%.
+    feed(T + 1, '90', '92', '91.405'),
+    read('balance'),
+  ]),
+  scenario('liquidates a short when mark rises through its threshold, not when it falls', [
+    place({ clientOrderId: 'open', side: 'SELL' }),
+    feed(T + 1, '89', '91', '90'),
+    read('positions'),
+    feed(T + 2, '500', '501', '500'),
+    read('balance'),
+  ]),
+  scenario('triggers a short stop only when price rises to it, filling at the ask', [
+    place({ clientOrderId: 'open', side: 'SELL', stopLoss: '105', takeProfit: '90' }),
+    feed(T + 1, '98', '100', '99'),
+    read('positions'),
+    feed(T + 2, '105', '107', '106'),
+    read('positions'),
+  ]),
+  scenario('triggers a short take-profit only when price falls to it', [
+    place({ clientOrderId: 'open', side: 'SELL', stopLoss: '105', takeProfit: '90' }),
+    feed(T + 1, '89', '91', '90'),
+    read('balance'),
+  ]),
+  scenario('averages entry when adding, and a stop then closes the whole enlarged position', [
+    place({ clientOrderId: 'first', leverage: 2, stopLoss: '95' }),
+    quote(T, '119', '121', '120'),
+    place({ clientOrderId: 'second', leverage: 2 }),
+    read('positions'),
+    feed(T + 1, '93', '95', '94'),
+    read('positions'),
+    read('balance'),
   ]),
   scenario('refuses to fill against a quote older than a minute', [
     quote(T - 60_001),
@@ -227,6 +343,46 @@ export const SCENARIOS: Scenario[] = [
     { op: 'createAccount', args: { name: 'empty', source: 'REPLAY', initialBalance: '0' } },
     place({ clientOrderId: 'after-reset' }),
   ]),
+  scenario('keeps the ledger auditable through a fixed pseudo-random trade sequence', pseudoRandomOps(), 'end'),
+
+  // ---- market events and read models ------------------------------------------------------
+  scenario('cancels a resting limit that can no longer be margined when it fills', [
+    {
+      op: 'createAccount',
+      args: {
+        name: 'thin', source: 'REPLAY', initialBalance: '100',
+        config: { takerFeeRate: '0.001', makerFeeRate: '0.0002', slippageBps: '0', impactBpsPerMillion: '0' },
+      },
+    },
+    place({ clientOrderId: 'long', accountId: 'acct_3', quantity: '0.4', leverage: 1 }),
+    place({ clientOrderId: 'add', accountId: 'acct_3', type: 'LIMIT', price: '50', leverage: 1 }),
+    read('balance', 'acct_3'),
+    { op: 'now', source: 'REPLAY', ts: 8 * HOUR },
+    // Funding drains the wallet first, so the limit crossing on this same quote is short of margin.
+    feed(8 * HOUR, '49', '50', '100', { fundingRate: '0.3' }),
+    read('balance', 'acct_3'),
+    read('openOrders', 'acct_3'),
+  ]),
+  scenario('records equity and daily risk across a UTC day boundary', [
+    place({ clientOrderId: 'open' }),
+    quote(T, '104', '106', '105'),
+    { op: 'recordEquity', accountId: ACCOUNT },
+    { op: 'now', source: 'REPLAY', ts: T + 30 * 60_000 },
+    { op: 'recordEquity', accountId: ACCOUNT },
+    { op: 'recordEquity', accountId: ACCOUNT },
+    read('dailyRisk'),
+    { op: 'now', source: 'REPLAY', ts: 8 * HOUR },
+    // No funding rate: the boundary passes with nothing paid.
+    feed(8 * HOUR, '104', '106', '105', { fundingRate: null }),
+    { op: 'now', source: 'REPLAY', ts: 25 * HOUR },
+    feed(25 * HOUR, '109', '111', '110', { fundingRate: '0.0001' }),
+    read('dailyRisk'),
+    read('balance'),
+    read('positions'),
+    { op: 'recordEquity', accountId: ACCOUNT },
+    { op: 'recordEquity', accountId: 'acct_missing' },
+    read('dailyRisk', 'acct_missing'),
+  ]),
   scenario('reports a stale quote in whole seconds', [
     quote(T - 90_499),
     place({ clientOrderId: 'stale-90' }),
@@ -244,71 +400,117 @@ function snapshot(db: DatabaseSync): Record<string, unknown[]> {
   return rows;
 }
 
-export function runScenario(scenario: Scenario) {
-  const db = openDatabase(':memory:');
+/**
+ * The fixed pseudo-random run from paper-engine.test.ts. What it trades depends on whether a
+ * position is open after each quote, so the ops are chosen by driving a scratch engine.
+ */
+function pseudoRandomOps(): Op[] {
+  const runner = createRunner();
   try {
-    const store = new SqliteStore(db);
-    const quotes = new Map<string, Quote>();
-    const clock = new Map<DataSource, number>();
-    let counter = 0;
-    let events: EngineEvent[] = [];
-    const engine = new PaperExecutionEngine({
-      store,
-      getQuote: (source, symbol) => quotes.get(`${source}:${symbol}`),
-      now: (source) => clock.get(source) ?? 0,
-      newId: (prefix) => `${prefix}_${++counter}`,
-      // A JSON round trip freezes the event as it was emitted, like the Rust side's owned copy.
-      onEvent: (event) => events.push(JSON.parse(JSON.stringify(event)) as EngineEvent),
-    });
-
-    const apply = (op: Op): unknown => {
-      switch (op.op) {
-        case 'quote':
-          quotes.set(`${op.quote.source}:${op.quote.symbol}`, op.quote);
-          if (op.feed) engine.onQuote(op.quote);
-          return undefined;
-        case 'clearQuote':
-          quotes.delete(`${op.source}:${op.symbol}`);
-          return undefined;
-        case 'now':
-          clock.set(op.source, op.ts);
-          return undefined;
-        case 'createAccount':
-          return engine.createAccount(op.args);
-        case 'resetAccount':
-          return engine.resetAccount(op.accountId);
-        case 'placeOrder':
-          return engine.placeOrderSync(op.request);
-        case 'cancelOrder':
-          engine.cancelOrderSync(op.orderId);
-          return undefined;
-        case 'closePosition':
-          return engine.closePosition(op.accountId, op.symbol, op.fraction, op.clientOrderId);
-        case 'setProtection':
-          engine.setProtection(op.accountId, op.symbol, op.stopLoss, op.takeProfit);
-          return undefined;
-        case 'recordEquity':
-          engine.recordEquity(op.accountId);
-          return undefined;
-        case 'read':
-          switch (op.what) {
-            case 'balance': return engine.balanceOf(op.accountId);
-            case 'positions': return engine.positionViews(op.accountId);
-            case 'openOrders': return engine.openOrders(op.accountId);
-            case 'dailyRisk': return engine.dailyRiskSync(op.accountId);
-          }
-      }
+    for (const op of setup()) runner.apply(op);
+    const ops: Op[] = [];
+    const push = (op: Op) => {
+      ops.push(op);
+      runner.apply(op);
     };
+    let seed = 0x12345678;
+    const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32);
+    let now = T;
+    for (let i = 0; i < 80; i++) {
+      const mid = 80 + Math.floor(random() * 40);
+      now += 60_000;
+      push({ op: 'now', source: 'REPLAY', ts: now });
+      push(feed(now, String(mid - 1), String(mid + 1), String(mid)));
+      const position = runner.store.getOpenPosition(ACCOUNT, 'BTCUSDT');
+      if (position && random() < 0.55) {
+        const side = position.side === 'LONG' ? 'SELL' : 'BUY';
+        push(place({ clientOrderId: `r-${i}`, side, quantity: random() < 0.5 ? '0.25' : '2', reduceOnly: true }));
+      } else if (!position) {
+        push(place({ clientOrderId: `r-${i}`, side: random() < 0.5 ? 'BUY' : 'SELL', quantity: '0.5', leverage: 5 }));
+      }
+    }
+    return ops;
+  } finally {
+    runner.db.close();
+  }
+}
 
+/** A fresh in-memory engine plus the quote book, clock and event log the ops drive. */
+function createRunner() {
+  const db = openDatabase(':memory:');
+  const store = new SqliteStore(db);
+  const quotes = new Map<string, Quote>();
+  const clock = new Map<DataSource, number>();
+  let counter = 0;
+  const events: EngineEvent[] = [];
+  const engine = new PaperExecutionEngine({
+    store,
+    getQuote: (source, symbol) => quotes.get(`${source}:${symbol}`),
+    now: (source) => clock.get(source) ?? 0,
+    newId: (prefix) => `${prefix}_${++counter}`,
+    // A JSON round trip freezes the event as it was emitted, like the Rust side's owned copy.
+    onEvent: (event) => events.push(JSON.parse(JSON.stringify(event)) as EngineEvent),
+  });
+
+  const apply = (op: Op): unknown => {
+    switch (op.op) {
+      case 'quote':
+        quotes.set(`${op.quote.source}:${op.quote.symbol}`, op.quote);
+        if (op.feed) engine.onQuote(op.quote);
+        return undefined;
+      case 'clearQuote':
+        quotes.delete(`${op.source}:${op.symbol}`);
+        return undefined;
+      case 'now':
+        clock.set(op.source, op.ts);
+        return undefined;
+      case 'createAccount':
+        return engine.createAccount(op.args);
+      case 'resetAccount':
+        return engine.resetAccount(op.accountId);
+      case 'placeOrder':
+        return engine.placeOrderSync(op.request);
+      case 'cancelOrder':
+        engine.cancelOrderSync(op.orderId);
+        return undefined;
+      case 'closePosition':
+        return engine.closePosition(op.accountId, op.symbol, op.fraction, op.clientOrderId);
+      case 'setProtection':
+        engine.setProtection(op.accountId, op.symbol, op.stopLoss, op.takeProfit);
+        return undefined;
+      case 'recordEquity':
+        engine.recordEquity(op.accountId);
+        return undefined;
+      case 'setTrigger':
+        db.prepare('UPDATE orders SET trigger_price=? WHERE id=?').run(op.triggerPrice, op.orderId);
+        return undefined;
+      case 'read':
+        switch (op.what) {
+          case 'balance': return engine.balanceOf(op.accountId);
+          case 'positions': return engine.positionViews(op.accountId);
+          case 'openOrders': return engine.openOrders(op.accountId);
+          case 'dailyRisk': return engine.dailyRiskSync(op.accountId);
+        }
+    }
+  };
+  /** The events emitted since the last call. */
+  const takeEvents = () => events.splice(0);
+  return { db, store, apply, takeEvents };
+}
+
+export function runScenario(scenario: Scenario) {
+  const runner = createRunner();
+  const { db, store } = runner;
+  try {
     const steps: Step[] = scenario.ops.map((op, i) => {
-      events = [];
-      const step: Step = { events };
+      const step: Step = { events: [] };
       try {
-        const result = apply(op);
+        const result = runner.apply(op);
         if (result !== undefined) step.result = JSON.parse(JSON.stringify(result));
       } catch (error) {
         step.error = error instanceof Error ? error.message : String(error);
       }
+      step.events = runner.takeEvents();
       if (scenario.snapshot === 'every' || i === scenario.ops.length - 1) step.rows = snapshot(db);
       return step;
     });

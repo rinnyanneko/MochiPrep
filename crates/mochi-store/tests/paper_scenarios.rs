@@ -150,11 +150,36 @@ impl Harness {
         let engine = &mut self.engine;
         let outcome = match op["op"].as_str().unwrap() {
             "quote" => {
-                assert_eq!(op["feed"], json!(false), "onQuote is not ported yet");
                 let quote: Quote = parse(&op["quote"]);
                 let key = source_key(quote.source, &quote.symbol);
-                self.quotes.borrow_mut().insert(key, quote);
+                self.quotes.borrow_mut().insert(key, quote.clone());
+                if op["feed"] == json!(true) {
+                    engine.on_quote(&quote).map(|()| None)
+                } else {
+                    Ok(None)
+                }
+            }
+            "setTrigger" => {
+                engine
+                    .store()
+                    .connection()
+                    .execute(
+                        "UPDATE orders SET trigger_price=? WHERE id=?",
+                        [text("triggerPrice"), text("orderId")],
+                    )
+                    .unwrap();
                 Ok(None)
+            }
+            "recordEquity" => engine.record_equity(&text("accountId")).map(|()| None),
+            "read" => {
+                let account_id = text("accountId");
+                match op["what"].as_str().unwrap() {
+                    "balance" => engine.balance_of(&account_id).map(|b| to_json(&b)),
+                    "positions" => engine.position_views(&account_id).map(|p| to_json(&p)),
+                    "openOrders" => engine.open_orders(&account_id).map(|o| to_json(&o)),
+                    "dailyRisk" => engine.daily_risk(&account_id).map(|r| to_json(&r)),
+                    other => panic!("unknown read {other}"),
+                }
             }
             "clearQuote" => {
                 let source: DataSource = parse(&op["source"]);

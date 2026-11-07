@@ -97,20 +97,20 @@ pub struct CreateAccountArgs {
 }
 
 /// TS `OrderRejection`: the order is refused, and recorded as REJECTED with this reason.
-struct OrderRejection {
+pub(super) struct OrderRejection {
     code: &'static str,
     detail: String,
 }
 
 impl OrderRejection {
-    fn message(&self) -> String {
+    pub(super) fn message(&self) -> String {
         format!("{}: {}", self.code, self.detail)
     }
 }
 
 /// How an order attempt ends when it does not succeed. TS tells the two apart with
 /// `instanceof OrderRejection`.
-enum Attempt {
+pub(super) enum Attempt {
     Rejected(OrderRejection),
     Failed(EngineError),
 }
@@ -145,21 +145,21 @@ fn reject(code: &'static str, detail: impl Into<String>) -> Attempt {
 }
 
 /// `d(s)` on a string. decimal.js throws exactly this for text that is not a number.
-fn dec(s: &str) -> Result<Dec, EngineError> {
+pub(super) fn dec(s: &str) -> Result<Dec, EngineError> {
     Dec::parse(s).map_err(|_| EngineError::Invalid(format!("[DecimalError] Invalid argument: {s}")))
 }
 
 /// A core-math failure TypeScript has no error for: decimal.js would return Infinity or NaN and
 /// carry it into the books, so the port refuses instead.
-fn math_error(what: &str, e: impl Into<CoreError>) -> EngineError {
+pub(super) fn math_error(what: &str, e: impl Into<CoreError>) -> EngineError {
     EngineError::Invalid(format!("Cannot compute {what}: {}", e.into()))
 }
 
-fn money(v: &Dec) -> Dec {
+pub(super) fn money(v: &Dec) -> Dec {
     v.to_decimal_places(8)
 }
 
-fn zero() -> Dec {
+pub(super) fn zero() -> Dec {
     Dec::from_js_number(0.0)
 }
 
@@ -175,7 +175,7 @@ fn side_of(side: OrderSide) -> PositionSide {
     }
 }
 
-fn closing_side(side: PositionSide) -> OrderSide {
+pub(super) fn closing_side(side: PositionSide) -> OrderSide {
     match side {
         PositionSide::Long => OrderSide::Sell,
         PositionSide::Short => OrderSide::Buy,
@@ -208,20 +208,20 @@ fn liquidity_text(liquidity: Liquidity) -> &'static str {
 
 /// One ledger posting before `post` assigns its id and running wallet. Absent TS fields are
 /// zero amounts and `None` references.
-struct Posting {
-    event_type: LedgerEventType,
-    amount: Dec,
-    margin_delta: Dec,
-    memo: String,
-    ts: i64,
-    symbol: Option<String>,
-    order_id: Option<String>,
-    fill_id: Option<String>,
-    position_id: Option<String>,
+pub(super) struct Posting {
+    pub(super) event_type: LedgerEventType,
+    pub(super) amount: Dec,
+    pub(super) margin_delta: Dec,
+    pub(super) memo: String,
+    pub(super) ts: i64,
+    pub(super) symbol: Option<String>,
+    pub(super) order_id: Option<String>,
+    pub(super) fill_id: Option<String>,
+    pub(super) position_id: Option<String>,
 }
 
 impl Posting {
-    fn new(event_type: LedgerEventType, memo: impl Into<String>, ts: i64) -> Self {
+    pub(super) fn new(event_type: LedgerEventType, memo: impl Into<String>, ts: i64) -> Self {
         Posting {
             event_type,
             amount: zero(),
@@ -238,14 +238,14 @@ impl Posting {
 
 /// A self-contained perpetuals simulator. See docs/PAPER_ENGINE.md for the exact rules.
 pub struct PaperExecutionEngine<S: PaperStore> {
-    store: S,
-    instruments: Instruments,
-    get_quote: QuoteLookup,
-    now: Clock,
+    pub(super) store: S,
+    pub(super) instruments: Instruments,
+    pub(super) get_quote: QuoteLookup,
+    pub(super) now: Clock,
     // Interior mutability because ids and events are produced inside `store.transaction`
     // closures, which can only borrow the engine shared.
     new_id: RefCell<IdSource>,
-    queued: RefCell<Vec<EngineEvent>>,
+    pub(super) queued: RefCell<Vec<EngineEvent>>,
     on_event: EventSink,
 }
 
@@ -266,16 +266,16 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
         &self.store
     }
 
-    fn next_id(&self, prefix: &str) -> String {
+    pub(super) fn next_id(&self, prefix: &str) -> String {
         (self.new_id.borrow_mut())(prefix)
     }
 
-    fn queue(&self, event: EngineEvent) {
+    pub(super) fn queue(&self, event: EngineEvent) {
         self.queued.borrow_mut().push(event);
     }
 
     /// Emits what the committed transaction queued.
-    fn flush(&mut self) {
+    pub(super) fn flush(&mut self) {
         for event in std::mem::take(self.queued.get_mut()) {
             (self.on_event)(event);
         }
@@ -286,13 +286,13 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
         self.queued.get_mut().clear();
     }
 
-    fn instrument(&self, symbol: &str) -> Result<&InstrumentSpecification, EngineError> {
+    pub(super) fn instrument(&self, symbol: &str) -> Result<&InstrumentSpecification, EngineError> {
         self.instruments
             .get(symbol)
             .ok_or_else(|| EngineError::Invalid(format!("Unknown instrument {symbol}")))
     }
 
-    fn require_account(&self, id: &str) -> Result<PaperAccount, EngineError> {
+    pub(super) fn require_account(&self, id: &str) -> Result<PaperAccount, EngineError> {
         self.store
             .get_account(id)?
             .ok_or_else(|| EngineError::Invalid(format!("Unknown account {id}")))
@@ -521,7 +521,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
         }
     }
 
-    fn build_order(&self, request: &OrderRequest, now: i64) -> Order {
+    pub(super) fn build_order(&self, request: &OrderRequest, now: i64) -> Order {
         Order {
             id: self.next_id("ord"),
             account_id: request.account_id.clone(),
@@ -759,7 +759,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
 
     /// Applies one fill to the position and ledger. Must run inside a transaction: it can still
     /// reject after writing, and only a rollback undoes those writes.
-    fn fill_order(
+    pub(super) fn fill_order(
         &self,
         account: &mut PaperAccount,
         order: &mut Order,
@@ -771,7 +771,14 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
         let instrument = self.instrument(&order.symbol)?;
         let fee_rate = match liquidity {
             Liquidity::Maker => account.config.maker_fee_rate.clone(),
-            _ => account.config.taker_fee_rate.clone(),
+            Liquidity::Taker => account.config.taker_fee_rate.clone(),
+            // TS types `fillOrder` as MAKER | TAKER only: `liquidate` books its own fill with no
+            // fee, so a liquidation reaching here is a bug, not a taker fill.
+            Liquidity::Liquidation => {
+                return Err(Attempt::Failed(EngineError::Invalid(
+                    "Liquidations are booked by liquidate, not fill_order".to_string(),
+                )))
+            }
         };
         let fee = money(&perp::notional(quantity, price).mul(&dec(&fee_rate)?));
         let fill_id = self.next_id("fill");
@@ -975,7 +982,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
 
     /// Moves the wallet and used margin and appends the matching ledger event. Zero postings
     /// are skipped so the ledger only holds real changes.
-    fn post(&self, account: &mut PaperAccount, e: Posting) -> Result<(), EngineError> {
+    pub(super) fn post(&self, account: &mut PaperAccount, e: Posting) -> Result<(), EngineError> {
         if e.amount.is_zero() && e.margin_delta.is_zero() {
             return Ok(());
         }
@@ -1062,7 +1069,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
     }
 
     /// Flat positions cannot be reduced: clears every reduce-only order on the symbol.
-    fn cancel_protection(
+    pub(super) fn cancel_protection(
         &self,
         account_id: &str,
         symbol: &str,
@@ -1081,7 +1088,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
     }
 
     /// Cancels an order and releases its reservation. CANCELED is the only way TS closes one.
-    fn close_order(
+    pub(super) fn close_order(
         &self,
         order: &mut Order,
         reason: Option<&str>,
