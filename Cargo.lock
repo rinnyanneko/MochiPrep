@@ -293,6 +293,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mochi-market"
+version = "0.1.0"
+dependencies = [
+ "mochi-domain",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "mochi-store"
 version = "0.1.0"
 dependencies = [

@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { generateTape } from '@mochiprep/market-data';
 import { DEFAULT_SYMBOLS, INSTRUMENTS } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database.js';
 import { newDataKey, seal, wrapWithPassword } from '../src/vault.js';
@@ -81,6 +83,23 @@ async function vaultFixture() {
   };
 }
 
+/** The replay tape: a readable head per symbol, plus a hash of every column of the full default tape. */
+function tapeFixture() {
+  const columns = ['open', 'high', 'low', 'close', 'volume'] as const;
+  const hash = createHash('sha256');
+  const head: Record<string, unknown[]> = {};
+  for (const symbol of DEFAULT_SYMBOLS) {
+    const tape = generateTape(symbol);
+    head[symbol] = Array.from({ length: 64 }, (_, i) => tape.candle(i));
+    // Raw float64 bytes, so Rust can hash the same bits without any text formatting in between.
+    for (const column of columns) {
+      const values = tape[column];
+      hash.update(new Uint8Array(values.buffer, values.byteOffset, values.byteLength));
+    }
+  }
+  return { head, sha256: hash.digest('hex') };
+}
+
 /**
  * Golden fixtures: what the TypeScript backend produces, saved so the Rust port can be tested
  * against it. Each key is a file name under crates/golden; a Buffer is written as raw bytes and
@@ -93,6 +112,7 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
       round: ROUND_CASES.map((x) => [noNegativeZero(x), noNegativeZero(Math.round(x))]),
       toFixed: FIXED_CASES.map(([x, d]) => [noNegativeZero(x), d, x.toFixed(d)]),
     },
+    'tape.json': tapeFixture(),
     'schema.json': schemaFixture(),
     'node-created.sqlite': nodeCreatedDatabase(),
     'vault.json': await vaultFixture(),
