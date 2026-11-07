@@ -7,7 +7,9 @@ afterEach(() => vi.useRealTimers());
 describe('deterministic replay', () => {
   it('keeps the seeded tape stable', () => {
     const tape = generateTape('BTCUSDT', 64);
-    const hash = createHash('sha256').update(JSON.stringify(tape)).digest('hex');
+    // Hashed as candle objects: the hash predates the column store and must not change.
+    const candles = Array.from({ length: tape.length }, (_, i) => tape.candle(i));
+    const hash = createHash('sha256').update(JSON.stringify(candles)).digest('hex');
     expect(hash).toBe('ed818a88167cf6b92d82163c069ab259dd0b5259da8c1409343e8f5915977e8c');
   });
 

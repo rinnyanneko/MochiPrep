@@ -23,8 +23,37 @@ function mulberry32(seed: number) {
   };
 }
 
+/**
+ * One-minute bars stored column-wise. Three symbols of 18 days are about 78k bars: as objects
+ * they took ~14 MiB of heap, as Float64Arrays ~3 MiB, off the GC's scanning path.
+ * Times are implicit, `TAPE_START + i * 60_000`, since the tape has no gaps.
+ */
+export class Tape {
+  readonly open: Float64Array;
+  readonly high: Float64Array;
+  readonly low: Float64Array;
+  readonly close: Float64Array;
+  readonly volume: Float64Array;
+
+  constructor(readonly length: number) {
+    this.open = new Float64Array(length);
+    this.high = new Float64Array(length);
+    this.low = new Float64Array(length);
+    this.close = new Float64Array(length);
+    this.volume = new Float64Array(length);
+  }
+
+  time(i: number) {
+    return TAPE_START + i * 60_000;
+  }
+
+  candle(i: number): Candle {
+    return { time: this.time(i), open: this.open[i]!, high: this.high[i]!, low: this.low[i]!, close: this.close[i]!, volume: this.volume[i]!, closed: true };
+  }
+}
+
 /** Bundled demo data: a seeded random walk through trend, chop and crash regimes. */
-export function generateTape(symbol: DefaultSymbol, minutes = TAPE_MINUTES): Candle[] {
+export function generateTape(symbol: DefaultSymbol, minutes = TAPE_MINUTES): Tape {
   const { seed, price: startPrice, volume: baseVolume } = SEEDS[symbol];
   const { priceTick } = INSTRUMENTS[symbol]!;
   const tick = Number(priceTick);
@@ -33,7 +62,7 @@ export function generateTape(symbol: DefaultSymbol, minutes = TAPE_MINUTES): Can
   const random = mulberry32(seed);
   const gaussian = () => random() + random() + random() + random() + random() + random() - 3;
 
-  const candles: Candle[] = [];
+  const tape = new Tape(minutes);
   let price = startPrice;
   let drift = 0;
   let vol = 0.0005;
@@ -56,15 +85,11 @@ export function generateTape(symbol: DefaultSymbol, minutes = TAPE_MINUTES): Can
       low = Math.min(low, price);
     }
     const volume = baseVolume * (0.6 + random()) * (1 + (Math.abs(price - open) / open) * 900);
-    candles.push({
-      time: TAPE_START + i * 60_000,
-      open: roundTick(open),
-      high: roundTick(high),
-      low: roundTick(low),
-      close: roundTick(price),
-      volume: Number(volume.toFixed(3)),
-      closed: true,
-    });
+    tape.open[i] = roundTick(open);
+    tape.high[i] = roundTick(high);
+    tape.low[i] = roundTick(low);
+    tape.close[i] = roundTick(price);
+    tape.volume[i] = Number(volume.toFixed(3));
   }
-  return candles;
+  return tape;
 }

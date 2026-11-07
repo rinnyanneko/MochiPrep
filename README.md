@@ -22,6 +22,15 @@ pnpm dev
 
 Open <http://localhost:5173>. The backend binds to `127.0.0.1:8787` and keeps its SQLite database in `.mochiprep/`. Nothing else is required: no Docker, no account, no paid service.
 
+For everyday use, build the web app once and run the backend alone. It serves the UI at <http://localhost:8787>, with no Vite dev server:
+
+```sh
+pnpm build
+pnpm start
+```
+
+`pnpm start` bundles the backend first (under a second) and runs the bundle, which uses about 80 MiB of memory in one process, against about 125 MiB across the two processes `pnpm dev` runs for the backend. To skip pnpm's own process too, run `node --max-semi-space-size=1 apps/server/dist/main.mjs` after a start or `pnpm --filter @mochiprep/server build`.
+
 ## Test
 
 ```sh

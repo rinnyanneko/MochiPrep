@@ -21,7 +21,7 @@ OKX Demo Trading, or real OKX accounts. OKX is the only exchange; every other ve
     pnpm typecheck
     pnpm test:e2e             # Playwright, needs Chrome
 
-Needs Node >= 22.13 (`node:sqlite`). Workspace packages export TypeScript source, so there is no build step.
+Needs Node >= 22.13 (`node:sqlite`). Workspace packages export TypeScript source, so tests, typecheck and `dev` need no build step. `start` bundles the server with esbuild (`apps/server/build.mjs`) to avoid tsx's memory cost; anything the server reads from disk at runtime must be copied into `dist/` there, as migrations are.
 
 ## Rules that must not bend
 

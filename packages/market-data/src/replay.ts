@@ -9,7 +9,7 @@ import {
   type Timeframe,
 } from '@mochiprep/shared';
 import type { MarketDataProvider } from './provider';
-import { generateTape, WARMUP_MINUTES } from './synthetic';
+import { generateTape, WARMUP_MINUTES, type Tape } from './synthetic';
 
 const FUNDING_MS = 8 * 3_600_000;
 const SPREAD_FRACTION = 0.00005;
@@ -22,7 +22,7 @@ const SPREAD_FRACTION = 0.00005;
 export class ReplayMarketData implements MarketDataProvider {
   readonly source = 'REPLAY' as const;
   readonly name = 'Synthetic replay';
-  private readonly tape: Record<string, Candle[]>;
+  private readonly tape: Record<string, Tape>;
   private cursor = WARMUP_MINUTES;
   private readonly quoteListeners = new Set<(q: Quote) => void>();
 
@@ -43,10 +43,10 @@ export class ReplayMarketData implements MarketDataProvider {
     return this.cursor >= this.length - 1;
   }
   get firstPlayableTime() {
-    return this.tape.BTCUSDT![WARMUP_MINUTES]!.time + 60_000;
+    return this.tape.BTCUSDT!.time(WARMUP_MINUTES) + 60_000;
   }
   get endTime() {
-    return this.tape.BTCUSDT![this.length - 1]!.time + 60_000;
+    return this.tape.BTCUSDT!.time(this.length - 1) + 60_000;
   }
 
   seek(index: number) {
@@ -63,14 +63,14 @@ export class ReplayMarketData implements MarketDataProvider {
   }
 
   now() {
-    return this.tape.BTCUSDT![this.cursor]!.time + 60_000;
+    return this.tape.BTCUSDT!.time(this.cursor) + 60_000;
   }
 
   /** Undefined for any pair outside the tape: custom pairs only exist on live data. */
   getQuote(symbol: SymbolId): Quote | undefined {
     const tape = this.tape[symbol];
     if (!tape) return undefined;
-    const candle = tape[this.cursor]!;
+    const candle = tape.candle(this.cursor);
     const instrument = INSTRUMENTS[symbol]!;
     const tick = Number(instrument.priceTick);
     const decimals = instrument.priceTick.split('.')[1]?.length ?? 0;
@@ -94,7 +94,7 @@ export class ReplayMarketData implements MarketDataProvider {
   private fundingRate(symbol: SymbolId): string {
     const back = Math.max(0, this.cursor - 480);
     const tape = this.tape[symbol]!;
-    const change = (tape[this.cursor]!.close - tape[back]!.close) / tape[back]!.close;
+    const change = (tape.close[this.cursor]! - tape.close[back]!) / tape.close[back]!;
     const rate = Math.max(-0.0005, Math.min(0.0005, 0.0001 + change * 0.01));
     return rate.toFixed(6);
   }
@@ -107,15 +107,14 @@ export class ReplayMarketData implements MarketDataProvider {
     const out: Candle[] = [];
     let i = this.cursor;
     while (i >= 0 && out.length < limit) {
-      const bucket = Math.floor(tape[i]!.time / size) * size;
-      const bar: Candle = { ...tape[i]!, time: bucket, closed: bucket + size <= nowMs };
+      const bucket = Math.floor(tape.time(i) / size) * size;
+      const bar: Candle = { ...tape.candle(i), time: bucket, closed: bucket + size <= nowMs };
       i--;
-      while (i >= 0 && tape[i]!.time >= bucket) {
-        const c = tape[i]!;
-        bar.open = c.open;
-        bar.high = Math.max(bar.high, c.high);
-        bar.low = Math.min(bar.low, c.low);
-        bar.volume += c.volume;
+      while (i >= 0 && tape.time(i) >= bucket) {
+        bar.open = tape.open[i]!;
+        bar.high = Math.max(bar.high, tape.high[i]!);
+        bar.low = Math.min(bar.low, tape.low[i]!);
+        bar.volume += tape.volume[i]!;
         i--;
       }
       bar.volume = Number(bar.volume.toFixed(3));
