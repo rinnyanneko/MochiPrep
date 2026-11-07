@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 mochi-decimal = { path = "../mochi-decimal" }
 mochi-domain = { path = "../mochi-domain" }
+serde = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

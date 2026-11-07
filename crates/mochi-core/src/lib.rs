@@ -7,5 +7,6 @@ pub mod fill_model;
 pub mod ledger;
 pub mod performance;
 pub mod perp;
+pub mod risk;
 
 pub use error::CoreError;

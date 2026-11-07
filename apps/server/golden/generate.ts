@@ -7,6 +7,7 @@ import {
   auditLedger,
   ceilToStep,
   d,
+  evaluateRisk,
   floorToStep,
   foldLedger,
   isMarketable,
@@ -982,6 +983,187 @@ function performanceCases(rand: () => number) {
 }
 
 /**
+ * Risk engine cases: `{ input, output }` where output is what `evaluateRisk` returns. Hand-picked
+ * cases cover every check id passing and failing, then a seeded sweep checks the sizing arithmetic.
+ */
+function riskFixture() {
+  const base: Quote = {
+    source: 'REPLAY', symbol: 'BTCUSDT', bid: '99', ask: '101', last: '100', mark: '100',
+    markEstimated: false, fundingRate: '0.001', nextFundingTime: null, ts: 1_000,
+  };
+  const balance: AccountBalance = {
+    accountId: 'a', initialBalance: '10000', walletBalance: '10000', availableBalance: '10000',
+    usedMargin: '0', orderMargin: '0', equity: '10000', realizedPnl: '0', unrealizedPnl: '0', feesPaid: '0', fundingPaid: '0',
+  };
+  const decision: AiDecisionData = {
+    symbol: 'BTCUSDT', action: 'LONG', orderType: 'MARKET', entryPrice: null, stopLoss: 90,
+    takeProfit: 120, reason: 'test', confidence: 0.8, expiresAt: null,
+  };
+  // The TS test passes partial positions; Rust deserializes the full type, so fill in the rest.
+  const position = (symbol: string, side: PositionSide = 'LONG', quantity = '1'): Position => ({
+    id: `p-${symbol}`, accountId: 'a', symbol, side, quantity, entryPrice: '100', leverage: 3,
+    margin: '33.33', liquidationPrice: '70', status: 'OPEN', realizedPnl: '0', feesPaid: '0',
+    fundingPaid: '0', maxQuantity: quantity, exitPrice: null, lastFundingTime: 0, openedAt: 0, closedAt: null,
+  });
+  const make = (overrides: Record<string, unknown> = {}) => ({
+    decision, symbol: 'BTCUSDT', settings: DEFAULT_RISK_SETTINGS, quote: base as Quote | null, now: 1_000,
+    balance, openPositions: [] as Position[], dailyPnl: '0', dayStartEquity: '10000', fees: DEFAULT_ACCOUNT_CONFIG,
+    ...overrides,
+  });
+  const settings = (o: Partial<RiskSettings>): RiskSettings => ({ ...DEFAULT_RISK_SETTINGS, ...o });
+  const dec = (o: Partial<AiDecisionData>): AiDecisionData => ({ ...decision, ...o });
+  const quoteFor = (symbol: string, bid: string, ask: string, ts = 1_000): Quote => ({ ...base, symbol, bid, ask, last: bid, mark: bid, ts });
+
+  const inputs: Array<ReturnType<typeof make>> = [
+    // The risk section of packages/core/test/perp.test.ts, in order.
+    make(),
+    make({ decision: dec({ symbol: 'ETHUSDT' }) }),
+    make({ decision: dec({ expiresAt: new Date(500).toISOString() }) }),
+    make({ now: 40_000 }),
+    make({ dailyPnl: '-250' }),
+    make({ settings: settings({ maxOpenPositions: 1 }), openPositions: [position('ETHUSDT')] }),
+    make({ openPositions: [position('BTCUSDT')] }),
+    make({ decision: dec({ stopLoss: 102 }) }),
+    make({ decision: dec({ stopLoss: null }) }),
+    make({ decision: dec({ takeProfit: 90 }) }),
+    make({ balance: { ...balance, equity: '0.01', availableBalance: '0.01' } }),
+    make({ settings: settings({ requireStopLoss: false }), decision: dec({ stopLoss: null }) }),
+    make({ settings: settings({ maxLeverage: 100 }), decision: dec({ stopLoss: 1 }) }),
+    // Pass and fail around each limit.
+    make({ decision: dec({ expiresAt: new Date(5_000).toISOString() }) }),
+    make({ decision: dec({ expiresAt: '1970-01-01T00:00:02.123+02:00' }) }),
+    make({ decision: dec({ expiresAt: '1970-01-01T00:00:05.9876Z' }) }),
+    make({ decision: dec({ expiresAt: new Date(1_000).toISOString() }) }),
+    make({ decision: dec({ expiresAt: '2030-12-31T23:59:59-05:30' }) }),
+    make({ now: 31_000 }),
+    make({ now: 31_001 }),
+    make({ now: 500 }),
+    make({ quote: null }),
+    make({ quote: null, decision: dec({ action: 'HOLD' }) }),
+    make({ dailyPnl: '-200' }),
+    make({ dailyPnl: '-199.999' }),
+    make({ dailyPnl: '55.555' }),
+    make({ dayStartEquity: '0', dailyPnl: '0' }),
+    make({ settings: settings({ maxOpenPositions: 1 }), openPositions: [position('BTCUSDT', 'SHORT', '0.5')] }),
+    make({ settings: settings({ maxOpenPositions: 0 }) }),
+    make({ settings: settings({ maxOpenPositions: 2.5 }), openPositions: [position('ETHUSDT'), position('SOLUSDT')] }),
+    make({ openPositions: [position('ETHUSDT')] }),
+    make({ openPositions: [position('BTCUSDT', 'SHORT', '0.25')] }),
+    // Actions.
+    make({ decision: dec({ action: 'HOLD' }) }),
+    make({ decision: dec({ action: 'HOLD', symbol: 'ETHUSDT' }) }),
+    make({ decision: dec({ action: 'CLOSE' }), openPositions: [position('BTCUSDT')] }),
+    make({ decision: dec({ action: 'CLOSE' }), openPositions: [position('BTCUSDT', 'SHORT', '2.5')] }),
+    make({ decision: dec({ action: 'CLOSE' }) }),
+    make({ decision: dec({ action: 'CLOSE' }), openPositions: [position('ETHUSDT')] }),
+    make({ decision: dec({ action: 'CLOSE', symbol: 'ETHUSDT' }), openPositions: [position('BTCUSDT')] }),
+    make({ decision: dec({ action: 'CLOSE', expiresAt: new Date(500).toISOString() }), openPositions: [position('BTCUSDT')] }),
+    // Stop loss and take profit on both sides, with and without a stop.
+    make({ decision: dec({ action: 'SHORT', stopLoss: 110, takeProfit: 80 }) }),
+    make({ decision: dec({ action: 'SHORT', stopLoss: 90, takeProfit: 80 }) }),
+    make({ decision: dec({ action: 'SHORT', stopLoss: 110, takeProfit: 99 }) }),
+    make({ decision: dec({ action: 'SHORT', stopLoss: 110, takeProfit: null }) }),
+    make({ decision: dec({ takeProfit: null }) }),
+    make({ decision: dec({ takeProfit: 101 }) }),
+    make({ decision: dec({ takeProfit: 101.0001 }) }),
+    make({ decision: dec({ stopLoss: 101 }) }),
+    make({ decision: dec({ stopLoss: 100.9 }) }),
+    make({ settings: settings({ requireStopLoss: false }), decision: dec({ action: 'SHORT', stopLoss: null, takeProfit: 80 }) }),
+    make({ settings: settings({ requireStopLoss: false }), decision: dec({ stopLoss: null, takeProfit: 90 }) }),
+    make({ settings: settings({ requireStopLoss: false }), decision: dec({ stopLoss: 102 }) }),
+    // Limit entries.
+    make({ decision: dec({ orderType: 'LIMIT', entryPrice: 95 }) }),
+    make({ decision: dec({ orderType: 'LIMIT', entryPrice: 95.25, stopLoss: 94.5, takeProfit: 99 }) }),
+    make({ decision: dec({ orderType: 'LIMIT', entryPrice: null }) }),
+    make({ decision: dec({ orderType: 'MARKET', entryPrice: 95 }) }),
+    make({ decision: dec({ action: 'SHORT', orderType: 'LIMIT', entryPrice: 105, stopLoss: 108, takeProfit: 98 }) }),
+    make({ decision: dec({ orderType: 'LIMIT', entryPrice: 95, stopLoss: 96 }) }),
+    make({ decision: dec({ orderType: 'LIMIT', entryPrice: 0.1 + 0.2, stopLoss: 0.1, takeProfit: 1 }) }),
+    // Sizing, leverage and notional limits.
+    make({ settings: settings({ maxLeverage: 2.5 }) }),
+    make({ settings: settings({ maxLeverage: 0.5 }) }),
+    make({ settings: settings({ maxLeverage: 1 }) }),
+    make({ settings: settings({ maxLeverage: 1000 }) }),
+    make({ settings: settings({ maxLeverage: 100 }) }),
+    make({ settings: settings({ maxLeverage: 100 }), decision: dec({ action: 'SHORT', stopLoss: 400, takeProfit: 50 }) }),
+    make({ settings: settings({ maxLeverage: 100 }), decision: dec({ action: 'SHORT', stopLoss: 100000, takeProfit: 50 }) }),
+    make({ settings: settings({ maxNotional: 500 }) }),
+    make({ settings: settings({ maxNotional: 50 }) }),
+    make({ settings: settings({ maxNotional: 0.1 }) }),
+    make({ settings: settings({ maxRiskPerTradePct: 0.1 }) }),
+    make({ settings: settings({ maxRiskPerTradePct: 50 }) }),
+    make({ settings: settings({ maxRiskPerTradePct: 0 }) }),
+    make({ balance: { ...balance, availableBalance: '120' } }),
+    make({ balance: { ...balance, availableBalance: '0' } }),
+    make({ balance: { ...balance, availableBalance: '-5' } }),
+    make({ balance: { ...balance, equity: '123456.789', availableBalance: '98765.4321' } }),
+    make({ fees: { ...DEFAULT_ACCOUNT_CONFIG, takerFeeRate: '0.01', slippageBps: '50' } }),
+    make({ fees: { ...DEFAULT_ACCOUNT_CONFIG, takerFeeRate: '0', slippageBps: '0' } }),
+    // Other instruments, including a symbol the agent does not trade.
+    make({
+      symbol: 'ETHUSDT', decision: dec({ symbol: 'ETHUSDT', stopLoss: 3400, takeProfit: 3700 }),
+      quote: quoteFor('ETHUSDT', '3499.9', '3500.1'),
+    }),
+    make({
+      symbol: 'SOLUSDT', decision: dec({ symbol: 'SOLUSDT', action: 'SHORT', stopLoss: 160, takeProfit: 140 }),
+      quote: quoteFor('SOLUSDT', '149.97', '150.03'),
+    }),
+    make({ symbol: 'ETHUSDT' }),
+    make({ symbol: 'BTCUSDT', decision: dec({ symbol: 'SOLUSDT' }) }),
+    make({ quote: quoteFor('BTCUSDT', '67234.5', '67234.6'), decision: dec({ stopLoss: 66000, takeProfit: 70000 }) }),
+    make({ quote: quoteFor('BTCUSDT', '99', '101', 2_500) }),
+    make({ quote: quoteFor('BTCUSDT', '99', '101', 29_999), now: 59_999 }),
+  ];
+
+  // Seeded sweep: random sides, prices, balances and settings so the 50-digit sizing is compared too.
+  const rand = mulberry32(0x72697368);
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(rand() * items.length)]!;
+  const between = (lo: number, hi: number, dp: number) => Number((lo + rand() * (hi - lo)).toFixed(dp));
+  for (let i = 0; i < 200; i++) {
+    const symbol = pick(DEFAULT_SYMBOLS);
+    const mid = symbol === 'BTCUSDT' ? between(20000, 90000, 2) : symbol === 'ETHUSDT' ? between(1000, 5000, 2) : between(20, 300, 3);
+    const spread = mid * 0.0002;
+    const bid = (mid - spread).toFixed(4);
+    const ask = (mid + spread).toFixed(4);
+    const action = pick(['LONG', 'SHORT'] as const);
+    const limit = rand() < 0.3;
+    const entry = limit ? Number((mid * (1 + (rand() - 0.5) * 0.02)).toFixed(2)) : null;
+    const ref = entry ?? Number(action === 'LONG' ? ask : bid);
+    const sign = action === 'LONG' ? -1 : 1;
+    // Some stops land on the wrong side so the validity check fails too.
+    const stopSign = rand() < 0.1 ? -sign : sign;
+    const stop = rand() < 0.1 ? null : Number((ref * (1 + stopSign * between(0.002, 0.15, 4))).toFixed(2));
+    const tp = rand() < 0.3 ? null : Number((ref * (1 - sign * between(-0.01, 0.2, 4))).toFixed(2));
+    const equity = between(50, 500000, 2);
+    inputs.push(make({
+      symbol,
+      decision: dec({
+        symbol, action, orderType: limit ? 'LIMIT' : 'MARKET', entryPrice: entry, stopLoss: stop, takeProfit: tp,
+        expiresAt: rand() < 0.2 ? new Date(between(0, 3000, 0)).toISOString() : null,
+      }),
+      settings: settings({
+        maxLeverage: pick([1, 2, 3, 3.7, 5, 10, 25, 75, 125, 400]),
+        maxRiskPerTradePct: pick([0.1, 0.25, 0.5, 1, 2, 5]),
+        maxDailyLossPct: pick([1, 2, 5]),
+        maxOpenPositions: pick([1, 2, 3]),
+        requireStopLoss: rand() < 0.8,
+        maxQuoteAgeSec: pick([5, 30, 60]),
+        maxNotional: pick([100, 1000, 25000, 100000, 1e6]),
+      }),
+      quote: rand() < 0.03 ? null : quoteFor(symbol, bid, ask, 1_000 - Math.floor(rand() * 8) * 1_000),
+      now: 1_000 + Math.floor(rand() * 40) * 1_000,
+      balance: { ...balance, equity: String(equity), availableBalance: String(Number((equity * between(0.2, 1, 3)).toFixed(2))) },
+      openPositions: rand() < 0.15 ? [position(pick(DEFAULT_SYMBOLS), pick(['LONG', 'SHORT'] as const))] : [],
+      dailyPnl: String(between(-1500, 800, 2)),
+      dayStartEquity: String(equity),
+      fees: { ...DEFAULT_ACCOUNT_CONFIG, takerFeeRate: pick(['0.0005', '0.001', '0.0002']), slippageBps: pick(['1', '5', '12.5']) },
+    }));
+  }
+
+  return inputs.map((input) => ({ input, output: evaluateRisk(input as Parameters<typeof evaluateRisk>[0]) }));
+}
+
+/**
  * Golden fixtures: what the TypeScript backend produces, saved so the Rust port can be tested
  * against it. Each key is a file name under crates/golden; a Buffer is written as raw bytes and
  * anything else as JSON.
@@ -997,6 +1179,7 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     'accounting-types.json': accountingTypesFixture(),
     'decimal.json': decimalFixture(),
     'core-math.json': coreMathFixture(),
+    'risk.json': riskFixture(),
     'tape.json': tapeFixture(),
     'replay.json': await replayFixture(),
     'schema.json': schemaFixture(),
