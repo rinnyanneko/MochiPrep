@@ -17,8 +17,9 @@ there is no live order path. OKX is the first exchange; every other venue is a r
 ## Commands
 
     pnpm install
-    pnpm test                 # vitest, all packages
-    pnpm --filter @mochiprep/core exec tsc -p tsconfig.json
+    pnpm test                 # vitest, all packages, network blocked
+    pnpm typecheck
+    pnpm test:e2e             # Playwright, needs Chrome
 
 Needs Node >= 22.13 (`node:sqlite`). Workspace packages export TypeScript source, so there is no build step.
 

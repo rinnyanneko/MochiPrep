@@ -219,6 +219,89 @@ describe('PaperExecutionEngine with SQLite', () => {
     expect(engine.balanceOf(accountId).usedMargin).toBe('0');
   });
 
+  const expectAudited = () => expect(auditLedger(store.getAccount(accountId)!, store.listLedger(accountId))).toEqual([]);
+
+  it('takes exactly the isolated margin from the wallet when a gap passes the liquidation price', () => {
+    const entry = engine.placeOrderSync(request({ clientOrderId: 'open' })).fills[0]!;
+    const { margin } = store.getOpenPosition(accountId, 'BTCUSDT')!;
+    q = makeQuote(now + 1, '1', '2', '1');
+    engine.onQuote(q);
+    const balance = engine.balanceOf(accountId);
+    expect(balance.walletBalance).toBe(d('10000').minus(entry.fee).minus(margin).toFixed());
+    expect(balance.realizedPnl).toBe(d(margin).neg().toFixed());
+    // Settled at the liquidation price, so a gap can never turn the penalty into a credit.
+    const penalty = store.listLedger(accountId).find((e) => e.type === 'LIQUIDATION_PENALTY')!;
+    expect(d(penalty.amount).lt(0)).toBe(true);
+    expectAudited();
+  });
+
+  it('forfeits the maintenance remainder as a penalty when liquidated at the threshold', () => {
+    const entry = engine.placeOrderSync(request({ clientOrderId: 'open' })).fills[0]!;
+    const position = store.getOpenPosition(accountId, 'BTCUSDT')!;
+    q = makeQuote(now + 1, '90', '92', position.liquidationPrice);
+    engine.onQuote(q);
+    expect(store.listClosedPositions(accountId, 1)[0]!.status).toBe('LIQUIDATED');
+    expect(engine.balanceOf(accountId).walletBalance).toBe(d('10000').minus(entry.fee).minus(position.margin).toFixed());
+    const penalty = store.listLedger(accountId).find((e) => e.type === 'LIQUIDATION_PENALTY')!;
+    expect(d(penalty.amount).lt(0)).toBe(true);
+    expectAudited();
+  });
+
+  it('liquidates a short when mark rises through its threshold, not when it falls', () => {
+    const entry = engine.placeOrderSync(request({ clientOrderId: 'open', side: 'SELL' })).fills[0]!;
+    const position = store.getOpenPosition(accountId, 'BTCUSDT')!;
+    expect(d(position.liquidationPrice).gt(position.entryPrice)).toBe(true);
+    q = makeQuote(now + 1, '89', '91', '90');
+    engine.onQuote(q);
+    expect(store.getOpenPosition(accountId, 'BTCUSDT')).toBeDefined();
+    q = makeQuote(now + 2, '500', '501', '500');
+    engine.onQuote(q);
+    expect(store.listClosedPositions(accountId, 1)[0]!.status).toBe('LIQUIDATED');
+    expect(engine.balanceOf(accountId).walletBalance).toBe(d('10000').minus(entry.fee).minus(position.margin).toFixed());
+    expectAudited();
+  });
+
+  it('triggers a short stop only when price rises to it, filling at the ask', () => {
+    engine.placeOrderSync(request({ clientOrderId: 'open', side: 'SELL', stopLoss: '105', takeProfit: '90' }));
+    q = makeQuote(now + 1, '98', '100', '99');
+    engine.onQuote(q);
+    expect(store.getOpenPosition(accountId, 'BTCUSDT')).toBeDefined();
+    q = makeQuote(now + 2, '105', '107', '106');
+    engine.onQuote(q);
+    expect(store.getOpenPosition(accountId, 'BTCUSDT')).toBeUndefined();
+    expect(store.listFills(accountId, 1)[0]).toMatchObject({ side: 'BUY', price: '107' });
+    expectAudited();
+  });
+
+  it('triggers a short take-profit only when price falls to it', () => {
+    engine.placeOrderSync(request({ clientOrderId: 'open', side: 'SELL', stopLoss: '105', takeProfit: '90' }));
+    q = makeQuote(now + 1, '89', '91', '90');
+    engine.onQuote(q);
+    expect(store.getOpenPosition(accountId, 'BTCUSDT')).toBeUndefined();
+    expect(store.listFills(accountId, 1)[0]).toMatchObject({ side: 'BUY', price: '91', realizedPnl: '8' });
+  });
+
+  it('averages entry when adding, and a stop then closes the whole enlarged position', () => {
+    engine.placeOrderSync(request({ clientOrderId: 'first', leverage: 2, stopLoss: '95' }));
+    q = makeQuote(now, '119', '121', '120');
+    engine.placeOrderSync(request({ clientOrderId: 'second', leverage: 2 }));
+    const position = store.getOpenPosition(accountId, 'BTCUSDT')!;
+    expect(position).toMatchObject({ quantity: '2', entryPrice: '111', margin: '111', liquidationPrice: '56.055' });
+    q = makeQuote(now + 1, '93', '95', '94');
+    engine.onQuote(q);
+    expect(store.getOpenPosition(accountId, 'BTCUSDT')).toBeUndefined();
+    expect(store.listFills(accountId, 1)[0]).toMatchObject({ quantity: '2', price: '93', realizedPnl: '-36' });
+    expectAudited();
+  });
+
+  it('refuses to fill against a quote older than a minute', () => {
+    q = makeQuote(now - 60_001);
+    const result = engine.placeOrderSync(request({ clientOrderId: 'stale' }));
+    expect(result.order.status).toBe('REJECTED');
+    expect(result.order.rejectReason).toContain('MARKET_DATA_STALE');
+    expect(store.listFills(accountId, 10)).toHaveLength(0);
+  });
+
   it('keeps the ledger auditable through a fixed pseudo-random trade sequence', () => {
     let seed = 0x12345678;
     const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32);

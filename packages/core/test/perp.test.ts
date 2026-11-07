@@ -64,12 +64,22 @@ describe('risk engine', () => {
     ['max-positions', { settings: { ...DEFAULT_RISK_SETTINGS, maxOpenPositions: 1 }, openPositions: [{ symbol: 'ETHUSDT' }] }],
     ['no-existing', { openPositions: [{ symbol: 'BTCUSDT', side: 'LONG', quantity: '1' }] }],
     ['stop-loss', { decision: { ...decision, stopLoss: 102 } }],
+    ['stop-loss', { decision: { ...decision, stopLoss: null } }],
     ['take-profit', { decision: { ...decision, takeProfit: 90 } }],
     ['sizing', { balance: { ...balance, equity: '0.01', availableBalance: '0.01' } }],
   ])('rejects a failed %s check', (id, overrides) => {
     const result = evaluateRisk(riskInput(overrides));
     expect(result.approved).toBe(false);
     expect(result.checks.find((c) => c.id === id)?.passed).toBe(false);
+  });
+
+  it('sizes from an assumed distance when settings allow a position without a stop', () => {
+    const result = evaluateRisk(riskInput({
+      settings: { ...DEFAULT_RISK_SETTINGS, requireStopLoss: false },
+      decision: { ...decision, stopLoss: null },
+    }));
+    expect(result.approved).toBe(true);
+    expect(Number(result.sized!.quantity)).toBeGreaterThan(0);
   });
 
   it('rejects a stop beyond the estimated liquidation price', () => {

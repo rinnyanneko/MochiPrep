@@ -2,9 +2,22 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { AiProvider } from '@mochiprep/ai-providers';
 import { DEFAULT_RISK_SETTINGS } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database';
 import { Runtime } from '../src/runtime';
+
+const holdProvider: AiProvider = {
+  kind: 'OPENAI',
+  complete: async () => ({
+    text: JSON.stringify({
+      symbol: 'BTCUSDT', action: 'HOLD', orderType: 'MARKET', entryPrice: null, stopLoss: null,
+      takeProfit: null, reason: 'wait', confidence: 0.5, expiresAt: null,
+    }),
+    inputTokens: null,
+    outputTokens: null,
+  }),
+};
 
 describe('file database recovery and secret lifetime', () => {
   const dirs: string[] = [];
@@ -20,7 +33,7 @@ describe('file database recovery and secret lifetime', () => {
     const secret = 'custom-secret-never-persist-987654321';
 
     const firstDb = openDatabase(path);
-    const first = new Runtime({ db: firstDb, replayMinutes: 5_900 });
+    const first = new Runtime({ db: firstDb, replayMinutes: 5_900, providerFactory: () => holdProvider });
     const account = first.engine.createAccount({
       name: 'persistent', source: 'REPLAY',
       config: { slippageBps: '0', impactBpsPerMillion: '0' },
@@ -44,6 +57,8 @@ describe('file database recovery and secret lifetime', () => {
     });
     first.runner.start(agent.id);
     await first.stepReplay(3);
+    // Still armed here, so only the restart itself can explain the paused state asserted below.
+    expect(first.store.getAgent(agent.id)).toMatchObject({ status: 'WAITING', running: true });
     const cursor = first.replay.position;
     await first.stop();
     firstDb.close();
@@ -56,7 +71,9 @@ describe('file database recovery and secret lifetime', () => {
     expect(second.store.getOpenPosition(account.id, 'BTCUSDT')).toBeDefined();
     expect(second.store.getOrder(pending.id)?.status).toBe('OPEN');
     expect(second.replay.position).toBe(cursor);
-    expect(second.store.getAgent(agent.id)).toMatchObject({ status: 'PAUSED', running: false, nextRunAt: null });
+    expect(second.store.getAgent(agent.id)).toMatchObject({
+      status: 'PAUSED', running: false, nextRunAt: null, statusDetail: 'Paused because the backend restarted',
+    });
     expect(second.providerViews().find((p) => p.id === 'remote')?.hasKey).toBe(false);
     await second.stop();
     secondDb.close();

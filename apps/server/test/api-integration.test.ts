@@ -1,9 +1,18 @@
+import { createServer } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_RISK_SETTINGS } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database';
 import { buildApp } from '../src/app';
 import { Runtime } from '../src/runtime';
+
+const freePort = () =>
+  new Promise<number>((resolve) => {
+    const probe = createServer().listen(0, '127.0.0.1', () => {
+      const { port } = probe.address() as { port: number };
+      probe.close(() => resolve(port));
+    });
+  });
 
 describe('API decision-to-position integration', () => {
   let db: DatabaseSync;
@@ -86,5 +95,26 @@ describe('API decision-to-position integration', () => {
   it('enforces host and token checks', async () => {
     expect((await app.inject({ method: 'GET', url: '/api/accounts', headers: { host: 'localhost:8787' } })).statusCode).toBe(401);
     expect((await app.inject({ method: 'GET', url: '/api/accounts', headers: { ...headers(), host: 'evil.invalid' } })).statusCode).toBe(403);
+  });
+
+  it('refuses a foreign Origin even with a valid token', async () => {
+    const get = (origin: string) => app.inject({ method: 'GET', url: '/api/accounts', headers: { ...headers(), origin } });
+    expect((await get('http://evil.invalid')).statusCode).toBe(403);
+    expect((await get('http://localhost:8787')).statusCode).toBe(200);
+  });
+
+  it('shuts down with an event stream still open', async () => {
+    const port = await freePort();
+    const origin = `http://127.0.0.1:${port}`;
+    const server = buildApp(runtime, { host: '127.0.0.1', port, dataDir: '.', allowedOrigins: [origin] });
+    await server.app.listen({ host: '127.0.0.1', port });
+    const stream = await fetch(`${origin}/api/events?token=${server.token}`);
+    expect(stream.status).toBe(200);
+
+    const outcome = await Promise.race([
+      server.app.close().then(() => 'closed'),
+      new Promise((resolve) => setTimeout(() => resolve('hung'), 3000)),
+    ]);
+    expect(outcome).toBe('closed');
   });
 });
