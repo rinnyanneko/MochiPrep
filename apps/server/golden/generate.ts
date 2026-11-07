@@ -59,16 +59,19 @@ function nodeCreatedDatabase(): Buffer {
   }
 }
 
-const VAULT_PASSWORD = 'mochi-pässwörd-é';
+// Decomposed on purpose (a + U+0308, o + U+0308, e + U+0301): the vault must normalize to NFC before scrypt.
+const VAULT_PASSWORD = 'mochi-pa\u0308sswo\u0308rd-e\u0301';
 const VAULT_FAST_KDF = { N: 1024, r: 8, p: 1 };
 
 /** Secrets sealed by Node, so Rust can prove it opens what existing installs have stored. */
 async function vaultFixture() {
+  const passwordNfc = VAULT_PASSWORD.normalize('NFC');
+  if (VAULT_PASSWORD === passwordNfc) throw new Error('vault fixture password must not already be NFC');
   const dataKey = newDataKey();
   const sealedCase = (context: string, plaintext: string) => ({ context, plaintext, sealed: seal(dataKey, plaintext, context) });
   return {
     password: VAULT_PASSWORD,
-    passwordNfc: VAULT_PASSWORD.normalize('NFC'),
+    passwordNfc,
     dataKeyHex: dataKey.toString('hex'),
     wrap: await wrapWithPassword(dataKey, VAULT_PASSWORD, VAULT_FAST_KDF),
     sealed: [

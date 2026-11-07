@@ -3,8 +3,10 @@ use mochi_vault::{
     wrap_with_password, KdfParams, PasswordWrap, VaultError, DEFAULT_KDF,
 };
 use serde_json::{json, Value};
+use unicode_normalization::UnicodeNormalization;
 
-const PASSWORD: &str = "mochi-pässwörd-é";
+// Decomposed (NFD) on purpose: the vault must normalize before scrypt.
+const PASSWORD: &str = "mochi-pa\u{308}sswo\u{308}rd-e\u{301}";
 // Small N keeps the tests fast; the format is identical to the default cost.
 const FAST: KdfParams = KdfParams {
     n: 1024,
@@ -34,6 +36,8 @@ fn opens_what_node_sealed() {
     let wrap = wrap_of(&fixture);
     let expected = fixture["dataKeyHex"].as_str().unwrap();
 
+    // The fixture must really differ, or normalization would go untested.
+    assert_ne!(fixture["password"], fixture["passwordNfc"]);
     for field in ["password", "passwordNfc"] {
         let key = unwrap_with_password(&wrap, fixture[field].as_str().unwrap()).unwrap();
         assert_eq!(hex(&key), expected, "{field}");
@@ -162,7 +166,7 @@ fn writes_fixture_for_node() {
     let sealed_case = |context: &str, plaintext: &str| json!({ "context": context, "plaintext": plaintext, "sealed": seal(&key, plaintext, context) });
     let fixture = json!({
         "password": PASSWORD,
-        "passwordNfc": PASSWORD, // the literal above is already NFC
+        "passwordNfc": PASSWORD.nfc().collect::<String>(),
         "dataKeyHex": hex(&key),
         "wrap": wrap_with_password(&key, PASSWORD, FAST).unwrap(),
         "sealed": [

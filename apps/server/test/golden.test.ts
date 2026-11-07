@@ -23,13 +23,18 @@ describe('golden fixtures', () => {
 
   it('Node opens what Rust sealed', async () => {
     const rustVault = JSON.parse(readFileSync(join(GOLDEN_DIR, 'rust-vault.json'), 'utf8')) as {
+      password: string;
       passwordNfc: string;
       dataKeyHex: string;
       wrap: PasswordWrap;
       sealed: Array<{ context: string; plaintext: string; sealed: string }>;
     };
+    expect(rustVault.password).not.toBe(rustVault.passwordNfc);
+    // Node normalizes the decomposed form itself, so both spellings must unwrap.
     const key = await unwrapWithPassword(rustVault.wrap, rustVault.passwordNfc);
     expect(key.toString('hex')).toBe(rustVault.dataKeyHex);
+    const keyFromNfd = await unwrapWithPassword(rustVault.wrap, rustVault.password);
+    expect(keyFromNfd.toString('hex')).toBe(rustVault.dataKeyHex);
     for (const entry of rustVault.sealed) {
       expect(open(key, entry.sealed, entry.context)).toBe(entry.plaintext);
     }

@@ -1,26 +1,26 @@
 {
- "password": "mochi-pässwörd-é",
+ "password": "mochi-pässwörd-é",
  "passwordNfc": "mochi-pässwörd-é",
- "dataKeyHex": "40b434e564deb8945f1dc14e6b854617189c6be62f58bcfccddbb4c1854bb502",
+ "dataKeyHex": "191d11e9f1a74a2d9a4715c6772d8042a7baacf5b5feef17fa392aca21146c76",
  "wrap": {
-  "salt": "RIVCKoSZZQA9pI+d8+TtgQ==",
+  "salt": "Hb4E/lTZNx+ZGrA1/coRAw==",
   "kdf": {
    "N": 1024,
    "r": 8,
    "p": 1
   },
-  "wrappedKey": "v1.FA6ldeVLG5+fHC/K.oXiUtsyca46DJIWoJ7j9gA==.daskXAM3qvFneLaFrfWI6CJHza0e9wPeOpWSEPCg5q2aClNMMy+tvoYHp+E="
+  "wrappedKey": "v1.LhpeAD7rFqCgbdHR./+aGHriz6esonDk5eVa10A==.yevNgH1p6be6pSBbqdIwXGmHT64YUEdX0EMowy/Koatb9FHb7J0ZYMRBP1E="
  },
  "sealed": [
   {
    "context": "provider-key:prov_1",
    "plaintext": "sk-golden-ai-key",
-   "sealed": "v1.QUZBQ52zNcPXC3xR./WTb2QbGYHrL4nPmW6lbHQ==.4Lk9+UBaUM/3SorgbG7F7A=="
+   "sealed": "v1.vVPOhHPv9yvog8A6.uEEBoFOpjOLBhQs3zxpiQw==.1GsBKFRjzKMMlxE6xpX58Q=="
   },
   {
    "context": "okx-credentials:acct_1",
    "plaintext": "{\"apiKey\":\"k\",\"secretKey\":\"s\",\"passphrase\":\"p\",\"environment\":\"OKX_DEMO\"}",
-   "sealed": "v1.+vBamNv5+matAdW4.2NinbAySVFbrgOGzGzEm9Q==.Bs6DUt7mw/CDWdgZzm1PhQOou1KgPOGrxEa8eHJSbWmpzMHfK3qIISr3FOZ6rYM7APW6IuO2zEpu1r5AjS6N94WkwNQ++Z7n"
+   "sealed": "v1.ZgrHGBPbs/Rzcxz3.5KqQmeaQS2T/5B0WT5xOIw==.+MKdChSqpab7F5ONK8rgET8Qrf2VhU7xaoGFsGT7HCgg1rwlF3NwtnTkxnq6JxFKP/dH1Tf7lUuWbPEJ4gcR+JtSSSweEtdo"
   }
  ]
 }
