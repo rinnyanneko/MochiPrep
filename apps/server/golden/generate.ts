@@ -3,8 +3,8 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { generateTape } from '@mochiprep/market-data';
-import { DEFAULT_SYMBOLS, INSTRUMENTS } from '@mochiprep/shared';
+import { generateTape, ReplayMarketData } from '@mochiprep/market-data';
+import { DEFAULT_SYMBOLS, INSTRUMENTS, type Timeframe } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database.js';
 import { newDataKey, seal, wrapWithPassword } from '../src/vault.js';
 
@@ -100,6 +100,34 @@ function tapeFixture() {
   return { head, sha256: hash.digest('hex') };
 }
 
+/** The replay feed: cursor edges, step quotes, and quotes plus aggregated candles at fixed cursors. */
+async function replayFixture() {
+  const timeframes: Timeframe[] = ['1m', '5m', '15m', '1h', '4h'];
+  const r = new ReplayMarketData();
+  const meta = { len: r.length, firstPlayableTime: r.firstPlayableTime, endTime: r.endTime, nowAtStart: r.now() };
+  const fresh = new ReplayMarketData();
+  const steps = [fresh.step(), fresh.step(), fresh.step()];
+  const snapshots = [];
+  for (const cursor of [5760, 9000, 20000, 25919]) {
+    r.seek(cursor);
+    const candles: Record<string, Record<string, unknown>> = {};
+    for (const symbol of ['BTCUSDT', 'SOLUSDT'] as const) {
+      candles[symbol] = {};
+      for (const tf of timeframes) candles[symbol][tf] = await r.getCandles(symbol, tf, 50);
+    }
+    snapshots.push({ cursor, now: r.now(), quotes: DEFAULT_SYMBOLS.map((s) => r.getQuote(s)), candles });
+  }
+  const edges: Record<string, number> = {};
+  r.seek(-5);
+  edges.afterSeekNegative = r.position;
+  r.seek(99999);
+  edges.afterSeekPastEnd = r.position;
+  edges.stepLengthAtEnd = r.step().length;
+  r.seek(5760);
+  edges.hugeLimitCandles = (await r.getCandles('BTCUSDT', '4h', 100000)).length;
+  return { meta, steps, snapshots, edges };
+}
+
 /**
  * Golden fixtures: what the TypeScript backend produces, saved so the Rust port can be tested
  * against it. Each key is a file name under crates/golden; a Buffer is written as raw bytes and
@@ -113,6 +141,7 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
       toFixed: FIXED_CASES.map(([x, d]) => [noNegativeZero(x), d, x.toFixed(d)]),
     },
     'tape.json': tapeFixture(),
+    'replay.json': await replayFixture(),
     'schema.json': schemaFixture(),
     'node-created.sqlite': nodeCreatedDatabase(),
     'vault.json': await vaultFixture(),
