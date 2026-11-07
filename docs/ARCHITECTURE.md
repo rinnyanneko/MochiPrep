@@ -43,7 +43,7 @@ SQLite stores accounts, orders, positions, fills, ledger events, agents, decisio
 
 ## Rust backend (in progress)
 
-A Rust port of the backend is being built under `crates/`. So far it has instrument specs and market types (`mochi-domain`), SQLite opening and the same migrations (`mochi-store`), master-password crypto compatible with `vault.ts` in both directions (`mochi-vault`), and the deterministic replay tape and feed (`mochi-market`). Golden fixtures in `crates/golden`, generated from the TypeScript code, keep the two in step. There is no Rust HTTP server, runtime, agents or OKX trading yet, and the Rust backend is not usable. The Node backend is still what runs.
+A Rust port of the backend is being built under `crates/`. So far it has instrument specs and market types (`mochi-domain`), decimal math that matches decimal.js (`mochi-decimal`), the accounting core (`mochi-core`: perp math, fill model, ledger audit, performance, risk engine and the quote-driven paper engine), SQLite opening, the same migrations and the paper store (`mochi-store`), master-password crypto compatible with `vault.ts` in both directions (`mochi-vault`), and the deterministic replay tape and feed (`mochi-market`). Golden fixtures in `crates/golden`, generated from the TypeScript code, keep the two in step; 43 scenarios prove the paper engine matches Node, and a test shows a reopened file database restores its state. There is no Rust HTTP server, runtime, agents or OKX trading yet, and the Rust backend is not usable. The Node backend is still what runs.
 
 ## Security model
 
