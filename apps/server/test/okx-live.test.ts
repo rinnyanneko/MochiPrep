@@ -705,6 +705,20 @@ describe('OKX execution', () => {
       expect(runtime.exchangeStatuses()[0]!.saved).toBe(false);
     });
 
+    it('keeps saved OKX keys when reconnected by hand while locked', async () => {
+      await runtime.enableVault(PASSWORD);
+      await runtime.connectOkx({ ...CREDS, name: 'OKX', environment: 'OKX_LIVE', limits: DEFAULT_LIVE_LIMITS, remember: true });
+      await restart();
+      expect(runtime.vaultStatus()).toBe('LOCKED');
+      // The save box is disabled while locked, so the dialog always sends remember: false.
+      await connect('OKX_LIVE');
+      expect(runtime.exchangeStatuses()[0]).toMatchObject({ connected: true, saved: true });
+
+      await restart();
+      await runtime.unlock(PASSWORD);
+      expect(runtime.exchangeStatuses()[0]).toMatchObject({ connected: true, saved: true, armed: false });
+    });
+
     it('changes the password without re-entering keys', async () => {
       await runtime.enableVault(PASSWORD);
       await expect(runtime.changePassword('wrong', 'new-master-password')).rejects.toThrow(/Wrong/);

@@ -775,7 +775,8 @@ export class Runtime {
       if (!this.dataKey) throw new Error('Connected, but the key was not saved: the master password was removed meanwhile');
       const saved: SavedOkxCredentials = { ...credentials, environment: input.environment };
       this.store.saveSealedExchangeCredentials(id, seal(this.dataKey, JSON.stringify(saved), exchangeContext(id)));
-    } else {
+    } else if (this.dataKey) {
+      // While locked the save box cannot be ticked, so an unticked box is not a choice to forget the key.
       this.store.deleteSealedExchangeCredentials(id);
     }
     if (account.initialBalance === '0') {
