@@ -5,7 +5,31 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ceilToStep, d, floorToStep, roundToStep, str, type Dec } from '@mochiprep/core';
 import { generateTape, ReplayMarketData } from '@mochiprep/market-data';
-import { DEFAULT_SYMBOLS, INSTRUMENTS, TIMEFRAMES, type Candle } from '@mochiprep/shared';
+import {
+  DEFAULT_ACCOUNT_CONFIG,
+  DEFAULT_LIVE_LIMITS,
+  DEFAULT_RISK_SETTINGS,
+  DEFAULT_SYMBOLS,
+  INSTRUMENTS,
+  TIMEFRAMES,
+  type AccountBalance,
+  type AiDecisionData,
+  type Candle,
+  type EquityPoint,
+  type Fill,
+  type LedgerEvent,
+  type Order,
+  type OrderRequest,
+  type OrderResult,
+  type PaperAccount,
+  type PaperAccountConfig,
+  type Position,
+  type PositionView,
+  type RiskCheck,
+  type RiskResult,
+  type RiskSettings,
+  type SizedTrade,
+} from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database.js';
 import { newDataKey, seal, wrapWithPassword } from '../src/vault.js';
 
@@ -370,6 +394,304 @@ function decimalFixture(): DecimalCase[] {
 }
 
 /**
+ * Accounting types as TypeScript literals, so tsc checks them against the interfaces. Each type has a
+ * fully populated sample and a minimal one (optional fields absent, nullable fields null).
+ */
+function accountingTypesFixture() {
+  const config: PaperAccountConfig = {
+    takerFeeRate: '0.0006',
+    makerFeeRate: '0.0001',
+    slippageBps: '2.5',
+    impactBpsPerMillion: '7',
+  };
+  const risk: RiskSettings = {
+    maxLeverage: 5,
+    maxRiskPerTradePct: 0.25,
+    maxDailyLossPct: 1.5,
+    maxOpenPositions: 4,
+    requireStopLoss: false,
+    maxQuoteAgeSec: 12.5,
+    maxNotional: 250000,
+  };
+  const riskMinimal: RiskSettings = { ...DEFAULT_RISK_SETTINGS };
+
+  const paperAccountFull: PaperAccount = {
+    id: 'acc-1',
+    name: 'Main',
+    source: 'LIVE',
+    venue: 'OKX_DEMO',
+    exchangeUid: '123456',
+    liveLimits: risk,
+    isDemo: true,
+    initialBalance: '10000',
+    walletBalance: '10234.5678',
+    usedMargin: '500.25',
+    realizedPnl: '234.5678',
+    feesPaid: '12.5',
+    fundingPaid: '-0.75',
+    config,
+    createdAt: 1700000000000,
+  };
+  const paperAccountMinimal: PaperAccount = {
+    ...paperAccountFull,
+    source: 'REPLAY',
+    venue: 'PAPER',
+    exchangeUid: null,
+    liveLimits: null,
+    isDemo: false,
+    config: { ...DEFAULT_ACCOUNT_CONFIG },
+  };
+
+  const orderFull: Order = {
+    id: 'ord-1',
+    accountId: 'acc-1',
+    clientOrderId: 'cli-1',
+    symbol: 'BTCUSDT',
+    side: 'BUY',
+    type: 'LIMIT',
+    quantity: '0.5',
+    price: '67000.5',
+    triggerPrice: '66000',
+    leverage: 3,
+    reduceOnly: true,
+    closePosition: false,
+    status: 'FILLED',
+    filledQuantity: '0.5',
+    avgFillPrice: '67000.5',
+    reservedMargin: '0',
+    attachedStopLoss: '65000',
+    attachedTakeProfit: '70000',
+    rejectReason: 'none',
+    exchangeOrderId: '987654321',
+    agentId: 'agent-1',
+    decisionId: 'dec-1',
+    createdAt: 1700000000000,
+    updatedAt: 1700000001000,
+  };
+  const orderMinimal: Order = {
+    ...orderFull,
+    type: 'STOP_MARKET',
+    side: 'SELL',
+    status: 'REJECTED',
+    price: null,
+    triggerPrice: null,
+    reduceOnly: false,
+    closePosition: true,
+    avgFillPrice: null,
+    attachedStopLoss: null,
+    attachedTakeProfit: null,
+    rejectReason: null,
+    exchangeOrderId: null,
+    agentId: null,
+    decisionId: null,
+  };
+
+  const fillFull: Fill = {
+    id: 'fill-1',
+    orderId: 'ord-1',
+    accountId: 'acc-1',
+    symbol: 'ETHUSDT',
+    side: 'SELL',
+    quantity: '2',
+    price: '3500.25',
+    fee: '3.5',
+    realizedPnl: '-12.125',
+    liquidity: 'MAKER',
+    ts: 1700000002000,
+  };
+  const fillTaker: Fill = { ...fillFull, liquidity: 'TAKER' };
+  const fillLiquidation: Fill = { ...fillFull, liquidity: 'LIQUIDATION' };
+
+  const requestFull: OrderRequest = {
+    accountId: 'acc-1',
+    clientOrderId: 'cli-1',
+    symbol: 'SOLUSDT',
+    side: 'BUY',
+    type: 'LIMIT',
+    quantity: '10',
+    price: '150.5',
+    leverage: 2,
+    reduceOnly: true,
+    stopLoss: '140',
+    takeProfit: '170',
+    agentId: 'agent-1',
+    decisionId: 'dec-1',
+  };
+  const requestMinimal: OrderRequest = {
+    accountId: 'acc-1',
+    clientOrderId: 'cli-2',
+    symbol: 'SOLUSDT',
+    side: 'SELL',
+    type: 'MARKET',
+    quantity: '1',
+    leverage: 1,
+  };
+
+  const positionFull: Position = {
+    id: 'pos-1',
+    accountId: 'acc-1',
+    symbol: 'BTCUSDT',
+    side: 'LONG',
+    quantity: '0.5',
+    entryPrice: '67000.5',
+    leverage: 3,
+    margin: '11166.75',
+    liquidationPrice: '45000.1',
+    status: 'LIQUIDATED',
+    realizedPnl: '-5',
+    feesPaid: '20.1',
+    fundingPaid: '1.5',
+    maxQuantity: '0.75',
+    exitPrice: '44999',
+    lastFundingTime: 1700000003000,
+    openedAt: 1700000000000,
+    closedAt: 1700000004000,
+  };
+  const positionOpen: Position = {
+    ...positionFull,
+    side: 'SHORT',
+    status: 'OPEN',
+    exitPrice: null,
+    closedAt: null,
+  };
+  const viewFull: PositionView = {
+    ...positionFull,
+    markPrice: '67500.5',
+    unrealizedPnl: '250',
+    stopLoss: '65000',
+    takeProfit: '70000',
+  };
+  const viewMinimal: PositionView = {
+    ...positionOpen,
+    markPrice: null,
+    unrealizedPnl: '0',
+    stopLoss: null,
+    takeProfit: null,
+  };
+
+  const resultFull: OrderResult = { order: orderFull, fills: [fillFull, fillTaker], duplicate: true };
+  const resultMinimal: OrderResult = { order: orderMinimal, fills: [], duplicate: false };
+
+  const ledgerFull: LedgerEvent = {
+    seq: 42,
+    id: 'led-1',
+    accountId: 'acc-1',
+    type: 'LIQUIDATION_PENALTY',
+    amount: '-5.5',
+    marginDelta: '-100',
+    walletAfter: '9894.5',
+    symbol: 'BTCUSDT',
+    orderId: 'ord-1',
+    fillId: 'fill-1',
+    positionId: 'pos-1',
+    memo: 'penalty',
+    ts: 1700000005000,
+  };
+  const ledgerMinimal: LedgerEvent = {
+    ...ledgerFull,
+    type: 'DEPOSIT',
+    symbol: null,
+    orderId: null,
+    fillId: null,
+    positionId: null,
+    memo: '',
+  };
+  const ledgerTypes: LedgerEvent['type'][] = [
+    'DEPOSIT', 'TRADE_FEE', 'REALIZED_PNL', 'FUNDING', 'LIQUIDATION_PENALTY', 'MARGIN_LOCK', 'MARGIN_RELEASE',
+  ];
+
+  const equity: EquityPoint = {
+    accountId: 'acc-1',
+    ts: 1700000006000,
+    equity: '10500.5',
+    wallet: '10234.5678',
+    unrealized: '265.9322',
+  };
+  const balance: AccountBalance = {
+    accountId: 'acc-1',
+    initialBalance: '10000',
+    walletBalance: '10234.5678',
+    availableBalance: '9000',
+    usedMargin: '500.25',
+    orderMargin: '100',
+    equity: '10500.5',
+    realizedPnl: '234.5678',
+    unrealizedPnl: '265.9322',
+    feesPaid: '12.5',
+    fundingPaid: '-0.75',
+  };
+
+  const decisionFull: AiDecisionData = {
+    symbol: 'BTCUSDT',
+    action: 'LONG',
+    orderType: 'LIMIT',
+    entryPrice: 67000.5,
+    stopLoss: 65000,
+    takeProfit: 70000,
+    reason: 'Breakout above resistance',
+    confidence: 0.72,
+    expiresAt: '2026-01-01T00:00:00.000Z',
+  };
+  const decisionMinimal: AiDecisionData = {
+    symbol: 'ETHUSDT',
+    action: 'HOLD',
+    orderType: 'MARKET',
+    entryPrice: null,
+    stopLoss: null,
+    takeProfit: null,
+    reason: '',
+    confidence: 1,
+    expiresAt: null,
+  };
+
+  const check: RiskCheck = { id: 'leverage', label: 'Leverage', passed: false, detail: '5x exceeds 3x' };
+  const sized: SizedTrade = {
+    quantity: '0.5',
+    leverage: 3,
+    notional: '33500.25',
+    margin: '11166.75',
+    riskAmount: '1000',
+    referencePrice: '67000.5',
+    estimatedLiquidationPrice: '45000.1',
+  };
+  const riskResultFull: RiskResult = {
+    approved: false,
+    checks: [check, { ...check, id: 'stop', passed: true }],
+    rejectionReasons: ['Leverage too high'],
+    sized,
+  };
+  const riskResultMinimal: RiskResult = { approved: true, checks: [], rejectionReasons: [], sized: null };
+
+  return {
+    defaults: {
+      accountConfig: DEFAULT_ACCOUNT_CONFIG,
+      riskSettings: DEFAULT_RISK_SETTINGS,
+      liveLimits: DEFAULT_LIVE_LIMITS,
+    },
+    samples: {
+      paperAccount: [paperAccountFull, paperAccountMinimal],
+      paperAccountConfig: [config, { ...DEFAULT_ACCOUNT_CONFIG }],
+      order: [orderFull, orderMinimal],
+      orderRequest: [requestFull, requestMinimal],
+      orderResult: [resultFull, resultMinimal],
+      fill: [fillFull, fillTaker, fillLiquidation],
+      position: [positionFull, positionOpen],
+      positionView: [viewFull, viewMinimal],
+      ledgerEvent: [ledgerFull, ledgerMinimal, ...ledgerTypes.map((type) => ({ ...ledgerFull, type }))],
+      equityPoint: [equity],
+      accountBalance: [balance],
+      riskSettings: [risk, riskMinimal],
+      aiDecisionData: [decisionFull, decisionMinimal],
+      riskCheck: [check],
+      riskResult: [riskResultFull, riskResultMinimal],
+      sizedTrade: [sized],
+    },
+    configJsonText: JSON.stringify(DEFAULT_ACCOUNT_CONFIG),
+    riskJsonText: JSON.stringify(DEFAULT_RISK_SETTINGS),
+  };
+}
+
+/**
  * Golden fixtures: what the TypeScript backend produces, saved so the Rust port can be tested
  * against it. Each key is a file name under crates/golden; a Buffer is written as raw bytes and
  * anything else as JSON.
@@ -381,6 +703,7 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
       round: ROUND_CASES.map((x) => [noNegativeZero(x), noNegativeZero(Math.round(x))]),
       toFixed: FIXED_CASES.map(([x, d]) => [noNegativeZero(x), d, x.toFixed(d)]),
     },
+    'accounting-types.json': accountingTypesFixture(),
     'decimal.json': decimalFixture(),
     'tape.json': tapeFixture(),
     'replay.json': await replayFixture(),

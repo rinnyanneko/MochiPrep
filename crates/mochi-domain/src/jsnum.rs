@@ -66,3 +66,17 @@ fn add_one_in_last_place(int_part: &str, frac: &str) -> String {
         format!("{whole}.{}", String::from_utf8_lossy(fraction))
     }
 }
+
+/// An f64 as a JSON value the way `JSON.stringify` writes it: 3 rather than 3.0. serde_json
+/// always keeps the `.0`, which would make Rust output differ from the TypeScript backend's.
+pub fn js_number_json(x: f64) -> serde_json::Value {
+    // Below 2^53 every integral f64 converts to i64 exactly. Larger magnitudes are left to
+    // serde_json (JS switches to exponent notation from 1e21, which we do not mirror).
+    if x.is_finite() && x.fract() == 0.0 && x.abs() < 9_007_199_254_740_992.0 {
+        // `as i64` turns -0 into 0, and JSON.stringify(-0) is "0" as well.
+        serde_json::Value::from(x as i64)
+    } else {
+        // NaN and infinities become null, which is also what JSON.stringify does.
+        serde_json::Value::from(x)
+    }
+}
