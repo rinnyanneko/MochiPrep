@@ -410,6 +410,34 @@ export const SCENARIOS: Scenario[] = [
     { op: 'recordEquity', accountId: 'acct_missing' },
     read('dailyRisk', 'acct_missing'),
   ]),
+  // ---- LIMIT orders with protection ------------------------------------------------------
+  scenario('a resting long limit with a stop and a target attaches both when a feed fills it', [
+    place({ clientOrderId: 'rest-protected', type: 'LIMIT', price: '90', stopLoss: '85', takeProfit: '110' }),
+    read('openOrders'),
+    feed(T + 1, '89', '90', '90'),
+    read('positions'),
+    read('openOrders'),
+  ]),
+  scenario('a resting short limit with a stop and a target attaches both when a feed fills it', [
+    place({ clientOrderId: 'rest-protected', side: 'SELL', type: 'LIMIT', price: '110', stopLoss: '115', takeProfit: '100' }),
+    read('openOrders'),
+    feed(T + 1, '110', '111', '110'),
+    read('positions'),
+    read('openOrders'),
+  ]),
+  scenario('a resting limit adds to a long opened at another leverage when a feed fills it', [
+    place({ clientOrderId: 'open', leverage: 10 }),
+    place({ clientOrderId: 'add-limit', type: 'LIMIT', price: '95', leverage: 5 }),
+    read('balance'),
+    feed(T + 1, '94', '95', '95'),
+    read('positions'),
+    read('balance'),
+  ]),
+  scenario('a marketable limit with a stop fills as taker and attaches the stop', [
+    place({ clientOrderId: 'cross-protected', type: 'LIMIT', price: '101', stopLoss: '95' }),
+    read('positions'),
+    read('openOrders'),
+  ]),
   scenario('reports a stale quote in whole seconds', [
     quote(T - 90_499),
     place({ clientOrderId: 'stale-90' }),
