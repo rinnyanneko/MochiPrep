@@ -222,6 +222,33 @@ export const SCENARIOS: Scenario[] = [
     feed(T + 2, '500', '501', '500'),
     read('balance'),
   ]),
+  // The fill settles at the liquidation price rounded to the 0.1 tick. At low prices that
+  // rounding can move further than the maintenance buffer (entry x 0.5%), so the raw loss
+  // exceeds the margin and the cap binds: the penalty is zero and no penalty row is written.
+  scenario('liquidation cap binds when tick rounding exceeds maintenance (LONG)', [
+    // Entry 3.7, margin 0.37, maintenance 0.0185, liquidation 3.3485, filled at 3.3: raw -0.4.
+    quote(T, '3.6', '3.7', '3.7'),
+    place({ clientOrderId: 'open' }),
+    feed(T + 1, '2.9', '3.1', '3'),
+    read('balance'),
+    read('positions'),
+  ]),
+  scenario('liquidation cap binds when tick rounding exceeds maintenance (SHORT)', [
+    // Entry 3.7, margin 0.37, maintenance 0.0185, liquidation 4.0515, filled at 4.1: raw -0.4.
+    quote(T, '3.7', '3.8', '3.7'),
+    place({ clientOrderId: 'open', side: 'SELL' }),
+    feed(T + 1, '4.1', '4.3', '4.2'),
+    read('balance'),
+    read('positions'),
+  ]),
+  scenario('liquidation loss equals the margin exactly when rounding lands on the bankruptcy price', [
+    // Entry 5, margin 0.5, liquidation 4.525, filled at 4.5: raw -0.5 = -margin, penalty 0.
+    quote(T, '4.9', '5', '5'),
+    place({ clientOrderId: 'open' }),
+    feed(T + 1, '4.4', '4.6', '4.5'),
+    read('balance'),
+    read('positions'),
+  ]),
   scenario('triggers a short stop only when price rises to it, filling at the ask', [
     place({ clientOrderId: 'open', side: 'SELL', stopLoss: '105', takeProfit: '90' }),
     feed(T + 1, '98', '100', '99'),

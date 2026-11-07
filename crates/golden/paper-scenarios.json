@@ -22835,6 +22835,3618 @@
   }
  },
  {
+  "name": "liquidation cap binds when tick rounding exceeds maintenance (LONG)",
+  "snapshot": "every",
+  "ops": [
+   {
+    "op": "now",
+    "source": "REPLAY",
+    "ts": 3600000
+   },
+   {
+    "op": "quote",
+    "quote": {
+     "source": "REPLAY",
+     "symbol": "BTCUSDT",
+     "bid": "99",
+     "ask": "101",
+     "last": "100",
+     "mark": "100",
+     "markEstimated": false,
+     "fundingRate": "0",
+     "nextFundingTime": null,
+     "ts": 3600000
+    },
+    "feed": false
+   },
+   {
+    "op": "createAccount",
+    "args": {
+     "name": "test",
+     "source": "REPLAY",
+     "initialBalance": "10000",
+     "config": {
+      "takerFeeRate": "0.001",
+      "makerFeeRate": "0.0002",
+      "slippageBps": "0",
+      "impactBpsPerMillion": "0"
+     }
+    }
+   },
+   {
+    "op": "quote",
+    "quote": {
+     "source": "REPLAY",
+     "symbol": "BTCUSDT",
+     "bid": "3.6",
+     "ask": "3.7",
+     "last": "3.7",
+     "mark": "3.7",
+     "markEstimated": false,
+     "fundingRate": "0",
+     "nextFundingTime": null,
+     "ts": 3600000
+    },
+    "feed": false
+   },
+   {
+    "op": "placeOrder",
+    "request": {
+     "accountId": "acct_1",
+     "symbol": "BTCUSDT",
+     "side": "BUY",
+     "type": "MARKET",
+     "quantity": "1",
+     "leverage": 10,
+     "clientOrderId": "open"
+    }
+   },
+   {
+    "op": "quote",
+    "quote": {
+     "source": "REPLAY",
+     "symbol": "BTCUSDT",
+     "bid": "2.9",
+     "ask": "3.1",
+     "last": "3",
+     "mark": "3",
+     "markEstimated": false,
+     "fundingRate": "0",
+     "nextFundingTime": null,
+     "ts": 3600001
+    },
+    "feed": true
+   },
+   {
+    "op": "read",
+    "what": "balance",
+    "accountId": "acct_1"
+   },
+   {
+    "op": "read",
+    "what": "positions",
+    "accountId": "acct_1"
+   }
+  ],
+  "steps": [
+   {
+    "events": [],
+    "rows": {
+     "accounts": [],
+     "orders": [],
+     "fills": [],
+     "positions": [],
+     "ledger_events": [],
+     "equity_history": []
+    }
+   },
+   {
+    "events": [],
+    "rows": {
+     "accounts": [],
+     "orders": [],
+     "fills": [],
+     "positions": [],
+     "ledger_events": [],
+     "equity_history": []
+    }
+   },
+   {
+    "events": [],
+    "result": {
+     "id": "acct_1",
+     "name": "test",
+     "source": "REPLAY",
+     "venue": "PAPER",
+     "exchangeUid": null,
+     "liveLimits": null,
+     "isDemo": false,
+     "initialBalance": "10000",
+     "walletBalance": "10000",
+     "usedMargin": "0",
+     "realizedPnl": "0",
+     "feesPaid": "0",
+     "fundingPaid": "0",
+     "config": {
+      "takerFeeRate": "0.001",
+      "makerFeeRate": "0.0002",
+      "slippageBps": "0",
+      "impactBpsPerMillion": "0"
+     },
+     "createdAt": 3600000
+    },
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "10000",
+       "used_margin": "0",
+       "realized_pnl": "0",
+       "fees_paid": "0",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [],
+     "fills": [],
+     "positions": [],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [],
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "10000",
+       "used_margin": "0",
+       "realized_pnl": "0",
+       "fees_paid": "0",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [],
+     "fills": [],
+     "positions": [],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [
+     {
+      "kind": "fill",
+      "fill": {
+       "id": "fill_4",
+       "orderId": "ord_3",
+       "accountId": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "3.7",
+       "fee": "0.0037",
+       "realizedPnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      },
+      "order": {
+       "id": "ord_3",
+       "accountId": "acct_1",
+       "clientOrderId": "open",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "triggerPrice": null,
+       "leverage": 10,
+       "reduceOnly": false,
+       "closePosition": false,
+       "status": "FILLED",
+       "filledQuantity": "1",
+       "avgFillPrice": "3.7",
+       "reservedMargin": "0",
+       "attachedStopLoss": null,
+       "attachedTakeProfit": null,
+       "rejectReason": null,
+       "exchangeOrderId": null,
+       "agentId": null,
+       "decisionId": null,
+       "createdAt": 3600000,
+       "updatedAt": 3600000
+      }
+     }
+    ],
+    "result": {
+     "order": {
+      "id": "ord_3",
+      "accountId": "acct_1",
+      "clientOrderId": "open",
+      "symbol": "BTCUSDT",
+      "side": "BUY",
+      "type": "MARKET",
+      "quantity": "1",
+      "price": null,
+      "triggerPrice": null,
+      "leverage": 10,
+      "reduceOnly": false,
+      "closePosition": false,
+      "status": "FILLED",
+      "filledQuantity": "1",
+      "avgFillPrice": "3.7",
+      "reservedMargin": "0",
+      "attachedStopLoss": null,
+      "attachedTakeProfit": null,
+      "rejectReason": null,
+      "exchangeOrderId": null,
+      "agentId": null,
+      "decisionId": null,
+      "createdAt": 3600000,
+      "updatedAt": 3600000
+     },
+     "fills": [
+      {
+       "id": "fill_4",
+       "orderId": "ord_3",
+       "accountId": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "3.7",
+       "fee": "0.0037",
+       "realizedPnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      }
+     ],
+     "duplicate": false
+    },
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "9999.9963",
+       "used_margin": "0.37",
+       "realized_pnl": "0",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [
+      {
+       "id": "ord_3",
+       "account_id": "acct_1",
+       "client_order_id": "open",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 0,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "3.7",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600000,
+       "updated_at": 3600000,
+       "exchange_order_id": null
+      }
+     ],
+     "fills": [
+      {
+       "id": "fill_4",
+       "order_id": "ord_3",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "3.7",
+       "fee": "0.0037",
+       "realized_pnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      }
+     ],
+     "positions": [
+      {
+       "id": "pos_5",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "LONG",
+       "quantity": "1",
+       "entry_price": "3.7",
+       "leverage": 10,
+       "margin": "0.37",
+       "liquidation_price": "3.3485",
+       "status": "OPEN",
+       "realized_pnl": "0",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "max_quantity": "1",
+       "exit_price": null,
+       "last_funding_time": 0,
+       "opened_at": 3600000,
+       "closed_at": null
+      }
+     ],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      },
+      {
+       "seq": 2,
+       "id": "evt_6",
+       "account_id": "acct_1",
+       "type": "MARGIN_LOCK",
+       "amount": "0",
+       "margin_delta": "0.37",
+       "wallet_after": "10000",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "Isolated margin at 10x",
+       "ts": 3600000
+      },
+      {
+       "seq": 3,
+       "id": "evt_7",
+       "account_id": "acct_1",
+       "type": "TRADE_FEE",
+       "amount": "-0.0037",
+       "margin_delta": "0",
+       "wallet_after": "9999.9963",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "TAKER fee at 0.001",
+       "ts": 3600000
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [
+     {
+      "kind": "fill",
+      "fill": {
+       "id": "fill_9",
+       "orderId": "ord_8",
+       "accountId": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "3.3",
+       "fee": "0",
+       "realizedPnl": "-0.37",
+       "liquidity": "LIQUIDATION",
+       "ts": 3600001
+      },
+      "order": {
+       "id": "ord_8",
+       "accountId": "acct_1",
+       "clientOrderId": "liquidation:pos_5",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "triggerPrice": null,
+       "leverage": 10,
+       "reduceOnly": true,
+       "closePosition": false,
+       "status": "FILLED",
+       "filledQuantity": "1",
+       "avgFillPrice": "3.3",
+       "reservedMargin": "0",
+       "attachedStopLoss": null,
+       "attachedTakeProfit": null,
+       "rejectReason": null,
+       "exchangeOrderId": null,
+       "agentId": null,
+       "decisionId": null,
+       "createdAt": 3600001,
+       "updatedAt": 3600001
+      }
+     },
+     {
+      "kind": "liquidation",
+      "position": {
+       "id": "pos_5",
+       "accountId": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "LONG",
+       "quantity": "0",
+       "entryPrice": "3.7",
+       "leverage": 10,
+       "margin": "0",
+       "liquidationPrice": "3.3485",
+       "status": "LIQUIDATED",
+       "realizedPnl": "-0.37",
+       "feesPaid": "0.0037",
+       "fundingPaid": "0",
+       "maxQuantity": "1",
+       "exitPrice": "3.3",
+       "lastFundingTime": 0,
+       "openedAt": 3600000,
+       "closedAt": 3600001
+      }
+     }
+    ],
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "9999.6263",
+       "used_margin": "0",
+       "realized_pnl": "-0.37",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [
+      {
+       "id": "ord_3",
+       "account_id": "acct_1",
+       "client_order_id": "open",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 0,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "3.7",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600000,
+       "updated_at": 3600000,
+       "exchange_order_id": null
+      },
+      {
+       "id": "ord_8",
+       "account_id": "acct_1",
+       "client_order_id": "liquidation:pos_5",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 1,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "3.3",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600001,
+       "updated_at": 3600001,
+       "exchange_order_id": null
+      }
+     ],
+     "fills": [
+      {
+       "id": "fill_4",
+       "order_id": "ord_3",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "3.7",
+       "fee": "0.0037",
+       "realized_pnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      },
+      {
+       "id": "fill_9",
+       "order_id": "ord_8",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "3.3",
+       "fee": "0",
+       "realized_pnl": "-0.37",
+       "liquidity": "LIQUIDATION",
+       "ts": 3600001
+      }
+     ],
+     "positions": [
+      {
+       "id": "pos_5",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "LONG",
+       "quantity": "0",
+       "entry_price": "3.7",
+       "leverage": 10,
+       "margin": "0",
+       "liquidation_price": "3.3485",
+       "status": "LIQUIDATED",
+       "realized_pnl": "-0.37",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "max_quantity": "1",
+       "exit_price": "3.3",
+       "last_funding_time": 0,
+       "opened_at": 3600000,
+       "closed_at": 3600001
+      }
+     ],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      },
+      {
+       "seq": 2,
+       "id": "evt_6",
+       "account_id": "acct_1",
+       "type": "MARGIN_LOCK",
+       "amount": "0",
+       "margin_delta": "0.37",
+       "wallet_after": "10000",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "Isolated margin at 10x",
+       "ts": 3600000
+      },
+      {
+       "seq": 3,
+       "id": "evt_7",
+       "account_id": "acct_1",
+       "type": "TRADE_FEE",
+       "amount": "-0.0037",
+       "margin_delta": "0",
+       "wallet_after": "9999.9963",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "TAKER fee at 0.001",
+       "ts": 3600000
+      },
+      {
+       "seq": 4,
+       "id": "evt_10",
+       "account_id": "acct_1",
+       "type": "REALIZED_PNL",
+       "amount": "-0.37",
+       "margin_delta": "0",
+       "wallet_after": "9999.6263",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Liquidated @ 3.3 (mark 3)",
+       "ts": 3600001
+      },
+      {
+       "seq": 5,
+       "id": "evt_11",
+       "account_id": "acct_1",
+       "type": "MARGIN_RELEASE",
+       "amount": "0",
+       "margin_delta": "-0.37",
+       "wallet_after": "9999.6263",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Margin released on liquidation",
+       "ts": 3600001
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [],
+    "result": {
+     "accountId": "acct_1",
+     "initialBalance": "10000",
+     "walletBalance": "9999.6263",
+     "availableBalance": "9999.6263",
+     "usedMargin": "0",
+     "orderMargin": "0",
+     "equity": "9999.6263",
+     "realizedPnl": "-0.37",
+     "unrealizedPnl": "0",
+     "feesPaid": "0.0037",
+     "fundingPaid": "0"
+    },
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "9999.6263",
+       "used_margin": "0",
+       "realized_pnl": "-0.37",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [
+      {
+       "id": "ord_3",
+       "account_id": "acct_1",
+       "client_order_id": "open",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 0,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "3.7",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600000,
+       "updated_at": 3600000,
+       "exchange_order_id": null
+      },
+      {
+       "id": "ord_8",
+       "account_id": "acct_1",
+       "client_order_id": "liquidation:pos_5",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 1,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "3.3",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600001,
+       "updated_at": 3600001,
+       "exchange_order_id": null
+      }
+     ],
+     "fills": [
+      {
+       "id": "fill_4",
+       "order_id": "ord_3",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "3.7",
+       "fee": "0.0037",
+       "realized_pnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      },
+      {
+       "id": "fill_9",
+       "order_id": "ord_8",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "3.3",
+       "fee": "0",
+       "realized_pnl": "-0.37",
+       "liquidity": "LIQUIDATION",
+       "ts": 3600001
+      }
+     ],
+     "positions": [
+      {
+       "id": "pos_5",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "LONG",
+       "quantity": "0",
+       "entry_price": "3.7",
+       "leverage": 10,
+       "margin": "0",
+       "liquidation_price": "3.3485",
+       "status": "LIQUIDATED",
+       "realized_pnl": "-0.37",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "max_quantity": "1",
+       "exit_price": "3.3",
+       "last_funding_time": 0,
+       "opened_at": 3600000,
+       "closed_at": 3600001
+      }
+     ],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      },
+      {
+       "seq": 2,
+       "id": "evt_6",
+       "account_id": "acct_1",
+       "type": "MARGIN_LOCK",
+       "amount": "0",
+       "margin_delta": "0.37",
+       "wallet_after": "10000",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "Isolated margin at 10x",
+       "ts": 3600000
+      },
+      {
+       "seq": 3,
+       "id": "evt_7",
+       "account_id": "acct_1",
+       "type": "TRADE_FEE",
+       "amount": "-0.0037",
+       "margin_delta": "0",
+       "wallet_after": "9999.9963",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "TAKER fee at 0.001",
+       "ts": 3600000
+      },
+      {
+       "seq": 4,
+       "id": "evt_10",
+       "account_id": "acct_1",
+       "type": "REALIZED_PNL",
+       "amount": "-0.37",
+       "margin_delta": "0",
+       "wallet_after": "9999.6263",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Liquidated @ 3.3 (mark 3)",
+       "ts": 3600001
+      },
+      {
+       "seq": 5,
+       "id": "evt_11",
+       "account_id": "acct_1",
+       "type": "MARGIN_RELEASE",
+       "amount": "0",
+       "margin_delta": "-0.37",
+       "wallet_after": "9999.6263",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Margin released on liquidation",
+       "ts": 3600001
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [],
+    "result": [],
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "9999.6263",
+       "used_margin": "0",
+       "realized_pnl": "-0.37",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [
+      {
+       "id": "ord_3",
+       "account_id": "acct_1",
+       "client_order_id": "open",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 0,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "3.7",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600000,
+       "updated_at": 3600000,
+       "exchange_order_id": null
+      },
+      {
+       "id": "ord_8",
+       "account_id": "acct_1",
+       "client_order_id": "liquidation:pos_5",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 1,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "3.3",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600001,
+       "updated_at": 3600001,
+       "exchange_order_id": null
+      }
+     ],
+     "fills": [
+      {
+       "id": "fill_4",
+       "order_id": "ord_3",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "3.7",
+       "fee": "0.0037",
+       "realized_pnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      },
+      {
+       "id": "fill_9",
+       "order_id": "ord_8",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "3.3",
+       "fee": "0",
+       "realized_pnl": "-0.37",
+       "liquidity": "LIQUIDATION",
+       "ts": 3600001
+      }
+     ],
+     "positions": [
+      {
+       "id": "pos_5",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "LONG",
+       "quantity": "0",
+       "entry_price": "3.7",
+       "leverage": 10,
+       "margin": "0",
+       "liquidation_price": "3.3485",
+       "status": "LIQUIDATED",
+       "realized_pnl": "-0.37",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "max_quantity": "1",
+       "exit_price": "3.3",
+       "last_funding_time": 0,
+       "opened_at": 3600000,
+       "closed_at": 3600001
+      }
+     ],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      },
+      {
+       "seq": 2,
+       "id": "evt_6",
+       "account_id": "acct_1",
+       "type": "MARGIN_LOCK",
+       "amount": "0",
+       "margin_delta": "0.37",
+       "wallet_after": "10000",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "Isolated margin at 10x",
+       "ts": 3600000
+      },
+      {
+       "seq": 3,
+       "id": "evt_7",
+       "account_id": "acct_1",
+       "type": "TRADE_FEE",
+       "amount": "-0.0037",
+       "margin_delta": "0",
+       "wallet_after": "9999.9963",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "TAKER fee at 0.001",
+       "ts": 3600000
+      },
+      {
+       "seq": 4,
+       "id": "evt_10",
+       "account_id": "acct_1",
+       "type": "REALIZED_PNL",
+       "amount": "-0.37",
+       "margin_delta": "0",
+       "wallet_after": "9999.6263",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Liquidated @ 3.3 (mark 3)",
+       "ts": 3600001
+      },
+      {
+       "seq": 5,
+       "id": "evt_11",
+       "account_id": "acct_1",
+       "type": "MARGIN_RELEASE",
+       "amount": "0",
+       "margin_delta": "-0.37",
+       "wallet_after": "9999.6263",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Margin released on liquidation",
+       "ts": 3600001
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   }
+  ],
+  "audit": {
+   "acct_1": []
+  }
+ },
+ {
+  "name": "liquidation cap binds when tick rounding exceeds maintenance (SHORT)",
+  "snapshot": "every",
+  "ops": [
+   {
+    "op": "now",
+    "source": "REPLAY",
+    "ts": 3600000
+   },
+   {
+    "op": "quote",
+    "quote": {
+     "source": "REPLAY",
+     "symbol": "BTCUSDT",
+     "bid": "99",
+     "ask": "101",
+     "last": "100",
+     "mark": "100",
+     "markEstimated": false,
+     "fundingRate": "0",
+     "nextFundingTime": null,
+     "ts": 3600000
+    },
+    "feed": false
+   },
+   {
+    "op": "createAccount",
+    "args": {
+     "name": "test",
+     "source": "REPLAY",
+     "initialBalance": "10000",
+     "config": {
+      "takerFeeRate": "0.001",
+      "makerFeeRate": "0.0002",
+      "slippageBps": "0",
+      "impactBpsPerMillion": "0"
+     }
+    }
+   },
+   {
+    "op": "quote",
+    "quote": {
+     "source": "REPLAY",
+     "symbol": "BTCUSDT",
+     "bid": "3.7",
+     "ask": "3.8",
+     "last": "3.7",
+     "mark": "3.7",
+     "markEstimated": false,
+     "fundingRate": "0",
+     "nextFundingTime": null,
+     "ts": 3600000
+    },
+    "feed": false
+   },
+   {
+    "op": "placeOrder",
+    "request": {
+     "accountId": "acct_1",
+     "symbol": "BTCUSDT",
+     "side": "SELL",
+     "type": "MARKET",
+     "quantity": "1",
+     "leverage": 10,
+     "clientOrderId": "open"
+    }
+   },
+   {
+    "op": "quote",
+    "quote": {
+     "source": "REPLAY",
+     "symbol": "BTCUSDT",
+     "bid": "4.1",
+     "ask": "4.3",
+     "last": "4.2",
+     "mark": "4.2",
+     "markEstimated": false,
+     "fundingRate": "0",
+     "nextFundingTime": null,
+     "ts": 3600001
+    },
+    "feed": true
+   },
+   {
+    "op": "read",
+    "what": "balance",
+    "accountId": "acct_1"
+   },
+   {
+    "op": "read",
+    "what": "positions",
+    "accountId": "acct_1"
+   }
+  ],
+  "steps": [
+   {
+    "events": [],
+    "rows": {
+     "accounts": [],
+     "orders": [],
+     "fills": [],
+     "positions": [],
+     "ledger_events": [],
+     "equity_history": []
+    }
+   },
+   {
+    "events": [],
+    "rows": {
+     "accounts": [],
+     "orders": [],
+     "fills": [],
+     "positions": [],
+     "ledger_events": [],
+     "equity_history": []
+    }
+   },
+   {
+    "events": [],
+    "result": {
+     "id": "acct_1",
+     "name": "test",
+     "source": "REPLAY",
+     "venue": "PAPER",
+     "exchangeUid": null,
+     "liveLimits": null,
+     "isDemo": false,
+     "initialBalance": "10000",
+     "walletBalance": "10000",
+     "usedMargin": "0",
+     "realizedPnl": "0",
+     "feesPaid": "0",
+     "fundingPaid": "0",
+     "config": {
+      "takerFeeRate": "0.001",
+      "makerFeeRate": "0.0002",
+      "slippageBps": "0",
+      "impactBpsPerMillion": "0"
+     },
+     "createdAt": 3600000
+    },
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "10000",
+       "used_margin": "0",
+       "realized_pnl": "0",
+       "fees_paid": "0",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [],
+     "fills": [],
+     "positions": [],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [],
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "10000",
+       "used_margin": "0",
+       "realized_pnl": "0",
+       "fees_paid": "0",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [],
+     "fills": [],
+     "positions": [],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [
+     {
+      "kind": "fill",
+      "fill": {
+       "id": "fill_4",
+       "orderId": "ord_3",
+       "accountId": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "3.7",
+       "fee": "0.0037",
+       "realizedPnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      },
+      "order": {
+       "id": "ord_3",
+       "accountId": "acct_1",
+       "clientOrderId": "open",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "triggerPrice": null,
+       "leverage": 10,
+       "reduceOnly": false,
+       "closePosition": false,
+       "status": "FILLED",
+       "filledQuantity": "1",
+       "avgFillPrice": "3.7",
+       "reservedMargin": "0",
+       "attachedStopLoss": null,
+       "attachedTakeProfit": null,
+       "rejectReason": null,
+       "exchangeOrderId": null,
+       "agentId": null,
+       "decisionId": null,
+       "createdAt": 3600000,
+       "updatedAt": 3600000
+      }
+     }
+    ],
+    "result": {
+     "order": {
+      "id": "ord_3",
+      "accountId": "acct_1",
+      "clientOrderId": "open",
+      "symbol": "BTCUSDT",
+      "side": "SELL",
+      "type": "MARKET",
+      "quantity": "1",
+      "price": null,
+      "triggerPrice": null,
+      "leverage": 10,
+      "reduceOnly": false,
+      "closePosition": false,
+      "status": "FILLED",
+      "filledQuantity": "1",
+      "avgFillPrice": "3.7",
+      "reservedMargin": "0",
+      "attachedStopLoss": null,
+      "attachedTakeProfit": null,
+      "rejectReason": null,
+      "exchangeOrderId": null,
+      "agentId": null,
+      "decisionId": null,
+      "createdAt": 3600000,
+      "updatedAt": 3600000
+     },
+     "fills": [
+      {
+       "id": "fill_4",
+       "orderId": "ord_3",
+       "accountId": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "3.7",
+       "fee": "0.0037",
+       "realizedPnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      }
+     ],
+     "duplicate": false
+    },
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "9999.9963",
+       "used_margin": "0.37",
+       "realized_pnl": "0",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [
+      {
+       "id": "ord_3",
+       "account_id": "acct_1",
+       "client_order_id": "open",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 0,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "3.7",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600000,
+       "updated_at": 3600000,
+       "exchange_order_id": null
+      }
+     ],
+     "fills": [
+      {
+       "id": "fill_4",
+       "order_id": "ord_3",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "3.7",
+       "fee": "0.0037",
+       "realized_pnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      }
+     ],
+     "positions": [
+      {
+       "id": "pos_5",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SHORT",
+       "quantity": "1",
+       "entry_price": "3.7",
+       "leverage": 10,
+       "margin": "0.37",
+       "liquidation_price": "4.0515",
+       "status": "OPEN",
+       "realized_pnl": "0",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "max_quantity": "1",
+       "exit_price": null,
+       "last_funding_time": 0,
+       "opened_at": 3600000,
+       "closed_at": null
+      }
+     ],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      },
+      {
+       "seq": 2,
+       "id": "evt_6",
+       "account_id": "acct_1",
+       "type": "MARGIN_LOCK",
+       "amount": "0",
+       "margin_delta": "0.37",
+       "wallet_after": "10000",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "Isolated margin at 10x",
+       "ts": 3600000
+      },
+      {
+       "seq": 3,
+       "id": "evt_7",
+       "account_id": "acct_1",
+       "type": "TRADE_FEE",
+       "amount": "-0.0037",
+       "margin_delta": "0",
+       "wallet_after": "9999.9963",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "TAKER fee at 0.001",
+       "ts": 3600000
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [
+     {
+      "kind": "fill",
+      "fill": {
+       "id": "fill_9",
+       "orderId": "ord_8",
+       "accountId": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "4.1",
+       "fee": "0",
+       "realizedPnl": "-0.37",
+       "liquidity": "LIQUIDATION",
+       "ts": 3600001
+      },
+      "order": {
+       "id": "ord_8",
+       "accountId": "acct_1",
+       "clientOrderId": "liquidation:pos_5",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "triggerPrice": null,
+       "leverage": 10,
+       "reduceOnly": true,
+       "closePosition": false,
+       "status": "FILLED",
+       "filledQuantity": "1",
+       "avgFillPrice": "4.1",
+       "reservedMargin": "0",
+       "attachedStopLoss": null,
+       "attachedTakeProfit": null,
+       "rejectReason": null,
+       "exchangeOrderId": null,
+       "agentId": null,
+       "decisionId": null,
+       "createdAt": 3600001,
+       "updatedAt": 3600001
+      }
+     },
+     {
+      "kind": "liquidation",
+      "position": {
+       "id": "pos_5",
+       "accountId": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SHORT",
+       "quantity": "0",
+       "entryPrice": "3.7",
+       "leverage": 10,
+       "margin": "0",
+       "liquidationPrice": "4.0515",
+       "status": "LIQUIDATED",
+       "realizedPnl": "-0.37",
+       "feesPaid": "0.0037",
+       "fundingPaid": "0",
+       "maxQuantity": "1",
+       "exitPrice": "4.1",
+       "lastFundingTime": 0,
+       "openedAt": 3600000,
+       "closedAt": 3600001
+      }
+     }
+    ],
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "9999.6263",
+       "used_margin": "0",
+       "realized_pnl": "-0.37",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [
+      {
+       "id": "ord_3",
+       "account_id": "acct_1",
+       "client_order_id": "open",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 0,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "3.7",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600000,
+       "updated_at": 3600000,
+       "exchange_order_id": null
+      },
+      {
+       "id": "ord_8",
+       "account_id": "acct_1",
+       "client_order_id": "liquidation:pos_5",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 1,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "4.1",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600001,
+       "updated_at": 3600001,
+       "exchange_order_id": null
+      }
+     ],
+     "fills": [
+      {
+       "id": "fill_4",
+       "order_id": "ord_3",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "3.7",
+       "fee": "0.0037",
+       "realized_pnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      },
+      {
+       "id": "fill_9",
+       "order_id": "ord_8",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "4.1",
+       "fee": "0",
+       "realized_pnl": "-0.37",
+       "liquidity": "LIQUIDATION",
+       "ts": 3600001
+      }
+     ],
+     "positions": [
+      {
+       "id": "pos_5",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SHORT",
+       "quantity": "0",
+       "entry_price": "3.7",
+       "leverage": 10,
+       "margin": "0",
+       "liquidation_price": "4.0515",
+       "status": "LIQUIDATED",
+       "realized_pnl": "-0.37",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "max_quantity": "1",
+       "exit_price": "4.1",
+       "last_funding_time": 0,
+       "opened_at": 3600000,
+       "closed_at": 3600001
+      }
+     ],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      },
+      {
+       "seq": 2,
+       "id": "evt_6",
+       "account_id": "acct_1",
+       "type": "MARGIN_LOCK",
+       "amount": "0",
+       "margin_delta": "0.37",
+       "wallet_after": "10000",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "Isolated margin at 10x",
+       "ts": 3600000
+      },
+      {
+       "seq": 3,
+       "id": "evt_7",
+       "account_id": "acct_1",
+       "type": "TRADE_FEE",
+       "amount": "-0.0037",
+       "margin_delta": "0",
+       "wallet_after": "9999.9963",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "TAKER fee at 0.001",
+       "ts": 3600000
+      },
+      {
+       "seq": 4,
+       "id": "evt_10",
+       "account_id": "acct_1",
+       "type": "REALIZED_PNL",
+       "amount": "-0.37",
+       "margin_delta": "0",
+       "wallet_after": "9999.6263",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Liquidated @ 4.1 (mark 4.2)",
+       "ts": 3600001
+      },
+      {
+       "seq": 5,
+       "id": "evt_11",
+       "account_id": "acct_1",
+       "type": "MARGIN_RELEASE",
+       "amount": "0",
+       "margin_delta": "-0.37",
+       "wallet_after": "9999.6263",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Margin released on liquidation",
+       "ts": 3600001
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [],
+    "result": {
+     "accountId": "acct_1",
+     "initialBalance": "10000",
+     "walletBalance": "9999.6263",
+     "availableBalance": "9999.6263",
+     "usedMargin": "0",
+     "orderMargin": "0",
+     "equity": "9999.6263",
+     "realizedPnl": "-0.37",
+     "unrealizedPnl": "0",
+     "feesPaid": "0.0037",
+     "fundingPaid": "0"
+    },
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "9999.6263",
+       "used_margin": "0",
+       "realized_pnl": "-0.37",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [
+      {
+       "id": "ord_3",
+       "account_id": "acct_1",
+       "client_order_id": "open",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 0,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "3.7",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600000,
+       "updated_at": 3600000,
+       "exchange_order_id": null
+      },
+      {
+       "id": "ord_8",
+       "account_id": "acct_1",
+       "client_order_id": "liquidation:pos_5",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 1,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "4.1",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600001,
+       "updated_at": 3600001,
+       "exchange_order_id": null
+      }
+     ],
+     "fills": [
+      {
+       "id": "fill_4",
+       "order_id": "ord_3",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "3.7",
+       "fee": "0.0037",
+       "realized_pnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      },
+      {
+       "id": "fill_9",
+       "order_id": "ord_8",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "4.1",
+       "fee": "0",
+       "realized_pnl": "-0.37",
+       "liquidity": "LIQUIDATION",
+       "ts": 3600001
+      }
+     ],
+     "positions": [
+      {
+       "id": "pos_5",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SHORT",
+       "quantity": "0",
+       "entry_price": "3.7",
+       "leverage": 10,
+       "margin": "0",
+       "liquidation_price": "4.0515",
+       "status": "LIQUIDATED",
+       "realized_pnl": "-0.37",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "max_quantity": "1",
+       "exit_price": "4.1",
+       "last_funding_time": 0,
+       "opened_at": 3600000,
+       "closed_at": 3600001
+      }
+     ],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      },
+      {
+       "seq": 2,
+       "id": "evt_6",
+       "account_id": "acct_1",
+       "type": "MARGIN_LOCK",
+       "amount": "0",
+       "margin_delta": "0.37",
+       "wallet_after": "10000",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "Isolated margin at 10x",
+       "ts": 3600000
+      },
+      {
+       "seq": 3,
+       "id": "evt_7",
+       "account_id": "acct_1",
+       "type": "TRADE_FEE",
+       "amount": "-0.0037",
+       "margin_delta": "0",
+       "wallet_after": "9999.9963",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "TAKER fee at 0.001",
+       "ts": 3600000
+      },
+      {
+       "seq": 4,
+       "id": "evt_10",
+       "account_id": "acct_1",
+       "type": "REALIZED_PNL",
+       "amount": "-0.37",
+       "margin_delta": "0",
+       "wallet_after": "9999.6263",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Liquidated @ 4.1 (mark 4.2)",
+       "ts": 3600001
+      },
+      {
+       "seq": 5,
+       "id": "evt_11",
+       "account_id": "acct_1",
+       "type": "MARGIN_RELEASE",
+       "amount": "0",
+       "margin_delta": "-0.37",
+       "wallet_after": "9999.6263",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Margin released on liquidation",
+       "ts": 3600001
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [],
+    "result": [],
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "9999.6263",
+       "used_margin": "0",
+       "realized_pnl": "-0.37",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [
+      {
+       "id": "ord_3",
+       "account_id": "acct_1",
+       "client_order_id": "open",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 0,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "3.7",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600000,
+       "updated_at": 3600000,
+       "exchange_order_id": null
+      },
+      {
+       "id": "ord_8",
+       "account_id": "acct_1",
+       "client_order_id": "liquidation:pos_5",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 1,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "4.1",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600001,
+       "updated_at": 3600001,
+       "exchange_order_id": null
+      }
+     ],
+     "fills": [
+      {
+       "id": "fill_4",
+       "order_id": "ord_3",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "3.7",
+       "fee": "0.0037",
+       "realized_pnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      },
+      {
+       "id": "fill_9",
+       "order_id": "ord_8",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "4.1",
+       "fee": "0",
+       "realized_pnl": "-0.37",
+       "liquidity": "LIQUIDATION",
+       "ts": 3600001
+      }
+     ],
+     "positions": [
+      {
+       "id": "pos_5",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SHORT",
+       "quantity": "0",
+       "entry_price": "3.7",
+       "leverage": 10,
+       "margin": "0",
+       "liquidation_price": "4.0515",
+       "status": "LIQUIDATED",
+       "realized_pnl": "-0.37",
+       "fees_paid": "0.0037",
+       "funding_paid": "0",
+       "max_quantity": "1",
+       "exit_price": "4.1",
+       "last_funding_time": 0,
+       "opened_at": 3600000,
+       "closed_at": 3600001
+      }
+     ],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      },
+      {
+       "seq": 2,
+       "id": "evt_6",
+       "account_id": "acct_1",
+       "type": "MARGIN_LOCK",
+       "amount": "0",
+       "margin_delta": "0.37",
+       "wallet_after": "10000",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "Isolated margin at 10x",
+       "ts": 3600000
+      },
+      {
+       "seq": 3,
+       "id": "evt_7",
+       "account_id": "acct_1",
+       "type": "TRADE_FEE",
+       "amount": "-0.0037",
+       "margin_delta": "0",
+       "wallet_after": "9999.9963",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "TAKER fee at 0.001",
+       "ts": 3600000
+      },
+      {
+       "seq": 4,
+       "id": "evt_10",
+       "account_id": "acct_1",
+       "type": "REALIZED_PNL",
+       "amount": "-0.37",
+       "margin_delta": "0",
+       "wallet_after": "9999.6263",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Liquidated @ 4.1 (mark 4.2)",
+       "ts": 3600001
+      },
+      {
+       "seq": 5,
+       "id": "evt_11",
+       "account_id": "acct_1",
+       "type": "MARGIN_RELEASE",
+       "amount": "0",
+       "margin_delta": "-0.37",
+       "wallet_after": "9999.6263",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Margin released on liquidation",
+       "ts": 3600001
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   }
+  ],
+  "audit": {
+   "acct_1": []
+  }
+ },
+ {
+  "name": "liquidation loss equals the margin exactly when rounding lands on the bankruptcy price",
+  "snapshot": "every",
+  "ops": [
+   {
+    "op": "now",
+    "source": "REPLAY",
+    "ts": 3600000
+   },
+   {
+    "op": "quote",
+    "quote": {
+     "source": "REPLAY",
+     "symbol": "BTCUSDT",
+     "bid": "99",
+     "ask": "101",
+     "last": "100",
+     "mark": "100",
+     "markEstimated": false,
+     "fundingRate": "0",
+     "nextFundingTime": null,
+     "ts": 3600000
+    },
+    "feed": false
+   },
+   {
+    "op": "createAccount",
+    "args": {
+     "name": "test",
+     "source": "REPLAY",
+     "initialBalance": "10000",
+     "config": {
+      "takerFeeRate": "0.001",
+      "makerFeeRate": "0.0002",
+      "slippageBps": "0",
+      "impactBpsPerMillion": "0"
+     }
+    }
+   },
+   {
+    "op": "quote",
+    "quote": {
+     "source": "REPLAY",
+     "symbol": "BTCUSDT",
+     "bid": "4.9",
+     "ask": "5",
+     "last": "5",
+     "mark": "5",
+     "markEstimated": false,
+     "fundingRate": "0",
+     "nextFundingTime": null,
+     "ts": 3600000
+    },
+    "feed": false
+   },
+   {
+    "op": "placeOrder",
+    "request": {
+     "accountId": "acct_1",
+     "symbol": "BTCUSDT",
+     "side": "BUY",
+     "type": "MARKET",
+     "quantity": "1",
+     "leverage": 10,
+     "clientOrderId": "open"
+    }
+   },
+   {
+    "op": "quote",
+    "quote": {
+     "source": "REPLAY",
+     "symbol": "BTCUSDT",
+     "bid": "4.4",
+     "ask": "4.6",
+     "last": "4.5",
+     "mark": "4.5",
+     "markEstimated": false,
+     "fundingRate": "0",
+     "nextFundingTime": null,
+     "ts": 3600001
+    },
+    "feed": true
+   },
+   {
+    "op": "read",
+    "what": "balance",
+    "accountId": "acct_1"
+   },
+   {
+    "op": "read",
+    "what": "positions",
+    "accountId": "acct_1"
+   }
+  ],
+  "steps": [
+   {
+    "events": [],
+    "rows": {
+     "accounts": [],
+     "orders": [],
+     "fills": [],
+     "positions": [],
+     "ledger_events": [],
+     "equity_history": []
+    }
+   },
+   {
+    "events": [],
+    "rows": {
+     "accounts": [],
+     "orders": [],
+     "fills": [],
+     "positions": [],
+     "ledger_events": [],
+     "equity_history": []
+    }
+   },
+   {
+    "events": [],
+    "result": {
+     "id": "acct_1",
+     "name": "test",
+     "source": "REPLAY",
+     "venue": "PAPER",
+     "exchangeUid": null,
+     "liveLimits": null,
+     "isDemo": false,
+     "initialBalance": "10000",
+     "walletBalance": "10000",
+     "usedMargin": "0",
+     "realizedPnl": "0",
+     "feesPaid": "0",
+     "fundingPaid": "0",
+     "config": {
+      "takerFeeRate": "0.001",
+      "makerFeeRate": "0.0002",
+      "slippageBps": "0",
+      "impactBpsPerMillion": "0"
+     },
+     "createdAt": 3600000
+    },
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "10000",
+       "used_margin": "0",
+       "realized_pnl": "0",
+       "fees_paid": "0",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [],
+     "fills": [],
+     "positions": [],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [],
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "10000",
+       "used_margin": "0",
+       "realized_pnl": "0",
+       "fees_paid": "0",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [],
+     "fills": [],
+     "positions": [],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [
+     {
+      "kind": "fill",
+      "fill": {
+       "id": "fill_4",
+       "orderId": "ord_3",
+       "accountId": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "5",
+       "fee": "0.005",
+       "realizedPnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      },
+      "order": {
+       "id": "ord_3",
+       "accountId": "acct_1",
+       "clientOrderId": "open",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "triggerPrice": null,
+       "leverage": 10,
+       "reduceOnly": false,
+       "closePosition": false,
+       "status": "FILLED",
+       "filledQuantity": "1",
+       "avgFillPrice": "5",
+       "reservedMargin": "0",
+       "attachedStopLoss": null,
+       "attachedTakeProfit": null,
+       "rejectReason": null,
+       "exchangeOrderId": null,
+       "agentId": null,
+       "decisionId": null,
+       "createdAt": 3600000,
+       "updatedAt": 3600000
+      }
+     }
+    ],
+    "result": {
+     "order": {
+      "id": "ord_3",
+      "accountId": "acct_1",
+      "clientOrderId": "open",
+      "symbol": "BTCUSDT",
+      "side": "BUY",
+      "type": "MARKET",
+      "quantity": "1",
+      "price": null,
+      "triggerPrice": null,
+      "leverage": 10,
+      "reduceOnly": false,
+      "closePosition": false,
+      "status": "FILLED",
+      "filledQuantity": "1",
+      "avgFillPrice": "5",
+      "reservedMargin": "0",
+      "attachedStopLoss": null,
+      "attachedTakeProfit": null,
+      "rejectReason": null,
+      "exchangeOrderId": null,
+      "agentId": null,
+      "decisionId": null,
+      "createdAt": 3600000,
+      "updatedAt": 3600000
+     },
+     "fills": [
+      {
+       "id": "fill_4",
+       "orderId": "ord_3",
+       "accountId": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "5",
+       "fee": "0.005",
+       "realizedPnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      }
+     ],
+     "duplicate": false
+    },
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "9999.995",
+       "used_margin": "0.5",
+       "realized_pnl": "0",
+       "fees_paid": "0.005",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [
+      {
+       "id": "ord_3",
+       "account_id": "acct_1",
+       "client_order_id": "open",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 0,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "5",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600000,
+       "updated_at": 3600000,
+       "exchange_order_id": null
+      }
+     ],
+     "fills": [
+      {
+       "id": "fill_4",
+       "order_id": "ord_3",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "5",
+       "fee": "0.005",
+       "realized_pnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      }
+     ],
+     "positions": [
+      {
+       "id": "pos_5",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "LONG",
+       "quantity": "1",
+       "entry_price": "5",
+       "leverage": 10,
+       "margin": "0.5",
+       "liquidation_price": "4.525",
+       "status": "OPEN",
+       "realized_pnl": "0",
+       "fees_paid": "0.005",
+       "funding_paid": "0",
+       "max_quantity": "1",
+       "exit_price": null,
+       "last_funding_time": 0,
+       "opened_at": 3600000,
+       "closed_at": null
+      }
+     ],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      },
+      {
+       "seq": 2,
+       "id": "evt_6",
+       "account_id": "acct_1",
+       "type": "MARGIN_LOCK",
+       "amount": "0",
+       "margin_delta": "0.5",
+       "wallet_after": "10000",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "Isolated margin at 10x",
+       "ts": 3600000
+      },
+      {
+       "seq": 3,
+       "id": "evt_7",
+       "account_id": "acct_1",
+       "type": "TRADE_FEE",
+       "amount": "-0.005",
+       "margin_delta": "0",
+       "wallet_after": "9999.995",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "TAKER fee at 0.001",
+       "ts": 3600000
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [
+     {
+      "kind": "fill",
+      "fill": {
+       "id": "fill_9",
+       "orderId": "ord_8",
+       "accountId": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "4.5",
+       "fee": "0",
+       "realizedPnl": "-0.5",
+       "liquidity": "LIQUIDATION",
+       "ts": 3600001
+      },
+      "order": {
+       "id": "ord_8",
+       "accountId": "acct_1",
+       "clientOrderId": "liquidation:pos_5",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "triggerPrice": null,
+       "leverage": 10,
+       "reduceOnly": true,
+       "closePosition": false,
+       "status": "FILLED",
+       "filledQuantity": "1",
+       "avgFillPrice": "4.5",
+       "reservedMargin": "0",
+       "attachedStopLoss": null,
+       "attachedTakeProfit": null,
+       "rejectReason": null,
+       "exchangeOrderId": null,
+       "agentId": null,
+       "decisionId": null,
+       "createdAt": 3600001,
+       "updatedAt": 3600001
+      }
+     },
+     {
+      "kind": "liquidation",
+      "position": {
+       "id": "pos_5",
+       "accountId": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "LONG",
+       "quantity": "0",
+       "entryPrice": "5",
+       "leverage": 10,
+       "margin": "0",
+       "liquidationPrice": "4.525",
+       "status": "LIQUIDATED",
+       "realizedPnl": "-0.5",
+       "feesPaid": "0.005",
+       "fundingPaid": "0",
+       "maxQuantity": "1",
+       "exitPrice": "4.5",
+       "lastFundingTime": 0,
+       "openedAt": 3600000,
+       "closedAt": 3600001
+      }
+     }
+    ],
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "9999.495",
+       "used_margin": "0",
+       "realized_pnl": "-0.5",
+       "fees_paid": "0.005",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [
+      {
+       "id": "ord_3",
+       "account_id": "acct_1",
+       "client_order_id": "open",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 0,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "5",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600000,
+       "updated_at": 3600000,
+       "exchange_order_id": null
+      },
+      {
+       "id": "ord_8",
+       "account_id": "acct_1",
+       "client_order_id": "liquidation:pos_5",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 1,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "4.5",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600001,
+       "updated_at": 3600001,
+       "exchange_order_id": null
+      }
+     ],
+     "fills": [
+      {
+       "id": "fill_4",
+       "order_id": "ord_3",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "5",
+       "fee": "0.005",
+       "realized_pnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      },
+      {
+       "id": "fill_9",
+       "order_id": "ord_8",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "4.5",
+       "fee": "0",
+       "realized_pnl": "-0.5",
+       "liquidity": "LIQUIDATION",
+       "ts": 3600001
+      }
+     ],
+     "positions": [
+      {
+       "id": "pos_5",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "LONG",
+       "quantity": "0",
+       "entry_price": "5",
+       "leverage": 10,
+       "margin": "0",
+       "liquidation_price": "4.525",
+       "status": "LIQUIDATED",
+       "realized_pnl": "-0.5",
+       "fees_paid": "0.005",
+       "funding_paid": "0",
+       "max_quantity": "1",
+       "exit_price": "4.5",
+       "last_funding_time": 0,
+       "opened_at": 3600000,
+       "closed_at": 3600001
+      }
+     ],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      },
+      {
+       "seq": 2,
+       "id": "evt_6",
+       "account_id": "acct_1",
+       "type": "MARGIN_LOCK",
+       "amount": "0",
+       "margin_delta": "0.5",
+       "wallet_after": "10000",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "Isolated margin at 10x",
+       "ts": 3600000
+      },
+      {
+       "seq": 3,
+       "id": "evt_7",
+       "account_id": "acct_1",
+       "type": "TRADE_FEE",
+       "amount": "-0.005",
+       "margin_delta": "0",
+       "wallet_after": "9999.995",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "TAKER fee at 0.001",
+       "ts": 3600000
+      },
+      {
+       "seq": 4,
+       "id": "evt_10",
+       "account_id": "acct_1",
+       "type": "REALIZED_PNL",
+       "amount": "-0.5",
+       "margin_delta": "0",
+       "wallet_after": "9999.495",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Liquidated @ 4.5 (mark 4.5)",
+       "ts": 3600001
+      },
+      {
+       "seq": 5,
+       "id": "evt_11",
+       "account_id": "acct_1",
+       "type": "MARGIN_RELEASE",
+       "amount": "0",
+       "margin_delta": "-0.5",
+       "wallet_after": "9999.495",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Margin released on liquidation",
+       "ts": 3600001
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [],
+    "result": {
+     "accountId": "acct_1",
+     "initialBalance": "10000",
+     "walletBalance": "9999.495",
+     "availableBalance": "9999.495",
+     "usedMargin": "0",
+     "orderMargin": "0",
+     "equity": "9999.495",
+     "realizedPnl": "-0.5",
+     "unrealizedPnl": "0",
+     "feesPaid": "0.005",
+     "fundingPaid": "0"
+    },
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "9999.495",
+       "used_margin": "0",
+       "realized_pnl": "-0.5",
+       "fees_paid": "0.005",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [
+      {
+       "id": "ord_3",
+       "account_id": "acct_1",
+       "client_order_id": "open",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 0,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "5",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600000,
+       "updated_at": 3600000,
+       "exchange_order_id": null
+      },
+      {
+       "id": "ord_8",
+       "account_id": "acct_1",
+       "client_order_id": "liquidation:pos_5",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 1,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "4.5",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600001,
+       "updated_at": 3600001,
+       "exchange_order_id": null
+      }
+     ],
+     "fills": [
+      {
+       "id": "fill_4",
+       "order_id": "ord_3",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "5",
+       "fee": "0.005",
+       "realized_pnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      },
+      {
+       "id": "fill_9",
+       "order_id": "ord_8",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "4.5",
+       "fee": "0",
+       "realized_pnl": "-0.5",
+       "liquidity": "LIQUIDATION",
+       "ts": 3600001
+      }
+     ],
+     "positions": [
+      {
+       "id": "pos_5",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "LONG",
+       "quantity": "0",
+       "entry_price": "5",
+       "leverage": 10,
+       "margin": "0",
+       "liquidation_price": "4.525",
+       "status": "LIQUIDATED",
+       "realized_pnl": "-0.5",
+       "fees_paid": "0.005",
+       "funding_paid": "0",
+       "max_quantity": "1",
+       "exit_price": "4.5",
+       "last_funding_time": 0,
+       "opened_at": 3600000,
+       "closed_at": 3600001
+      }
+     ],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      },
+      {
+       "seq": 2,
+       "id": "evt_6",
+       "account_id": "acct_1",
+       "type": "MARGIN_LOCK",
+       "amount": "0",
+       "margin_delta": "0.5",
+       "wallet_after": "10000",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "Isolated margin at 10x",
+       "ts": 3600000
+      },
+      {
+       "seq": 3,
+       "id": "evt_7",
+       "account_id": "acct_1",
+       "type": "TRADE_FEE",
+       "amount": "-0.005",
+       "margin_delta": "0",
+       "wallet_after": "9999.995",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "TAKER fee at 0.001",
+       "ts": 3600000
+      },
+      {
+       "seq": 4,
+       "id": "evt_10",
+       "account_id": "acct_1",
+       "type": "REALIZED_PNL",
+       "amount": "-0.5",
+       "margin_delta": "0",
+       "wallet_after": "9999.495",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Liquidated @ 4.5 (mark 4.5)",
+       "ts": 3600001
+      },
+      {
+       "seq": 5,
+       "id": "evt_11",
+       "account_id": "acct_1",
+       "type": "MARGIN_RELEASE",
+       "amount": "0",
+       "margin_delta": "-0.5",
+       "wallet_after": "9999.495",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Margin released on liquidation",
+       "ts": 3600001
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   },
+   {
+    "events": [],
+    "result": [],
+    "rows": {
+     "accounts": [
+      {
+       "id": "acct_1",
+       "name": "test",
+       "source": "REPLAY",
+       "is_demo": 0,
+       "initial_balance": "10000",
+       "wallet_balance": "9999.495",
+       "used_margin": "0",
+       "realized_pnl": "-0.5",
+       "fees_paid": "0.005",
+       "funding_paid": "0",
+       "config": "{\"takerFeeRate\":\"0.001\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"0\",\"impactBpsPerMillion\":\"0\"}",
+       "created_at": 3600000,
+       "venue": "PAPER",
+       "exchange_uid": null,
+       "live_limits": null
+      }
+     ],
+     "orders": [
+      {
+       "id": "ord_3",
+       "account_id": "acct_1",
+       "client_order_id": "open",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 0,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "5",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600000,
+       "updated_at": 3600000,
+       "exchange_order_id": null
+      },
+      {
+       "id": "ord_8",
+       "account_id": "acct_1",
+       "client_order_id": "liquidation:pos_5",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "type": "MARKET",
+       "quantity": "1",
+       "price": null,
+       "trigger_price": null,
+       "leverage": 10,
+       "reduce_only": 1,
+       "close_position": 0,
+       "status": "FILLED",
+       "filled_quantity": "1",
+       "avg_fill_price": "4.5",
+       "reserved_margin": "0",
+       "attached_stop_loss": null,
+       "attached_take_profit": null,
+       "reject_reason": null,
+       "agent_id": null,
+       "decision_id": null,
+       "created_at": 3600001,
+       "updated_at": 3600001,
+       "exchange_order_id": null
+      }
+     ],
+     "fills": [
+      {
+       "id": "fill_4",
+       "order_id": "ord_3",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "BUY",
+       "quantity": "1",
+       "price": "5",
+       "fee": "0.005",
+       "realized_pnl": "0",
+       "liquidity": "TAKER",
+       "ts": 3600000
+      },
+      {
+       "id": "fill_9",
+       "order_id": "ord_8",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "SELL",
+       "quantity": "1",
+       "price": "4.5",
+       "fee": "0",
+       "realized_pnl": "-0.5",
+       "liquidity": "LIQUIDATION",
+       "ts": 3600001
+      }
+     ],
+     "positions": [
+      {
+       "id": "pos_5",
+       "account_id": "acct_1",
+       "symbol": "BTCUSDT",
+       "side": "LONG",
+       "quantity": "0",
+       "entry_price": "5",
+       "leverage": 10,
+       "margin": "0",
+       "liquidation_price": "4.525",
+       "status": "LIQUIDATED",
+       "realized_pnl": "-0.5",
+       "fees_paid": "0.005",
+       "funding_paid": "0",
+       "max_quantity": "1",
+       "exit_price": "4.5",
+       "last_funding_time": 0,
+       "opened_at": 3600000,
+       "closed_at": 3600001
+      }
+     ],
+     "ledger_events": [
+      {
+       "seq": 1,
+       "id": "evt_2",
+       "account_id": "acct_1",
+       "type": "DEPOSIT",
+       "amount": "10000",
+       "margin_delta": "0",
+       "wallet_after": "10000",
+       "symbol": null,
+       "order_id": null,
+       "fill_id": null,
+       "position_id": null,
+       "memo": "Initial virtual balance",
+       "ts": 3600000
+      },
+      {
+       "seq": 2,
+       "id": "evt_6",
+       "account_id": "acct_1",
+       "type": "MARGIN_LOCK",
+       "amount": "0",
+       "margin_delta": "0.5",
+       "wallet_after": "10000",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "Isolated margin at 10x",
+       "ts": 3600000
+      },
+      {
+       "seq": 3,
+       "id": "evt_7",
+       "account_id": "acct_1",
+       "type": "TRADE_FEE",
+       "amount": "-0.005",
+       "margin_delta": "0",
+       "wallet_after": "9999.995",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_3",
+       "fill_id": "fill_4",
+       "position_id": "pos_5",
+       "memo": "TAKER fee at 0.001",
+       "ts": 3600000
+      },
+      {
+       "seq": 4,
+       "id": "evt_10",
+       "account_id": "acct_1",
+       "type": "REALIZED_PNL",
+       "amount": "-0.5",
+       "margin_delta": "0",
+       "wallet_after": "9999.495",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Liquidated @ 4.5 (mark 4.5)",
+       "ts": 3600001
+      },
+      {
+       "seq": 5,
+       "id": "evt_11",
+       "account_id": "acct_1",
+       "type": "MARGIN_RELEASE",
+       "amount": "0",
+       "margin_delta": "-0.5",
+       "wallet_after": "9999.495",
+       "symbol": "BTCUSDT",
+       "order_id": "ord_8",
+       "fill_id": "fill_9",
+       "position_id": "pos_5",
+       "memo": "Margin released on liquidation",
+       "ts": 3600001
+      }
+     ],
+     "equity_history": [
+      {
+       "account_id": "acct_1",
+       "ts": 3600000,
+       "equity": "10000",
+       "wallet": "10000",
+       "unrealized": "0"
+      }
+     ]
+    }
+   }
+  ],
+  "audit": {
+   "acct_1": []
+  }
+ },
+ {
   "name": "triggers a short stop only when price rises to it, filling at the ask",
   "snapshot": "every",
   "ops": [
