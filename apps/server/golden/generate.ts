@@ -52,6 +52,7 @@ import {
   type SizedTrade,
 } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database.js';
+import { SqliteStore } from '../src/db/store.js';
 import { newDataKey, seal, wrapWithPassword } from '../src/vault.js';
 
 const ROUND_CASES = [
@@ -85,6 +86,72 @@ function schemaFixture() {
       migrations: (db.prepare('SELECT name FROM schema_migrations ORDER BY name').all() as { name: string }[]).map(
         (r) => r.name,
       ),
+    };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * What Node's SqliteStore writes for the accounting tables, row by row, plus what its readers
+ * return. `inputs` are the exact objects inserted (ids and timestamps made distinct so they fit
+ * the table constraints), so the Rust tests insert the same data rather than re-deriving it.
+ */
+function storeRowsFixture() {
+  const { samples } = accountingTypesFixture();
+  const account = samples.paperAccount[0]!;
+  const minimalAccount = { ...samples.paperAccount[1]!, id: 'acc-2' };
+  const orders: Order[] = [
+    { ...samples.order[0]! },
+    { ...samples.order[1]!, id: 'ord-2', clientOrderId: 'cli-2', status: 'OPEN', createdAt: 1700000000500, updatedAt: 1700000001500 },
+  ];
+  const fills: Fill[] = [
+    { ...samples.fill[0]! },
+    { ...samples.fill[1]!, id: 'fill-2', orderId: 'ord-2', ts: 1700000002500 },
+  ];
+  const positions: Position[] = [
+    { ...samples.position[0]! },
+    { ...samples.position[1]!, id: 'pos-2', symbol: 'ETHUSDT' },
+  ];
+  const ledger: Array<Omit<LedgerEvent, 'seq'>> = [0, 1, 2].map((i) => {
+    const { seq: _seq, ...event } = samples.ledgerEvent[i]!;
+    return { ...event, id: `led-${i + 1}`, ts: event.ts + i };
+  });
+  const equity: EquityPoint[] = [
+    { ...samples.equityPoint[0]! },
+    { ...samples.equityPoint[0]!, ts: samples.equityPoint[0]!.ts + 1000, equity: '10600.25' },
+  ];
+  // Rewrites the first point's slot, which covers the ON CONFLICT path.
+  const equityUpdate: EquityPoint = { ...equity[0]!, equity: '10501', unrealized: '266.4322' };
+
+  const db = openDatabase(':memory:');
+  try {
+    const store = new SqliteStore(db);
+    // The first account holds everything; the minimal one only proves its NULL columns are stored as NULL.
+    store.insertAccount(account);
+    store.insertAccount(minimalAccount);
+    orders.forEach((o) => store.insertOrder(o));
+    fills.forEach((f) => store.insertFill(f));
+    positions.forEach((p) => store.insertPosition(p));
+    ledger.forEach((e) => store.appendLedger(e));
+    equity.forEach((p) => store.upsertEquityPoint(p));
+    store.upsertEquityPoint(equityUpdate);
+
+    const tables = ['accounts', 'orders', 'fills', 'positions', 'ledger_events', 'equity_history'];
+    const rows: Record<string, unknown[]> = {};
+    for (const table of tables) rows[table] = db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all();
+
+    return {
+      inputs: { accounts: [account, minimalAccount], orders, fills, positions, ledger, equity, equityUpdate },
+      rows,
+      reads: {
+        getAccount: store.getAccount(account.id),
+        getAccountMinimal: store.getAccount(minimalAccount.id),
+        listOpenOrders: store.listOpenOrders(account.id),
+        getOpenPosition: store.getOpenPosition(account.id, 'ETHUSDT'),
+        listLedger: store.listLedger(account.id),
+        listEquity: store.listEquity(account.id, 10),
+      },
     };
   } finally {
     db.close();
@@ -1183,6 +1250,7 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     'tape.json': tapeFixture(),
     'replay.json': await replayFixture(),
     'schema.json': schemaFixture(),
+    'store-rows.json': storeRowsFixture(),
     'node-created.sqlite': nodeCreatedDatabase(),
     'vault.json': await vaultFixture(),
   };

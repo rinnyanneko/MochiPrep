@@ -1,6 +1,10 @@
 //! SQLite store shared with the Node backend: same pragmas, same migration files, same
 //! `schema_migrations` bookkeeping, so either backend can open a database the other created.
 
+mod paper;
+
+pub use paper::SqlitePaperStore;
+
 use rusqlite::Connection;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};

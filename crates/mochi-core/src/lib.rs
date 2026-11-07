@@ -5,6 +5,7 @@
 mod error;
 pub mod fill_model;
 pub mod ledger;
+pub mod paper;
 pub mod performance;
 pub mod perp;
 pub mod risk;

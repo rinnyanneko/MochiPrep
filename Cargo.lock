@@ -332,7 +332,10 @@ dependencies = [
 name = "mochi-store"
 version = "0.1.0"
 dependencies = [
+ "mochi-core",
+ "mochi-domain",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",

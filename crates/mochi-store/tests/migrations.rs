@@ -138,6 +138,8 @@ fn failed_migration_leaves_nothing() {
         Err(StoreError::Migration { name, .. }) => assert_eq!(name, "999_bad.sql"),
         other => panic!("expected a Migration error, got {other:?}"),
     }
+    // A rollback that left the transaction open would wedge every later write.
+    assert!(conn.is_autocommit());
     assert!(!table_exists(&conn, "t"));
     assert!(migration_names(&conn).is_empty());
 }
