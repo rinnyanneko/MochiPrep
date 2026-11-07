@@ -1,8 +1,17 @@
-import type { ProviderConfig } from '@mochiprep/shared';
+import type { ProviderConfig, ProviderKind } from '@mochiprep/shared';
 import { ProviderError, type AiProvider, type AiRequest, type AiResponse } from './types';
 import { redactSecrets } from './redact';
 
 const TIMEOUT_MS = 60_000;
+
+const DEFAULT_BASE: Partial<Record<ProviderKind, string>> = {
+  OPENAI: 'https://api.openai.com/v1',
+  OPENAI_COMPATIBLE: 'https://api.openai.com/v1',
+  DEEPSEEK: 'https://api.deepseek.com',
+  OPENCODE: 'https://opencode.ai/inference/openai/v1',
+};
+/** Providers confirmed to honour JSON mode. Elsewhere the prompt alone asks for JSON. */
+const JSON_MODE: ProviderKind[] = ['OPENAI', 'DEEPSEEK'];
 
 async function post(
   url: string,
@@ -11,6 +20,7 @@ async function post(
   request: AiRequest,
   apiKey: string,
   fetchImpl: typeof fetch,
+  extraHeaders: Record<string, string> = {},
 ): Promise<any> {
   const timeout = AbortSignal.timeout(TIMEOUT_MS);
   const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
@@ -18,16 +28,16 @@ async function post(
   try {
     response = await fetchImpl(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...headers },
+      headers: { ...extraHeaders, 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body),
       signal,
     });
   } catch (error) {
     if (signal.aborted) throw new ProviderError('TIMEOUT', 'The model did not answer in time');
-    throw new ProviderError('NETWORK', redactSecrets(`Could not reach the provider: ${(error as Error).message}`, [apiKey]));
+    throw new ProviderError('NETWORK', redactSecrets(`Could not reach the provider: ${(error as Error).message}`, [apiKey, ...Object.values(extraHeaders)]));
   }
   if (!response.ok) {
-    const text = redactSecrets((await response.text().catch(() => '')).slice(0, 400), [apiKey]);
+    const text = redactSecrets((await response.text().catch(() => '')).slice(0, 400), [apiKey, ...Object.values(extraHeaders)]);
     const code = response.status === 401 || response.status === 403 ? 'AUTH' : response.status === 429 ? 'RATE_LIMIT' : 'HTTP';
     throw new ProviderError(code, `Provider returned HTTP ${response.status}: ${text}`);
   }
@@ -44,9 +54,9 @@ export function createRemoteProvider(config: ProviderConfig, apiKey: string, fet
   switch (config.kind) {
     case 'OPENAI':
     case 'DEEPSEEK':
+    case 'OPENCODE':
     case 'OPENAI_COMPATIBLE': {
-      const fallback = config.kind === 'DEEPSEEK' ? 'https://api.deepseek.com' : 'https://api.openai.com/v1';
-      const base = trimBase(config.baseUrl ?? fallback);
+      const base = trimBase(config.baseUrl ?? DEFAULT_BASE[config.kind]!);
       return {
         kind: config.kind,
         async complete(request): Promise<AiResponse> {
@@ -60,11 +70,12 @@ export function createRemoteProvider(config: ProviderConfig, apiKey: string, fet
                 { role: 'user', content: request.user },
               ],
               // Not every compatible server implements this, and the prompt demands JSON anyway.
-              ...(config.kind === 'OPENAI_COMPATIBLE' ? {} : { response_format: { type: 'json_object' } }),
+              ...(JSON_MODE.includes(config.kind) ? { response_format: { type: 'json_object' } } : {}),
             },
             request,
             apiKey,
             fetchImpl,
+            config.extraHeaders,
           );
           const text = json?.choices?.[0]?.message?.content;
           // DeepSeek's JSON mode can answer with blank content, which its docs say to expect.
@@ -90,6 +101,7 @@ export function createRemoteProvider(config: ProviderConfig, apiKey: string, fet
             request,
             apiKey,
             fetchImpl,
+            config.extraHeaders,
           );
           const text = (json?.content ?? [])
             .filter((block: { type: string }) => block.type === 'text')
@@ -116,6 +128,7 @@ export function createRemoteProvider(config: ProviderConfig, apiKey: string, fet
             request,
             apiKey,
             fetchImpl,
+            config.extraHeaders,
           );
           const text = (json?.candidates?.[0]?.content?.parts ?? [])
             .map((part: { text?: string }) => part.text ?? '')

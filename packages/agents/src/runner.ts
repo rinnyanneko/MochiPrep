@@ -9,6 +9,7 @@ import {
   type DataSource,
   type DecisionOutcome,
   type DecisionRecord,
+  type NewsItem,
   type OrderRequest,
   type PaperAccount,
   type ProviderConfig,
@@ -29,6 +30,9 @@ export interface AgentStore {
   getAgent(id: string): Agent | undefined;
   listAgents(): Agent[];
   insertDecision(record: DecisionRecord): void;
+  saveDecision(record: DecisionRecord): void;
+  getDecision(id: string): DecisionRecord | undefined;
+  listPendingSignals(): DecisionRecord[];
 }
 
 export interface AgentRunnerDeps {
@@ -42,6 +46,10 @@ export interface AgentRunnerDeps {
   secrets(): Iterable<string>;
   onChange(topics: Topic[]): void;
   onNotice?(level: 'warn' | 'error', message: string): void;
+  /** Headlines for an agent's pair. Failure must surface as `error`, never as a throw. */
+  news?(agent: Agent): Promise<{ items: NewsItem[]; error: string | null }>;
+  /** A new suggestion is waiting for the user. */
+  onSignal?(record: DecisionRecord): void;
   newId?(): string;
 }
 
@@ -127,6 +135,7 @@ export class AgentRunner {
 
   /** Runs every due agent on this feed, and resolves once they have all finished. */
   async tick(source: DataSource): Promise<void> {
+    this.expireSignals(source);
     const now = this.deps.market(source).now();
     const due = this.deps.store
       .listAgents()
@@ -153,12 +162,115 @@ export class AgentRunner {
       const market = this.deps.market(source);
       this.update(agent, { status: 'ANALYZING', statusDetail: null });
       const record = await this.analyzeAndAct(agent, market, source, trigger);
+      if (record.outcome === 'SIGNAL') this.retireSignals((s) => s.agentId === agentId, 'Replaced by a newer suggestion');
       this.deps.store.insertDecision(record);
       this.finishCycle(agent, market, record);
       this.deps.onChange(['decisions', 'accounts', 'orders', 'positions', 'arena']);
+      if (record.outcome === 'SIGNAL') this.deps.onSignal?.(record);
       return record;
     } finally {
       this.inFlight.delete(agentId);
+    }
+  }
+
+  // ---- suggestions ----------------------------------------------------------------------
+
+  private retireSignals(match: (signal: DecisionRecord) => boolean, detail: string) {
+    for (const signal of this.deps.store.listPendingSignals()) {
+      if (match(signal)) this.deps.store.saveDecision(settle(signal, 'SIGNAL_EXPIRED', detail));
+    }
+    this.deps.onChange(['decisions']);
+  }
+
+  /** Suggestions go stale on the feed's own clock, so a paused tape does not age them. */
+  expireSignals(source: DataSource) {
+    const now = this.deps.market(source).now();
+    const due = this.deps.store.listPendingSignals().filter((s) => s.source === source && (s.signalExpiresAt ?? 0) <= now);
+    if (due.length === 0) return;
+    const ids = new Set(due.map((s) => s.id));
+    this.retireSignals((s) => ids.has(s.id), 'Expired before it was acted on');
+  }
+
+  /** Stop All must leave nothing to act on by accident. */
+  retireAllSignals() {
+    this.retireSignals(() => true, 'Cleared by Stop All');
+  }
+
+  private requirePendingSignal(id: string): DecisionRecord {
+    const signal = this.deps.store.getDecision(id);
+    if (!signal) throw new Error('Unknown suggestion');
+    if (signal.outcome !== 'SIGNAL') throw new Error('This suggestion is no longer pending');
+    return signal;
+  }
+
+  dismissSignal(id: string): DecisionRecord {
+    const signal = settle(this.requirePendingSignal(id), 'SIGNAL_DISMISSED', 'Dismissed by user');
+    this.deps.store.saveDecision(signal);
+    this.deps.onChange(['decisions']);
+    return signal;
+  }
+
+  /**
+   * Acts on a suggestion the user accepted. Nothing from the original analysis is trusted except
+   * the idea itself: the risk engine runs again on current prices and balances, and resizes it.
+   */
+  async executeSignal(id: string): Promise<DecisionRecord> {
+    const signal = this.requirePendingSignal(id);
+    const agent = this.requireAgent(signal.agentId);
+    if (this.inFlight.has(agent.id)) throw new Error('This agent is busy. Try again in a moment.');
+    this.inFlight.add(agent.id);
+    try {
+      const account = this.deps.account(agent.accountId)!;
+      const market = this.deps.market(signal.source);
+      if ((signal.signalExpiresAt ?? 0) <= market.now()) {
+        settle(signal, 'SIGNAL_EXPIRED', 'Expired before it was acted on');
+      } else {
+        const engine = this.deps.execution(agent.accountId);
+        signal.risk = await this.assess(agent, account, signal.decision!, engine, market, market.getQuote(agent.symbol) ?? null);
+        if (!signal.risk.approved) settle(signal, 'RISK_REJECTED', signal.risk.rejectionReasons.join(' | '));
+        else await this.execute(agent, signal.decision!, signal, engine);
+      }
+      signal.signalExpiresAt = null;
+      this.deps.store.saveDecision(signal);
+      this.deps.onChange(['decisions', 'accounts', 'orders', 'positions', 'arena']);
+      return signal;
+    } finally {
+      this.inFlight.delete(agent.id);
+    }
+  }
+
+  private async assess(agent: Agent, account: PaperAccount, decision: AiDecisionData, engine: ExecutionEngine, market: MarketDataProvider, quote: Quote | null) {
+    const daily = await engine.dailyRisk(agent.accountId);
+    return evaluateRisk({
+      decision,
+      symbol: agent.symbol,
+      settings: effectiveRisk(agent.risk, account.liveLimits),
+      quote,
+      now: market.now(),
+      balance: await engine.getBalance(agent.accountId),
+      openPositions: await engine.getPositions(agent.accountId),
+      dailyPnl: daily.dailyPnl,
+      dayStartEquity: daily.dayStartEquity,
+      fees: account.config,
+    });
+  }
+
+  private async execute(agent: Agent, decision: AiDecisionData, record: DecisionRecord, engine: ExecutionEngine) {
+    let result;
+    try {
+      result = await engine.placeOrder(await this.toOrder(agent, decision, record, engine));
+    } catch (error) {
+      return settle(record, 'ORDER_REJECTED', redactSecrets((error as Error).message, this.deps.secrets()));
+    }
+    record.orderId = result.order.id;
+    record.fillIds = result.fills.map((f) => f.id);
+    switch (result.order.status) {
+      case 'FILLED':
+        return settle(record, 'EXECUTED', `Filled ${result.order.quantity} @ ${result.order.avgFillPrice}`);
+      case 'OPEN':
+        return settle(record, 'ORDER_PLACED', `Resting ${result.order.side} limit @ ${result.order.price}`);
+      default:
+        return settle(record, 'ORDER_REJECTED', result.order.rejectReason);
     }
   }
 
@@ -212,6 +324,9 @@ export class AgentRunner {
       risk: null,
       outcome: 'DATA_ERROR',
       outcomeDetail: null,
+      news: null,
+      newsError: null,
+      signalExpiresAt: null,
       orderId: null,
       fillIds: [],
       latencyMs: null,
@@ -220,11 +335,7 @@ export class AgentRunner {
       estimatedCost: null,
       isMock: false,
     };
-    const conclude = (outcome: DecisionOutcome, detail: string | null = null) => {
-      record.outcome = outcome;
-      record.outcomeDetail = detail;
-      return record;
-    };
+    const conclude = (outcome: DecisionOutcome, detail: string | null = null) => settle(record, outcome, detail);
 
     let engine: ExecutionEngine;
     try {
@@ -265,6 +376,13 @@ export class AgentRunner {
     const indicators = indicatorSnapshot(closed);
     record.indicators = indicators;
 
+    // News is optional context: losing it must never stop an analysis.
+    if (agent.useNews && source === 'LIVE' && this.deps.news) {
+      const result = await this.deps.news(agent).catch((error: Error) => ({ items: [], error: error.message }));
+      record.news = result.items;
+      record.newsError = result.error;
+    }
+
     // 6. Ask the model.
     const context: MarketContext = {
       symbol: agent.symbol,
@@ -278,6 +396,7 @@ export class AgentRunner {
       balance,
       risk: agent.risk,
       strategy: agent.strategy,
+      ...(record.news ? { news: record.news } : {}),
     };
     let text: string;
     const started = Date.now();
@@ -314,19 +433,7 @@ export class AgentRunner {
 
     // 8. Risk. Time and quote are re-read: the model may have taken a while.
     const latestQuote = market.getQuote(agent.symbol) ?? null;
-    const daily = await engine.dailyRisk(agent.accountId);
-    record.risk = evaluateRisk({
-      decision: parsed.decision,
-      symbol: agent.symbol,
-      settings: effectiveRisk(agent.risk, account.liveLimits),
-      quote: stale ? null : latestQuote,
-      now: market.now(),
-      balance: await engine.getBalance(agent.accountId),
-      openPositions: await engine.getPositions(agent.accountId),
-      dailyPnl: daily.dailyPnl,
-      dayStartEquity: daily.dayStartEquity,
-      fees: account.config,
-    });
+    record.risk = await this.assess(agent, account, parsed.decision, engine, market, stale ? null : latestQuote);
 
     if (trigger === 'ANALYZE') return conclude('ANALYSIS_ONLY', 'Analyze Now never places orders');
     if (!record.risk.approved) return conclude('RISK_REJECTED', record.risk.rejectionReasons.join(' | '));
@@ -337,24 +444,14 @@ export class AgentRunner {
       return conclude('ANALYSIS_ONLY', 'Agent was stopped before execution');
     }
 
-    // 9. Execute.
+    // 9. Suggest, or execute.
+    if (agent.executionMode === 'SIGNAL') {
+      const aiExpiry = parsed.decision.expiresAt ? Date.parse(parsed.decision.expiresAt) : Infinity;
+      record.signalExpiresAt = Math.min(aiExpiry, market.now() + agent.intervalSec * 1000);
+      return conclude('SIGNAL', 'Waiting for you to accept or dismiss');
+    }
     this.update(agent, { status: 'EXECUTING' });
-    let result;
-    try {
-      result = await engine.placeOrder(await this.toOrder(agent, parsed.decision, record, engine));
-    } catch (error) {
-      return conclude('ORDER_REJECTED', redactSecrets((error as Error).message, this.deps.secrets()));
-    }
-    record.orderId = result.order.id;
-    record.fillIds = result.fills.map((f) => f.id);
-    switch (result.order.status) {
-      case 'FILLED':
-        return conclude('EXECUTED', `Filled ${result.order.quantity} @ ${result.order.avgFillPrice}`);
-      case 'OPEN':
-        return conclude('ORDER_PLACED', `Resting ${result.order.side} limit @ ${result.order.price}`);
-      default:
-        return conclude('ORDER_REJECTED', result.order.rejectReason);
-    }
+    return this.execute(agent, parsed.decision, record, engine);
   }
 
   private async toOrder(agent: Agent, decision: AiDecisionData, record: DecisionRecord, engine: ExecutionEngine): Promise<OrderRequest> {
@@ -394,6 +491,12 @@ export class AgentRunner {
       if (order.agentId === agent.id && order.type === 'LIMIT' && !order.reduceOnly) await engine.cancelOrder(order.id);
     }
   }
+}
+
+function settle(record: DecisionRecord, outcome: DecisionOutcome, detail: string | null = null) {
+  record.outcome = outcome;
+  record.outcomeDetail = detail;
+  return record;
 }
 
 /** String(0.0000001) is "1e-7", which neither the API schema nor OKX accepts. */

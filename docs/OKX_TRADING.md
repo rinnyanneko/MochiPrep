@@ -36,7 +36,11 @@ These assumptions still need checking on the real exchange:
 | Unknown outcome | After a timeout the order stays open and is looked up by client ID. It is **never resent**. |
 | Stop All | Stops every agent and disarms real orders. Open positions and their stops stay on OKX. |
 
+An agent in Suggest mode can run without arming, because it places nothing. Accepting a suggestion needs an armed account, except for a CLOSE, and the risk engine runs again at that moment.
+
 Agents go through the same risk engine as paper trading, then the ceilings above. On an exchange account, the stricter of the agent's limit and the account's ceiling applies.
+
+An agent reading news on a real account takes third-party text as input. Anyone can publish a headline written to steer an AI. Ceilings limit the damage, not the decision, so prefer Suggest mode here.
 
 Closing is always allowed while connected, even when disarmed, so you can never be locked out of an exit.
 
@@ -54,6 +58,6 @@ OKX credentials are held only in memory. After a restart the account stays liste
 
 - Balances and positions come from OKX and refresh every 5 seconds. MochiPrep keeps no ledger for exchange accounts.
 - Stops can't be edited after entry from MochiPrep. Use OKX.
-- A stop or take-profit that fills on OKX shows up as a position change, not as a fill in MochiPrep's history.
+- A stop or take-profit that fills on OKX shows up as a position change, not as a fill in MochiPrep's history, so it has no marker on the chart.
 - Daily loss is measured from the first equity snapshot of the UTC day, and it includes deposits and withdrawals made that day.
 - Order state is polled, not streamed.

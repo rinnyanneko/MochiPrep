@@ -2,7 +2,7 @@ import { AgentRunner } from '@mochiprep/agents';
 import { mockProvider, MOCK_MODELS, ProviderError, createRemoteProvider, redactSecrets, type AiProvider } from '@mochiprep/ai-providers';
 import { maxDrawdownPct, PaperExecutionEngine, winRatePct, d, str, type EngineEvent, type ExecutionEngine } from '@mochiprep/core';
 import { OkxClient, OkxExecutionEngine, type OkxCredentials } from '@mochiprep/exchanges';
-import { OkxMarketData, ReplayMarketData, type MarketDataProvider } from '@mochiprep/market-data';
+import { DEFAULT_NEWS_SOURCES, NewsService, OkxMarketData, ReplayMarketData, validateFeedUrl, type MarketDataProvider } from '@mochiprep/market-data';
 import {
   ARM_PHRASE,
   DEFAULT_ACCOUNT_CONFIG,
@@ -17,9 +17,11 @@ import {
   type Agent,
   type ArenaRow,
   type DataSource,
+  type DecisionRecord,
   type ExchangeStatus,
   type FeedStatus,
   type InstrumentSpecification,
+  type NewsSource,
   type PositionView,
   type ProviderConfig,
   type ProviderView,
@@ -57,6 +59,8 @@ interface RuntimeOptions {
   replayMinutes?: number;
   /** Provider override for tests. */
   providerFactory?: (config: ProviderConfig, key: string) => AiProvider;
+  /** Feed transport override for tests. */
+  newsFetch?: typeof fetch;
   /** OKX transport override for tests. */
   okx?: { fetchImpl?: typeof fetch; baseUrl?: string };
 }
@@ -70,6 +74,7 @@ export class Runtime {
   readonly live: MarketDataProvider;
   readonly engine: PaperExecutionEngine;
   readonly runner: AgentRunner;
+  readonly news: NewsService;
 
   /** BYOK keys, mirrored from SQLite (plaintext, by the owner's choice). */
   private readonly keys: Map<string, string>;
@@ -92,6 +97,7 @@ export class Runtime {
   private lastReplayEquityAt = 0;
   private lastLiveEquityAt = 0;
   private liveTicking = false;
+  private signalRaised = false;
 
   constructor(options: RuntimeOptions) {
     this.store = new SqliteStore(options.db);
@@ -100,6 +106,8 @@ export class Runtime {
     this.replay = new ReplayMarketData(options.replayMinutes);
     this.live = options.live ?? new OkxMarketData();
     this.providerFactory = options.providerFactory ?? ((config, key) => createRemoteProvider(config, key));
+
+    this.news = new NewsService(() => this.newsSources(), options.newsFetch);
 
     this.engine = new PaperExecutionEngine({
       store: this.store,
@@ -117,6 +125,8 @@ export class Runtime {
       secrets: () => this.secrets(),
       onChange: (topics) => this.invalidate(...topics),
       onNotice: (level, message) => this.emit({ type: 'toast', level, message }),
+      onSignal: (record) => this.onSignal(record),
+      news: (agent) => this.newsFor(agent.symbol),
     });
 
     this.seedMockProvider();
@@ -297,10 +307,21 @@ export class Runtime {
     return this.stepping;
   }
 
+  /** The tape holds still at a suggestion, or it would expire before anyone could read it. */
+  private onSignal(record: DecisionRecord) {
+    if (record.source === 'REPLAY') {
+      this.signalRaised = true;
+      this.setPlaying(false);
+    }
+    const { action } = record.decision!;
+    this.emit({ type: 'toast', level: 'info', message: `${record.agentName} suggests ${action} ${record.symbol}` });
+  }
+
   private async doSteps(steps: number) {
     let quotes: Quote[] = [];
     try {
-      for (let i = 0; i < steps; i++) {
+      this.signalRaised = false;
+      for (let i = 0; i < steps && !this.signalRaised; i++) {
         const next = this.replay.step();
         if (next.length === 0) break;
         quotes = next;
@@ -348,6 +369,7 @@ export class Runtime {
           accountId: account.id,
           risk,
           intervalSec: 900,
+          executionMode: 'AUTO',
         },
         true,
       );
@@ -391,11 +413,13 @@ export class Runtime {
   // ---- agents & providers ---------------------------------------------------------------
 
   createAgent(
-    input: Omit<Agent, 'id' | 'status' | 'running' | 'nextRunAt' | 'lastRunAt' | 'statusDetail' | 'consecutiveErrors' | 'isDemo' | 'createdAt'>,
+    input: Omit<Agent, 'id' | 'status' | 'running' | 'nextRunAt' | 'lastRunAt' | 'statusDetail' | 'consecutiveErrors' | 'isDemo' | 'createdAt' | 'executionMode' | 'useNews'> & Partial<Pick<Agent, 'executionMode' | 'useNews'>>,
     isDemo = false,
   ): Agent {
     this.assertAgentRefs(input.providerId, input.accountId, input.symbol);
     const agent: Agent = {
+      executionMode: 'AUTO',
+      useNews: false,
       ...input,
       id: `agent_${randomUUID()}`,
       status: 'IDLE',
@@ -423,6 +447,47 @@ export class Runtime {
   assertTradable(symbol: SymbolId, source: DataSource) {
     if (!INSTRUMENTS[symbol]) throw new Error(`${symbol} is not an added pair. Add it in Settings first.`);
     if (source === 'REPLAY' && !isDefaultSymbol(symbol)) throw new Error(`${symbol} has no replay data. Use a Live OKX account.`);
+  }
+
+  // ---- news -----------------------------------------------------------------------------
+
+  newsSources(): NewsSource[] {
+    const saved = this.store.getSetting<NewsSource[]>('news.sources') ?? [];
+    // Built-ins come from code, so a corrected feed URL reaches existing installs too.
+    const builtIn = DEFAULT_NEWS_SOURCES.map((source) => ({ ...source, enabled: saved.find((s) => s.id === source.id)?.enabled ?? source.enabled }));
+    return [...builtIn, ...saved.filter((source) => !source.builtIn)];
+  }
+
+  private saveNewsSources(sources: NewsSource[]) {
+    this.store.setSetting('news.sources', sources);
+    this.news.invalidate();
+    this.invalidate('news');
+  }
+
+  newsFor(symbol: SymbolId, limit?: number) {
+    return this.news.forSymbol(symbol, INSTRUMENTS[symbol]?.baseCurrency ?? symbol.replace(/USDT$/, ''), limit);
+  }
+
+  addNewsSource(name: string, url: string): NewsSource {
+    const problem = validateFeedUrl(url);
+    if (problem) throw new Error(problem);
+    if (this.newsSources().some((s) => s.url === url)) throw new Error('This feed is already added');
+    const source: NewsSource = { id: `news_${randomUUID()}`, name, url, enabled: true, builtIn: false };
+    this.saveNewsSources([...this.newsSources(), source]);
+    return source;
+  }
+
+  setNewsSourceEnabled(id: string, enabled: boolean) {
+    const sources = this.newsSources();
+    if (!sources.some((s) => s.id === id)) throw new Error('Unknown news source');
+    this.saveNewsSources(sources.map((s) => (s.id === id ? { ...s, enabled } : s)));
+  }
+
+  removeNewsSource(id: string) {
+    const source = this.newsSources().find((s) => s.id === id);
+    if (!source) throw new Error('Unknown news source');
+    if (source.builtIn) throw new Error('Built-in sources can be turned off, not removed');
+    this.saveNewsSources(this.newsSources().filter((s) => s.id !== id));
   }
 
   // ---- trading pairs --------------------------------------------------------------------
@@ -486,6 +551,7 @@ export class Runtime {
 
   private *secrets() {
     yield* this.keys.values();
+    for (const provider of this.store.listProviders()) yield* Object.values(provider.extraHeaders ?? {});
     for (const session of this.exchanges.values()) yield* session.secrets;
   }
 
@@ -608,7 +674,18 @@ export class Runtime {
     if (!account || account.venue === 'PAPER') return;
     const session = this.exchanges.get(account.id);
     if (!session) throw new Error(`${account.name} is not connected to OKX`);
-    if (!session.armed) throw new Error(`${account.name} is not armed. Arm it in Settings first.`);
+    // A suggestion places nothing, so analysis does not need real orders switched on.
+    if (agent.executionMode === 'AUTO' && !session.armed) throw new Error(`${account.name} is not armed. Arm it in Settings first.`);
+  }
+
+  /**
+   * Checked before a suggestion is consumed: an order refused here would burn its idempotency
+   * key, and the user could not retry after arming. Exits need no arming.
+   */
+  assertCanExecuteSignal(signal: DecisionRecord) {
+    const account = this.store.getAccount(signal.accountId);
+    if (account?.venue !== 'OKX_LIVE' || signal.decision?.action === 'CLOSE') return;
+    if (!this.exchanges.get(account.id)?.armed) throw new Error(`${account.name} is not armed. Arm it in Settings first.`);
   }
 
   private async syncExchanges() {
@@ -678,8 +755,9 @@ export class Runtime {
   }
 
   providerViews(): ProviderView[] {
-    return this.store.listProviders().map((p) => ({
+    return this.store.listProviders().map(({ extraHeaders, ...p }) => ({
       ...p,
+      headerNames: Object.keys(extraHeaders ?? {}),
       requiresKey: p.kind !== 'MOCK',
       hasKey: p.kind === 'MOCK' || this.keys.has(p.id),
     }));

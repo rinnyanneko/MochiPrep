@@ -1,10 +1,11 @@
 import { KeyRound, Pencil, Plug, Plus, RotateCcw, ShieldCheck, Trash2, X } from 'lucide-react';
 import { ExchangeCard } from '@/components/ExchangeCard';
+import { NewsSourcesCard } from '@/components/NewsPanel';
 import { PairsCard } from '@/components/PairsCard';
 import { useState } from 'react';
 import type { ProviderKind, ProviderView } from '@mochiprep/shared';
 import { PageTitle } from '@/components/Shell';
-import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Select } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Select, Textarea } from '@/components/ui';
 import { api } from '@/lib/api';
 import { attempt, useApp } from '@/store';
 
@@ -14,7 +15,16 @@ const KINDS: { value: Exclude<ProviderKind, 'MOCK'>; label: string; baseUrl: str
   { value: 'ANTHROPIC', label: 'Anthropic Claude', baseUrl: '', model: 'claude-sonnet-5-5' },
   { value: 'GEMINI', label: 'Google Gemini', baseUrl: '', model: '' },
   { value: 'DEEPSEEK', label: 'DeepSeek', baseUrl: '', model: 'deepseek-flash' },
+  { value: 'OPENCODE', label: 'OpenCode', baseUrl: '', model: 'deepseek-v4.1-flash' },
 ];
+
+function parseHeaders(text: string): Record<string, string> {
+  const entries = text.split('\n').flatMap((line) => {
+    const colon = line.indexOf(':');
+    return line.trim() && colon > 0 ? [[line.slice(0, colon).trim(), line.slice(colon + 1).trim()]] : [];
+  });
+  return Object.fromEntries(entries);
+}
 
 function ProviderDialog({ provider, onClose }: { provider: ProviderView | null; onClose(): void }) {
   const [kind, setKind] = useState<(typeof KINDS)[number]['value']>(provider && provider.kind !== 'MOCK' ? provider.kind : 'OPENAI_COMPATIBLE');
@@ -23,6 +33,8 @@ function ProviderDialog({ provider, onClose }: { provider: ProviderView | null; 
   const [model, setModel] = useState(provider?.defaultModel ?? '');
   const [inputPrice, setInputPrice] = useState(provider?.inputPricePerMTok?.toString() ?? '');
   const [outputPrice, setOutputPrice] = useState(provider?.outputPricePerMTok?.toString() ?? '');
+  const [headers, setHeaders] = useState('');
+  const savedHeaders = provider?.headerNames ?? [];
 
   const pickKind = (value: typeof kind) => {
     const preset = KINDS.find((k) => k.value === value)!;
@@ -39,6 +51,8 @@ function ProviderDialog({ provider, onClose }: { provider: ProviderView | null; 
       defaultModel: model,
       inputPricePerMTok: inputPrice === '' ? null : Number(inputPrice),
       outputPricePerMTok: outputPrice === '' ? null : Number(outputPrice),
+      // Left empty on edit, the saved headers stay: their values are not sent back to fill in.
+      ...(headers.trim() || !provider ? { extraHeaders: parseHeaders(headers) } : {}),
     };
     const ok = await attempt(() => (provider ? api.put(`/providers/${provider.id}`, body) : api.post('/providers', body)));
     if (ok) onClose();
@@ -61,6 +75,12 @@ function ProviderDialog({ provider, onClose }: { provider: ProviderView | null; 
           <Field label="Input $ / 1M tokens"><Input type="number" min={0} step="any" value={inputPrice} onChange={(e) => setInputPrice(e.target.value)} /></Field>
           <Field label="Output $ / 1M tokens"><Input type="number" min={0} step="any" value={outputPrice} onChange={(e) => setOutputPrice(e.target.value)} /></Field>
         </div>
+        <Field
+          label="Extra headers"
+          hint={savedHeaders.length ? `Saved: ${savedHeaders.join(', ')}. Leave empty to keep them, or enter new ones to replace them.` : 'Optional, for gateways that need them. One "Name: value" per line. Saved unencrypted, like API keys.'}
+        >
+          <Textarea className="num h-20 text-xs" autoComplete="off" spellCheck={false} value={headers} onChange={(e) => setHeaders(e.target.value)} placeholder={'HTTP-Referer: https://example.com\nX-Title: MochiPrep'} />
+        </Field>
         <p className="text-[11px] text-ink-3">Prices are optional. They are only used to estimate cost, so enter your provider's current rates.</p>
       </div>
       <div className="mt-4 flex justify-end gap-2">
@@ -101,6 +121,7 @@ function ProviderRow({ provider, onEdit }: { provider: ProviderView; onEdit(): v
           <Badge tone="info">No key needed</Badge>
         )}
         <span className="num text-xs text-ink-3">{provider.defaultModel}</span>
+        {provider.headerNames.length > 0 && <Badge title={provider.headerNames.join(', ')}>{provider.headerNames.length} extra header{provider.headerNames.length === 1 ? '' : 's'}</Badge>}
         {provider.requiresKey && (
           <span className="ml-auto flex gap-1">
             <Button size="sm" disabled={!provider.hasKey || testing} onClick={test}><Plug /> Test</Button>
@@ -162,6 +183,8 @@ export function SettingsPage() {
         </Card>
 
         <PairsCard />
+
+        <NewsSourcesCard />
 
         <ExchangeCard />
       </div>

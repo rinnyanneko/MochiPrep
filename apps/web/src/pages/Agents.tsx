@@ -1,10 +1,10 @@
 import { Pause, Pencil, Play, Plus, ScanSearch, Square, StepForward, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { DEFAULT_RISK_SETTINGS, TIMEFRAMES, type Agent, type AgentStatus, type DecisionRecord, type RiskSettings, type SymbolId, type Timeframe } from '@mochiprep/shared';
+import { DEFAULT_RISK_SETTINGS, TIMEFRAMES, type ExecutionMode, type Agent, type AgentStatus, type DecisionRecord, type RiskSettings, type SymbolId, type Timeframe } from '@mochiprep/shared';
 import { Mochi, type MochiMood } from '@/components/Mochi';
 import { PageTitle } from '@/components/Shell';
 import { DecisionDetail, DecisionList, VenueBadge } from '@/components/trading';
-import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Select, Textarea, type Tone } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Segmented, Select, Textarea, type Tone } from '@/components/ui';
 import { api } from '@/lib/api';
 import { dateTime, money, pct, pnlClass } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -38,6 +38,8 @@ type Form = {
   accountId: string;
   risk: RiskSettings;
   intervalSec: number;
+  executionMode: ExecutionMode;
+  useNews: boolean;
 };
 
 function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void }) {
@@ -56,6 +58,8 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
       accountId: 'NEW',
       risk: DEFAULT_RISK_SETTINGS,
       intervalSec: 900,
+      executionMode: 'SIGNAL',
+      useNews: source === 'LIVE',
     },
   );
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
@@ -71,7 +75,7 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
         accountId = created.id;
       }
       const body = { ...form, accountId };
-      const fields = { name: body.name, providerId: body.providerId, model: body.model, symbol: body.symbol, timeframe: body.timeframe, strategy: body.strategy, accountId, risk: body.risk, intervalSec: body.intervalSec };
+      const fields = { name: body.name, providerId: body.providerId, model: body.model, symbol: body.symbol, timeframe: body.timeframe, strategy: body.strategy, accountId, risk: body.risk, intervalSec: body.intervalSec, executionMode: body.executionMode, useNews: body.useNews };
       return agent ? api.put(`/agents/${agent.id}`, fields) : api.post('/agents', fields);
     });
     if (done) {
@@ -124,6 +128,30 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
             {INTERVALS.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
           </Select>
         </Field>
+        <div className="sm:col-span-2">
+          <span className="mb-1 block text-xs font-semibold text-ink-2">When the AI finds a trade</span>
+          <Segmented
+            label="Execution mode"
+            value={form.executionMode}
+            onChange={(executionMode) => set({ executionMode })}
+            options={[
+              { value: 'SIGNAL', label: 'Suggest to me' },
+              { value: 'AUTO', label: 'Trade automatically' },
+            ]}
+          />
+          <span className="mt-1 block text-[11px] text-ink-3">
+            {form.executionMode === 'SIGNAL' ? 'You see the entry, stop and target, and decide. Nothing is ordered until you accept.' : 'Approved orders are placed immediately, with no confirmation.'}
+          </span>
+        </div>
+        <label className="flex items-start gap-2 text-xs text-ink-2 sm:col-span-2">
+          <input type="checkbox" className="mt-0.5 accent-[var(--accent)]" disabled={source === 'REPLAY'} checked={form.useNews && source === 'LIVE'} onChange={(e) => set({ useNews: e.target.checked })} />
+          <span>
+            Read recent news headlines
+            <span className="block text-[11px] text-ink-3">
+              {source === 'REPLAY' ? 'Live OKX only: real headlines would not match the synthetic tape.' : 'Headlines are unverified third-party text. They can be wrong or written to mislead an AI. Sources are in Settings.'}
+            </span>
+          </span>
+        </label>
         <Field label="Strategy instructions" className="sm:col-span-2" hint="Sent to the model as style guidance. It cannot override the risk engine.">
           <Textarea value={form.strategy} onChange={(e) => set({ strategy: e.target.value })} placeholder="Trade pullbacks in the direction of the 1h trend..." />
         </Field>
@@ -141,7 +169,7 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
         <input type="checkbox" checked={form.risk.requireStopLoss} onChange={(e) => setRisk({ requireStopLoss: e.target.checked })} className="accent-[var(--accent)]" />
         Require a stop loss on new positions
       </label>
-      {selectedAccount?.venue === 'OKX_LIVE' && (
+      {selectedAccount?.venue === 'OKX_LIVE' && form.executionMode === 'AUTO' && (
         <p className="mt-3 rounded-xl bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">
           This agent will place real orders on its own while running. The account's limits in Settings cap everything above.
         </p>
@@ -180,6 +208,8 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
             <span className="truncate font-display text-[15px] font-extrabold">{agent.name}</span>
             <Badge tone={status.tone} data-testid="agent-status">{status.label}</Badge>
             {account && account.venue !== 'PAPER' && <VenueBadge venue={account.venue} />}
+            <Badge tone={agent.executionMode === 'AUTO' ? 'accent' : 'info'} data-testid="agent-mode">{agent.executionMode === 'AUTO' ? 'Auto' : 'Suggest'}</Badge>
+            {agent.useNews && <Badge data-testid="agent-news">News</Badge>}
           </span>
           <span className="mt-0.5 block truncate text-xs text-ink-3">{provider?.name} · {agent.model}</span>
           <span className="block text-xs text-ink-3">{agent.symbol} · {agent.timeframe} · every {agent.intervalSec >= 60 ? `${agent.intervalSec / 60}m` : `${agent.intervalSec}s`}</span>
@@ -206,7 +236,7 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
           <Button size="sm" variant="primary" onClick={() => act('start')}><Play /> Start</Button>
         )}
         <Button size="sm" disabled={busy} onClick={() => cycle('analyze')} title="Ask the model and show the result without trading"><ScanSearch /> Analyze now</Button>
-        <Button size="sm" disabled={busy} onClick={() => cycle('run')} title="One full cycle, including a paper trade if approved"><StepForward /> Run one cycle</Button>
+        <Button size="sm" disabled={busy} onClick={() => cycle('run')} title={agent.executionMode === 'AUTO' ? 'One full cycle, placing an order if approved' : 'One full cycle, suggesting a trade if approved'}><StepForward /> Run one cycle</Button>
         <span className="ml-auto flex gap-1">
           <Button size="icon" variant="ghost" aria-label={`Edit ${agent.name}`} onClick={onEdit}><Pencil /></Button>
           <Button size="icon" variant="ghost" aria-label={`Delete ${agent.name}`} disabled={agent.running} onClick={() => attempt(() => api.del(`/agents/${agent.id}`))}><Trash2 /></Button>

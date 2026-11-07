@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Your cute little AI trading companion. Local-first, BYOK, paper-trading crypto perpetuals.",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "packageManager": "pnpm@11.24.0",
   "engines": { "node": ">=22.13.0", "pnpm": ">=9" },

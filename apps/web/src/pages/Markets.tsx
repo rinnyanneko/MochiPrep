@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { TIMEFRAMES, type Candle, type SymbolId, type Timeframe } from '@mochiprep/shared';
-import { MarketChart } from '@/components/charts';
+import { ChartTradeSummary, MarketChart } from '@/components/charts';
+import { NewsPanel } from '@/components/NewsPanel';
+import { AccountPicker, useCurrentAccount } from '@/components/trading';
+import { useTradeOverlay } from '@/components/useTradeOverlay';
 import { FeedBadge, PageTitle } from '@/components/Shell';
 import { Badge, Card, Segmented, Select, Stat } from '@/components/ui';
 import { api } from '@/lib/api';
@@ -30,6 +33,9 @@ export function MarketsPage() {
   const [timeframe, setTimeframe] = useState<Timeframe>('15m');
   const quote = useApp((s) => s.quotes[source][symbol]);
   const { data: candles, error } = useCandles(symbol, timeframe);
+  const account = useCurrentAccount();
+  const [showTrades, setShowTrades] = useState(true);
+  const overlay = useTradeOverlay(showTrades ? account?.id : undefined, symbol, timeframe, quote);
 
   const first = candles?.[Math.max(0, candles.length - Math.round(86_400_000 / { '1m': 60_000, '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000 }[timeframe]))];
   const change = quote && first ? ((Number(quote.last) - first.open) / first.open) * 100 : null;
@@ -62,14 +68,25 @@ export function MarketsPage() {
           <span className="text-ink-3">Volume in the main pane, then RSI 14, then MACD 12/26/9 with signal.</span>
           {source === 'REPLAY' && <Badge tone="info">Synthetic</Badge>}
         </div>
+        {account && (
+          <div className="mb-2 flex flex-wrap items-center gap-3 px-2">
+            <label className="flex items-center gap-2 text-xs text-ink-2">
+              <input type="checkbox" checked={showTrades} onChange={(e) => setShowTrades(e.target.checked)} className="accent-[var(--accent)]" />
+              Show trades
+            </label>
+            {showTrades && <AccountPicker className="h-8 w-52 text-xs" />}
+            {showTrades && <ChartTradeSummary summary={overlay.summary} />}
+          </div>
+        )}
         <div className="h-[640px]">
           {error ? (
             <p className="px-5 py-20 text-center text-[13px] text-ink-3">Could not load candles: {error}</p>
           ) : (
-            <MarketChart candles={candles ?? []} symbol={symbol} timeframe={timeframe} quote={quote} />
+            <MarketChart candles={candles ?? []} symbol={symbol} timeframe={timeframe} quote={quote} priceLines={overlay.lines} markers={overlay.markers} notes={overlay.notes} />
           )}
         </div>
       </Card>
+      {source === 'LIVE' && <NewsPanel symbol={symbol} />}
     </>
   );
 }

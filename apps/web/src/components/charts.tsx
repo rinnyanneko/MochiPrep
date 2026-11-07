@@ -2,16 +2,23 @@ import {
   CandlestickSeries,
   ColorType,
   createChart,
+  createSeriesMarkers,
   CrosshairMode,
   HistogramSeries,
   LineSeries,
+  type AutoscaleInfo,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
+  type ISeriesMarkersPluginApi,
+  type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ema, macd, rsi, TIMEFRAME_MS, type Candle, type Quote, type Series, type SymbolId, type Timeframe } from '@mochiprep/shared';
-import { money, priceDigits } from '@/lib/format';
+import { ema, macd, rsi, TIMEFRAME_MS, type Candle, type Fill, type Quote, type Series, type SymbolId, type Timeframe } from '@mochiprep/shared';
+import { money, pnlClass, price as formatPrice, priceDigits, qty, signedMoney } from '@/lib/format';
+import type { ChartTone, PriceLineSpec, TradeMarker, TradeSummary } from '@/lib/trade-overlay';
+import { cn } from '@/lib/utils';
 import { useApp } from '@/store';
 
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -26,7 +33,8 @@ function baseOptions() {
       textColor: css('--ink-3'),
       fontFamily: 'JetBrains Mono Variable, monospace',
       fontSize: 11,
-      attributionLogo: false,
+      // Required by the Lightweight Charts license: it must credit and link to TradingView.
+      attributionLogo: true,
       panes: { separatorColor: css('--line') },
     },
     grid: { vertLines: { visible: false }, horzLines: { color: css('--line') } },
@@ -39,11 +47,26 @@ function baseOptions() {
 const line = (series: Series, candles: Candle[]) =>
   series.flatMap((value, i) => (value === null ? [] : [{ time: seconds(candles[i]!.time), value }]));
 
-export interface PriceLineSpec {
-  price: number;
-  label: string;
-  tone: 'up' | 'down' | 'neutral';
-}
+const toneColors = (): Record<ChartTone, string> => ({
+  up: css('--up'),
+  down: css('--down'),
+  neutral: css('--ink-3'),
+  warn: css('--warn'),
+  info: css('--info'),
+});
+
+const LABEL_HEIGHT = 18;
+const LABEL_GAP = 2;
+const LABEL_TONES: Record<ChartTone, string> = {
+  up: 'bg-up-soft text-up',
+  down: 'bg-down-soft text-down',
+  neutral: 'bg-surface-3 text-ink-2',
+  warn: 'bg-warn-soft text-warn',
+  info: 'bg-info-soft text-info',
+};
+
+const NO_MARKERS: TradeMarker[] = [];
+const NO_NOTES = new Map<number, Fill[]>();
 
 interface Props {
   candles: Candle[];
@@ -52,19 +75,31 @@ interface Props {
   quote: Quote | undefined;
   showIndicators?: boolean;
   priceLines?: PriceLineSpec[];
+  markers?: TradeMarker[];
+  /** Fills per bar open time, shown when hovering a bar. */
+  notes?: Map<number, Fill[]>;
 }
 
 /** Candles and volume, plus EMA overlays and RSI / MACD panes. The forming bar follows live quotes. */
-export function MarketChart({ candles, symbol, timeframe, quote, showIndicators = true, priceLines = [] }: Props) {
+export function MarketChart({ candles, symbol, timeframe, quote, showIndicators = true, priceLines = [], markers = NO_MARKERS, notes = NO_NOTES }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const series = useRef<Record<string, ISeriesApi<any>>>({});
   const lastBar = useRef<Candle | null>(null);
+  const markerPlugin = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const drawnLines = useRef(new Map<string, IPriceLine>());
+  const notesRef = useRef(notes);
+  notesRef.current = notes;
+  const linesRef = useRef(priceLines);
+  linesRef.current = priceLines;
+  const labelNodes = useRef(new Map<string, HTMLSpanElement>());
+  const [hovered, setHovered] = useState<Fill[] | null>(null);
   const theme = useApp((s) => s.theme);
   const digits = priceDigits(symbol);
 
   useEffect(() => {
-    const instance = createChart(host.current!, baseOptions());
+    const options = baseOptions();
+    const instance = createChart(host.current!, { ...options, timeScale: { ...options.timeScale, barSpacing: 9 } });
     chart.current = instance;
     const up = css('--up');
     const down = css('--down');
@@ -77,6 +112,19 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
       wickDownColor: down,
       borderVisible: false,
       priceFormat: format,
+      // Keeps TP, SL and limits on screen. Liquidation is usually too far away to include.
+      autoscaleInfoProvider: (base: () => AutoscaleInfo | null) => {
+        const info = base();
+        const prices = linesRef.current.filter((line) => line.id !== 'liq').map((line) => line.price);
+        if (!info?.priceRange || prices.length === 0) return info;
+        return {
+          ...info,
+          priceRange: {
+            minValue: Math.min(info.priceRange.minValue, ...prices),
+            maxValue: Math.max(info.priceRange.maxValue, ...prices),
+          },
+        };
+      },
     });
     s.volume = instance.addSeries(HistogramSeries, { priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
     instance.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
@@ -96,9 +144,16 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
       panes[2]?.setStretchFactor(1.3);
     }
     series.current = s;
+    markerPlugin.current = createSeriesMarkers(s.candles as ISeriesApi<'Candlestick', Time>, []);
+    instance.subscribeCrosshairMove((param) => {
+      const bar = typeof param.time === 'number' ? notesRef.current.get(param.time * 1000) : undefined;
+      setHovered(bar ?? null);
+    });
     return () => {
       instance.remove();
       chart.current = null;
+      markerPlugin.current = null;
+      drawnLines.current.clear();
     };
   }, [theme, showIndicators, digits]);
 
@@ -131,12 +186,71 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
   useEffect(() => {
     const target = series.current.candles;
     if (!target) return;
-    const colors = { up: css('--up'), down: css('--down'), neutral: css('--ink-3') };
-    const created = priceLines.map((p) =>
-      target.createPriceLine({ price: p.price, color: colors[p.tone], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: p.label }),
+    const colors = toneColors();
+    const drawn = drawnLines.current;
+    const wanted = new Set(priceLines.map((line) => line.id));
+    for (const [id, line] of drawn) {
+      if (!wanted.has(id)) {
+        target.removePriceLine(line);
+        drawn.delete(id);
+      }
+    }
+    for (const spec of priceLines) {
+      // No title: the library can only draw it at the right edge, over the newest candles.
+      const options = { price: spec.price, color: colors[spec.tone], title: '' };
+      const existing = drawn.get(spec.id);
+      if (existing) existing.applyOptions(options);
+      else drawn.set(spec.id, target.createPriceLine({ ...options, lineWidth: 1, lineStyle: 2, axisLabelVisible: true }));
+    }
+    // Lines are not chart data, so the price scale must be told to refit around them.
+    chart.current?.priceScale('right').applyOptions({ autoScale: true });
+  }, [priceLines, theme, digits, symbol, showIndicators]);
+
+  // The price scale refits without any event, so labels follow it frame by frame.
+  useEffect(() => {
+    let frame = 0;
+    const place = () => {
+      frame = requestAnimationFrame(place);
+      const target = series.current.candles;
+      const paneHeight = chart.current?.panes()[0]?.getHeight() ?? 0;
+      if (!target) return;
+      const placed = linesRef.current
+        .map((line) => ({ node: labelNodes.current.get(line.id), y: target.priceToCoordinate(line.price) }))
+        .sort((a, b) => (a.y ?? 0) - (b.y ?? 0));
+      let lowest = -Infinity;
+      for (const { node, y } of placed) {
+        if (!node) continue;
+        const visible = y !== null && y >= 0 && y <= paneHeight;
+        node.style.visibility = visible ? 'visible' : 'hidden';
+        if (!visible) continue;
+        // Close prices would stack their labels unreadably, so push each one clear of the last.
+        const top = Math.max(y - LABEL_HEIGHT / 2, lowest + LABEL_GAP);
+        node.style.transform = `translateY(${top}px)`;
+        lowest = top + LABEL_HEIGHT;
+      }
+    };
+    place();
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    const colors = toneColors();
+    const bars = new Set(candles.map((c) => c.time));
+    // A marker off the loaded range has no bar to sit on.
+    markerPlugin.current?.setMarkers(
+      markers
+        .filter((m) => bars.has(m.barTime))
+        .map((m) => ({
+          id: m.id,
+          time: seconds(m.barTime),
+          position: m.position,
+          shape: m.shape,
+          size: 1.4,
+          color: colors[m.tone],
+          text: m.text,
+        })),
     );
-    return () => created.forEach((l) => target.removePriceLine(l));
-  }, [priceLines, theme, candles.length === 0, digits]);
+  }, [markers, candles, theme, digits, showIndicators]);
 
   useEffect(() => {
     const bar = lastBar.current;
@@ -153,7 +267,47 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
     target.update({ time: seconds(next.time), open: next.open, high: next.high, low: next.low, close: next.close });
   }, [quote, symbol, timeframe]);
 
-  return <div ref={host} className="size-full" data-testid="market-chart" />;
+  return (
+    <div className="relative size-full">
+      <div ref={host} className="size-full" data-testid="market-chart" />
+      {priceLines.map((line) => (
+        <span
+          key={line.id}
+          ref={(node) => {
+            if (node) labelNodes.current.set(line.id, node);
+            else labelNodes.current.delete(line.id);
+          }}
+          data-testid="chart-line-label"
+          className={cn('num pointer-events-none invisible absolute top-0 left-2 z-[5] rounded-md px-1.5 text-[11px] leading-[18px] whitespace-nowrap', LABEL_TONES[line.tone])}
+        >
+          {line.label}
+        </span>
+      ))}
+      {hovered && (
+        <div className="pointer-events-none absolute top-2 left-2 z-10 rounded-xl border border-line bg-surface-2 px-3 py-2 text-xs" data-testid="chart-trade-tip">
+          {hovered.map((fill) => (
+            <div key={fill.id} className="num flex gap-3 whitespace-nowrap">
+              <span className={cn('font-semibold', fill.side === 'BUY' ? 'text-up' : 'text-down')}>{fill.liquidity === 'LIQUIDATION' ? 'Liquidated' : fill.side}</span>
+              <span>{qty(fill.quantity)} @ {formatPrice(fill.price, symbol)}</span>
+              <span className="text-ink-3">fee {money(fill.fee, 4)}</span>
+              {Number(fill.realizedPnl) !== 0 && <span className={pnlClass(fill.realizedPnl)}>{signedMoney(fill.realizedPnl)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Pair totals above a chart, so the markers have a number to add up to. */
+export function ChartTradeSummary({ summary }: { summary: TradeSummary }) {
+  return (
+    <span className="num flex flex-wrap gap-x-3 text-xs text-ink-3" data-testid="chart-trade-summary">
+      <span>{summary.fillCount} {summary.fillCount === 1 ? 'fill' : 'fills'}</span>
+      <span>Realized net <span className={pnlClass(summary.realizedNet)}>{signedMoney(summary.realizedNet)}</span></span>
+      {summary.unrealized !== null && <span>Open <span className={pnlClass(summary.unrealized)}>{signedMoney(summary.unrealized)}</span></span>}
+    </span>
+  );
 }
 
 export interface EquitySeries {

@@ -364,6 +364,26 @@ export interface RiskResult {
 export const AGENT_STATUSES = ['IDLE', 'ANALYZING', 'WAITING', 'EXECUTING', 'PAUSED', 'ERROR'] as const;
 export type AgentStatus = (typeof AGENT_STATUSES)[number];
 
+/** AUTO places approved orders itself. SIGNAL suggests them and waits for the user. */
+export type ExecutionMode = 'AUTO' | 'SIGNAL';
+
+export interface NewsSource {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  builtIn: boolean;
+}
+
+/** A headline from a third party. Untrusted: it may be wrong, stale, or written to manipulate. */
+export interface NewsItem {
+  id: string;
+  source: string;
+  title: string;
+  url: string;
+  publishedAt: number;
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -375,6 +395,9 @@ export interface Agent {
   accountId: string;
   risk: RiskSettings;
   intervalSec: number;
+  executionMode: ExecutionMode;
+  /** Live data only: the replay tape is synthetic, so real headlines would not match it. */
+  useNews: boolean;
   status: AgentStatus;
   /** True while the schedule is armed. Always false after a backend restart. */
   running: boolean;
@@ -386,7 +409,7 @@ export interface Agent {
   createdAt: number;
 }
 
-export type ProviderKind = 'MOCK' | 'OPENAI_COMPATIBLE' | 'OPENAI' | 'ANTHROPIC' | 'GEMINI' | 'DEEPSEEK';
+export type ProviderKind = 'MOCK' | 'OPENAI_COMPATIBLE' | 'OPENAI' | 'ANTHROPIC' | 'GEMINI' | 'DEEPSEEK' | 'OPENCODE';
 
 export interface ProviderConfig {
   id: string;
@@ -397,10 +420,14 @@ export interface ProviderConfig {
   /** User-entered list prices for cost estimates; null = unknown, so no estimate is shown. */
   inputPricePerMTok: number | null;
   outputPricePerMTok: number | null;
+  /** Sent with every request, for gateways that need them. Values may be secret. */
+  extraHeaders?: Record<string, string>;
   createdAt: number;
 }
 
-export interface ProviderView extends ProviderConfig {
+export interface ProviderView extends Omit<ProviderConfig, 'extraHeaders'> {
+  /** Names only: header values can hold credentials, so they never leave the backend. */
+  headerNames: string[];
   /** Whether a key is saved. The key itself is never returned. */
   hasKey: boolean;
   requiresKey: boolean;
@@ -409,6 +436,9 @@ export interface ProviderView extends ProviderConfig {
 export type DecisionOutcome =
   | 'HOLD'
   | 'ANALYSIS_ONLY'
+  | 'SIGNAL'
+  | 'SIGNAL_DISMISSED'
+  | 'SIGNAL_EXPIRED'
   | 'EXECUTED'
   | 'ORDER_PLACED'
   | 'ORDER_REJECTED'
@@ -450,6 +480,11 @@ export interface DecisionRecord {
   risk: RiskResult | null;
   outcome: DecisionOutcome;
   outcomeDetail: string | null;
+  /** Headlines the model saw, so a decision can be audited later. Null when news was off. */
+  news: NewsItem[] | null;
+  newsError: string | null;
+  /** When a pending SIGNAL stops being actionable, on the feed's clock. */
+  signalExpiresAt: number | null;
   orderId: string | null;
   fillIds: string[];
   latencyMs: number | null;
@@ -530,4 +565,4 @@ export type ServerEvent =
   | { type: 'invalidate'; topics: Topic[] }
   | { type: 'toast'; level: 'info' | 'warn' | 'error'; message: string };
 
-export type Topic = 'accounts' | 'orders' | 'positions' | 'agents' | 'decisions' | 'providers' | 'arena' | 'exchange' | 'instruments';
+export type Topic = 'accounts' | 'orders' | 'positions' | 'agents' | 'decisions' | 'providers' | 'arena' | 'exchange' | 'instruments' | 'news';

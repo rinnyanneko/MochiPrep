@@ -40,6 +40,8 @@ interface State {
   decisions: DecisionRecord[];
   arena: ArenaRow[];
   exchange: ExchangeStatus[];
+  /** Suggestions waiting for the user. */
+  signals: DecisionRecord[];
   /** Every pair available on live data. Replay only has the built-in ones. */
   symbols: SymbolId[];
   versions: Record<Topic, number>;
@@ -92,8 +94,9 @@ export const useApp = create<State>((set, get) => ({
   decisions: [],
   arena: [],
   exchange: [],
+  signals: [],
   symbols: [...DEFAULT_SYMBOLS],
-  versions: { accounts: 0, orders: 0, positions: 0, agents: 0, decisions: 0, providers: 0, arena: 0, exchange: 0, instruments: 0 },
+  versions: { accounts: 0, orders: 0, positions: 0, agents: 0, decisions: 0, providers: 0, arena: 0, exchange: 0, instruments: 0, news: 0 },
   page: (location.hash.slice(1) as Page) || 'dashboard',
   source: remembered('mochi.source', 'REPLAY') as DataSource,
   accountId: null,
@@ -144,6 +147,7 @@ export const useApp = create<State>((set, get) => ({
     if (topics.includes('agents')) jobs.push(api.get<Agent[]>('/agents').then((agents) => set({ agents })));
     if (topics.includes('providers')) jobs.push(api.get<ProviderView[]>('/providers').then((providers) => set({ providers })));
     if (topics.includes('decisions')) {
+      jobs.push(api.get<DecisionRecord[]>('/signals').then((signals) => set({ signals })));
       jobs.push(
         api.get<DecisionRecord[]>('/decisions?limit=200').then((decisions) => {
           const previous = get().decisions[0];
@@ -302,6 +306,13 @@ export const useSymbols = (): SymbolId[] => {
   const symbols = useApp((s) => s.symbols);
   const source = useApp((s) => s.source);
   return source === 'REPLAY' ? [...DEFAULT_SYMBOLS] : symbols;
+};
+
+/** Pending suggestions on the data source in view. */
+export const useSourceSignals = () => {
+  const signals = useApp((s) => s.signals);
+  const source = useApp((s) => s.source);
+  return signals.filter((s) => s.source === source);
 };
 
 /** Accounts on the data source currently in view. */

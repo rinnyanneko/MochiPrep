@@ -125,6 +125,8 @@ const toAgent = (r: Row): Agent => ({
   accountId: r.account_id,
   risk: JSON.parse(r.risk),
   intervalSec: r.interval_sec,
+  executionMode: r.execution_mode,
+  useNews: !!r.use_news,
   status: r.status,
   running: !!r.running,
   nextRunAt: r.next_run_at,
@@ -143,6 +145,7 @@ const toProvider = (r: Row): ProviderConfig => ({
   defaultModel: r.default_model,
   inputPricePerMTok: r.input_price,
   outputPricePerMTok: r.output_price,
+  extraHeaders: JSON.parse(r.extra_headers),
   createdAt: r.created_at,
 });
 
@@ -339,17 +342,17 @@ export class SqliteStore implements PaperStore, AgentStore {
   // agents
   insertAgent(a: Agent) {
     this.run(
-      `INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,risk,interval_sec,status,running,next_run_at,last_run_at,
-        status_detail,consecutive_errors,is_demo,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      a.id, a.name, a.providerId, a.model, a.symbol, a.timeframe, a.strategy, a.accountId, JSON.stringify(a.risk), a.intervalSec, a.status,
+      `INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,risk,interval_sec,execution_mode,use_news,status,running,next_run_at,last_run_at,
+        status_detail,consecutive_errors,is_demo,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      a.id, a.name, a.providerId, a.model, a.symbol, a.timeframe, a.strategy, a.accountId, JSON.stringify(a.risk), a.intervalSec, a.executionMode, a.useNews ? 1 : 0, a.status,
       a.running ? 1 : 0, a.nextRunAt, a.lastRunAt, a.statusDetail, a.consecutiveErrors, a.isDemo ? 1 : 0, a.createdAt,
     );
   }
   saveAgent(a: Agent) {
     this.run(
-      `UPDATE agents SET name=?, provider_id=?, model=?, symbol=?, timeframe=?, strategy=?, account_id=?, risk=?, interval_sec=?, status=?, running=?,
+      `UPDATE agents SET name=?, provider_id=?, model=?, symbol=?, timeframe=?, strategy=?, account_id=?, risk=?, interval_sec=?, execution_mode=?, use_news=?, status=?, running=?,
         next_run_at=?, last_run_at=?, status_detail=?, consecutive_errors=? WHERE id=?`,
-      a.name, a.providerId, a.model, a.symbol, a.timeframe, a.strategy, a.accountId, JSON.stringify(a.risk), a.intervalSec, a.status,
+      a.name, a.providerId, a.model, a.symbol, a.timeframe, a.strategy, a.accountId, JSON.stringify(a.risk), a.intervalSec, a.executionMode, a.useNews ? 1 : 0, a.status,
       a.running ? 1 : 0, a.nextRunAt, a.lastRunAt, a.statusDetail, a.consecutiveErrors, a.id,
     );
   }
@@ -372,6 +375,16 @@ export class SqliteStore implements PaperStore, AgentStore {
       rec.id, rec.agentId, rec.accountId, rec.ts, rec.outcome, JSON.stringify(rec),
     );
   }
+  saveDecision(rec: DecisionRecord) {
+    this.run('UPDATE decisions SET outcome=?, body=? WHERE id=?', rec.outcome, JSON.stringify(rec), rec.id);
+  }
+  getDecision(id: string): DecisionRecord | undefined {
+    const r = this.one('SELECT body FROM decisions WHERE id=?', id);
+    return r ? JSON.parse(r.body) : undefined;
+  }
+  listPendingSignals(): DecisionRecord[] {
+    return this.all("SELECT body FROM decisions WHERE outcome='SIGNAL' ORDER BY ts DESC").map((r) => JSON.parse(r.body));
+  }
   listDecisions(filter: { agentId?: string; limit: number }): DecisionRecord[] {
     const rows = filter.agentId
       ? this.all('SELECT body FROM decisions WHERE agent_id=? ORDER BY ts DESC, rowid DESC LIMIT ?', filter.agentId, filter.limit)
@@ -391,14 +404,14 @@ export class SqliteStore implements PaperStore, AgentStore {
   // providers
   insertProvider(p: ProviderConfig) {
     this.run(
-      'INSERT INTO providers (id,name,kind,base_url,default_model,input_price,output_price,created_at) VALUES (?,?,?,?,?,?,?,?)',
-      p.id, p.name, p.kind, p.baseUrl, p.defaultModel, p.inputPricePerMTok, p.outputPricePerMTok, p.createdAt,
+      'INSERT INTO providers (id,name,kind,base_url,default_model,input_price,output_price,extra_headers,created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+      p.id, p.name, p.kind, p.baseUrl, p.defaultModel, p.inputPricePerMTok, p.outputPricePerMTok, JSON.stringify(p.extraHeaders ?? {}), p.createdAt,
     );
   }
   saveProvider(p: ProviderConfig) {
     this.run(
-      'UPDATE providers SET name=?, kind=?, base_url=?, default_model=?, input_price=?, output_price=? WHERE id=?',
-      p.name, p.kind, p.baseUrl, p.defaultModel, p.inputPricePerMTok, p.outputPricePerMTok, p.id,
+      'UPDATE providers SET name=?, kind=?, base_url=?, default_model=?, input_price=?, output_price=?, extra_headers=? WHERE id=?',
+      p.name, p.kind, p.baseUrl, p.defaultModel, p.inputPricePerMTok, p.outputPricePerMTok, JSON.stringify(p.extraHeaders ?? {}), p.id,
     );
   }
   getProvider(id: string) {

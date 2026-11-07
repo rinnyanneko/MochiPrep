@@ -1,8 +1,10 @@
 import { Plus, RotateCcw, TriangleAlert } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { INSTRUMENTS, type Fill, type LedgerEvent, type Order, type Position, type PositionView, type SymbolId, type Timeframe } from '@mochiprep/shared';
-import { MarketChart, type PriceLineSpec } from '@/components/charts';
+import { useState } from 'react';
+import { INSTRUMENTS, TIMEFRAMES, type Fill, type LedgerEvent, type Order, type Position, type PositionView, type SymbolId, type Timeframe } from '@mochiprep/shared';
+import { ChartTradeSummary, MarketChart } from '@/components/charts';
+import { useTradeOverlay } from '@/components/useTradeOverlay';
 import { PageTitle } from '@/components/Shell';
+import { SignalsCard } from '@/components/SignalsCard';
 import { AccountPicker, ClosedPositionsTable, FillsTable, LedgerTable, OrdersTable, PositionsTable, useCurrentAccount, VenueBadge } from '@/components/trading';
 import { Badge, Button, Card, Dialog, Field, Input, Segmented, Select, Stat, Tabs } from '@/components/ui';
 import { api } from '@/lib/api';
@@ -188,11 +190,12 @@ export function PaperPage() {
   const symbols = useSymbols();
   const [picked, setSymbol] = useState<SymbolId>('BTCUSDT');
   const symbol = symbols.includes(picked) ? picked : 'BTCUSDT';
-  const [timeframe] = useState<Timeframe>('5m');
+  const [timeframe, setTimeframe] = useState<Timeframe>('5m');
   const [tab, setTab] = useState('positions');
   const quote = useApp((s) => s.quotes[source][symbol]);
   const { data: candles } = useCandles(symbol, timeframe, 300);
   const id = account?.id;
+  const overlay = useTradeOverlay(id, symbol, timeframe, quote);
 
   const { data: positions } = useQuery(() => (id ? api.get<PositionView[]>(`/accounts/${id}/positions`) : Promise.resolve([])), [id], ['positions']);
   const { data: orders } = useQuery(() => (id ? api.get<Order[]>(`/accounts/${id}/orders?limit=200`) : Promise.resolve([])), [id], ['orders']);
@@ -201,18 +204,6 @@ export function PaperPage() {
   const { data: ledger } = useQuery(() => (id ? api.get<LedgerEvent[]>(`/accounts/${id}/ledger?limit=300`) : Promise.resolve([])), [id], ['orders', 'positions']);
 
   const open = (orders ?? []).filter((o) => o.status === 'OPEN');
-  const lines = useMemo<PriceLineSpec[]>(
-    () =>
-      (positions ?? [])
-        .filter((p) => p.symbol === symbol)
-        .flatMap((p) => [
-          { price: Number(p.entryPrice), label: 'Entry', tone: 'neutral' as const },
-          ...(p.stopLoss ? [{ price: Number(p.stopLoss), label: 'Stop', tone: 'down' as const }] : []),
-          ...(p.takeProfit ? [{ price: Number(p.takeProfit), label: 'Target', tone: 'up' as const }] : []),
-        ]),
-    [positions, symbol],
-  );
-
   const actions = (
     <div className="flex flex-wrap items-center gap-2">
       <AccountPicker />
@@ -224,7 +215,7 @@ export function PaperPage() {
   if (!account) {
     return (
       <>
-        <PageTitle title="Paper Trading" action={actions} />
+        <PageTitle title="Trading" action={actions} />
         <Card className="px-6 py-10 text-center text-[13px] text-ink-3">Create a {source === 'LIVE' ? 'live-data' : 'replay'} paper account to start trading.</Card>
       </>
     );
@@ -245,6 +236,7 @@ export function PaperPage() {
           Real money. Orders here, and from any agent on this account, are placed on your OKX account.
         </div>
       )}
+      <div className="mb-3 empty:hidden"><SignalsCard /></div>
       <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Stat label="Equity" value={<span data-testid="account-equity">{money(b.equity)}</span>} />
         <Stat label="Wallet" value={money(b.walletBalance)} />
@@ -262,8 +254,10 @@ export function PaperPage() {
             <span className="num text-lg font-semibold">{price(quote?.last, symbol)}</span>
             <span className="num text-xs text-ink-3">{price(quote?.bid, symbol)} / {price(quote?.ask, symbol)}</span>
             {source === 'REPLAY' ? <Badge tone="info">Synthetic</Badge> : exchange ? <VenueBadge venue={account.venue} /> : <Badge tone="accent">Live prices, paper fills</Badge>}
+            <span className="ml-auto"><Segmented label="Timeframe" value={timeframe} onChange={setTimeframe} options={TIMEFRAMES.map((t) => ({ value: t, label: t }))} /></span>
           </div>
-          <div className="h-[470px]"><MarketChart candles={candles ?? []} symbol={symbol} timeframe={timeframe} quote={quote} showIndicators={false} priceLines={lines} /></div>
+          <div className="mb-1 px-2"><ChartTradeSummary summary={overlay.summary} /></div>
+          <div className="h-[470px]"><MarketChart candles={candles ?? []} symbol={symbol} timeframe={timeframe} quote={quote} showIndicators={false} priceLines={overlay.lines} markers={overlay.markers} notes={overlay.notes} /></div>
         </Card>
         <OrderTicket account={account} symbol={symbol} />
       </div>

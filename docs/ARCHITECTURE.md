@@ -25,6 +25,14 @@ An agent cycle snapshots a fresh quote and closed candles, builds indicators and
 
 AI output is untrusted data throughout this path. It cannot select another account, bypass sizing, change configured limits, or directly call the engine.
 
+## Execution modes
+
+In `AUTO`, an approved decision goes straight to the engine. In `SIGNAL`, the cycle stops at outcome `SIGNAL` with an expiry on the feed's clock. `executeSignal` trusts only the idea: it re-runs the risk engine on current data, which also resizes the order. A new suggestion from the same agent replaces the old one, and Stop All clears them all. Replay stops at each suggestion, or it would expire before anyone could read it.
+
+## News
+
+`NewsService` reads enabled RSS feeds at most every five minutes. Feed text is hostile input: `sanitizeHeadline` removes angle brackets and control or format characters, so a title cannot close the `<news>` block in the prompt, and titles are capped in length. The system prompt says headlines are data and never instructions. That lowers prompt injection risk without removing it, so the risk engine stays the real bound on any order. News failures never stop a cycle. Feeds must be public https, and redirects are followed by hand so each hop passes that check, because the backend fetches them from the user's machine.
+
 ## Replay clock
 
 Replay is a seeded, bundled minute tape with a warm-up region. Its clock advances only through an explicit step. The runtime publishes one quote per symbol and waits for quote handling and due agent cycles to complete before advancing again. Slow model calls therefore pause tape time instead of skipping simulated minutes. Reset restores the deterministic cursor and account state, so equal inputs produce equal numeric outcomes; random database IDs are not part of determinism.

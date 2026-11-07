@@ -70,9 +70,25 @@ export const ClosePositionSchema = z.strictObject({
   clientOrderId: z.string().min(1).max(128),
 });
 
+/** Each provider sets these itself. A duplicate would break auth or the request framing. */
+const RESERVED_HEADERS = ['authorization', 'x-api-key', 'x-goog-api-key', 'anthropic-version', 'content-type', 'content-length', 'host', 'connection', 'transfer-encoding'];
+
+const ExtraHeadersSchema = z
+  .record(z.string().regex(/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,100}$/, 'invalid header name'), z.string().min(1).max(2000).regex(/^[^\r\n]*$/, 'header values cannot contain line breaks'))
+  .superRefine((headers, ctx) => {
+    const names = Object.keys(headers);
+    if (names.length > 20) ctx.addIssue({ code: 'custom', message: 'at most 20 headers' });
+    for (const name of names) {
+      if (RESERVED_HEADERS.includes(name.toLowerCase())) ctx.addIssue({ code: 'custom', message: `${name} is set by the provider and cannot be overridden` });
+    }
+  })
+  .transform((headers) => Object.fromEntries(Object.entries(headers).map(([name, value]) => [name.toLowerCase(), value])));
+
 export const ProviderInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(60),
-  kind: z.enum(['OPENAI_COMPATIBLE', 'OPENAI', 'ANTHROPIC', 'GEMINI', 'DEEPSEEK']),
+  kind: z.enum(['OPENAI_COMPATIBLE', 'OPENAI', 'ANTHROPIC', 'GEMINI', 'DEEPSEEK', 'OPENCODE']),
+  /** Omit to keep the saved headers: the API never returns their values to send back. */
+  extraHeaders: ExtraHeadersSchema.optional(),
   baseUrl: z.url().max(300).nullable(),
   defaultModel: z.string().trim().min(1).max(120),
   inputPricePerMTok: z.number().min(0).nullable(),
@@ -91,7 +107,16 @@ export const AgentInputSchema = z.strictObject({
   accountId: z.string().min(1),
   risk: RiskSettingsSchema.default(DEFAULT_RISK_SETTINGS),
   intervalSec: z.number().int().min(10).max(86_400),
+  executionMode: z.enum(['AUTO', 'SIGNAL']).default('SIGNAL'),
+  useNews: z.boolean().default(false),
 });
+
+export const NewsSourceInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(40),
+  url: z.url().max(300),
+});
+
+export const NewsSourceToggleSchema = z.strictObject({ enabled: z.boolean() });
 
 const secret = z.string().trim().min(1).max(200);
 

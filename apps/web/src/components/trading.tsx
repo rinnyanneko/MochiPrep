@@ -212,6 +212,9 @@ export function LedgerTable({ events }: { events: LedgerEvent[] }) {
 const OUTCOME: Record<DecisionOutcome, { label: string; tone: Tone }> = {
   HOLD: { label: 'Hold', tone: 'neutral' },
   ANALYSIS_ONLY: { label: 'Analysis only', tone: 'info' },
+  SIGNAL: { label: 'Suggested', tone: 'accent' },
+  SIGNAL_DISMISSED: { label: 'Dismissed', tone: 'neutral' },
+  SIGNAL_EXPIRED: { label: 'Expired', tone: 'neutral' },
   EXECUTED: { label: 'Executed', tone: 'up' },
   ORDER_PLACED: { label: 'Order resting', tone: 'info' },
   ORDER_REJECTED: { label: 'Order rejected', tone: 'down' },
@@ -224,7 +227,7 @@ const OUTCOME: Record<DecisionOutcome, { label: string; tone: Tone }> = {
 export const OutcomeBadge = ({ outcome }: { outcome: DecisionOutcome }) => <Badge tone={OUTCOME[outcome].tone}>{OUTCOME[outcome].label}</Badge>;
 export const OUTCOME_OPTIONS = Object.entries(OUTCOME).map(([value, o]) => ({ value: value as DecisionOutcome, label: o.label }));
 
-const actionTone = (action?: string): Tone => (action === 'LONG' ? 'up' : action === 'SHORT' ? 'down' : action === 'CLOSE' ? 'accent' : 'neutral');
+export const actionTone = (action?: string): Tone => (action === 'LONG' ? 'up' : action === 'SHORT' ? 'down' : action === 'CLOSE' ? 'accent' : 'neutral');
 
 export function DecisionList({ decisions, selected, onSelect, emptyText }: { decisions: DecisionRecord[]; selected?: string; onSelect(d: DecisionRecord): void; emptyText: string }) {
   if (decisions.length === 0) return <p className="px-5 py-8 text-center text-[13px] text-ink-3">{emptyText}</p>;
@@ -292,6 +295,22 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
             <Row label="Stop / Target">{ai.stopLoss ?? '–'} / {ai.takeProfit ?? '–'}</Row>
             <Row label="Confidence (uncalibrated)">{(ai.confidence * 100).toFixed(0)}%</Row>
           </div>
+        </section>
+      )}
+
+      {d.news && (
+        <section data-testid="decision-news">
+          <h3 className="mb-1 text-xs font-semibold text-ink-2">Headlines the AI saw ({d.news.length})</h3>
+          {d.newsError && <p className="mb-1 text-xs text-warn">{d.newsError}</p>}
+          <ul className="space-y-1">
+            {d.news.map((item) => (
+              <li key={item.id} className="text-xs text-ink-2">
+                <span className="text-ink-3">{item.source} · {dateTime(item.publishedAt)}</span>
+                <span className="block">{item.title}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-[11px] text-ink-3">Third-party text, unverified.</p>
         </section>
       )}
 

@@ -11,6 +11,8 @@ import {
   ClosePositionSchema,
   CreateAccountSchema,
   INSTRUMENTS,
+  NewsSourceInputSchema,
+  NewsSourceToggleSchema,
   OkxConnectSchema,
   PlaceOrderSchema,
   ProtectionSchema,
@@ -128,6 +130,25 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   });
   app.get('/api/market/quotes', async (request) => runtime.quotes(SourceQuery.parse(request.query).source));
 
+  // ---- news -----------------------------------------------------------------------------
+  app.get('/api/news', async (request) => {
+    const { symbol } = z.object({ symbol: SymbolSchema }).parse(request.query);
+    return runtime.newsFor(symbol, 12);
+  });
+  app.get('/api/news/sources', async () => runtime.newsSources());
+  app.post('/api/news/sources', async (request) => {
+    const { name, url } = NewsSourceInputSchema.parse(request.body);
+    return runtime.addNewsSource(name, url);
+  });
+  app.put<{ Params: IdParams }>('/api/news/sources/:id', async (request) => {
+    runtime.setNewsSourceEnabled(request.params.id, NewsSourceToggleSchema.parse(request.body).enabled);
+    return { ok: true };
+  });
+  app.delete<{ Params: IdParams }>('/api/news/sources/:id', async (request) => {
+    runtime.removeNewsSource(request.params.id);
+    return { ok: true };
+  });
+
   // ---- trading pairs --------------------------------------------------------------------
   app.get('/api/instruments', async () => Object.values(INSTRUMENTS));
   app.get('/api/instruments/available', async () => runtime.availableInstruments());
@@ -229,13 +250,15 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
     const provider = { ...input, id: `prov_${randomUUID()}`, createdAt: Date.now() };
     runtime.store.insertProvider(provider);
     runtime.invalidate('providers');
-    return provider;
+    return runtime.providerViews().find((p) => p.id === provider.id);
   });
   app.put<{ Params: IdParams }>('/api/providers/:id', async (request) => {
-    const provider = { ...editableProvider(request.params.id), ...ProviderInputSchema.parse(request.body) };
+    const current = editableProvider(request.params.id);
+    const input = ProviderInputSchema.parse(request.body);
+    const provider = { ...current, ...input, extraHeaders: input.extraHeaders ?? current.extraHeaders ?? {} };
     runtime.store.saveProvider(provider);
     runtime.invalidate('providers');
-    return provider;
+    return runtime.providerViews().find((p) => p.id === provider.id);
   });
   app.delete<{ Params: IdParams }>('/api/providers/:id', async (request) => {
     const { id } = editableProvider(request.params.id);
@@ -312,6 +335,7 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   app.post<{ Params: IdParams }>('/api/agents/:id/run', runOnce('RUN_ONCE'));
   app.post('/api/agents/stop-all', async () => {
     const stopped = runtime.runner.stopAll();
+    runtime.runner.retireAllSignals();
     runtime.setPlaying(false);
     runtime.disarm();
     return { stopped };
@@ -335,6 +359,21 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
     runtime.disarm(requireAccount(request.params.id));
     return { ok: true };
   });
+
+  // ---- suggestions ----------------------------------------------------------------------
+  const requireSignal = (id: string) => {
+    const signal = runtime.store.getDecision(id);
+    if (!signal) throw Object.assign(new Error('Unknown suggestion'), { statusCode: 404 });
+    if (signal.outcome !== 'SIGNAL') throw Object.assign(new Error('This suggestion is no longer pending'), { statusCode: 409 });
+    return signal;
+  };
+  app.get('/api/signals', async () => runtime.store.listPendingSignals());
+  app.post<{ Params: IdParams }>('/api/signals/:id/execute', async (request) => {
+    const signal = requireSignal(request.params.id);
+    runtime.assertCanExecuteSignal(signal);
+    return runtime.runner.executeSignal(signal.id);
+  });
+  app.post<{ Params: IdParams }>('/api/signals/:id/dismiss', async (request) => runtime.runner.dismissSignal(requireSignal(request.params.id).id));
 
   app.get('/api/decisions', async (request) => {
     const { agentId, limit } = DecisionQuery.parse(request.query);

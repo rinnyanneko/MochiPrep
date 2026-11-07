@@ -22,7 +22,7 @@ import { api } from '@/lib/api';
 import { dateTime } from '@/lib/format';
 import { DYOR_NOTICE } from '@/lib/notices';
 import { cn } from '@/lib/utils';
-import { attempt, useApp, type Page } from '@/store';
+import { attempt, useApp, useSourceSignals, type Page } from '@/store';
 import { Mochi, MOOD_LABEL, type MochiMood } from './Mochi';
 import { Badge, Button, Dialog, Segmented, Select, type Tone } from './ui';
 
@@ -30,7 +30,7 @@ const NAV: { id: Page; label: string; icon: typeof Bot }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'markets', label: 'Markets', icon: CandlestickChart },
   { id: 'agents', label: 'AI Agents', icon: Bot },
-  { id: 'paper', label: 'Paper Trading', icon: Wallet },
+  { id: 'paper', label: 'Trading', icon: Wallet },
   { id: 'arena', label: 'Trading Arena', icon: Swords },
   { id: 'history', label: 'Trade History', icon: History },
   { id: 'settings', label: 'Settings', icon: Settings },
@@ -86,6 +86,7 @@ function Sidebar() {
   const page = useApp((s) => s.page);
   const setPage = useApp((s) => s.setPage);
   const mood = useMood();
+  const pendingSignals = useSourceSignals().length;
 
   return (
     <aside className="flex shrink-0 flex-col border-line bg-surface max-lg:order-last max-lg:border-t lg:w-56 lg:border-r">
@@ -110,6 +111,9 @@ function Sidebar() {
           >
             <item.icon className="size-4 shrink-0" />
             {item.label}
+            {item.id === 'paper' && pendingSignals > 0 && (
+              <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] text-accent-ink" data-testid="signal-count">{pendingSignals}</span>
+            )}
           </button>
         ))}
       </nav>

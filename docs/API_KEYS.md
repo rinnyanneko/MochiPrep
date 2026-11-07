@@ -51,9 +51,29 @@
 2. 建立金鑰並複製。
 3. 在 MochiPrep 選類型 **DeepSeek**，Base URL 留空，模型預設為 `deepseek-flash`。
 
+### OpenCode
+
+1. 依 [Zen 文件](https://opencode.ai/docs/zen/) 登入 OpenCode Console，加入付款資訊和額度，複製 API key。
+2. 在 MochiPrep 選類型 **OpenCode**，Base URL 留空，模型預設為 `deepseek-v4.1-flash`。
+
+MochiPrep 走 OpenCode 的 Chat Completions 端點，官方說明其他文字模型也能經它轉換使用。名稱帶 `-free` 的免費模型只能在 OpenCode 自家客戶端使用，這裡請選付費模型。完整模型清單見 [Zen 文件](https://opencode.ai/docs/zen/)。
+
 ### OpenAI 相容服務
 
 本機模型或其他相容 OpenAI API 的服務，選類型 **OpenAI-compatible**，Base URL 填到 `/v1` 為止，例如 Ollama 的 `http://localhost:11434/v1`。不需要金鑰的本機服務，金鑰欄隨便填一個值即可。
+
+### 需要特定 Header 的服務
+
+有些閘道服務要求額外的 HTTP header，例如 `HTTP-Referer` 或組織 ID。新增 provider 時填在 **Extra headers**，一行一個：
+
+```text
+HTTP-Referer: https://example.com
+X-Title: MochiPrep
+```
+
+- 和 API key 一樣未加密存在本機，App 只會顯示名稱，不會顯示內容。
+- 編輯時留空會保留原本的值，填入新內容會整組取代。
+- `Authorization`、`x-api-key`、`Content-Type` 這類由 MochiPrep 設定的 header 不能覆蓋。
 
 ## OKX
 

@@ -26,3 +26,41 @@ describe('DeepSeek provider', () => {
     await expect(provider.complete(request)).rejects.toBeInstanceOf(ProviderError);
   });
 });
+
+describe('OpenCode provider', () => {
+  const opencode: ProviderConfig = { ...config, id: 'o', name: 'OpenCode', kind: 'OPENCODE', defaultModel: 'deepseek-v4.1-flash' };
+
+  it('calls the Chat Completions endpoint without JSON mode', async () => {
+    const fetchImpl = reply('{"ok":true}');
+    await createRemoteProvider(opencode, 'key', fetchImpl as unknown as typeof fetch).complete(request);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://opencode.ai/inference/openai/v1/chat/completions');
+    expect((init.headers as Record<string, string>).authorization).toBe('Bearer key');
+    expect(JSON.parse(init.body as string).response_format).toBeUndefined();
+  });
+
+  it('lets a custom base URL replace the default', async () => {
+    const fetchImpl = reply('{"ok":true}');
+    await createRemoteProvider({ ...opencode, baseUrl: 'https://gateway.test/v1/' }, 'key', fetchImpl as unknown as typeof fetch).complete(request);
+    expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toBe('https://gateway.test/v1/chat/completions');
+  });
+});
+
+describe('extra headers', () => {
+  const kinds: [ProviderConfig['kind'], string][] = [['OPENAI_COMPATIBLE', 'https://x.test/v1'], ['ANTHROPIC', 'https://x.test'], ['GEMINI', 'https://x.test']];
+
+  it.each(kinds)('reach the provider on %s', async (kind, baseUrl) => {
+    const body = kind === 'ANTHROPIC' ? { content: [{ type: 'text', text: 'hi' }] } : kind === 'GEMINI' ? { candidates: [{ content: { parts: [{ text: 'hi' }] } }] } : { choices: [{ message: { content: 'hi' } }] };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(body)));
+    const provider = createRemoteProvider({ ...config, kind, baseUrl, extraHeaders: { 'x-title': 'mochi' } }, 'key', fetchImpl as unknown as typeof fetch);
+    await provider.complete(request);
+    expect(((fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].headers as Record<string, string>)['x-title']).toBe('mochi');
+  });
+
+  it('are redacted from provider errors', async () => {
+    const fetchImpl = vi.fn(async () => new Response('rejected header gateway-secret-value', { status: 500 }));
+    const provider = createRemoteProvider({ ...config, extraHeaders: { 'x-org': 'gateway-secret-value' } }, 'key', fetchImpl as unknown as typeof fetch);
+    await expect(provider.complete(request)).rejects.toThrow(/\[REDACTED\]/);
+    await expect(provider.complete(request)).rejects.not.toThrow(/gateway-secret-value/);
+  });
+});

@@ -71,7 +71,7 @@ describe('API decision-to-position integration', () => {
       method: 'POST', url: '/api/agents', headers: headers(),
       payload: {
         name: 'agent', providerId: provider.id, model: 'model', symbol: 'BTCUSDT', timeframe: '15m', strategy: '',
-        accountId: account.id, risk: DEFAULT_RISK_SETTINGS, intervalSec: 900,
+        accountId: account.id, risk: DEFAULT_RISK_SETTINGS, intervalSec: 900, executionMode: 'AUTO',
       },
     });
     const agent = agentResponse.json();

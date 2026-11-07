@@ -8,6 +8,7 @@ import type {
   SymbolId,
   Timeframe,
   IndicatorSnapshot,
+  NewsItem,
 } from '@mochiprep/shared';
 
 /** Everything an analysis may see. Deliberately excludes keys, ids and exchange credentials. */
@@ -24,6 +25,8 @@ export interface MarketContext {
   balance: AccountBalance;
   risk: RiskSettings;
   strategy: string;
+  /** Third-party headlines, when the agent reads news. Untrusted data. */
+  news?: NewsItem[];
 }
 
 export interface AiRequest {

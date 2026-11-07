@@ -36,9 +36,21 @@ pnpm test:e2e    # Playwright through the real UI, needs Google Chrome installed
 
 Press **Try Demo Mode** on the Dashboard. It needs no API key and no internet: each mock agent gets 10,000 virtual USDT, then press play in the top bar to run the tape. Demo Mode uses a bundled, seeded replay tape and mock agents. Time advances deterministically and waits for agent work, making equal runs reproducible by values and fill sequence. Demo trades, PnL, rejections, and leaderboard results are simulations—not forecasts or investment claims.
 
+## Suggest or trade automatically
+
+Each agent has a mode. **Suggest to me** shows the entry, stop and target on the chart and in a list, and nothing is ordered until you accept. Accepting runs the risk engine again and resizes the order at current prices. Suggestions expire after one agent interval, and the replay tape stops at each one so you can read it. **Trade automatically** places approved orders with no confirmation. New agents start in Suggest mode.
+
+## News
+
+On Live OKX, an agent can read recent headlines from RSS feeds. Turn it on per agent, and choose feeds in **Settings > News sources**. Agents get up to 8 headlines from the last 24 hours, with their coin first. Only titles are used, and each decision records the ones the model saw. Headlines are untrusted: they can be wrong, or written to mislead an AI. The risk engine still bounds every order, but it cannot tell a misled decision from a sound one, so prefer Suggest mode with news on a real account.
+
 ## Live OKX prices
 
 Switch the top bar to **Live OKX** to paper trade against OKX public market data. No exchange key is involved: orders on a paper account are simulated locally.
+
+## Trades on the chart
+
+Charts on **Markets** and **Trading** show the selected account's trades: `B` and `S` markers with realized PnL on closing fills, the entry line with live PnL and return on margin, TP, SL, liquidation, and resting limits. Hover a bar with a marker to see each fill's size, price and fee. Markers cover the account's latest 500 fills and appear on loaded bars only.
 
 ## Trading pairs
 
@@ -50,7 +62,7 @@ Connect an account in **Settings**, using Demo Trading or a real account. See [h
 
 ## BYOK providers
 
-Add a provider in **Settings**, paste its key, then pick it when creating an agent. See [how to get API keys](docs/API_KEYS.md). You can configure OpenAI-compatible, OpenAI, Anthropic, Gemini, or DeepSeek providers. AI keys are saved **unencrypted** in the local SQLite file, so they survive restarts. The database lives in `.mochiprep/`, which only your user can read and git ignores. Anyone who can read that file, including backups of it, can read the keys. They are never logged or returned to the browser. Model output is strictly validated and must pass server-side risk checks before the paper engine can accept an order.
+Add a provider in **Settings**, paste its key, then pick it when creating an agent. See [how to get API keys](docs/API_KEYS.md). You can configure OpenAI-compatible, OpenAI, Anthropic, Gemini, DeepSeek, or OpenCode providers, and add extra request headers for gateways that need them. AI keys and extra headers are saved **unencrypted** in the local SQLite file, so they survive restarts. The database lives in `.mochiprep/`, which only your user can read and git ignores. Anyone who can read that file, including backups of it, can read the keys. They are never logged or returned to the browser. Model output is strictly validated and must pass server-side risk checks before the paper engine can accept an order.
 
 ## Current limits
 
@@ -59,5 +71,11 @@ Add a provider in **Settings**, paste its key, then pick it when creating an age
 - Paper trading uses one 0.5% maintenance rate for every pair, while OKX uses tiers, so simulated liquidation is less accurate on small coins.
 - Simplified fills, funding, and isolated liquidation; no order-book queue, partial liquidity, maintenance tiers, cross margin, or exchange-identical liquidation.
 - OKX credentials and arming disappear on restart by design. AI keys do not.
+
+## License
+
+MochiPrep is licensed under the [GNU Affero General Public License](LICENSE), version 3 or (at your option) any later version. If you run a modified version as a network service, you must offer its users the source.
+
+Charts use [TradingView Lightweight Charts](https://www.tradingview.com/lightweight-charts/) (Apache-2.0), copyright TradingView, Inc.
 
 See [Trading on OKX](docs/OKX_TRADING.md), [paper engine rules](docs/PAPER_ENGINE.md), [architecture](docs/ARCHITECTURE.md), and [roadmap](docs/ROADMAP.md).

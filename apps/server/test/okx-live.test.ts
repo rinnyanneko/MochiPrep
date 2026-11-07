@@ -487,6 +487,62 @@ describe('OKX execution', () => {
       expect(okx.placed).toHaveLength(0);
     });
 
+    describe('suggestions on a real account', () => {
+      const suggesting = (accountId: string) => runtime.store.getAgent(agentOn(accountId).id)!;
+      const asSignal = (accountId: string) => {
+        const agent = suggesting(accountId);
+        agent.executionMode = 'SIGNAL';
+        runtime.store.saveAgent(agent);
+        return agent;
+      };
+
+      it('can run unarmed, because a suggestion places nothing', async () => {
+        const account = await connect('OKX_LIVE');
+        const agent = asSignal(account.id);
+        expect(() => runtime.assertCanRun(agent)).not.toThrow();
+        const record = await runtime.runner.runCycle(agent.id, 'RUN_ONCE');
+        expect(record!.outcome).toBe('SIGNAL');
+        expect(okx.placed).toHaveLength(0);
+      });
+
+      it('refuses to accept while unarmed and keeps the suggestion for later', async () => {
+        const account = await connect('OKX_LIVE');
+        const record = (await runtime.runner.runCycle(asSignal(account.id).id, 'RUN_ONCE'))!;
+        expect(() => runtime.assertCanExecuteSignal(record)).toThrow(/not armed/);
+        expect(runtime.store.listPendingSignals()).toHaveLength(1);
+
+        runtime.arm(account.id, ARM_PHRASE);
+        expect(() => runtime.assertCanExecuteSignal(record)).not.toThrow();
+        expect((await runtime.runner.executeSignal(record.id)).outcome).toBe('EXECUTED');
+        expect(okx.placed).toHaveLength(1);
+      });
+
+      it('the API refuses to accept while unarmed, without using up the suggestion', async () => {
+        const account = await connect('OKX_LIVE');
+        const record = (await runtime.runner.runCycle(asSignal(account.id).id, 'RUN_ONCE'))!;
+        const { app, token } = buildApp(runtime, { host: '127.0.0.1', port: 8787, dataDir: '.', allowedOrigins: ['http://localhost:8787'] });
+        const accept = () => app.inject({ method: 'POST', url: `/api/signals/${record.id}/execute`, headers: { host: 'localhost:8787', authorization: `Bearer ${token}` } });
+
+        const refused = await accept();
+        expect(refused.statusCode).toBe(400);
+        expect(refused.json().error).toContain('not armed');
+        expect(runtime.store.getDecision(record.id)!.outcome).toBe('SIGNAL');
+        expect(okx.placed).toHaveLength(0);
+
+        runtime.arm(account.id, ARM_PHRASE);
+        expect((await accept()).json().outcome).toBe('EXECUTED');
+        await app.close();
+      });
+
+      it('still passes account ceilings when accepted', async () => {
+        const account = await connect('OKX_LIVE');
+        runtime.arm(account.id, ARM_PHRASE);
+        const record = (await runtime.runner.runCycle(asSignal(account.id).id, 'RUN_ONCE'))!;
+        const result = await runtime.runner.executeSignal(record.id);
+        expect(Number(result.risk!.sized!.notional)).toBeLessThanOrEqual(DEFAULT_LIVE_LIMITS.maxNotional);
+      });
+    });
+
     it('will not schedule an agent on an unarmed real account', async () => {
       const account = await connect('OKX_LIVE');
       expect(() => runtime.assertCanRun(agentOn(account.id))).toThrow(/not armed/);

@@ -4,6 +4,7 @@ import type { EquityPoint, Fill, PositionView } from '@mochiprep/shared';
 import { EquityChart } from '@/components/charts';
 import { Mochi } from '@/components/Mochi';
 import { PageTitle } from '@/components/Shell';
+import { SignalsCard } from '@/components/SignalsCard';
 import { AccountPicker, DecisionList, FillsTable, PositionsTable } from '@/components/trading';
 import { Button, Card, CardHeader, Stat } from '@/components/ui';
 import { api } from '@/lib/api';
@@ -59,6 +60,7 @@ function combine(curves: EquityPoint[][]): { ts: number; equity: number }[] {
 export function DashboardPage() {
   const accounts = useSourceAccounts();
   const allAccounts = useApp((s) => s.accounts);
+  const accountsLoaded = useApp((s) => s.versions.accounts > 0);
   const demoActive = useApp((s) => s.demoActive);
   const source = useApp((s) => s.source);
   const accountId = useApp((s) => s.accountId);
@@ -82,6 +84,8 @@ export function DashboardPage() {
 
   const series = useMemo(() => [{ id: 'equity', name: 'Equity', color: '--series-1', points: combine(curves ?? []) }], [curves]);
 
+  // Until the first load, "no accounts" only means "not fetched yet".
+  if (!accountsLoaded) return null;
   if (allAccounts.length === 0 && !demoActive) return <Welcome />;
 
   const sum = (pick: (a: (typeof scope)[number]) => string) => scope.reduce((total, a) => total + Number(pick(a)), 0);
@@ -102,10 +106,11 @@ export function DashboardPage() {
       {scope.length === 0 ? (
         <Card className="px-6 py-10 text-center text-[13px] text-ink-3">
           No {source === 'LIVE' ? 'live-data' : 'replay'} paper accounts yet.{' '}
-          <button type="button" className="font-semibold text-accent" onClick={() => setPage('paper')}>Create one in Paper Trading</button>.
+          <button type="button" className="font-semibold text-accent" onClick={() => setPage('paper')}>Create one in Trading</button>.
         </Card>
       ) : (
         <div className="space-y-4">
+          <SignalsCard />
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
             <Stat label="Total equity" value={<span data-testid="total-equity">{money(equity)}</span>} sub={<span className={pnlClass(equity - initial)}>{pct(initial ? ((equity - initial) / initial) * 100 : 0)}</span>} />
             <Stat label="Wallet balance" value={money(sum((a) => a.balance.walletBalance))} sub="USDT" />

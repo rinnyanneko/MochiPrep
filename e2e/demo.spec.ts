@@ -47,13 +47,22 @@ test('market data to agent decision to risk to paper order to position to PnL in
   await expect(page.getByTestId('risk-checks')).toContainText('Risk engine: rejected');
   await expect(page.getByTestId('ledger-audit')).toHaveText('Ledger balances match');
 
-  await page.getByRole('button', { name: 'Paper Trading' }).click();
+  await page.getByRole('button', { name: 'Trading', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Paper Trading' })).toBeVisible();
+  await page.getByLabel('Paper account').selectOption({ label: 'Reckless account' });
+  await expect(page.getByTestId('chart-trade-summary')).toContainText(/[1-9]\d* fills?/);
   await page.getByLabel('Paper account').selectOption({ label: 'Demo terminal' });
   await expect(page.getByTestId('account-equity')).toHaveText('10,000.00');
   await page.getByRole('button', { name: 'Review long' }).click();
   await page.getByRole('button', { name: 'Place order' }).click();
   await expect(page.getByTestId('position-row')).toHaveCount(1);
   await expect(page.getByTestId('position-row')).toContainText('LONG');
+  await expect(page.getByTestId('chart-trade-summary')).toContainText('Open');
+  // Labels sit at the left, clear of the newest candles at the right edge.
+  const label = page.getByTestId('chart-line-label').filter({ hasText: 'LONG' });
+  await expect(label).toBeVisible();
+  const [box, chart] = [await label.boundingBox(), await page.getByTestId('market-chart').boundingBox()];
+  expect(box!.x + box!.width).toBeLessThan(chart!.x + chart!.width / 2);
   // Spread, slippage and the entry fee mean a fresh long is immediately below starting equity.
   await expect.poll(async () => usdt(await page.getByTestId('account-equity').textContent())).toBeLessThan(10_000);
 
@@ -65,4 +74,34 @@ test('market data to agent decision to risk to paper order to position to PnL in
   await page.getByTestId('confirm-demo-action').click();
   await page.getByRole('button', { name: 'Dashboard' }).click();
   await expect(page.getByTestId('total-equity')).toHaveText('40,000.00');
+});
+
+test('an agent in suggestion mode waits for the user, then the suggestion becomes a position', async ({ page }) => {
+  await page.goto('/');
+  // The first test may have left Demo Mode on, in the same throwaway backend.
+  const demo = page.getByTestId('try-demo');
+  await expect(demo.or(page.getByTestId('total-equity'))).toBeVisible();
+  if (await demo.isVisible()) await demo.click();
+
+  await page.getByRole('button', { name: 'AI Agents' }).click();
+  const card = page.getByTestId('agent-card').filter({ hasText: 'Reckless Rice Cake' });
+  await card.getByRole('button', { name: 'Edit Reckless Rice Cake' }).click();
+  await page.getByRole('button', { name: 'Suggest to me' }).click();
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(card.getByTestId('agent-mode')).toHaveText('Suggest');
+  await card.getByRole('button', { name: 'Start', exact: true }).click();
+
+  await page.getByLabel('Replay speed').selectOption('60');
+  await page.getByRole('button', { name: 'Play replay' }).click();
+
+  await page.getByRole('button', { name: /^Dashboard/ }).click();
+  const row = page.getByTestId('signal-row').first();
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  // The tape stops at a suggestion, and nothing has traded yet.
+  await expect(page.getByRole('button', { name: 'Play replay' })).toBeVisible();
+  await expect(page.getByTestId('signal-count')).toHaveText('1');
+
+  await row.getByRole('button', { name: 'Place order' }).click();
+  await expect(page.getByTestId('signals-card')).toBeHidden();
+  await expect(page.getByTestId('position-row')).toHaveCount(1);
 });
