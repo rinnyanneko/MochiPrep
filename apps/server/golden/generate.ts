@@ -99,59 +99,188 @@ function schemaFixture() {
  */
 function storeRowsFixture() {
   const { samples } = accountingTypesFixture();
-  const account = samples.paperAccount[0]!;
-  const minimalAccount = { ...samples.paperAccount[1]!, id: 'acc-2' };
+  const T0 = 1700000000000;
+  const account = samples.paperAccount[0]!; // LIVE source
+  const replayAccount = { ...samples.paperAccount[1]!, id: 'acc-2' }; // REPLAY source
+
+  // Two accounts on different sources, so the market joins have something to filter out.
+  // Orders share created_at on purpose (ord-2, ord-3, ord-5): ordering then falls to rowid.
+  const order = (o: Partial<Order> & Pick<Order, 'id' | 'clientOrderId'>): Order => ({
+    ...samples.order[1]!,
+    status: 'OPEN',
+    ...o,
+  });
   const orders: Order[] = [
-    { ...samples.order[0]! },
-    { ...samples.order[1]!, id: 'ord-2', clientOrderId: 'cli-2', status: 'OPEN', createdAt: 1700000000500, updatedAt: 1700000001500 },
+    { ...samples.order[0]! }, // ord-1, acc-1, BTCUSDT, FILLED
+    order({ id: 'ord-2', clientOrderId: 'cli-2', createdAt: T0 + 500, updatedAt: T0 + 1500 }),
+    order({ id: 'ord-3', clientOrderId: 'cli-3', createdAt: T0 + 500, updatedAt: T0 + 1600 }),
+    order({ id: 'ord-4', clientOrderId: 'cli-4', symbol: 'ETHUSDT', createdAt: T0 + 100 }),
+    order({ id: 'ord-5', clientOrderId: 'cli-5', accountId: 'acc-2', createdAt: T0 + 500 }),
+    order({ id: 'ord-6', clientOrderId: 'cli-6', status: 'CANCELED', createdAt: T0 + 700 }),
   ];
+  // Inserted out of id order, with equal ts, so only the rowid tie-break gives the expected order.
+  const fill = (f: Partial<Fill> & Pick<Fill, 'id'>): Fill => ({ ...samples.fill[1]!, ...f });
   const fills: Fill[] = [
-    { ...samples.fill[0]! },
-    { ...samples.fill[1]!, id: 'fill-2', orderId: 'ord-2', ts: 1700000002500 },
+    fill({ id: 'fill-1', orderId: 'ord-1', ts: T0 + 2000 }),
+    fill({ id: 'fill-2', orderId: 'ord-2', ts: T0 + 2500 }),
+    fill({ id: 'fill-4', orderId: 'ord-1', ts: T0 + 2500 }),
+    fill({ id: 'fill-3', orderId: 'ord-1', ts: T0 + 2500 }),
+    fill({ id: 'fill-5', orderId: 'ord-5', accountId: 'acc-2', ts: T0 + 2600 }),
   ];
+  const position = (p: Partial<Position> & Pick<Position, 'id'>): Position => ({
+    ...samples.position[1]!,
+    ...p,
+  });
   const positions: Position[] = [
-    { ...samples.position[0]! },
-    { ...samples.position[1]!, id: 'pos-2', symbol: 'ETHUSDT' },
+    { ...samples.position[0]! }, // pos-1, BTCUSDT, LIQUIDATED, closedAt T0+4000
+    position({ id: 'pos-2', symbol: 'ETHUSDT' }), // OPEN
+    position({ id: 'pos-3', status: 'CLOSED', exitPrice: '68000', closedAt: T0 + 5000 }),
+    position({ id: 'pos-4', symbol: 'ETHUSDT', status: 'CLOSED', exitPrice: '3000', closedAt: T0 + 4500 }),
+    position({ id: 'pos-5', symbol: 'SOLUSDT', openedAt: T0 - 1000 }), // OPEN, older than pos-2
+    position({ id: 'pos-6', accountId: 'acc-2', symbol: 'ETHUSDT' }), // OPEN on the REPLAY account
   ];
   const ledger: Array<Omit<LedgerEvent, 'seq'>> = [0, 1, 2].map((i) => {
     const { seq: _seq, ...event } = samples.ledgerEvent[i]!;
     return { ...event, id: `led-${i + 1}`, ts: event.ts + i };
   });
+  const point = (accountId: string, n: number, equity: string): EquityPoint => ({
+    ...samples.equityPoint[0]!,
+    accountId,
+    ts: T0 + 6000 + n * 1000,
+    equity,
+  });
   const equity: EquityPoint[] = [
-    { ...samples.equityPoint[0]! },
-    { ...samples.equityPoint[0]!, ts: samples.equityPoint[0]!.ts + 1000, equity: '10600.25' },
+    point('acc-1', 0, '10500.5'),
+    point('acc-1', 1, '10600.25'),
+    point('acc-1', 2, '10400'),
+    point('acc-1', 3, '10450.75'),
+    point('acc-1', 4, '10700'),
+    point('acc-2', 0, '9000'),
   ];
-  // Rewrites the first point's slot, which covers the ON CONFLICT path.
+  // Rewrites the first point slot, which covers the ON CONFLICT path.
   const equityUpdate: EquityPoint = { ...equity[0]!, equity: '10501', unrealized: '266.4322' };
+
+  // Edits that include fields the save methods must NOT write (name, price, leverage, openedAt).
+  const savedAccount: PaperAccount = {
+    ...account,
+    name: 'Renamed',
+    initialBalance: '1',
+    walletBalance: '9000.5',
+    usedMargin: '1',
+    realizedPnl: '-10',
+    feesPaid: '3',
+    fundingPaid: '0.5',
+  };
+  const savedOrder: Order = {
+    ...orders[1]!,
+    price: '1',
+    quantity: '0.25',
+    status: 'FILLED',
+    filledQuantity: '0.25',
+    avgFillPrice: '67100',
+    reservedMargin: '12.5',
+    rejectReason: 'edited',
+    exchangeOrderId: '555',
+    updatedAt: T0 + 9000,
+  };
+  const savedPosition: Position = {
+    ...positions[1]!,
+    leverage: 9,
+    openedAt: 1,
+    quantity: '0.2',
+    entryPrice: '3100',
+    margin: '77.5',
+    liquidationPrice: '2500',
+    status: 'CLOSED',
+    realizedPnl: '42',
+    feesPaid: '2',
+    fundingPaid: '-1',
+    maxQuantity: '0.9',
+    exitPrice: '3200',
+    lastFundingTime: T0 + 8000,
+    closedAt: T0 + 8100,
+  };
 
   const db = openDatabase(':memory:');
   try {
     const store = new SqliteStore(db);
-    // The first account holds everything; the minimal one only proves its NULL columns are stored as NULL.
+    const tables = ['accounts', 'orders', 'fills', 'positions', 'ledger_events', 'equity_history'];
+    const snapshot = () => {
+      const rows: Record<string, unknown[]> = {};
+      for (const table of tables) rows[table] = db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all();
+      return rows;
+    };
+
     store.insertAccount(account);
-    store.insertAccount(minimalAccount);
+    store.insertAccount(replayAccount);
     orders.forEach((o) => store.insertOrder(o));
     fills.forEach((f) => store.insertFill(f));
     positions.forEach((p) => store.insertPosition(p));
     ledger.forEach((e) => store.appendLedger(e));
     equity.forEach((p) => store.upsertEquityPoint(p));
     store.upsertEquityPoint(equityUpdate);
+    const rows = snapshot();
 
-    const tables = ['accounts', 'orders', 'fills', 'positions', 'ledger_events', 'equity_history'];
-    const rows: Record<string, unknown[]> = {};
-    for (const table of tables) rows[table] = db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all();
+    const reads = {
+      getAccount: store.getAccount('acc-1'),
+      getAccountReplay: store.getAccount('acc-2'),
+      listAccounts: store.listAccounts(),
+      getOrder: store.getOrder('ord-3'),
+      getOrderByClientId: store.getOrderByClientId('acc-1', 'cli-4'),
+      listOpenOrders: store.listOpenOrders('acc-1'),
+      listOpenOrdersForMarketLive: store.listOpenOrdersForMarket('LIVE', 'BTCUSDT'),
+      listOpenOrdersForMarketReplay: store.listOpenOrdersForMarket('REPLAY', 'BTCUSDT'),
+      listOrdersLimit3: store.listOrders('acc-1', 3),
+      listOrdersAll: store.listOrders('acc-1', 100),
+      listFillsByOrder: store.listFillsByOrder('ord-1'),
+      listFillsLimit3: store.listFills('acc-1', 3),
+      listFillsAll: store.listFills('acc-1', 100),
+      getOpenPosition: store.getOpenPosition('acc-1', 'ETHUSDT'),
+      listOpenPositions: store.listOpenPositions('acc-1'),
+      listOpenPositionsForMarketLive: store.listOpenPositionsForMarket('LIVE', 'ETHUSDT'),
+      listOpenPositionsForMarketReplay: store.listOpenPositionsForMarket('REPLAY', 'ETHUSDT'),
+      listClosedPositionsLimit2: store.listClosedPositions('acc-1', 2),
+      listClosedPositionsAll: store.listClosedPositions('acc-1', 100),
+      listLedger: store.listLedger('acc-1'),
+      listLedgerSince: store.listLedger('acc-1', ledger[1]!.ts),
+      listEquityLimit3: store.listEquity('acc-1', 3),
+      listEquityAll: store.listEquity('acc-1', 100),
+    };
+
+    store.saveAccount(savedAccount);
+    store.saveOrder(savedOrder);
+    store.savePosition(savedPosition);
+    const afterSaves = {
+      rows: snapshot(),
+      reads: {
+        getAccount: store.getAccount('acc-1'),
+        getOrder: store.getOrder('ord-2'),
+        getOpenPosition: store.getOpenPosition('acc-1', 'ETHUSDT') ?? null,
+        listClosedPositionsAll: store.listClosedPositions('acc-1', 100),
+      },
+    };
+
+    store.deleteAccountData('acc-2', true);
+    const afterKeepingRow = snapshot();
+    store.deleteAccountData('acc-1', false);
+    const afterDeletingRow = snapshot();
 
     return {
-      inputs: { accounts: [account, minimalAccount], orders, fills, positions, ledger, equity, equityUpdate },
-      rows,
-      reads: {
-        getAccount: store.getAccount(account.id),
-        getAccountMinimal: store.getAccount(minimalAccount.id),
-        listOpenOrders: store.listOpenOrders(account.id),
-        getOpenPosition: store.getOpenPosition(account.id, 'ETHUSDT'),
-        listLedger: store.listLedger(account.id),
-        listEquity: store.listEquity(account.id, 10),
+      inputs: {
+        accounts: [account, replayAccount],
+        orders,
+        fills,
+        positions,
+        ledger,
+        equity,
+        equityUpdate,
+        saves: { account: savedAccount, order: savedOrder, position: savedPosition },
       },
+      rows,
+      reads,
+      afterSaves,
+      afterKeepingRow,
+      afterDeletingRow,
     };
   } finally {
     db.close();

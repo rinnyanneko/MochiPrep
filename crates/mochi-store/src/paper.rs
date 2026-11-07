@@ -60,6 +60,65 @@ impl SqlitePaperStore {
     }
 }
 
+/// A transaction (or savepoint) that has begun but not ended. If it is dropped unfinished, which
+/// happens when the closure panics or when COMMIT/RELEASE fails, it rolls back, so the connection
+/// is never left inside a transaction and `depth` always returns to its value before the call.
+struct OpenTransaction<'a> {
+    store: &'a SqlitePaperStore,
+    /// The nesting depth before this transaction began; 0 means a real BEGIN, else a savepoint.
+    depth: u32,
+    finished: bool,
+}
+
+impl OpenTransaction<'_> {
+    fn savepoint(&self) -> String {
+        format!("sp_{}", self.depth)
+    }
+
+    /// Ends successfully with COMMIT at the top level, or RELEASE of the savepoint when nested.
+    /// If the statement fails, the transaction stays open and the drop guard rolls it back.
+    fn finish(mut self) -> Result<(), StoreFailure> {
+        let sql = if self.depth == 0 {
+            "COMMIT".to_string()
+        } else {
+            format!("RELEASE {}", self.savepoint())
+        };
+        self.store.exec(&sql)?;
+        self.end();
+        Ok(())
+    }
+
+    fn rollback(mut self) -> Result<(), StoreFailure> {
+        let result = self.undo();
+        self.end();
+        result
+    }
+
+    fn undo(&self) -> Result<(), StoreFailure> {
+        if self.depth == 0 {
+            self.store.exec("ROLLBACK")
+        } else {
+            let sp = self.savepoint();
+            self.store.exec(&format!("ROLLBACK TO {sp}; RELEASE {sp}"))
+        }
+    }
+
+    fn end(&mut self) {
+        self.finished = true;
+        self.store.depth.set(self.depth);
+    }
+}
+
+impl Drop for OpenTransaction<'_> {
+    fn drop(&mut self) {
+        if !self.finished {
+            // Nothing useful can be done if this fails while unwinding.
+            let _ = self.undo();
+            self.store.depth.set(self.depth);
+        }
+    }
+}
+
 fn failure(e: rusqlite::Error) -> StoreFailure {
     StoreFailure(e.to_string())
 }
@@ -232,26 +291,28 @@ impl PaperStore for SqlitePaperStore {
         f: impl FnOnce() -> Result<T, E>,
     ) -> Result<T, E> {
         let depth = self.depth.get();
-        let savepoint = format!("sp_{depth}");
         // IMMEDIATE takes the write lock up front, as the Node store does.
         if depth == 0 {
             self.exec("BEGIN IMMEDIATE")?;
         } else {
-            self.exec(&format!("SAVEPOINT {savepoint}"))?;
+            self.exec(&format!("SAVEPOINT sp_{depth}"))?;
         }
         self.depth.set(depth + 1);
-        let result = f();
-        self.depth.set(depth);
-        let finish = match (&result, depth) {
-            (Ok(_), 0) => "COMMIT".to_string(),
-            (Ok(_), _) => format!("RELEASE {savepoint}"),
-            (Err(_), 0) => "ROLLBACK".to_string(),
-            (Err(_), _) => format!("ROLLBACK TO {savepoint}; RELEASE {savepoint}"),
+        let open = OpenTransaction {
+            store: self,
+            depth,
+            finished: false,
         };
-        match self.exec(&finish) {
-            Ok(()) => result,
-            // If f failed, its error is the one worth reporting; a failed ROLLBACK is not.
-            Err(e) => result.and(Err(e.into())),
+        match f() {
+            Ok(value) => {
+                open.finish()?;
+                Ok(value)
+            }
+            // The closure's own error is the one worth reporting, even if the rollback also fails.
+            Err(e) => {
+                let _ = open.rollback();
+                Err(e)
+            }
         }
     }
 
