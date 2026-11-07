@@ -1,0 +1,18 @@
+[workspace]
+members = ["crates/*"]
+# crates/golden holds fixtures, not a crate.
+exclude = ["crates/golden"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99"
+license = "AGPL-3.0-or-later"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = "2"
+sha2 = "0.10"
+tempfile = "3"

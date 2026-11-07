@@ -1,0 +1,13 @@
+[package]
+name = "mochi-market"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mochi-domain = { path = "../mochi-domain" }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+sha2 = { workspace = true }

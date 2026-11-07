@@ -7,7 +7,8 @@
     "dev": "tsx watch --clear-screen=false --max-semi-space-size=1 --disable-warning=ExperimentalWarning src/main.ts",
     "build": "node build.mjs",
     "start": "node build.mjs && node --max-semi-space-size=1 --enable-source-maps --disable-warning=ExperimentalWarning dist/main.mjs",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "golden": "tsx golden/generate.ts"
   },
   "dependencies": {
     "@fastify/static": "^9.0.0",

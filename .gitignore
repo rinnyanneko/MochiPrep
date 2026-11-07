@@ -14,3 +14,4 @@ playwright-report/
 .vite/
 .claude/settings.local.json
 .idea/
+target/

@@ -1,0 +1,163 @@
+{
+ "objects": [
+  {
+   "type": "index",
+   "name": "idx_decisions_agent",
+   "tbl_name": "decisions",
+   "sql": "CREATE INDEX idx_decisions_agent ON decisions(agent_id, ts)"
+  },
+  {
+   "type": "index",
+   "name": "idx_decisions_ts",
+   "tbl_name": "decisions",
+   "sql": "CREATE INDEX idx_decisions_ts ON decisions(ts)"
+  },
+  {
+   "type": "index",
+   "name": "idx_fills_account",
+   "tbl_name": "fills",
+   "sql": "CREATE INDEX idx_fills_account ON fills(account_id, ts)"
+  },
+  {
+   "type": "index",
+   "name": "idx_fills_order",
+   "tbl_name": "fills",
+   "sql": "CREATE INDEX idx_fills_order ON fills(order_id)"
+  },
+  {
+   "type": "index",
+   "name": "idx_ledger_account",
+   "tbl_name": "ledger_events",
+   "sql": "CREATE INDEX idx_ledger_account ON ledger_events(account_id, ts)"
+  },
+  {
+   "type": "index",
+   "name": "idx_orders_account",
+   "tbl_name": "orders",
+   "sql": "CREATE INDEX idx_orders_account ON orders(account_id, created_at)"
+  },
+  {
+   "type": "index",
+   "name": "idx_orders_open",
+   "tbl_name": "orders",
+   "sql": "CREATE INDEX idx_orders_open ON orders(status, symbol)"
+  },
+  {
+   "type": "index",
+   "name": "idx_positions_market",
+   "tbl_name": "positions",
+   "sql": "CREATE INDEX idx_positions_market ON positions(status, symbol)"
+  },
+  {
+   "type": "index",
+   "name": "idx_positions_one_way",
+   "tbl_name": "positions",
+   "sql": "CREATE UNIQUE INDEX idx_positions_one_way ON positions(account_id, symbol) WHERE status = 'OPEN'"
+  },
+  {
+   "type": "table",
+   "name": "accounts",
+   "tbl_name": "accounts",
+   "sql": "CREATE TABLE accounts (\n  id TEXT PRIMARY KEY,\n  name TEXT NOT NULL,\n  source TEXT NOT NULL CHECK (source IN ('REPLAY','LIVE')),\n  is_demo INTEGER NOT NULL DEFAULT 0,\n  initial_balance TEXT NOT NULL,\n  wallet_balance TEXT NOT NULL,\n  used_margin TEXT NOT NULL,\n  realized_pnl TEXT NOT NULL,\n  fees_paid TEXT NOT NULL,\n  funding_paid TEXT NOT NULL,\n  config TEXT NOT NULL,\n  created_at INTEGER NOT NULL\n, venue TEXT NOT NULL DEFAULT 'PAPER', exchange_uid TEXT, live_limits TEXT)"
+  },
+  {
+   "type": "table",
+   "name": "agents",
+   "tbl_name": "agents",
+   "sql": "CREATE TABLE agents (\n  id TEXT PRIMARY KEY,\n  name TEXT NOT NULL,\n  provider_id TEXT NOT NULL REFERENCES providers(id),\n  model TEXT NOT NULL,\n  symbol TEXT NOT NULL,\n  timeframe TEXT NOT NULL,\n  strategy TEXT NOT NULL,\n  account_id TEXT NOT NULL REFERENCES accounts(id),\n  risk TEXT NOT NULL,\n  interval_sec INTEGER NOT NULL,\n  status TEXT NOT NULL,\n  running INTEGER NOT NULL,\n  next_run_at INTEGER,\n  last_run_at INTEGER,\n  status_detail TEXT,\n  consecutive_errors INTEGER NOT NULL DEFAULT 0,\n  is_demo INTEGER NOT NULL DEFAULT 0,\n  created_at INTEGER NOT NULL\n, execution_mode TEXT NOT NULL DEFAULT 'AUTO', use_news INTEGER NOT NULL DEFAULT 0)"
+  },
+  {
+   "type": "table",
+   "name": "decisions",
+   "tbl_name": "decisions",
+   "sql": "CREATE TABLE decisions (\n  id TEXT PRIMARY KEY,\n  agent_id TEXT NOT NULL,\n  account_id TEXT NOT NULL,\n  ts INTEGER NOT NULL,\n  outcome TEXT NOT NULL,\n  body TEXT NOT NULL\n)"
+  },
+  {
+   "type": "table",
+   "name": "equity_history",
+   "tbl_name": "equity_history",
+   "sql": "CREATE TABLE equity_history (\n  account_id TEXT NOT NULL REFERENCES accounts(id),\n  ts INTEGER NOT NULL,\n  equity TEXT NOT NULL,\n  wallet TEXT NOT NULL,\n  unrealized TEXT NOT NULL,\n  PRIMARY KEY (account_id, ts)\n)"
+  },
+  {
+   "type": "table",
+   "name": "fills",
+   "tbl_name": "fills",
+   "sql": "CREATE TABLE fills (\n  id TEXT PRIMARY KEY,\n  order_id TEXT NOT NULL REFERENCES orders(id),\n  account_id TEXT NOT NULL REFERENCES accounts(id),\n  symbol TEXT NOT NULL,\n  side TEXT NOT NULL,\n  quantity TEXT NOT NULL,\n  price TEXT NOT NULL,\n  fee TEXT NOT NULL,\n  realized_pnl TEXT NOT NULL,\n  liquidity TEXT NOT NULL,\n  ts INTEGER NOT NULL\n)"
+  },
+  {
+   "type": "table",
+   "name": "instruments",
+   "tbl_name": "instruments",
+   "sql": "CREATE TABLE instruments (\n  symbol TEXT PRIMARY KEY,\n  spec TEXT NOT NULL,\n  added_at INTEGER NOT NULL\n)"
+  },
+  {
+   "type": "table",
+   "name": "ledger_events",
+   "tbl_name": "ledger_events",
+   "sql": "CREATE TABLE ledger_events (\n  seq INTEGER PRIMARY KEY AUTOINCREMENT,\n  id TEXT NOT NULL UNIQUE,\n  account_id TEXT NOT NULL REFERENCES accounts(id),\n  type TEXT NOT NULL,\n  amount TEXT NOT NULL,\n  margin_delta TEXT NOT NULL,\n  wallet_after TEXT NOT NULL,\n  symbol TEXT,\n  order_id TEXT,\n  fill_id TEXT,\n  position_id TEXT,\n  memo TEXT NOT NULL,\n  ts INTEGER NOT NULL\n)"
+  },
+  {
+   "type": "table",
+   "name": "orders",
+   "tbl_name": "orders",
+   "sql": "CREATE TABLE orders (\n  id TEXT PRIMARY KEY,\n  account_id TEXT NOT NULL REFERENCES accounts(id),\n  client_order_id TEXT NOT NULL,\n  symbol TEXT NOT NULL,\n  side TEXT NOT NULL,\n  type TEXT NOT NULL,\n  quantity TEXT NOT NULL,\n  price TEXT,\n  trigger_price TEXT,\n  leverage INTEGER NOT NULL,\n  reduce_only INTEGER NOT NULL,\n  close_position INTEGER NOT NULL,\n  status TEXT NOT NULL,\n  filled_quantity TEXT NOT NULL,\n  avg_fill_price TEXT,\n  reserved_margin TEXT NOT NULL,\n  attached_stop_loss TEXT,\n  attached_take_profit TEXT,\n  reject_reason TEXT,\n  agent_id TEXT,\n  decision_id TEXT,\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL, exchange_order_id TEXT,\n  UNIQUE (account_id, client_order_id)\n)"
+  },
+  {
+   "type": "table",
+   "name": "positions",
+   "tbl_name": "positions",
+   "sql": "CREATE TABLE positions (\n  id TEXT PRIMARY KEY,\n  account_id TEXT NOT NULL REFERENCES accounts(id),\n  symbol TEXT NOT NULL,\n  side TEXT NOT NULL,\n  quantity TEXT NOT NULL,\n  entry_price TEXT NOT NULL,\n  leverage INTEGER NOT NULL,\n  margin TEXT NOT NULL,\n  liquidation_price TEXT NOT NULL,\n  status TEXT NOT NULL,\n  realized_pnl TEXT NOT NULL,\n  fees_paid TEXT NOT NULL,\n  funding_paid TEXT NOT NULL,\n  max_quantity TEXT NOT NULL,\n  exit_price TEXT,\n  last_funding_time INTEGER NOT NULL,\n  opened_at INTEGER NOT NULL,\n  closed_at INTEGER\n)"
+  },
+  {
+   "type": "table",
+   "name": "provider_keys",
+   "tbl_name": "provider_keys",
+   "sql": "CREATE TABLE provider_keys (\n  provider_id TEXT PRIMARY KEY REFERENCES providers(id) ON DELETE CASCADE,\n  api_key TEXT NOT NULL,\n  updated_at INTEGER NOT NULL\n)"
+  },
+  {
+   "type": "table",
+   "name": "providers",
+   "tbl_name": "providers",
+   "sql": "CREATE TABLE providers (\n  id TEXT PRIMARY KEY,\n  name TEXT NOT NULL,\n  kind TEXT NOT NULL,\n  base_url TEXT,\n  default_model TEXT NOT NULL,\n  input_price REAL,\n  output_price REAL,\n  created_at INTEGER NOT NULL\n, extra_headers TEXT NOT NULL DEFAULT '{}')"
+  },
+  {
+   "type": "table",
+   "name": "schema_migrations",
+   "tbl_name": "schema_migrations",
+   "sql": "CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
+  },
+  {
+   "type": "table",
+   "name": "sealed_exchange_credentials",
+   "tbl_name": "sealed_exchange_credentials",
+   "sql": "CREATE TABLE sealed_exchange_credentials (\n  account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,\n  sealed TEXT NOT NULL,\n  updated_at INTEGER NOT NULL\n)"
+  },
+  {
+   "type": "table",
+   "name": "sealed_provider_keys",
+   "tbl_name": "sealed_provider_keys",
+   "sql": "CREATE TABLE sealed_provider_keys (\n  provider_id TEXT PRIMARY KEY REFERENCES providers(id) ON DELETE CASCADE,\n  sealed TEXT NOT NULL,\n  updated_at INTEGER NOT NULL\n)"
+  },
+  {
+   "type": "table",
+   "name": "settings",
+   "tbl_name": "settings",
+   "sql": "CREATE TABLE settings (\n  key TEXT PRIMARY KEY,\n  value TEXT NOT NULL\n)"
+  },
+  {
+   "type": "table",
+   "name": "vault_keys",
+   "tbl_name": "vault_keys",
+   "sql": "CREATE TABLE vault_keys (\n  id TEXT PRIMARY KEY,\n  kind TEXT NOT NULL,\n  params TEXT NOT NULL,\n  created_at INTEGER NOT NULL\n)"
+  }
+ ],
+ "migrations": [
+  "001_init.sql",
+  "002_live_and_keys.sql",
+  "003_instruments.sql",
+  "004_execution_mode.sql",
+  "005_provider_headers.sql",
+  "006_agent_news.sql",
+  "007_vault.sql"
+ ]
+}

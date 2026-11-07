@@ -1,0 +1,3 @@
+crates/golden/*.sqlite binary
+crates/golden/*.json text eol=lf
+apps/server/src/db/migrations/*.sql text eol=lf

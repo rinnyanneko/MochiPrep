@@ -1,0 +1,50 @@
+[
+ {
+  "symbol": "BTCUSDT",
+  "marketType": "CRYPTO_PERP",
+  "baseCurrency": "BTC",
+  "quoteCurrency": "USDT",
+  "settlementCurrency": "USDT",
+  "contractSize": "1",
+  "quantityStep": "0.0001",
+  "minQuantity": "0.0001",
+  "priceTick": "0.1",
+  "maxLeverage": 100,
+  "maintenanceMarginRate": "0.005",
+  "fundingIntervalHours": 8,
+  "venueContractValue": "0.01",
+  "venueLotSize": "0.01"
+ },
+ {
+  "symbol": "ETHUSDT",
+  "marketType": "CRYPTO_PERP",
+  "baseCurrency": "ETH",
+  "quoteCurrency": "USDT",
+  "settlementCurrency": "USDT",
+  "contractSize": "1",
+  "quantityStep": "0.001",
+  "minQuantity": "0.001",
+  "priceTick": "0.01",
+  "maxLeverage": 100,
+  "maintenanceMarginRate": "0.005",
+  "fundingIntervalHours": 8,
+  "venueContractValue": "0.1",
+  "venueLotSize": "0.01"
+ },
+ {
+  "symbol": "SOLUSDT",
+  "marketType": "CRYPTO_PERP",
+  "baseCurrency": "SOL",
+  "quoteCurrency": "USDT",
+  "settlementCurrency": "USDT",
+  "contractSize": "1",
+  "quantityStep": "0.01",
+  "minQuantity": "0.01",
+  "priceTick": "0.01",
+  "maxLeverage": 100,
+  "maintenanceMarginRate": "0.005",
+  "fundingIntervalHours": 8,
+  "venueContractValue": "1",
+  "venueLotSize": "0.01"
+ }
+]

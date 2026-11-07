@@ -1,0 +1,26 @@
+{
+ "password": "mochi-pässwörd-é",
+ "passwordNfc": "mochi-pässwörd-é",
+ "dataKeyHex": "191d11e9f1a74a2d9a4715c6772d8042a7baacf5b5feef17fa392aca21146c76",
+ "wrap": {
+  "salt": "Hb4E/lTZNx+ZGrA1/coRAw==",
+  "kdf": {
+   "N": 1024,
+   "r": 8,
+   "p": 1
+  },
+  "wrappedKey": "v1.LhpeAD7rFqCgbdHR./+aGHriz6esonDk5eVa10A==.yevNgH1p6be6pSBbqdIwXGmHT64YUEdX0EMowy/Koatb9FHb7J0ZYMRBP1E="
+ },
+ "sealed": [
+  {
+   "context": "provider-key:prov_1",
+   "plaintext": "sk-golden-ai-key",
+   "sealed": "v1.vVPOhHPv9yvog8A6.uEEBoFOpjOLBhQs3zxpiQw==.1GsBKFRjzKMMlxE6xpX58Q=="
+  },
+  {
+   "context": "okx-credentials:acct_1",
+   "plaintext": "{\"apiKey\":\"k\",\"secretKey\":\"s\",\"passphrase\":\"p\",\"environment\":\"OKX_DEMO\"}",
+   "sealed": "v1.ZgrHGBPbs/Rzcxz3.5KqQmeaQS2T/5B0WT5xOIw==.+MKdChSqpab7F5ONK8rgET8Qrf2VhU7xaoGFsGT7HCgg1rwlF3NwtnTkxnq6JxFKP/dH1Tf7lUuWbPEJ4gcR+JtSSSweEtdo"
+  }
+ ]
+}
