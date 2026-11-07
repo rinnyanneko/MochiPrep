@@ -60,6 +60,9 @@ pub fn open_database(path: &Path) -> Result<Connection, StoreError> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         create_private_dir(dir)?;
     }
+    // Create the file 0600 before SQLite does: SQLite gives -wal/-shm the main file's mode, so
+    // nothing is ever readable by other users, not even between creation and chmod.
+    create_private_file(path)?;
     let conn = Connection::open(path)?;
     conn.execute_batch(PRAGMAS)?;
     restrict_files(path)?;
@@ -144,6 +147,24 @@ fn create_private_dir(dir: &Path) -> Result<(), StoreError> {
 #[cfg(not(unix))]
 fn create_private_dir(dir: &Path) -> Result<(), StoreError> {
     std::fs::create_dir_all(dir)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn create_private_file(path: &Path) -> Result<(), StoreError> {
+    use std::os::unix::fs::OpenOptionsExt;
+    // No truncate: an existing database is opened and left as it is; mode only applies on creation.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn create_private_file(_path: &Path) -> Result<(), StoreError> {
     Ok(())
 }
 

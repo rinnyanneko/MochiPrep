@@ -180,3 +180,44 @@ fn wal_path(path: &Path) -> std::path::PathBuf {
     s.push("-wal");
     s.into()
 }
+
+#[cfg(unix)]
+fn mode(path: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+#[cfg(unix)]
+fn sibling(path: &Path, suffix: &str) -> std::path::PathBuf {
+    let mut s = path.as_os_str().to_owned();
+    s.push(suffix);
+    s.into()
+}
+
+#[cfg(unix)]
+#[test]
+fn new_database_files_are_private() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db.sqlite");
+    let _conn = open_database(&path).unwrap();
+    for file in [path.clone(), sibling(&path, "-wal"), sibling(&path, "-shm")] {
+        assert_eq!(mode(&file), 0o600, "{}", file.display());
+    }
+}
+
+// open_database relies on this: by pre-creating the main file 0600 it never has to chmod a
+// -wal or -shm file that was briefly readable, because SQLite copies the main file's mode.
+#[cfg(unix)]
+#[test]
+fn sqlite_gives_wal_and_shm_the_main_file_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db.sqlite");
+    drop(open_database(&path).unwrap()); // closing removes -wal and -shm
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch("PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS t (x)")
+        .unwrap();
+    assert_eq!(mode(&sibling(&path, "-wal")), 0o640);
+    assert_eq!(mode(&sibling(&path, "-shm")), 0o640);
+}
