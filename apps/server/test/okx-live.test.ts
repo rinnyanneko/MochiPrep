@@ -1,15 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { createHmac } from 'node:crypto';
 import type { AiProvider, AiRequest } from '@mochiprep/ai-providers';
-import type { MarketDataProvider } from '@mochiprep/market-data';
+import { parseOkxInstrument, type MarketDataProvider } from '@mochiprep/market-data';
 import {
   ARM_PHRASE,
   DEFAULT_LIVE_LIMITS,
   DEFAULT_RISK_SETTINGS,
+  unregisterInstrument,
   type Candle,
   type OrderRequest,
   type Quote,
@@ -39,6 +40,7 @@ class FakeOkx {
   /** Makes order lookups fail with a code that does not mean "not found". */
   lookupErrorCode: string | null = null;
   ctValOverride: string | null = null;
+  pepeCtValOverride: string | null = null;
   leverageCalls: { instId: string; lever: string; mgnMode: string }[] = [];
   placed: Record<string, any>[] = [];
   orders = new Map<string, Record<string, string>>();
@@ -63,8 +65,10 @@ class FakeOkx {
 
     if (url.pathname.endsWith('/account/config')) return this.json([{ uid: '42', perm: this.perm, posMode: this.posMode, acctLv: this.acctLv }]);
     if (url.pathname.endsWith('/public/instruments')) {
-      const ctVal = { 'BTC-USDT-SWAP': '0.01', 'ETH-USDT-SWAP': '0.1', 'SOL-USDT-SWAP': '1' }[url.searchParams.get('instId')!];
-      return this.json([{ ctVal: this.ctValOverride ?? ctVal, lotSz: '0.01' }]);
+      const instId = url.searchParams.get('instId')!;
+      const ctVal = { 'BTC-USDT-SWAP': '0.01', 'ETH-USDT-SWAP': '0.1', 'SOL-USDT-SWAP': '1', 'PEPE-USDT-SWAP': '10000000' }[instId];
+      const isPepe = instId.startsWith('PEPE');
+      return this.json([{ ctVal: this.ctValOverride ?? (isPepe ? this.pepeCtValOverride : null) ?? ctVal, lotSz: isPepe ? '0.1' : '0.01' }]);
     }
     if (url.pathname.endsWith('/account/balance')) {
       return this.json([{ details: [{ ccy: 'USDT', eq: String(this.equity), availEq: String(this.equity), upl: '0' }] }]);
@@ -112,6 +116,11 @@ class FakeOkx {
   }
 }
 
+const PEPE = parseOkxInstrument({
+  instId: 'PEPE-USDT-SWAP', settleCcy: 'USDT', ctType: 'linear', state: 'live', ruleType: 'normal', instCategory: '1',
+  ctValCcy: 'PEPE', ctVal: '10000000', lotSz: '0.1', minSz: '0.1', tickSz: '0.0000000001', lever: '50',
+})!;
+
 class FakeFeed {
   readonly source = 'LIVE' as const;
   readonly name = 'fake';
@@ -127,6 +136,7 @@ class FakeFeed {
     const last = Math.floor(Date.now() / size) * size - size;
     return Array.from({ length: 60 }, (_, i) => ({ time: last - (59 - i) * size, open: PRICE, high: PRICE + 50, low: PRICE - 50, close: PRICE, volume: 1, closed: true }));
   }
+  async listInstruments() { return [PEPE]; }
   status() { return { source: 'LIVE' as const, provider: 'fake', state: 'CONNECTED' as const, lastMessageAt: Date.now() }; }
   onQuote() { return () => {}; }
   onStatus() { return () => {}; }
@@ -328,6 +338,53 @@ describe('OKX execution', () => {
       expect(exit.order.status).toBe('FILLED');
       expect(okx.placed[1]).toMatchObject({ sz: '0.1', reduceOnly: true });
       expect(okx.position).toBeNull();
+    });
+  });
+
+  describe('added pairs', () => {
+    afterEach(() => unregisterInstrument('PEPEUSDT'));
+
+    it('converts to contracts from the pair spec, and sends prices in plain decimals on the tick', async () => {
+      await runtime.addInstrument('PEPEUSDT');
+      const account = await connect();
+      runtime.arm(account.id, ARM_PHRASE);
+      feed.getQuote = ((symbol: SymbolId): Quote => ({
+        source: 'LIVE', symbol, bid: '0.0000099', ask: '0.0000101', last: '0.00001', mark: '0.00001',
+        markEstimated: false, fundingRate: '0', nextFundingTime: null, ts: Date.now(),
+      })) as typeof feed.getQuote;
+      await runtime.execution(account.id).placeOrder(order(account.id, {
+        symbol: 'PEPEUSDT', quantity: '3500000', stopLoss: '0.00000901234',
+      }));
+      // 0.35 contracts, floored to this pair's 0.1 lot.
+      expect(okx.placed[0]).toMatchObject({ instId: 'PEPE-USDT-SWAP', sz: '0.3' });
+      expect(okx.placed[0]!.attachAlgoOrds[0].slTriggerPx).toBe('0.0000090123');
+    });
+
+    it('keeps exponent notation out of an agent order', async () => {
+      await runtime.addInstrument('PEPEUSDT');
+      const account = runtime.engine.createAccount({ name: 'paper', source: 'LIVE' });
+      const quote = feed.getQuote.bind(feed);
+      feed.getQuote = ((symbol: SymbolId): Quote => ({ ...quote(symbol), bid: '0.00000099', ask: '0.00000101', last: '0.000001', mark: '0.000001' })) as typeof feed.getQuote;
+      const tiny: AiProvider = {
+        kind: 'OPENAI',
+        complete: async () => ({
+          text: JSON.stringify({ symbol: 'PEPEUSDT', action: 'LONG', orderType: 'MARKET', entryPrice: null, stopLoss: 0.0000009, takeProfit: null, reason: 'test', confidence: 0.5, expiresAt: null }),
+          inputTokens: 1,
+          outputTokens: 1,
+        }),
+      };
+      vi.spyOn(runtime, 'providerFor').mockReturnValue(tiny);
+      const agent = runtime.createAgent({ name: 'pepe', providerId: 'remote', model: 'm', symbol: 'PEPEUSDT', timeframe: '15m', strategy: '', accountId: account.id, risk: DEFAULT_RISK_SETTINGS, intervalSec: 60 });
+      const record = await runtime.runner.runCycle(agent.id, 'RUN_ONCE');
+      expect(record!.outcome).toBe('EXECUTED');
+      const placed = runtime.store.listOrders(account.id, 10).find((o) => o.type === 'MARKET')!;
+      expect(placed.attachedStopLoss).toBe('0.0000009');
+    });
+
+    it('refuses to connect if a saved pair changed on OKX', async () => {
+      await runtime.addInstrument('PEPEUSDT');
+      okx.pepeCtValOverride = '20000000';
+      await expect(connect()).rejects.toThrow(/contract specs for PEPEUSDT/);
     });
   });
 

@@ -20,15 +20,23 @@ export interface InstrumentSpecification {
   maxLeverage: number;
   maintenanceMarginRate: string;
   fundingIntervalHours: number;
+  /** Base units per OKX contract. Orders are sent in contracts, so this must match OKX exactly. */
+  venueContractValue: string;
+  /** Smallest contract increment on OKX. */
+  venueLotSize: string;
 }
 
-export const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'] as const;
-export type SymbolId = (typeof SYMBOLS)[number];
+/** Always available, and the only pairs on the replay tape. */
+export const DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'] as const;
+export type DefaultSymbol = (typeof DEFAULT_SYMBOLS)[number];
+/** A registered instrument symbol, such as DOGEUSDT. Users can add pairs, so this is open. */
+export type SymbolId = string;
 
 const perp = (
   base: string,
   quantityStep: string,
   priceTick: string,
+  venueContractValue: string,
 ): InstrumentSpecification => ({
   symbol: `${base}USDT`,
   marketType: 'CRYPTO_PERP',
@@ -42,14 +50,28 @@ const perp = (
   maxLeverage: 100,
   maintenanceMarginRate: '0.005',
   fundingIntervalHours: 8,
+  venueContractValue,
+  venueLotSize: '0.01',
 });
 
 /** Steps mirror OKX USDT swaps (ctVal x lotSz): 0.01 x 0.01 BTC, 0.1 x 0.01 ETH, 1 x 0.01 SOL. */
 export const INSTRUMENTS: Record<SymbolId, InstrumentSpecification> = {
-  BTCUSDT: perp('BTC', '0.0001', '0.1'),
-  ETHUSDT: perp('ETH', '0.001', '0.01'),
-  SOLUSDT: perp('SOL', '0.01', '0.01'),
+  BTCUSDT: perp('BTC', '0.0001', '0.1', '0.01'),
+  ETHUSDT: perp('ETH', '0.001', '0.01', '0.1'),
+  SOLUSDT: perp('SOL', '0.01', '0.01', '1'),
 };
+
+export const isDefaultSymbol = (symbol: SymbolId) => (DEFAULT_SYMBOLS as readonly string[]).includes(symbol);
+
+export const listSymbols = (): SymbolId[] => Object.keys(INSTRUMENTS);
+
+export function registerInstrument(spec: InstrumentSpecification) {
+  INSTRUMENTS[spec.symbol] = spec;
+}
+
+export function unregisterInstrument(symbol: SymbolId) {
+  if (!isDefaultSymbol(symbol)) delete INSTRUMENTS[symbol];
+}
 
 /** REPLAY = deterministic synthetic tape, LIVE = real public market data. */
 export type DataSource = 'REPLAY' | 'LIVE';
@@ -508,4 +530,4 @@ export type ServerEvent =
   | { type: 'invalidate'; topics: Topic[] }
   | { type: 'toast'; level: 'info' | 'warn' | 'error'; message: string };
 
-export type Topic = 'accounts' | 'orders' | 'positions' | 'agents' | 'decisions' | 'providers' | 'arena' | 'exchange';
+export type Topic = 'accounts' | 'orders' | 'positions' | 'agents' | 'decisions' | 'providers' | 'arena' | 'exchange' | 'instruments';

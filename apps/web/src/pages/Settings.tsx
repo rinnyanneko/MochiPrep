@@ -1,5 +1,6 @@
 import { KeyRound, Pencil, Plug, Plus, RotateCcw, ShieldCheck, Trash2, X } from 'lucide-react';
 import { ExchangeCard } from '@/components/ExchangeCard';
+import { PairsCard } from '@/components/PairsCard';
 import { useState } from 'react';
 import type { ProviderKind, ProviderView } from '@mochiprep/shared';
 import { PageTitle } from '@/components/Shell';
@@ -159,6 +160,8 @@ export function SettingsPage() {
             </div>
           )}
         </Card>
+
+        <PairsCard />
 
         <ExchangeCard />
       </div>

@@ -13,6 +13,12 @@ MochiPrep is a local-first, BYOK trading terminal. The server owns secrets and t
 - `apps/server` composes providers, agents, the engine, Fastify routes, and SQLite persistence.
 - `apps/web` is the React client and must not receive API keys.
 
+## Instruments
+
+`INSTRUMENTS` in `packages/shared` is a registry: the three built-in pairs plus any the user adds, stored in the `instruments` table and registered at startup. An added pair's specs come from OKX at the moment of adding, and connecting an exchange account rechecks every registered pair. Replay has only the built-in pairs, so `assertTradable` keeps added pairs on live data.
+
+`parseOkxInstrument` decides what is tradable. Its crypto filter uses `instCategory: 1`, a meaning inferred from OKX's data rather than documentation: 3 holds stocks and 4 holds commodities.
+
 ## Agent cycle
 
 An agent cycle snapshots a fresh quote and closed candles, builds indicators and a prompt, calls the selected provider, strictly validates the response, then passes it through every risk check. Only an approved, sized result reaches the account's `ExecutionEngine`, which is the paper engine or the OKX engine. An exchange account's ceilings override the agent's own limits during sizing, and the OKX engine checks them again. Invalid output, stale data, provider failure, or risk rejection produces a decision record but no order. Analyze-only cycles never submit orders. A per-agent in-flight guard prevents overlapping cycles, and pausing or stopping during model work is checked before execution.

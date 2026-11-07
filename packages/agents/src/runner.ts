@@ -1,4 +1,4 @@
-import { evaluateRisk, type ExecutionEngine } from '@mochiprep/core';
+import { d, evaluateRisk, type ExecutionEngine } from '@mochiprep/core';
 import { ProviderError, redactSecrets, type AiProvider, type MarketContext } from '@mochiprep/ai-providers';
 import type { MarketDataProvider } from '@mochiprep/market-data';
 import {
@@ -382,10 +382,10 @@ export class AgentRunner {
       side: decision.action === 'LONG' ? 'BUY' : 'SELL',
       type: decision.orderType,
       quantity: sized.quantity,
-      price: decision.orderType === 'LIMIT' ? String(decision.entryPrice) : null,
+      price: decision.orderType === 'LIMIT' ? plain(decision.entryPrice) : null,
       leverage: sized.leverage,
-      stopLoss: decision.stopLoss === null ? null : String(decision.stopLoss),
-      takeProfit: decision.takeProfit === null ? null : String(decision.takeProfit),
+      stopLoss: plain(decision.stopLoss),
+      takeProfit: plain(decision.takeProfit),
     };
   }
 
@@ -395,6 +395,9 @@ export class AgentRunner {
     }
   }
 }
+
+/** String(0.0000001) is "1e-7", which neither the API schema nor OKX accepts. */
+const plain = (price: number | null) => (price === null ? null : d(price).toFixed());
 
 /** An exchange account's ceilings win over an agent's settings, so sizing stays inside them. */
 export function effectiveRisk(agent: RiskSettings, ceiling: RiskSettings | null): RiskSettings {

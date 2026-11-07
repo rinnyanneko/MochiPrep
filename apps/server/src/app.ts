@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import fastifyStatic from '@fastify/static';
 import { auditLedger } from '@mochiprep/core';
 import {
+  AddInstrumentSchema,
   AgentInputSchema,
   ArmSchema,
   ClosePositionSchema,
@@ -16,7 +17,7 @@ import {
   ProviderInputSchema,
   ProviderKeySchema,
   ReplayControlSchema,
-  SYMBOLS,
+  SymbolSchema,
   TIMEFRAMES,
   type ServerEvent,
 } from '@mochiprep/shared';
@@ -27,7 +28,7 @@ import { MOCK_PROVIDER_ID, type Runtime } from './runtime';
 
 const CandleQuery = z.object({
   source: z.enum(['REPLAY', 'LIVE']),
-  symbol: z.enum(SYMBOLS),
+  symbol: SymbolSchema,
   timeframe: z.enum(TIMEFRAMES),
   limit: z.coerce.number().int().min(1).max(1000).default(300),
 });
@@ -122,9 +123,19 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   // ---- market ---------------------------------------------------------------------------
   app.get('/api/market/candles', async (request) => {
     const { source, symbol, timeframe, limit } = CandleQuery.parse(request.query);
+    runtime.assertTradable(symbol, source);
     return runtime.candles(source, symbol, timeframe, limit);
   });
   app.get('/api/market/quotes', async (request) => runtime.quotes(SourceQuery.parse(request.query).source));
+
+  // ---- trading pairs --------------------------------------------------------------------
+  app.get('/api/instruments', async () => Object.values(INSTRUMENTS));
+  app.get('/api/instruments/available', async () => runtime.availableInstruments());
+  app.post('/api/instruments', async (request) => runtime.addInstrument(AddInstrumentSchema.parse(request.body).symbol));
+  app.delete<{ Params: { symbol: string } }>('/api/instruments/:symbol', async (request) => {
+    await runtime.removeInstrument(SymbolSchema.parse(request.params.symbol));
+    return { ok: true };
+  });
 
   // ---- accounts -------------------------------------------------------------------------
   const accountView = (id: string) => ({ ...runtime.store.getAccount(id)!, balance: runtime.balanceOf(id) });
@@ -171,7 +182,7 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   // ---- orders ---------------------------------------------------------------------------
   app.post('/api/orders', async (request) => {
     const input = PlaceOrderSchema.parse(request.body);
-    requireAccount(input.accountId);
+    runtime.assertTradable(input.symbol, runtime.store.getAccount(requireAccount(input.accountId))!.source);
     const result = await runtime.execution(input.accountId).placeOrder(input);
     runtime.invalidate('accounts', 'orders', 'positions', 'arena');
     return result;
@@ -185,7 +196,7 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   });
   app.post<{ Params: PositionParams }>('/api/positions/:accountId/:symbol/close', async (request) => {
     const { fraction, clientOrderId } = ClosePositionSchema.parse(request.body);
-    const symbol = z.enum(SYMBOLS).parse(request.params.symbol);
+    const symbol = SymbolSchema.parse(request.params.symbol);
     const accountId = requireAccount(request.params.accountId);
     const result = await runtime.execution(accountId).closePosition(accountId, symbol, fraction, clientOrderId);
     runtime.invalidate('accounts', 'orders', 'positions', 'arena');
@@ -193,7 +204,7 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   });
   app.put<{ Params: PositionParams }>('/api/positions/:accountId/:symbol/protection', async (request) => {
     const { stopLoss, takeProfit } = ProtectionSchema.parse(request.body);
-    const symbol = z.enum(SYMBOLS).parse(request.params.symbol);
+    const symbol = SymbolSchema.parse(request.params.symbol);
     const accountId = requireAccount(request.params.accountId);
     if (runtime.store.getAccount(accountId)!.venue !== 'PAPER') throw new Error('Change stops for exchange positions on OKX');
     runtime.engine.setProtection(accountId, symbol, stopLoss, takeProfit);
@@ -250,8 +261,9 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
     if (config.kind === 'MOCK') return { ok: true, sample: 'Mock provider needs no connection.' };
     const response = await provider.complete({
       model,
-      system: 'Reply with the single word OK.',
-      user: 'Connection test.',
+      // OpenAI and DeepSeek reject JSON mode unless the prompt itself mentions JSON.
+      system: 'Reply with this JSON object and nothing else: {"ok":true}',
+      user: 'Connection test. Answer in JSON.',
       context: undefined as never,
     });
     return { ok: true, sample: runtime.redact(response.text.slice(0, 120)) };
@@ -268,7 +280,7 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   app.post('/api/agents', async (request) => runtime.createAgent(AgentInputSchema.parse(request.body)));
   app.put<{ Params: IdParams }>('/api/agents/:id', async (request) => {
     const input = AgentInputSchema.parse(request.body);
-    runtime.assertAgentRefs(input.providerId, input.accountId);
+    runtime.assertAgentRefs(input.providerId, input.accountId, input.symbol);
     const agent = { ...requireAgent(request.params.id), ...input };
     runtime.store.saveAgent(agent);
     runtime.invalidate('agents', 'arena');

@@ -1,4 +1,4 @@
-import type { Candle, DataSource, FeedStatus, Quote, SymbolId, Timeframe } from '@mochiprep/shared';
+import type { Candle, DataSource, FeedStatus, InstrumentSpecification, Quote, SymbolId, Timeframe } from '@mochiprep/shared';
 
 /** Normalized market data, whatever the venue. Adding an exchange means implementing this. */
 export interface MarketDataProvider {
@@ -14,4 +14,8 @@ export interface MarketDataProvider {
   status(): FeedStatus;
   onQuote(listener: (quote: Quote) => void): () => void;
   onStatus(listener: (status: FeedStatus) => void): () => void;
+  /** Tradable pairs this venue lists, for feeds that can add pairs at runtime. */
+  listInstruments?(fresh?: boolean): Promise<InstrumentSpecification[]>;
+  trackSymbol?(symbol: SymbolId): void;
+  untrackSymbol?(symbol: SymbolId): void;
 }

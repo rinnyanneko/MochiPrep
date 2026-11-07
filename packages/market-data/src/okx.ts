@@ -1,8 +1,10 @@
+import { d } from '@mochiprep/core';
 import {
-  SYMBOLS,
+  DEFAULT_SYMBOLS,
   type Candle,
   type ConnectionState,
   type FeedStatus,
+  type InstrumentSpecification,
   type Quote,
   type SymbolId,
   type Timeframe,
@@ -18,9 +20,41 @@ const REST_POLL_MS = 5_000;
 const CANDLE_CACHE_MS = 3_000;
 const MAX_BACKOFF_MS = 30_000;
 
-export const toInstId = (symbol: SymbolId) => `${symbol.replace('USDT', '')}-USDT-SWAP`;
-export const fromInstId = (instId: string): SymbolId | undefined =>
-  SYMBOLS.find((s) => toInstId(s) === instId);
+export const toInstId = (symbol: SymbolId) => `${symbol.replace(/USDT$/, '')}-USDT-SWAP`;
+
+const INSTRUMENT_CACHE_MS = 300_000;
+/** Inferred from OKX data, not documentation: 1 is crypto, 3 stocks, 4 commodities. */
+const CRYPTO_CATEGORY = '1';
+
+/**
+ * Turns an OKX SWAP row into a spec, or null if MochiPrep must not trade it. Only live, linear,
+ * USDT-settled crypto contracts qualify: pre-market, stock and commodity contracts have trading
+ * rules the paper engine and risk checks do not model.
+ */
+export function parseOkxInstrument(row: Record<string, string>): InstrumentSpecification | null {
+  const match = /^([A-Z0-9]+)-USDT-SWAP$/.exec(row.instId ?? '');
+  if (!match) return null;
+  const base = match[1]!;
+  const eligible = row.settleCcy === 'USDT' && row.ctType === 'linear' && row.state === 'live'
+    && row.ruleType === 'normal' && row.instCategory === CRYPTO_CATEGORY && row.ctValCcy === base;
+  if (!eligible || !row.ctVal || !row.lotSz || !row.minSz || !row.tickSz) return null;
+  return {
+    symbol: `${base}USDT`,
+    marketType: 'CRYPTO_PERP',
+    baseCurrency: base,
+    quoteCurrency: 'USDT',
+    settlementCurrency: 'USDT',
+    contractSize: '1',
+    quantityStep: d(row.ctVal).mul(row.lotSz).toFixed(),
+    minQuantity: d(row.ctVal).mul(row.minSz).toFixed(),
+    priceTick: row.tickSz,
+    maxLeverage: Number(row.lever) || 1,
+    maintenanceMarginRate: '0.005',
+    fundingIntervalHours: 8,
+    venueContractValue: row.ctVal,
+    venueLotSize: row.lotSz,
+  };
+}
 
 /** OKX returns newest first as arrays of strings: [ts,o,h,l,c,vol,volCcy,volCcyQuote,confirm]. */
 export function parseOkxCandles(rows: string[][]): Candle[] {
@@ -37,6 +71,9 @@ export function parseOkxCandles(rows: string[][]): Candle[] {
     }))
     .sort((a, b) => a.time - b.time);
 }
+
+const channels = (symbol: SymbolId) =>
+  ['tickers', 'mark-price', 'funding-rate'].map((channel) => ({ channel, instId: toInstId(symbol) }));
 
 interface Partial {
   bid?: string;
@@ -84,7 +121,9 @@ export class OkxMarketData implements MarketDataProvider {
   private readonly wsUrl: string;
   private readonly backoff: (attempt: number) => number;
 
+  private readonly symbols = new Set<SymbolId>(DEFAULT_SYMBOLS);
   private readonly state = new Map<SymbolId, Partial>();
+  private instrumentCache: { at: number; specs: InstrumentSpecification[] } | null = null;
   private readonly quoteListeners = new Set<(q: Quote) => void>();
   private readonly statusListeners = new Set<(s: FeedStatus) => void>();
   private readonly candleCache = new Map<string, { at: number; candles: Candle[] }>();
@@ -144,10 +183,7 @@ export class OkxMarketData implements MarketDataProvider {
     socket.onopen = () => {
       this.attempts = 0;
       this.lastMessageAt = Date.now();
-      const args = SYMBOLS.flatMap((s) =>
-        ['tickers', 'mark-price', 'funding-rate'].map((channel) => ({ channel, instId: toInstId(s) })),
-      );
-      socket.send(JSON.stringify({ op: 'subscribe', args }));
+      socket.send(JSON.stringify({ op: 'subscribe', args: [...this.symbols].flatMap(channels) }));
       this.setConnection('CONNECTED');
       this.pingTimer = setInterval(() => this.heartbeat(socket), PING_MS);
     };
@@ -191,7 +227,7 @@ export class OkxMarketData implements MarketDataProvider {
     } catch {
       return;
     }
-    const symbol = message.arg?.instId ? fromInstId(message.arg.instId) : undefined;
+    const symbol = [...this.symbols].find((s) => toInstId(s) === message.arg?.instId);
     const row = message.data?.[0];
     if (!symbol || !row) return;
     const current = this.state.get(symbol) ?? {};
@@ -229,7 +265,7 @@ export class OkxMarketData implements MarketDataProvider {
 
   private async pollRest() {
     await Promise.allSettled(
-      SYMBOLS.map(async (symbol) => {
+      [...this.symbols].map(async (symbol) => {
         const instId = toInstId(symbol);
         const [ticker, mark, funding] = await Promise.all([
           this.get<Record<string, string>>(`/api/v5/market/ticker?instId=${instId}`),
@@ -258,6 +294,34 @@ export class OkxMarketData implements MarketDataProvider {
     const candles = parseOkxCandles(rows);
     this.candleCache.set(key, { at: Date.now(), candles });
     return candles;
+  }
+
+  /** Everything MochiPrep could trade on OKX. Pass fresh when the result decides a real spec. */
+  async listInstruments(fresh = false): Promise<InstrumentSpecification[]> {
+    if (!fresh && this.instrumentCache && Date.now() - this.instrumentCache.at < INSTRUMENT_CACHE_MS) {
+      return this.instrumentCache.specs;
+    }
+    const rows = await this.get<Record<string, string>>('/api/v5/public/instruments?instType=SWAP');
+    const specs = rows.flatMap((row) => parseOkxInstrument(row) ?? []).sort((a, b) => a.symbol.localeCompare(b.symbol));
+    this.instrumentCache = { at: Date.now(), specs };
+    return specs;
+  }
+
+  trackSymbol(symbol: SymbolId) {
+    if (this.symbols.has(symbol)) return;
+    this.symbols.add(symbol);
+    this.send('subscribe', symbol);
+    if (this.running) void this.pollRest();
+  }
+
+  untrackSymbol(symbol: SymbolId) {
+    this.send('unsubscribe', symbol);
+    this.symbols.delete(symbol);
+    this.state.delete(symbol);
+  }
+
+  private send(op: 'subscribe' | 'unsubscribe', symbol: SymbolId) {
+    if (this.socket?.readyState === this.socket?.OPEN) this.socket?.send(JSON.stringify({ op, args: channels(symbol) }));
   }
 
   getQuote(symbol: SymbolId) {

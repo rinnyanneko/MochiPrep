@@ -1,4 +1,4 @@
-import { INSTRUMENTS, type Candle, type SymbolId } from '@mochiprep/shared';
+import { INSTRUMENTS, type Candle, type DefaultSymbol } from '@mochiprep/shared';
 
 /** 2026-01-01T00:00:00Z. The tape is synthetic, so this date means nothing about real markets. */
 export const TAPE_START = Date.UTC(2026, 0, 1);
@@ -6,7 +6,7 @@ export const TAPE_MINUTES = 18 * 1440;
 /** History shown before the first playable bar, so indicators are warm. */
 export const WARMUP_MINUTES = 4 * 1440;
 
-const SEEDS: Record<SymbolId, { seed: number; price: number; volume: number }> = {
+const SEEDS: Record<DefaultSymbol, { seed: number; price: number; volume: number }> = {
   BTCUSDT: { seed: 0x6d6f6368, price: 68_000, volume: 42 },
   ETHUSDT: { seed: 0x69707265, price: 3_400, volume: 520 },
   SOLUSDT: { seed: 0x70303031, price: 150, volume: 6_400 },
@@ -24,10 +24,11 @@ function mulberry32(seed: number) {
 }
 
 /** Bundled demo data: a seeded random walk through trend, chop and crash regimes. */
-export function generateTape(symbol: SymbolId, minutes = TAPE_MINUTES): Candle[] {
+export function generateTape(symbol: DefaultSymbol, minutes = TAPE_MINUTES): Candle[] {
   const { seed, price: startPrice, volume: baseVolume } = SEEDS[symbol];
-  const tick = Number(INSTRUMENTS[symbol].priceTick);
-  const decimals = INSTRUMENTS[symbol].priceTick.split('.')[1]?.length ?? 0;
+  const { priceTick } = INSTRUMENTS[symbol]!;
+  const tick = Number(priceTick);
+  const decimals = priceTick.split('.')[1]?.length ?? 0;
   const roundTick = (v: number) => Number((Math.round(v / tick) * tick).toFixed(decimals));
   const random = mulberry32(seed);
   const gaussian = () => random() + random() + random() + random() + random() + random() - 3;

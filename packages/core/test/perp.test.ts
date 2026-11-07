@@ -20,7 +20,7 @@ describe('linear perpetual math', () => {
   });
 
   it('uses the observed touch, adverse slippage, tick rounding, and limit crossing rules', () => {
-    const instrument = { symbol: 'BTCUSDT', marketType: 'CRYPTO_PERP' as const, baseCurrency: 'BTC', quoteCurrency: 'USDT', settlementCurrency: 'USDT', contractSize: '1', quantityStep: '0.0001', minQuantity: '0.0001', priceTick: '0.1', maxLeverage: 100, maintenanceMarginRate: '0.005', fundingIntervalHours: 8 };
+    const instrument = { symbol: 'BTCUSDT', marketType: 'CRYPTO_PERP' as const, baseCurrency: 'BTC', quoteCurrency: 'USDT', settlementCurrency: 'USDT', contractSize: '1', quantityStep: '0.0001', minQuantity: '0.0001', priceTick: '0.1', maxLeverage: 100, maintenanceMarginRate: '0.005', fundingIntervalHours: 8, venueContractValue: '0.01', venueLotSize: '0.01' };
     expect(marketFillPrice('BUY', '1', quote, { ...DEFAULT_ACCOUNT_CONFIG, slippageBps: '10', impactBpsPerMillion: '0' }, instrument).toFixed()).toBe('101.2');
     expect(marketFillPrice('SELL', '1', quote, { ...DEFAULT_ACCOUNT_CONFIG, slippageBps: '10', impactBpsPerMillion: '0' }, instrument).toFixed()).toBe('98.9');
     expect(isMarketable('BUY', '101', quote)).toBe(true);

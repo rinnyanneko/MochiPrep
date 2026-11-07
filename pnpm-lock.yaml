@@ -157,6 +157,9 @@ importers:
 
   packages/market-data:
     dependencies:
+      '@mochiprep/core':
+        specifier: workspace:*
+        version: link:../core
       '@mochiprep/shared':
         specifier: workspace:*
         version: link:../shared

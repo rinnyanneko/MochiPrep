@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
+import { DEFAULT_SYMBOLS, registerInstrument } from '@mochiprep/shared';
 import type {
   AccountBalance,
   Agent,
@@ -8,6 +9,7 @@ import type {
   DecisionRecord,
   ExchangeStatus,
   FeedStatus,
+  InstrumentSpecification,
   PaperAccount,
   ProviderView,
   Quote,
@@ -38,6 +40,8 @@ interface State {
   decisions: DecisionRecord[];
   arena: ArenaRow[];
   exchange: ExchangeStatus[];
+  /** Every pair available on live data. Replay only has the built-in ones. */
+  symbols: SymbolId[];
   versions: Record<Topic, number>;
   page: Page;
   source: DataSource;
@@ -74,7 +78,7 @@ const remember = (key: string, value: string) => {
 };
 
 let toastId = 0;
-const ALL_TOPICS: Topic[] = ['accounts', 'orders', 'positions', 'agents', 'decisions', 'providers', 'arena', 'exchange'];
+const ALL_TOPICS: Topic[] = ['accounts', 'orders', 'positions', 'agents', 'decisions', 'providers', 'arena', 'exchange', 'instruments'];
 
 export const useApp = create<State>((set, get) => ({
   connected: false,
@@ -88,7 +92,8 @@ export const useApp = create<State>((set, get) => ({
   decisions: [],
   arena: [],
   exchange: [],
-  versions: { accounts: 0, orders: 0, positions: 0, agents: 0, decisions: 0, providers: 0, arena: 0, exchange: 0 },
+  symbols: [...DEFAULT_SYMBOLS],
+  versions: { accounts: 0, orders: 0, positions: 0, agents: 0, decisions: 0, providers: 0, arena: 0, exchange: 0, instruments: 0 },
   page: (location.hash.slice(1) as Page) || 'dashboard',
   source: remembered('mochi.source', 'REPLAY') as DataSource,
   accountId: null,
@@ -148,6 +153,14 @@ export const useApp = create<State>((set, get) => ({
             if (newest.outcome === 'RISK_REJECTED') set({ lastAlertAt: Date.now() });
           }
           set({ decisions });
+        }),
+      );
+    }
+    if (topics.includes('instruments')) {
+      jobs.push(
+        api.get<InstrumentSpecification[]>('/instruments').then((specs) => {
+          specs.forEach(registerInstrument);
+          set({ symbols: specs.map((s) => s.symbol) });
         }),
       );
     }
@@ -283,6 +296,13 @@ export async function attempt<T>(action: () => Promise<T>): Promise<T | undefine
     return undefined;
   }
 }
+
+/** Pairs that exist on the data source in view. */
+export const useSymbols = (): SymbolId[] => {
+  const symbols = useApp((s) => s.symbols);
+  const source = useApp((s) => s.source);
+  return source === 'REPLAY' ? [...DEFAULT_SYMBOLS] : symbols;
+};
 
 /** Accounts on the data source currently in view. */
 export const useSourceAccounts = () => {

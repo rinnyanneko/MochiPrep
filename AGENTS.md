@@ -32,6 +32,7 @@ Needs Node >= 22.13 (`node:sqlite`). Workspace packages export TypeScript source
 - AI keys live in SQLite by the owner's choice, and never in logs, errors or the browser.
 - OKX credentials stay in `Runtime` memory only. Never write them to disk or show them to a model.
 - Never resend an order after an unknown outcome: resolve it by lookup. Every OKX order passes `preTradeRefusal`.
+- Contract specs come from OKX, never from guesses. `SymbolId` is open-ended: use `getInstrument`, and remember replay has only `DEFAULT_SYMBOLS`.
 - A key that can withdraw is always refused. Exits stay possible when disarmed.
 - Never present simulated results as predictive, and never claim an unimplemented feature works.
 - Comments explain why. Do not add placeholder code for future markets.

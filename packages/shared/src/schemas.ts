@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SYMBOLS, TIMEFRAMES, DEFAULT_LIVE_LIMITS, DEFAULT_RISK_SETTINGS } from './domain';
+import { TIMEFRAMES, DEFAULT_LIVE_LIMITS, DEFAULT_RISK_SETTINGS } from './domain';
 
 const positive = z.number().finite().positive();
 
@@ -26,7 +26,9 @@ export const AiDecisionSchema = z
   });
 
 const decimalString = z.string().regex(/^\d+(\.\d+)?$/, 'expected a positive decimal string').max(40);
-const symbol = z.enum(SYMBOLS);
+/** Shape only. Whether a pair is actually tradable is checked against the instrument registry. */
+export const SymbolSchema = z.string().regex(/^[A-Z0-9]{1,24}USDT$/, 'expected a pair like DOGEUSDT');
+const symbol = SymbolSchema;
 
 export const RiskSettingsSchema = z.strictObject({
   maxLeverage: z.number().min(1).max(100),
@@ -102,6 +104,8 @@ export const OkxConnectSchema = OkxCredentialsSchema.extend({
 });
 
 export const ArmSchema = z.strictObject({ confirmation: z.string().max(100) });
+
+export const AddInstrumentSchema = z.strictObject({ symbol: SymbolSchema });
 
 export const ReplayControlSchema = z.strictObject({
   playing: z.boolean().optional(),

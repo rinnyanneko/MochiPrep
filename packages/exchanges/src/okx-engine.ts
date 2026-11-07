@@ -1,7 +1,6 @@
-import { d, floorToStep, min, ZERO, type ExecutionEngine } from '@mochiprep/core';
+import { d, floorToStep, getInstrument, min, roundToStep, ZERO, type ExecutionEngine } from '@mochiprep/core';
 import {
-  INSTRUMENTS,
-  SYMBOLS,
+  listSymbols,
   type AccountBalance,
   type AccountVenue,
   type EquityPoint,
@@ -17,9 +16,6 @@ import {
 } from '@mochiprep/shared';
 import { OkxRejection, toClOrdId, toInstId, type OkxClient, type OkxPosition, type PlaceOrderBody } from './okx-client';
 
-/** Base units per contract, verified against OKX on connect. */
-export const CONTRACT_VALUE: Record<SymbolId, string> = { BTCUSDT: '0.01', ETHUSDT: '0.1', SOLUSDT: '1' };
-export const LOT_SIZE = '0.01';
 const MAX_SNAPSHOT_AGE_MS = 30_000;
 const NEVER_ARRIVED_AFTER_MS = 60_000;
 const EQUITY_EVERY_MS = 60_000;
@@ -52,7 +48,7 @@ export interface OkxEngineDeps {
   newId?(prefix: string): string;
 }
 
-const fromInstId = (instId: string) => SYMBOLS.find((s) => toInstId(s) === instId);
+const fromInstId = (instId: string) => listSymbols().find((s) => toInstId(s) === instId);
 
 /**
  * Trades through OKX. The exchange is the source of truth for balances and positions; local rows
@@ -154,6 +150,7 @@ export class OkxExecutionEngine implements ExecutionEngine {
     if (prior) return { order: prior, fills: store.listFillsByOrder(prior.id), duplicate: true };
 
     const order = this.buildOrder(request);
+    this.alignToTick(order);
     const position = this.positions.find((p) => p.symbol === request.symbol);
     if (order.reduceOnly && position) order.quantity = min(d(order.quantity), d(position.quantity)).toFixed();
 
@@ -162,7 +159,7 @@ export class OkxExecutionEngine implements ExecutionEngine {
     if (refusal || contracts.lte(0)) {
       return this.reject(order, refusal ?? 'INVALID_QUANTITY: below one lot');
     }
-    order.quantity = contracts.mul(CONTRACT_VALUE[order.symbol]).toFixed();
+    order.quantity = contracts.mul(getInstrument(order.symbol).venueContractValue).toFixed();
 
     // Written before anything is sent, so a crash can never leave an order we do not know about.
     store.insertOrder(order);
@@ -186,7 +183,17 @@ export class OkxExecutionEngine implements ExecutionEngine {
   }
 
   private toContracts(order: Order) {
-    return floorToStep(d(order.quantity).div(CONTRACT_VALUE[order.symbol]), LOT_SIZE);
+    const { venueContractValue, venueLotSize } = getInstrument(order.symbol);
+    return floorToStep(d(order.quantity).div(venueContractValue), venueLotSize);
+  }
+
+  /** OKX refuses prices off the tick, and models rarely produce them on it. */
+  private alignToTick(order: Order) {
+    const { priceTick } = getInstrument(order.symbol);
+    const align = (price: string | null) => (price ? roundToStep(d(price), priceTick).toFixed() : null);
+    order.price = align(order.price);
+    order.attachedStopLoss = align(order.attachedStopLoss);
+    order.attachedTakeProfit = align(order.attachedTakeProfit);
   }
 
   private toBody(order: Order, instId: string, clOrdId: string, sz: string): PlaceOrderBody {
@@ -285,7 +292,7 @@ export class OkxExecutionEngine implements ExecutionEngine {
     }
     order.exchangeOrderId = remote.ordId;
     order.rejectReason = null;
-    const filled = d(remote.accFillSz || 0).mul(CONTRACT_VALUE[order.symbol]);
+    const filled = d(remote.accFillSz || 0).mul(getInstrument(order.symbol).venueContractValue);
     order.filledQuantity = filled.toFixed();
     if (remote.avgPx) order.avgFillPrice = remote.avgPx;
     order.updatedAt = at;
@@ -361,7 +368,7 @@ export class OkxExecutionEngine implements ExecutionEngine {
     const symbol = fromInstId(p.instId);
     if (!symbol) return [];
     const { store, accountId, now } = this.deps;
-    const quantity = d(p.pos).abs().mul(CONTRACT_VALUE[symbol]).toFixed();
+    const quantity = d(p.pos).abs().mul(getInstrument(symbol).venueContractValue).toFixed();
     const entry = store.listOrders(accountId, 200).find((o) => o.symbol === symbol && !o.reduceOnly && o.status === 'FILLED');
     return [
       {
@@ -395,7 +402,7 @@ export class OkxExecutionEngine implements ExecutionEngine {
   closePosition(accountId: string, symbol: SymbolId, fraction: number, clientOrderId: string) {
     const position = this.positions.find((p) => p.symbol === symbol);
     if (!position) throw new Error(`No open ${symbol} position`);
-    const quantity = fraction >= 1 ? d(position.quantity) : floorToStep(d(position.quantity).mul(fraction), INSTRUMENTS[symbol].quantityStep);
+    const quantity = fraction >= 1 ? d(position.quantity) : floorToStep(d(position.quantity).mul(fraction), getInstrument(symbol).quantityStep);
     return this.placeOrder({
       accountId,
       clientOrderId,

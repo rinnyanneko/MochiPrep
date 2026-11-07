@@ -9,7 +9,7 @@
 Work through these in order, and stop at the first surprise.
 
 1. In OKX, set the account to **Futures mode** and **one-way** position mode.
-2. Create a **Demo Trading** API key with **Trade** permission only. Bind it to your IP if you can.
+2. Create a **Demo Trading** API key with **Trade** permission only, as described in [the API key guide](API_KEYS.md). Bind it to your IP if you can.
 3. In **Settings > OKX trading**, connect it with the Demo Trading environment.
 4. Place a market order with a stop from **OKX Trading**, then confirm on OKX that the order, its stop, and the isolated margin are what you expect.
 5. Close it. Then try a limit order, a cancel, and a run of one agent.
@@ -39,6 +39,12 @@ These assumptions still need checking on the real exchange:
 Agents go through the same risk engine as paper trading, then the ceilings above. On an exchange account, the stricter of the agent's limit and the account's ceiling applies.
 
 Closing is always allowed while connected, even when disarmed, so you can never be locked out of an exit.
+
+## Trading pairs
+
+Pairs added in **Settings** trade on OKX like the built-in ones. Orders go out in contracts, and contract sizes vary widely: a BTC contract is 0.01 BTC, a PEPE contract is 10,000,000 PEPE. So one contract may be larger than a small order, and the minimum size differs per pair.
+
+Specs are read from OKX when a pair is added and rechecked on every connect, which refuses to continue if any changed. Prices are rounded to the pair's tick before sending. Check the first order on any new pair on OKX, and note that small coins move faster and have thinner books than BTC.
 
 ## Restarts
 

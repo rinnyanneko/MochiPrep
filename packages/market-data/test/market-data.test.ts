@@ -87,3 +87,67 @@ describe('OKX parsing', () => {
     feed.stop();
   });
 });
+
+describe('OKX pair subscriptions', () => {
+  class Socket {
+    static instances: Socket[] = [];
+    OPEN = 1;
+    readyState = 1;
+    sent: string[] = [];
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    constructor(_url: string) { Socket.instances.push(this); }
+    send(value: string) { this.sent.push(value); }
+    close() {}
+  }
+  const start = () => {
+    Socket.instances = [];
+    const fetchImpl = vi.fn(async () => ({ ok: true, json: async () => ({ code: '0', msg: '', data: [] }) }) as Response);
+    const feed = new OkxMarketData({ fetchImpl: fetchImpl as unknown as typeof fetch, WebSocketImpl: Socket as unknown as typeof WebSocket });
+    return { feed, fetchImpl };
+  };
+
+  it('subscribes an added pair on the open socket and accepts its ticks', () => {
+    const { feed } = start();
+    feed.start();
+    const socket = Socket.instances[0]!;
+    socket.onopen!();
+    feed.trackSymbol('DOGEUSDT');
+    expect(JSON.parse(socket.sent.at(-1)!)).toMatchObject({ op: 'subscribe', args: expect.arrayContaining([{ channel: 'tickers', instId: 'DOGE-USDT-SWAP' }]) });
+    feed.handleMessage(JSON.stringify({ arg: { channel: 'tickers', instId: 'DOGE-USDT-SWAP' }, data: [{ bidPx: '1', askPx: '2', last: '1.5', ts: '9' }] }));
+    expect(feed.getQuote('DOGEUSDT')).toMatchObject({ last: '1.5' });
+    feed.stop();
+  });
+
+  it('includes pairs tracked before the socket opened', () => {
+    const { feed } = start();
+    feed.trackSymbol('DOGEUSDT');
+    feed.start();
+    const socket = Socket.instances[0]!;
+    socket.onopen!();
+    expect(socket.sent[0]).toContain('DOGE-USDT-SWAP');
+    feed.stop();
+  });
+
+  it('stops accepting ticks for a removed pair', () => {
+    const { feed } = start();
+    feed.trackSymbol('DOGEUSDT');
+    feed.untrackSymbol('DOGEUSDT');
+    const quotes: unknown[] = [];
+    feed.onQuote((q) => quotes.push(q));
+    feed.handleMessage(JSON.stringify({ arg: { channel: 'tickers', instId: 'DOGE-USDT-SWAP' }, data: [{ bidPx: '1', askPx: '2', last: '1.5', ts: '9' }] }));
+    expect(quotes).toEqual([]);
+    expect(feed.getQuote('DOGEUSDT')).toBeUndefined();
+  });
+
+  it('filters the OKX list and caches it unless asked for fresh data', async () => {
+    const { feed, fetchImpl } = start();
+    await feed.listInstruments();
+    await feed.listInstruments();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await feed.listInstruments(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});

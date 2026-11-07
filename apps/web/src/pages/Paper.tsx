@@ -1,13 +1,13 @@
 import { Plus, RotateCcw, TriangleAlert } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { INSTRUMENTS, SYMBOLS, type Fill, type LedgerEvent, type Order, type Position, type PositionView, type SymbolId, type Timeframe } from '@mochiprep/shared';
+import { INSTRUMENTS, type Fill, type LedgerEvent, type Order, type Position, type PositionView, type SymbolId, type Timeframe } from '@mochiprep/shared';
 import { MarketChart, type PriceLineSpec } from '@/components/charts';
 import { PageTitle } from '@/components/Shell';
 import { AccountPicker, ClosedPositionsTable, FillsTable, LedgerTable, OrdersTable, PositionsTable, useCurrentAccount, VenueBadge } from '@/components/trading';
 import { Badge, Button, Card, Dialog, Field, Input, Segmented, Select, Stat, Tabs } from '@/components/ui';
 import { api } from '@/lib/api';
 import { money, pnlClass, price, qty, signedMoney } from '@/lib/format';
-import { attempt, useApp, useQuery, type AccountView } from '@/store';
+import { attempt, useApp, useQuery, useSymbols, type AccountView } from '@/store';
 import { useCandles } from './Markets';
 
 function CreateAccount() {
@@ -73,7 +73,7 @@ function OrderTicket({ account, symbol }: { account: AccountView; symbol: Symbol
   const [reduceOnly, setReduceOnly] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
-  const instrument = INSTRUMENTS[symbol];
+  const instrument = INSTRUMENTS[symbol]!;
   const reference = type === 'LIMIT' ? Number(limit) : Number(side === 'BUY' ? quote?.ask : quote?.bid);
   const step = Number(instrument.quantityStep);
   const rawQty = mode === 'QTY' ? Number(amount) : (Number(amount) * leverage) / (reference || Infinity);
@@ -185,7 +185,9 @@ function OrderTicket({ account, symbol }: { account: AccountView; symbol: Symbol
 export function PaperPage() {
   const account = useCurrentAccount();
   const source = useApp((s) => s.source);
-  const [symbol, setSymbol] = useState<SymbolId>('BTCUSDT');
+  const symbols = useSymbols();
+  const [picked, setSymbol] = useState<SymbolId>('BTCUSDT');
+  const symbol = symbols.includes(picked) ? picked : 'BTCUSDT';
   const [timeframe] = useState<Timeframe>('5m');
   const [tab, setTab] = useState('positions');
   const quote = useApp((s) => s.quotes[source][symbol]);
@@ -254,8 +256,8 @@ export function PaperPage() {
       <div className="grid gap-3 xl:grid-cols-[1fr_320px]">
         <Card className="p-3">
           <div className="mb-2 flex items-center gap-3 px-2">
-            <Select aria-label="Trading symbol" className="w-32" value={symbol} onChange={(e) => setSymbol(e.target.value as SymbolId)}>
-              {SYMBOLS.map((s) => <option key={s} value={s}>{s}</option>)}
+            <Select aria-label="Trading symbol" className="w-36" value={symbol} onChange={(e) => setSymbol(e.target.value)}>
+              {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
             <span className="num text-lg font-semibold">{price(quote?.last, symbol)}</span>
             <span className="num text-xs text-ink-3">{price(quote?.bid, symbol)} / {price(quote?.ask, symbol)}</span>

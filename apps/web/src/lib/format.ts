@@ -23,7 +23,7 @@ export function pct(v: Num, digits = 2): string {
 }
 
 export function priceDigits(symbol: SymbolId): number {
-  return INSTRUMENTS[symbol].priceTick.split('.')[1]?.length ?? 0;
+  return INSTRUMENTS[symbol]?.priceTick.split('.')[1]?.length ?? 2;
 }
 
 export function price(v: Num, symbol: SymbolId): string {

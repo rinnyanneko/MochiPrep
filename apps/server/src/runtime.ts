@@ -1,20 +1,25 @@
 import { AgentRunner } from '@mochiprep/agents';
 import { mockProvider, MOCK_MODELS, ProviderError, createRemoteProvider, redactSecrets, type AiProvider } from '@mochiprep/ai-providers';
 import { maxDrawdownPct, PaperExecutionEngine, winRatePct, d, str, type EngineEvent, type ExecutionEngine } from '@mochiprep/core';
-import { CONTRACT_VALUE, LOT_SIZE, OkxClient, OkxExecutionEngine, type OkxCredentials } from '@mochiprep/exchanges';
+import { OkxClient, OkxExecutionEngine, type OkxCredentials } from '@mochiprep/exchanges';
 import { OkxMarketData, ReplayMarketData, type MarketDataProvider } from '@mochiprep/market-data';
 import {
   ARM_PHRASE,
   DEFAULT_ACCOUNT_CONFIG,
   DEFAULT_LIVE_LIMITS,
   DEFAULT_RISK_SETTINGS,
-  SYMBOLS,
+  INSTRUMENTS,
+  isDefaultSymbol,
+  listSymbols,
+  registerInstrument,
+  unregisterInstrument,
   type AccountBalance,
   type Agent,
   type ArenaRow,
   type DataSource,
   type ExchangeStatus,
   type FeedStatus,
+  type InstrumentSpecification,
   type PositionView,
   type ProviderConfig,
   type ProviderView,
@@ -115,6 +120,10 @@ export class Runtime {
     });
 
     this.seedMockProvider();
+    for (const spec of this.store.listInstruments()) {
+      registerInstrument(spec);
+      this.live.trackSymbol?.(spec.symbol);
+    }
     this.restore();
   }
 
@@ -385,7 +394,7 @@ export class Runtime {
     input: Omit<Agent, 'id' | 'status' | 'running' | 'nextRunAt' | 'lastRunAt' | 'statusDetail' | 'consecutiveErrors' | 'isDemo' | 'createdAt'>,
     isDemo = false,
   ): Agent {
-    this.assertAgentRefs(input.providerId, input.accountId);
+    this.assertAgentRefs(input.providerId, input.accountId, input.symbol);
     const agent: Agent = {
       ...input,
       id: `agent_${randomUUID()}`,
@@ -403,9 +412,51 @@ export class Runtime {
     return agent;
   }
 
-  assertAgentRefs(providerId: string, accountId: string) {
+  assertAgentRefs(providerId: string, accountId: string, symbol: SymbolId) {
     if (!this.store.getProvider(providerId)) throw new Error('Unknown AI provider');
-    if (!this.store.getAccount(accountId)) throw new Error('Unknown paper account');
+    const account = this.store.getAccount(accountId);
+    if (!account) throw new Error('Unknown paper account');
+    this.assertTradable(symbol, account.source);
+  }
+
+  /** Custom pairs exist only on live data: the replay tape has just the built-in three. */
+  assertTradable(symbol: SymbolId, source: DataSource) {
+    if (!INSTRUMENTS[symbol]) throw new Error(`${symbol} is not an added pair. Add it in Settings first.`);
+    if (source === 'REPLAY' && !isDefaultSymbol(symbol)) throw new Error(`${symbol} has no replay data. Use a Live OKX account.`);
+  }
+
+  // ---- trading pairs --------------------------------------------------------------------
+
+  async availableInstruments(): Promise<InstrumentSpecification[]> {
+    if (!this.live.listInstruments) throw new Error('This feed cannot list instruments');
+    return (await this.live.listInstruments()).filter((spec) => !INSTRUMENTS[spec.symbol]);
+  }
+
+  /** Specs always come from OKX at this moment, so orders are never sized from a guess. */
+  async addInstrument(symbol: SymbolId): Promise<InstrumentSpecification> {
+    if (INSTRUMENTS[symbol]) throw new Error(`${symbol} is already added`);
+    if (!this.live.listInstruments) throw new Error('This feed cannot list instruments');
+    const spec = (await this.live.listInstruments(true)).find((s) => s.symbol === symbol);
+    if (!spec) throw new Error(`${symbol} is not a live USDT crypto perpetual on OKX`);
+    this.store.saveInstrument(spec);
+    registerInstrument(spec);
+    this.live.trackSymbol?.(symbol);
+    this.invalidate('instruments');
+    return spec;
+  }
+
+  async removeInstrument(symbol: SymbolId) {
+    if (isDefaultSymbol(symbol)) throw new Error(`${symbol} is built in`);
+    if (!INSTRUMENTS[symbol]) throw new Error(`${symbol} is not an added pair`);
+    if (this.store.listAgents().some((a) => a.symbol === symbol)) throw new Error('Agents still use this pair');
+    for (const account of this.store.listAccounts()) {
+      if ((await this.positionsOf(account.id)).some((p) => p.symbol === symbol)) throw new Error(`${account.name} has an open ${symbol} position`);
+      if (this.store.listOpenOrders(account.id).some((o) => o.symbol === symbol)) throw new Error(`${account.name} has open ${symbol} orders`);
+    }
+    this.store.deleteInstrument(symbol);
+    this.live.untrackSymbol?.(symbol);
+    unregisterInstrument(symbol);
+    this.invalidate('instruments');
   }
 
   private resolveProvider(agent: Agent) {
@@ -467,9 +518,10 @@ export class Runtime {
     if (!permissions.includes('trade')) throw new Error('This API key has no trade permission.');
     if (config.posMode !== 'net_mode') throw new Error('Set OKX position mode to one-way (net) first. MochiPrep does not support hedge mode.');
     if (config.acctLv === '1') throw new Error('This OKX account is in Spot mode, which cannot trade perpetuals. Switch it to Futures mode.');
-    for (const symbol of SYMBOLS) {
+    for (const symbol of listSymbols()) {
       const spec = await client.getContractValue(symbol);
-      if (Number(spec.ctVal) !== Number(CONTRACT_VALUE[symbol]) || Number(spec.lotSz) !== Number(LOT_SIZE)) {
+      const known = INSTRUMENTS[symbol]!;
+      if (Number(spec.ctVal) !== Number(known.venueContractValue) || Number(spec.lotSz) !== Number(known.venueLotSize)) {
         throw new Error(`OKX contract specs for ${symbol} changed. Refusing to size orders from stale values.`);
       }
     }
@@ -640,7 +692,7 @@ export class Runtime {
   }
 
   quotes(source: DataSource): Quote[] {
-    return SYMBOLS.flatMap((s) => this.market(source).getQuote(s) ?? []);
+    return listSymbols().flatMap((s) => this.market(source).getQuote(s) ?? []);
   }
 
   async candles(source: DataSource, symbol: SymbolId, timeframe: Timeframe, limit: number) {

@@ -1,6 +1,6 @@
 import { Pause, Pencil, Play, Plus, ScanSearch, Square, StepForward, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { DEFAULT_RISK_SETTINGS, SYMBOLS, TIMEFRAMES, type Agent, type AgentStatus, type DecisionRecord, type RiskSettings, type SymbolId, type Timeframe } from '@mochiprep/shared';
+import { DEFAULT_RISK_SETTINGS, TIMEFRAMES, type Agent, type AgentStatus, type DecisionRecord, type RiskSettings, type SymbolId, type Timeframe } from '@mochiprep/shared';
 import { Mochi, type MochiMood } from '@/components/Mochi';
 import { PageTitle } from '@/components/Shell';
 import { DecisionDetail, DecisionList, VenueBadge } from '@/components/trading';
@@ -8,7 +8,7 @@ import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Select, Textarea
 import { api } from '@/lib/api';
 import { dateTime, money, pct, pnlClass } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { attempt, useApp, useQuery, useSourceAccounts, type AccountView } from '@/store';
+import { attempt, useApp, useQuery, useSourceAccounts, useSymbols, type AccountView } from '@/store';
 
 const STATUS: Record<AgentStatus, { tone: Tone; mood: MochiMood; label: string }> = {
   IDLE: { tone: 'neutral', mood: 'sleeping', label: 'Idle' },
@@ -44,6 +44,7 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
   const providers = useApp((s) => s.providers);
   const source = useApp((s) => s.source);
   const accounts = useSourceAccounts();
+  const symbols = useSymbols();
   const [form, setForm] = useState<Form>(
     agent ?? {
       name: '',
@@ -112,8 +113,8 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.venue === 'OKX_LIVE' ? ' (REAL MONEY)' : a.venue === 'OKX_DEMO' ? ' (OKX demo)' : ''}</option>)}
           </Select>
         </Field>
-        <Field label="Symbol">
-          <Select value={form.symbol} onChange={(e) => set({ symbol: e.target.value as SymbolId })}>{SYMBOLS.map((s) => <option key={s}>{s}</option>)}</Select>
+        <Field label="Symbol" hint={source === 'REPLAY' ? 'Added pairs need Live OKX: the replay tape has only these.' : 'Add more pairs in Settings.'}>
+          <Select value={form.symbol} onChange={(e) => set({ symbol: e.target.value as SymbolId })}>{symbols.map((s) => <option key={s}>{s}</option>)}</Select>
         </Field>
         <Field label="Timeframe">
           <Select value={form.timeframe} onChange={(e) => set({ timeframe: e.target.value as Timeframe })}>{TIMEFRAMES.map((t) => <option key={t}>{t}</option>)}</Select>

@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { SYMBOLS, TIMEFRAMES, type Candle, type SymbolId, type Timeframe } from '@mochiprep/shared';
+import { TIMEFRAMES, type Candle, type SymbolId, type Timeframe } from '@mochiprep/shared';
 import { MarketChart } from '@/components/charts';
 import { FeedBadge, PageTitle } from '@/components/Shell';
-import { Badge, Card, Segmented, Stat } from '@/components/ui';
+import { Badge, Card, Segmented, Select, Stat } from '@/components/ui';
 import { api } from '@/lib/api';
 import { dateTime, pct, pnlClass, price } from '@/lib/format';
-import { useApp, useQuery } from '@/store';
+import { useApp, useQuery, useSymbols } from '@/store';
 import { useEffect } from 'react';
 
 export function useCandles(symbol: SymbolId, timeframe: Timeframe, limit = 400) {
@@ -24,7 +24,9 @@ export function useCandles(symbol: SymbolId, timeframe: Timeframe, limit = 400) 
 
 export function MarketsPage() {
   const source = useApp((s) => s.source);
-  const [symbol, setSymbol] = useState<SymbolId>('BTCUSDT');
+  const symbols = useSymbols();
+  const [picked, setSymbol] = useState<SymbolId>('BTCUSDT');
+  const symbol = symbols.includes(picked) ? picked : 'BTCUSDT';
   const [timeframe, setTimeframe] = useState<Timeframe>('15m');
   const quote = useApp((s) => s.quotes[source][symbol]);
   const { data: candles, error } = useCandles(symbol, timeframe);
@@ -39,7 +41,9 @@ export function MarketsPage() {
         description={source === 'REPLAY' ? 'Synthetic replay tape. These prices are not real.' : 'USDT perpetuals from the OKX public feed. No API key needed.'}
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <Segmented label="Symbol" value={symbol} onChange={setSymbol} options={SYMBOLS.map((s) => ({ value: s, label: s.replace('USDT', '') }))} />
+            <Select aria-label="Symbol" className="h-8 w-36 text-xs" value={symbol} onChange={(e) => setSymbol(e.target.value)}>
+              {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
+            </Select>
             <Segmented label="Timeframe" value={timeframe} onChange={setTimeframe} options={TIMEFRAMES.map((t) => ({ value: t, label: t }))} />
           </div>
         }

@@ -25,7 +25,7 @@ export class OkxRejection extends Error {
 /** No usable answer. The request may or may not have taken effect, so never blindly retry a write. */
 export class OkxUnknownOutcome extends Error {}
 
-export const toInstId = (symbol: SymbolId) => `${symbol.replace('USDT', '')}-USDT-SWAP`;
+export const toInstId = (symbol: SymbolId) => `${symbol.replace(/USDT$/, '')}-USDT-SWAP`;
 
 /** clOrdId allows only 32 alphanumerics. Hashing keeps it deterministic for any local key. */
 export const toClOrdId = (clientOrderId: string) => createHash('sha256').update(clientOrderId).digest('hex').slice(0, 32);

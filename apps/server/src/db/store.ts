@@ -7,6 +7,7 @@ import type {
   DecisionRecord,
   EquityPoint,
   Fill,
+  InstrumentSpecification,
   LedgerEvent,
   Order,
   PaperAccount,
@@ -409,6 +410,21 @@ export class SqliteStore implements PaperStore, AgentStore {
   }
   deleteProvider(id: string) {
     this.run('DELETE FROM providers WHERE id=?', id);
+  }
+
+  // instruments
+  listInstruments(): InstrumentSpecification[] {
+    return this.all('SELECT spec FROM instruments ORDER BY symbol').map((r) => JSON.parse(r.spec));
+  }
+  saveInstrument(spec: InstrumentSpecification) {
+    this.run(
+      `INSERT INTO instruments (symbol,spec,added_at) VALUES (?,?,?)
+       ON CONFLICT(symbol) DO UPDATE SET spec=excluded.spec`,
+      spec.symbol, JSON.stringify(spec), Date.now(),
+    );
+  }
+  deleteInstrument(symbol: SymbolId) {
+    this.run('DELETE FROM instruments WHERE symbol=?', symbol);
   }
 
   // AI provider keys

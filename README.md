@@ -40,18 +40,23 @@ Press **Try Demo Mode** on the Dashboard. It needs no API key and no internet: e
 
 Switch the top bar to **Live OKX** to paper trade against OKX public market data. No exchange key is involved: orders on a paper account are simulated locally.
 
+## Trading pairs
+
+BTC, ETH and SOL are built in. To trade another coin, add it in **Settings > Trading pairs**: any live USDT crypto perpetual listed on OKX works, and its contract specs come straight from OKX. Added pairs work on Live OKX accounts only, because the replay tape has just the three built-in pairs.
+
 ## Trading on OKX
 
-Connect an account in **Settings**, using Demo Trading or a real account. Agents on that account then trade it automatically, with every order inside the account's ceilings. See [Trading on OKX](docs/OKX_TRADING.md).
+Connect an account in **Settings**, using Demo Trading or a real account. See [how to get API keys](docs/API_KEYS.md). Agents on that account then trade it automatically, with every order inside the account's ceilings. See [Trading on OKX](docs/OKX_TRADING.md).
 
 ## BYOK providers
 
-Add a provider in **Settings**, paste its key, then pick it when creating an agent. You can configure OpenAI-compatible, OpenAI, Anthropic, Gemini, or DeepSeek providers. AI keys are saved **unencrypted** in the local SQLite file, so they survive restarts. The database lives in `.mochiprep/`, which only your user can read and git ignores. Anyone who can read that file, including backups of it, can read the keys. They are never logged or returned to the browser. Model output is strictly validated and must pass server-side risk checks before the paper engine can accept an order.
+Add a provider in **Settings**, paste its key, then pick it when creating an agent. See [how to get API keys](docs/API_KEYS.md). You can configure OpenAI-compatible, OpenAI, Anthropic, Gemini, or DeepSeek providers. AI keys are saved **unencrypted** in the local SQLite file, so they survive restarts. The database lives in `.mochiprep/`, which only your user can read and git ignores. Anyone who can read that file, including backups of it, can read the keys. They are never logged or returned to the browser. Model output is strictly validated and must pass server-side risk checks before the paper engine can accept an order.
 
 ## Current limits
 
-- OKX is the only exchange. Linear USDT perpetuals only, isolated margin, one-way position mode.
+- OKX is the only exchange. Linear USDT crypto perpetuals only, isolated margin, one-way position mode. OKX's stock, commodity and pre-market contracts are excluded.
 - OKX order handling is untested against the real exchange.
+- Paper trading uses one 0.5% maintenance rate for every pair, while OKX uses tiers, so simulated liquidation is less accurate on small coins.
 - Simplified fills, funding, and isolated liquidation; no order-book queue, partial liquidity, maintenance tiers, cross margin, or exchange-identical liquidation.
 - OKX credentials and arming disappear on restart by design. AI keys do not.
 

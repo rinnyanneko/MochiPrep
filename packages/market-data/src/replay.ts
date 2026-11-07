@@ -1,6 +1,6 @@
 import {
+  DEFAULT_SYMBOLS,
   INSTRUMENTS,
-  SYMBOLS,
   TIMEFRAME_MS,
   type Candle,
   type FeedStatus,
@@ -22,19 +22,19 @@ const SPREAD_FRACTION = 0.00005;
 export class ReplayMarketData implements MarketDataProvider {
   readonly source = 'REPLAY' as const;
   readonly name = 'Synthetic replay';
-  private readonly tape: Record<SymbolId, Candle[]>;
+  private readonly tape: Record<string, Candle[]>;
   private cursor = WARMUP_MINUTES;
   private readonly quoteListeners = new Set<(q: Quote) => void>();
 
   constructor(minutes?: number) {
-    this.tape = Object.fromEntries(SYMBOLS.map((s) => [s, generateTape(s, minutes)])) as Record<SymbolId, Candle[]>;
+    this.tape = Object.fromEntries(DEFAULT_SYMBOLS.map((s) => [s, generateTape(s, minutes)]));
   }
 
   start() {}
   stop() {}
 
   get length() {
-    return this.tape.BTCUSDT.length;
+    return this.tape.BTCUSDT!.length;
   }
   get position() {
     return this.cursor;
@@ -43,10 +43,10 @@ export class ReplayMarketData implements MarketDataProvider {
     return this.cursor >= this.length - 1;
   }
   get firstPlayableTime() {
-    return this.tape.BTCUSDT[WARMUP_MINUTES]!.time + 60_000;
+    return this.tape.BTCUSDT![WARMUP_MINUTES]!.time + 60_000;
   }
   get endTime() {
-    return this.tape.BTCUSDT[this.length - 1]!.time + 60_000;
+    return this.tape.BTCUSDT![this.length - 1]!.time + 60_000;
   }
 
   seek(index: number) {
@@ -57,18 +57,21 @@ export class ReplayMarketData implements MarketDataProvider {
   step(): Quote[] {
     if (this.atEnd) return [];
     this.cursor++;
-    const quotes = SYMBOLS.map((symbol) => this.getQuote(symbol));
+    const quotes = DEFAULT_SYMBOLS.map((symbol) => this.getQuote(symbol)!);
     for (const quote of quotes) for (const listener of this.quoteListeners) listener(quote);
     return quotes;
   }
 
   now() {
-    return this.tape.BTCUSDT[this.cursor]!.time + 60_000;
+    return this.tape.BTCUSDT![this.cursor]!.time + 60_000;
   }
 
-  getQuote(symbol: SymbolId): Quote {
-    const candle = this.tape[symbol][this.cursor]!;
-    const instrument = INSTRUMENTS[symbol];
+  /** Undefined for any pair outside the tape: custom pairs only exist on live data. */
+  getQuote(symbol: SymbolId): Quote | undefined {
+    const tape = this.tape[symbol];
+    if (!tape) return undefined;
+    const candle = tape[this.cursor]!;
+    const instrument = INSTRUMENTS[symbol]!;
     const tick = Number(instrument.priceTick);
     const decimals = instrument.priceTick.split('.')[1]?.length ?? 0;
     const half = Math.max(tick, Math.round((candle.close * SPREAD_FRACTION) / tick) * tick);
@@ -90,7 +93,7 @@ export class ReplayMarketData implements MarketDataProvider {
   /** Follows the tape's own 8h return, like a perp premium would, clamped to +-0.05%. */
   private fundingRate(symbol: SymbolId): string {
     const back = Math.max(0, this.cursor - 480);
-    const tape = this.tape[symbol];
+    const tape = this.tape[symbol]!;
     const change = (tape[this.cursor]!.close - tape[back]!.close) / tape[back]!.close;
     const rate = Math.max(-0.0005, Math.min(0.0005, 0.0001 + change * 0.01));
     return rate.toFixed(6);
@@ -98,6 +101,7 @@ export class ReplayMarketData implements MarketDataProvider {
 
   async getCandles(symbol: SymbolId, timeframe: Timeframe, limit: number): Promise<Candle[]> {
     const tape = this.tape[symbol];
+    if (!tape) return [];
     const size = TIMEFRAME_MS[timeframe];
     const nowMs = this.now();
     const out: Candle[] = [];
