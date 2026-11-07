@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { ceilToStep, d, floorToStep, roundToStep, str, type Dec } from '@mochiprep/core';
 import { generateTape, ReplayMarketData } from '@mochiprep/market-data';
 import { DEFAULT_SYMBOLS, INSTRUMENTS, TIMEFRAMES, type Candle } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database.js';
@@ -193,6 +194,181 @@ async function replayFixture() {
   return { meta, steps, ...(await fullOutputHashes()), snapshots, edges };
 }
 
+const DECIMAL_SEED = 0x6d6f6368;
+
+/** Small seeded PRNG so the corpus is identical on every run. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+type DecimalCase = { op: string; a: string | number; b?: string; dp?: number; out: string };
+
+const BINARY_OPS: Record<string, (a: Dec, b: Dec) => Dec> = {
+  add: (a, b) => a.add(b),
+  sub: (a, b) => a.sub(b),
+  mul: (a, b) => a.mul(b),
+  div: (a, b) => a.div(b),
+  floorToStep: floorToStep,
+  ceilToStep: ceilToStep,
+  roundToStep: roundToStep,
+};
+const UNARY_OPS: Record<string, (a: Dec) => Dec> = {
+  neg: (a) => a.neg(),
+  floor: (a) => a.floor(),
+  ceil: (a) => a.ceil(),
+  round: (a) => a.round(),
+};
+
+/** Runs decimal.js exactly as the accounting code configures it; throws and non-finite results become "error". */
+function decimalOut(run: () => Dec): string {
+  try {
+    const v = run();
+    return v.isFinite() ? str(v) : 'error';
+  } catch {
+    return 'error';
+  }
+}
+
+/**
+ * Expected decimal.js results for the Rust Dec: a seeded random corpus (long operands, so products
+ * and quotients overflow 50 digits) plus hand-picked edge cases through every operation.
+ */
+function decimalFixture(): DecimalCase[] {
+  const rand = mulberry32(DECIMAL_SEED);
+  const int = (lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1));
+  const digits = (n: number) => Array.from({ length: n }, () => int(0, 9)).join('');
+  const randomOperand = (): string => {
+    const intLen = int(1, 30);
+    const head = intLen === 1 ? String(int(0, 9)) : String(int(1, 9)) + digits(intLen - 1);
+    const frac = digits(int(0, 30));
+    return (rand() < 0.5 ? '-' : '') + head + (frac ? '.' + frac : '');
+  };
+
+  const cases: DecimalCase[] = [];
+  const binary = (op: string, a: string, b: string) =>
+    cases.push({ op, a, b, out: decimalOut(() => BINARY_OPS[op]!(d(a), d(b))) });
+  const unary = (op: string, a: string) => cases.push({ op, a, out: decimalOut(() => UNARY_OPS[op]!(d(a))) });
+  const withDp = (op: 'toDP' | 'toFixedDp', a: string, dp: number) =>
+    cases.push({
+      op,
+      a,
+      dp,
+      out: op === 'toDP' ? decimalOut(() => d(a).toDecimalPlaces(dp)) : d(a).toFixed(dp),
+    });
+  const toFixed = (a: string) => cases.push({ op: 'toFixed', a, out: d(a).toFixed() });
+  const cmp = (a: string, b: string) => cases.push({ op: 'cmp', a, b, out: String(d(a).cmp(d(b))) });
+  const fromNumber = (x: number) => cases.push({ op: 'fromNumber', a: x, out: str(d(x)) });
+  const everyOp = (a: string, b: string) => {
+    for (const op of Object.keys(BINARY_OPS)) binary(op, a, b);
+    for (const op of Object.keys(UNARY_OPS)) unary(op, a);
+    toFixed(a);
+    cmp(a, b);
+    for (const dp of [0, 2, 8]) withDp('toFixedDp', a, dp);
+    for (const dp of [0, 3, 10]) withDp('toDP', a, dp);
+  };
+
+  // Random operands: 1-30 integer digits, 0-30 fraction digits, random sign.
+  for (let i = 0; i < 450; i++) {
+    const a = randomOperand();
+    const b = randomOperand();
+    const step = (rand() < 0.5 ? '' : '0.') + String(int(1, 9)) + digits(int(0, 6));
+    for (const op of ['add', 'sub', 'mul', 'div']) binary(op, a, b);
+    for (const op of Object.keys(UNARY_OPS)) unary(op, a);
+    toFixed(a);
+    cmp(a, b);
+    withDp('toDP', a, int(0, 10));
+    withDp('toFixedDp', a, int(0, 8));
+    for (const op of ['floorToStep', 'ceilToStep', 'roundToStep']) binary(op, a, step);
+  }
+
+  // Zero and negative zero through every op, against each other and ordinary values.
+  for (const [a, b] of [['0', '0'], ['-0', '0'], ['0', '-0'], ['-0', '-0'], ['0', '5'], ['-0', '5'], ['5', '-0'], ['-3', '0'], ['-0', '-2.5'], ['0.5', '-0.5']]) {
+    everyOp(a!, b!);
+  }
+
+  // Repeating quotients, and one whose 51st significant digit is exactly a tie.
+  for (const [a, b] of [['1', '3'], ['2', '3'], ['-1', '3'], ['1', '-3'], ['1', '7'], ['10', '3'], ['1', '0.3'], ['100', '7']]) {
+    binary('div', a!, b!);
+  }
+  // Exact quotients with 51 significant digits ending in 5: a true tie at the 50th digit, with an even and an odd digit before it.
+  binary('div', '1', '2');
+  binary('div', '12345678901234567890123456789012345678901234567890', '100');
+  binary('div', '123456789012345678901234567890123456789012345678905', '1000');
+  binary('div', '123456789012345678901234567890123456789012345678915', '1000');
+  binary('div', '-123456789012345678901234567890123456789012345678905', '1000');
+  // Just above and below the tie: 51 digits ending 5, then a nonzero tail.
+  binary('div', '1234567890123456789012345678901234567890123456789050000000000001', '1000000000000');
+  binary('div', '1234567890123456789012345678901234567890123456789049999999999999', '1000000000000');
+  binary('div', '1', '1' + '0'.repeat(50));
+  binary('mul', '123456789012345678901234567890123456789012345678905', '1');
+  binary('add', '12345678901234567890123456789012345678901234567890', '0.5');
+  binary('add', '12345678901234567890123456789012345678901234567891', '0.5');
+  binary('add', '1e60', '1e-30');
+  binary('sub', '1e60', '1e-30');
+  binary('add', '1', '1e-60');
+  binary('sub', '1', '1e-60');
+  binary('sub', '5', '5');
+  binary('sub', '-5', '-5');
+  binary('add', '-5', '5');
+
+  // Exponent notation and tiny values.
+  for (const a of ['1e-7', '5E+3', '0.00000000000000000000000000000001', '1e-40', '-1e-7', '1e40', '1e41', '12e-3']) {
+    everyOp(a, '3');
+    everyOp('2.5', a);
+  }
+
+  // Long inputs are never rounded on construction, only by arithmetic.
+  const fifty = '1234567890123456789012345678901234567890.1234567891';
+  const sixty = '1234567890123456789012345678901234567890123456789012.12345678';
+  for (const a of [fifty, sixty, '-' + sixty]) {
+    toFixed(a);
+    unary('neg', a);
+    binary('add', a, '0');
+    binary('mul', a, '1');
+    cmp(a, fifty);
+  }
+
+  // Ties for round / toDP / toFixedDp.
+  for (const a of ['0.5', '1.5', '2.5', '3.5', '-0.5', '-1.5', '-2.5', '-3.5', '0.4999', '-0.4999']) {
+    unary('round', a);
+    unary('floor', a);
+    unary('ceil', a);
+    withDp('toDP', a, 0);
+    withDp('toFixedDp', a, 0);
+  }
+  for (const a of ['1.00000000005', '1.00000000015', '-1.00000000005', '0.125', '0.135', '-0.125', '0.005', '-0.005', '-0.0001', '0.0049', '9.995', '99.5', '-99.5']) {
+    for (const dp of [0, 2, 3, 10]) {
+      withDp('toDP', a, dp);
+      withDp('toFixedDp', a, dp);
+    }
+  }
+
+  // Step helpers, including a zero step (decimal.js yields NaN, which must become an error).
+  const stepCases = [
+    ['10.37', '0.05'], ['-10.37', '0.05'], ['0.0123', '0.001'], ['7', '0.5'], ['7.25', '0.5'], ['7.75', '0.5'],
+    ['5', '0'], ['0', '0.1'], ['-0', '0.1'], ['1234.5678', '10'], ['2.5', '1'], ['3.5', '1'],
+  ];
+  for (const [a, step] of stepCases) {
+    for (const op of ['floorToStep', 'ceilToStep', 'roundToStep']) binary(op, a!, step!);
+  }
+
+  // Ordering and equality, including -0 against 0.
+  const cmpCases = [['0', '-0'], ['1', '1.0'], ['-1', '-1.00'], ['1e3', '1000'], ['0.1', '0.10'], ['-5', '5'], ['5', '-5']];
+  for (const [a, b] of cmpCases) cmp(a!, b!);
+
+  // JS numbers, as new Decimal(x) reads them.
+  const numbers = [0.1, 1e-7, 0.0005, 3, 100, 68000, 0, 0.1 + 0.2, 1e21, 1.5e-10, 123456.789, -2.5, 5e-324, 1.7976931348623157e308];
+  for (const x of numbers) fromNumber(x);
+  return cases;
+}
+
 /**
  * Golden fixtures: what the TypeScript backend produces, saved so the Rust port can be tested
  * against it. Each key is a file name under crates/golden; a Buffer is written as raw bytes and
@@ -205,6 +381,7 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
       round: ROUND_CASES.map((x) => [noNegativeZero(x), noNegativeZero(Math.round(x))]),
       toFixed: FIXED_CASES.map(([x, d]) => [noNegativeZero(x), d, x.toFixed(d)]),
     },
+    'decimal.json': decimalFixture(),
     'tape.json': tapeFixture(),
     'replay.json': await replayFixture(),
     'schema.json': schemaFixture(),

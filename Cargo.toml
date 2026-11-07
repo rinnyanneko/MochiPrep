@@ -16,3 +16,5 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
 sha2 = "0.10"
 tempfile = "3"
+num-bigint = "0.4"
+num-traits = "0.2"
