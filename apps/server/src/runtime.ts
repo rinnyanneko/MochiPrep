@@ -32,10 +32,13 @@ import {
   type SymbolId,
   type Timeframe,
   type Topic,
+  type VaultStatus,
+  VAULT_RESET_PHRASE,
 } from '@mochiprep/shared';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { SqliteStore } from './db/store';
+import { DEFAULT_KDF, newDataKey, open, seal, unwrapWithPassword, wrapWithPassword, type KdfParams, type PasswordWrap } from './vault';
 
 export const MOCK_PROVIDER_ID = 'mock';
 const REPLAY_BATCH_MS = 100;
@@ -45,6 +48,13 @@ const REPLAY_EQUITY_EVERY_MS = 15 * 60_000;
 const LIVE_EQUITY_EVERY_MS = 60_000;
 const DEFAULT_SPEED = 20;
 const EXCHANGE_SYNC_MS = 5_000;
+const PASSWORD_WRAP_ID = 'password';
+const providerContext = (id: string) => `provider-key:${id}`;
+const exchangeContext = (id: string) => `okx-credentials:${id}`;
+
+interface SavedOkxCredentials extends OkxCredentials {
+  environment: 'OKX_DEMO' | 'OKX_LIVE';
+}
 
 interface ExchangeSession {
   engine: OkxExecutionEngine;
@@ -63,6 +73,8 @@ interface RuntimeOptions {
   newsFetch?: typeof fetch;
   /** OKX transport override for tests. */
   okx?: { fetchImpl?: typeof fetch; baseUrl?: string };
+  /** Key-derivation cost override for tests. */
+  kdf?: KdfParams;
 }
 
 type Listener = (event: ServerEvent) => void;
@@ -76,10 +88,14 @@ export class Runtime {
   readonly runner: AgentRunner;
   readonly news: NewsService;
 
-  /** BYOK keys, mirrored from SQLite (plaintext, by the owner's choice). */
+  /** BYOK keys, mirrored from SQLite: plaintext without a master password, otherwise loaded on unlock. */
   private readonly keys: Map<string, string>;
-  /** OKX sessions. Exchange credentials live only here and are gone on restart. */
+  /** OKX sessions. Credentials reach disk only when the owner saves them, sealed by the master password. */
   private readonly exchanges = new Map<string, ExchangeSession>();
+  /** Opens every sealed secret. Held only in memory, from unlock until the process exits. */
+  private dataKey: Buffer | null = null;
+  private vaultBusy = false;
+  private readonly kdf: KdfParams;
   private readonly okxOptions: RuntimeOptions['okx'];
   private lastExchangeSyncAt = 0;
   private readonly providerFactory: (config: ProviderConfig, key: string) => AiProvider;
@@ -101,7 +117,8 @@ export class Runtime {
 
   constructor(options: RuntimeOptions) {
     this.store = new SqliteStore(options.db);
-    this.keys = this.store.getProviderKeys();
+    this.keys = this.store.hasVault() ? new Map() : this.store.getProviderKeys();
+    this.kdf = options.kdf ?? DEFAULT_KDF;
     this.okxOptions = options.okx;
     this.replay = new ReplayMarketData(options.replayMinutes);
     this.live = options.live ?? new OkxMarketData();
@@ -533,12 +550,16 @@ export class Runtime {
   providerFor(config: ProviderConfig): AiProvider {
     if (config.kind === 'MOCK') return mockProvider;
     const key = this.keys.get(config.id);
-    if (!key) throw new ProviderError('NO_KEY', `API key for "${config.name}" is not loaded. Keys live in memory, so re-enter it in Settings.`);
+    if (!key && this.vaultStatus() === 'LOCKED') throw new ProviderError('NO_KEY', `Unlock MochiPrep with your master password to load the key for "${config.name}".`);
+    if (!key) throw new ProviderError('NO_KEY', `No API key saved for "${config.name}". Enter it in Settings.`);
     return this.providerFactory(config, key);
   }
 
   setKey(providerId: string, key: string) {
-    this.store.saveProviderKey(providerId, key);
+    const status = this.vaultStatus();
+    if (status === 'LOCKED') throw new Error('Unlock MochiPrep with your master password first');
+    if (status === 'UNLOCKED') this.store.saveSealedProviderKey(providerId, seal(this.dataKey!, key, providerContext(providerId)));
+    else this.store.saveProviderKey(providerId, key);
     this.keys.set(providerId, key);
     this.invalidate('providers');
   }
@@ -559,6 +580,112 @@ export class Runtime {
     return redactSecrets(text, this.secrets());
   }
 
+  // ---- master password ------------------------------------------------------------------
+
+  vaultStatus(): VaultStatus {
+    if (this.dataKey) return 'UNLOCKED';
+    return this.store.hasVault() ? 'LOCKED' : 'OFF';
+  }
+
+  /** Each change derives a key for hundreds of ms; one at a time keeps two from racing. */
+  private async exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.vaultBusy) throw new Error('Another master password action is in progress');
+    this.vaultBusy = true;
+    try {
+      return await fn();
+    } finally {
+      this.vaultBusy = false;
+    }
+  }
+
+  private async openVault(password: string): Promise<Buffer> {
+    const wrap = this.store.getVaultKey<PasswordWrap>(PASSWORD_WRAP_ID);
+    if (!wrap) throw new Error('No master password is set');
+    return unwrapWithPassword(wrap, password);
+  }
+
+  /** Seals the AI keys already saved and removes their plaintext, in one transaction. */
+  enableVault(password: string) {
+    return this.exclusive(async () => {
+      if (this.vaultStatus() !== 'OFF') throw new Error('A master password is already set');
+      const dataKey = newDataKey();
+      const wrap = await wrapWithPassword(dataKey, password, this.kdf);
+      this.store.transaction(() => {
+        this.store.saveVaultKey(PASSWORD_WRAP_ID, 'PASSWORD', wrap);
+        for (const [id, key] of this.store.getProviderKeys()) this.store.saveSealedProviderKey(id, seal(dataKey, key, providerContext(id)));
+      });
+      this.store.scrub();
+      this.dataKey = dataKey;
+      this.invalidate('vault', 'providers', 'exchange');
+    });
+  }
+
+  /**
+   * Loads sealed AI keys and reconnects saved OKX accounts. Reconnecting runs every check a
+   * manual connect does and never arms a real account: arming always takes the typed phrase.
+   */
+  unlock(password: string) {
+    return this.exclusive(async () => {
+      if (this.vaultStatus() !== 'LOCKED') throw new Error('MochiPrep is not locked');
+      const dataKey = await this.openVault(password);
+      const keys = [...this.store.getSealedProviderKeys()].map(([id, value]) => [id, open(dataKey, value, providerContext(id))] as const);
+      this.dataKey = dataKey;
+      for (const [id, key] of keys) this.keys.set(id, key);
+      this.invalidate('vault', 'providers', 'exchange');
+
+      const failed: string[] = [];
+      for (const { accountId, sealed } of this.store.listSealedExchangeCredentials()) {
+        const account = this.store.getAccount(accountId);
+        if (!account || this.exchanges.has(accountId)) continue;
+        try {
+          const saved = JSON.parse(open(dataKey, sealed, exchangeContext(accountId))) as SavedOkxCredentials;
+          await this.connectOkx(
+            { ...saved, name: account.name, limits: account.liveLimits ?? DEFAULT_LIVE_LIMITS, remember: true },
+            accountId,
+          );
+        } catch (error) {
+          failed.push(account.name);
+          this.emit({ type: 'toast', level: 'error', message: `${account.name}: could not reconnect to OKX. ${this.redact((error as Error).message)}` });
+        }
+      }
+      return { failed };
+    });
+  }
+
+  changePassword(current: string, next: string) {
+    return this.exclusive(async () => {
+      const dataKey = await this.openVault(current);
+      this.store.saveVaultKey(PASSWORD_WRAP_ID, 'PASSWORD', await wrapWithPassword(dataKey, next, this.kdf));
+    });
+  }
+
+  /** Back to unencrypted AI keys. Saved OKX credentials are deleted: they never exist in plaintext. */
+  disableVault(password: string) {
+    return this.exclusive(async () => {
+      const dataKey = await this.openVault(password);
+      const keys = [...this.store.getSealedProviderKeys()].map(([id, value]) => [id, open(dataKey, value, providerContext(id))] as const);
+      this.store.transaction(() => {
+        for (const [id, key] of keys) this.store.saveProviderKey(id, key);
+        this.store.deleteVault();
+      });
+      for (const [id, key] of keys) this.keys.set(id, key);
+      this.dataKey = null;
+      this.invalidate('vault', 'providers', 'exchange');
+    });
+  }
+
+  /** For a lost password. Nothing sealed can be recovered, so all of it is deleted. */
+  resetVault(confirmation: string) {
+    if (confirmation !== VAULT_RESET_PHRASE) throw new Error(`Type exactly: ${VAULT_RESET_PHRASE}`);
+    if (this.vaultBusy) throw new Error('Another master password action is in progress');
+    if (this.vaultStatus() === 'OFF') throw new Error('No master password is set');
+    const sealed = [...this.store.getSealedProviderKeys().keys()];
+    this.store.transaction(() => this.store.deleteVault());
+    for (const id of sealed) this.keys.delete(id);
+    this.dataKey = null;
+    this.invalidate('vault', 'providers', 'exchange');
+  }
+
   // ---- exchange accounts ----------------------------------------------------------------
 
   /** The engine an account trades through. Throws when an exchange account is not connected. */
@@ -575,7 +702,12 @@ export class Runtime {
    * Verifies a key before anything can trade on it. A key that can withdraw is refused outright:
    * a leak of a trade-only key cannot move funds off the exchange.
    */
-  async connectOkx(input: OkxCredentials & { name: string; environment: 'OKX_DEMO' | 'OKX_LIVE'; limits: RiskSettings }) {
+  async connectOkx(
+    input: OkxCredentials & { name: string; environment: 'OKX_DEMO' | 'OKX_LIVE'; limits: RiskSettings; remember?: boolean },
+    /** Set when reconnecting saved credentials, which must still belong to that account. */
+    expectedAccountId?: string,
+  ) {
+    if (input.remember && this.vaultStatus() !== 'UNLOCKED') throw new Error('Set a master password and unlock it to save OKX keys');
     const credentials = { apiKey: input.apiKey, secretKey: input.secretKey, passphrase: input.passphrase };
     const client = new OkxClient(credentials, input.environment, this.okxOptions);
     const config = await client.getConfig();
@@ -594,6 +726,7 @@ export class Runtime {
 
     const uid = config.uid ?? '';
     let account = this.store.listAccounts().find((a) => a.venue === input.environment && a.exchangeUid === uid);
+    if (expectedAccountId && account?.id !== expectedAccountId) throw new Error('The saved API key now belongs to a different OKX account. Reconnect it by hand.');
     if (account) {
       account.liveLimits = input.limits;
       this.store.saveAccountProfile(account);
@@ -637,6 +770,15 @@ export class Runtime {
     // Trading is only possible once a full reconciliation has succeeded.
     await session.engine.sync();
     this.exchanges.set(id, session);
+    if (input.remember) {
+      // Checked again: the vault may have been reset while OKX was answering.
+      if (!this.dataKey) throw new Error('Connected, but the key was not saved: the master password was removed meanwhile');
+      const saved: SavedOkxCredentials = { ...credentials, environment: input.environment };
+      this.store.saveSealedExchangeCredentials(id, seal(this.dataKey, JSON.stringify(saved), exchangeContext(id)));
+    } else if (this.dataKey) {
+      // While locked the save box cannot be ticked, so an unticked box is not a choice to forget the key.
+      this.store.deleteSealedExchangeCredentials(id);
+    }
     if (account.initialBalance === '0') {
       account.initialBalance = (await session.engine.getBalance()).equity;
       this.store.saveAccountProfile(account);
@@ -645,8 +787,10 @@ export class Runtime {
     return account;
   }
 
+  /** Also forgets saved credentials, so a disconnected account does not return on the next unlock. */
   disconnectExchange(accountId: string) {
     this.exchanges.delete(accountId);
+    this.store.deleteSealedExchangeCredentials(accountId);
     this.runner.pauseAccountAgents(accountId, 'OKX disconnected');
     this.invalidate('accounts', 'exchange');
   }
@@ -715,6 +859,7 @@ export class Runtime {
           name: account.name,
           venue: account.venue,
           connected: !!session,
+          saved: this.store.hasSealedExchangeCredentials(account.id),
           armed: session?.armed ?? false,
           healthy: session?.engine.healthy ?? false,
           lastSyncAt: session?.engine.lastSync ?? null,

@@ -19,10 +19,12 @@ function ConnectDialog({ preset, onClose }: { preset: ExchangeStatus | null; onC
   const [limits, setLimits] = useState<RiskSettings>(preset?.limits ?? DEFAULT_LIVE_LIMITS);
   const [busy, setBusy] = useState(false);
   const toast = useApp((s) => s.toast);
+  const unlocked = useApp((s) => s.vault === 'UNLOCKED');
+  const [remember, setRemember] = useState(preset?.saved ?? false);
 
   const connect = async () => {
     setBusy(true);
-    const ok = await attempt(() => api.post('/exchange/okx/connect', { name, environment, apiKey, secretKey, passphrase, limits }));
+    const ok = await attempt(() => api.post('/exchange/okx/connect', { name, environment, apiKey, secretKey, passphrase, limits, remember: remember && unlocked }));
     setBusy(false);
     if (ok) {
       toast('info', 'Connected to OKX.');
@@ -37,7 +39,7 @@ function ConnectDialog({ preset, onClose }: { preset: ExchangeStatus | null; onC
   );
 
   return (
-    <Dialog open onOpenChange={onClose} title={preset ? `Reconnect ${preset.name}` : 'Connect OKX'} description="Credentials stay in backend memory only. They are never saved, so you enter them again after a restart." wide>
+    <Dialog open onOpenChange={onClose} title={preset ? `Reconnect ${preset.name}` : 'Connect OKX'} description="Credentials stay in backend memory unless you save them encrypted below. Unsaved, you enter them again after a restart." wide>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Environment" hint="Try Demo Trading first: it needs a key created in OKX demo mode.">
           <Select value={environment} disabled={!!preset} onChange={(e) => setEnvironment(e.target.value as Environment)}>
@@ -49,6 +51,17 @@ function ConnectDialog({ preset, onClose }: { preset: ExchangeStatus | null; onC
         <Field label="API key"><Input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></Field>
         <Field label="Secret key"><Input type="password" autoComplete="off" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} /></Field>
         <Field label="Passphrase" className="sm:col-span-2"><Input type="password" autoComplete="off" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} /></Field>
+        <label className="flex items-start gap-2 text-xs text-ink-2 sm:col-span-2">
+          <input type="checkbox" className="mt-0.5 accent-[var(--accent)]" disabled={!unlocked} checked={remember && unlocked} onChange={(e) => setRemember(e.target.checked)} />
+          <span>
+            Save encrypted with my master password
+            <span className="block text-[11px] text-ink-3">
+              {unlocked
+                ? 'Reconnects when you unlock after a restart. Real accounts still start disarmed. Disconnecting deletes the saved key.'
+                : 'Set and unlock a master password in Settings to use this.'}
+            </span>
+          </span>
+        </label>
       </div>
       <h3 className="mt-4 mb-2 font-display text-sm font-extrabold">Account ceilings</h3>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -83,7 +96,7 @@ function ArmDialog({ status, onClose }: { status: ExchangeStatus; onClose(): voi
     if (ok) onClose();
   };
   return (
-    <Dialog open onOpenChange={onClose} title={`Arm ${status.name}?`} description="Arming allows real orders from you and from running agents. It ends at Stop All, Disarm, or a backend restart.">
+    <Dialog open onOpenChange={onClose} title={`Arm ${status.name}?`} description="Arming allows real orders from you and from running agents. It ends at Stop All, Disarm, or a backend restart, even when the key is saved.">
       <ul className="mb-3 space-y-1 text-[13px] text-ink-2">
         <li>Up to {status.limits.maxNotional} USDT per order, {status.limits.maxLeverage}x leverage</li>
         <li>Up to {status.limits.maxOpenPositions} positions, new orders stop after a {status.limits.maxDailyLossPct}% daily loss</li>
@@ -114,6 +127,7 @@ function StatusRow({ status, onReconnect, onArm }: { status: ExchangeStatus; onR
         <Badge tone="down" title={status.error ?? undefined}>Sync lost</Badge>
       )}
       {real && status.connected && (status.armed ? <Badge tone="down">Armed</Badge> : <Badge>Disarmed</Badge>)}
+      {status.saved && <Badge tone="info" title="Encrypted with your master password">Key saved</Badge>}
       <span className="num text-xs text-ink-3">{status.lastSyncAt ? dateTime(status.lastSyncAt) : ''}</span>
       <span className="ml-auto flex gap-1">
         {!status.connected && <Button size="sm" onClick={onReconnect}><Link2 /> Reconnect</Button>}

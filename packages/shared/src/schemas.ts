@@ -126,7 +126,16 @@ export const OkxConnectSchema = OkxCredentialsSchema.extend({
   name: z.string().trim().min(1).max(60),
   environment: z.enum(['OKX_DEMO', 'OKX_LIVE']),
   limits: RiskSettingsSchema.default(DEFAULT_LIVE_LIMITS),
+  /** Save the credentials sealed by the master password. Needs an unlocked vault. */
+  remember: z.boolean().default(false),
 });
+
+const masterPassword = z.string().min(10, 'Use at least 10 characters').max(200);
+
+export const VaultPasswordSchema = z.strictObject({ password: z.string().min(1).max(200) });
+export const VaultCreateSchema = z.strictObject({ password: masterPassword });
+export const VaultChangeSchema = z.strictObject({ current: z.string().min(1).max(200), next: masterPassword });
+export const VaultResetSchema = z.strictObject({ confirmation: z.string().max(100) });
 
 export const ArmSchema = z.strictObject({ confirmation: z.string().max(100) });
 

@@ -521,8 +521,10 @@ export interface ExchangeStatus {
   accountId: string;
   name: string;
   venue: AccountVenue;
-  /** Credentials are in memory for this process. False after every restart. */
+  /** Credentials are in memory for this process. False after every restart until reconnected or unlocked. */
   connected: boolean;
+  /** Credentials are saved, sealed by the master password, and reconnect on unlock. */
+  saved: boolean;
   /** Real orders allowed. Always true for OKX_DEMO once connected. */
   armed: boolean;
   /** Last sync with the exchange succeeded recently enough to trade on. */
@@ -565,4 +567,10 @@ export type ServerEvent =
   | { type: 'invalidate'; topics: Topic[] }
   | { type: 'toast'; level: 'info' | 'warn' | 'error'; message: string };
 
-export type Topic = 'accounts' | 'orders' | 'positions' | 'agents' | 'decisions' | 'providers' | 'arena' | 'exchange' | 'instruments' | 'news';
+export type Topic = 'accounts' | 'orders' | 'positions' | 'agents' | 'decisions' | 'providers' | 'arena' | 'exchange' | 'instruments' | 'news' | 'vault';
+
+/** OFF: no master password, AI keys are stored unencrypted. LOCKED: secrets are sealed and not yet loaded. */
+export type VaultStatus = 'OFF' | 'LOCKED' | 'UNLOCKED';
+
+/** Typed to delete a vault whose password is lost. */
+export const VAULT_RESET_PHRASE = 'DELETE SAVED KEYS';
