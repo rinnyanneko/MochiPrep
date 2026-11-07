@@ -11,6 +11,7 @@ OKX Demo Trading, or real OKX accounts. OKX is the only exchange; every other ve
 - `packages/ai-providers`: mock, OpenAI-compatible, OpenAI, Anthropic, Gemini, secret redaction.
 - `packages/agents`: prompt, output parsing, `AgentRunner` cycle.
 - `packages/exchanges`: signed OKX client and `OkxExecutionEngine`. Real money: see docs/OKX_TRADING.md.
+- `crates`: Rust backend port (in progress). `mochi-domain` holds the shared types; `crates/golden` holds fixtures generated from the TypeScript code.
 - `apps/server`: Fastify routes, `Runtime`, SQLite store and migrations.
 - `apps/web`: React UI.
 
@@ -20,6 +21,8 @@ OKX Demo Trading, or real OKX accounts. OKX is the only exchange; every other ve
     pnpm test                 # vitest, all packages, network blocked
     pnpm typecheck
     pnpm test:e2e             # Playwright, needs Chrome
+    cargo test --workspace    # Rust crates
+    pnpm golden               # regenerate crates/golden from the TypeScript code
 
 Needs Node >= 22.13 (`node:sqlite`). Workspace packages export TypeScript source, so tests, typecheck and `dev` need no build step. `start` bundles the server with esbuild (`apps/server/build.mjs`) to avoid tsx's memory cost; anything the server reads from disk at runtime must be copied into `dist/` there, as migrations are.
 

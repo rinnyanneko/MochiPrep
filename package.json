@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "typecheck": "pnpm -r --parallel typecheck"
+    "typecheck": "pnpm -r --parallel typecheck",
+    "golden": "pnpm --filter @mochiprep/server golden"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.0",
