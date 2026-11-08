@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 axum = { workspace = true }
 # Streams for the SSE body; axum's own Sse is built on the same crate.
-futures-util = "0.3"
+futures-util = { workspace = true }
 http-body-util = { workspace = true }
 mochi-core = { path = "../mochi-core" }
 mochi-decimal = { path = "../mochi-decimal" }
@@ -36,3 +36,5 @@ tempfile = { workspace = true }
 # Paused time for the timing tests; socket reads and writes for the SSE shutdown test.
 tokio = { workspace = true, features = ["test-util", "io-util"] }
 tower = { workspace = true }
+# A local OKX WebSocket server for the live feed test.
+tokio-tungstenite = { workspace = true }

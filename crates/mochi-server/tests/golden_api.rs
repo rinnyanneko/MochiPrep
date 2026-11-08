@@ -429,8 +429,9 @@ async fn an_exchange_account_without_equity_history_shows_its_initial_balance() 
     state.runtime.shutdown().await;
 }
 
+/// Live candles come from the OKX feed (tests/live_feed.rs); without one, the route says so.
 #[tokio::test]
-async fn live_candles_wait_for_the_okx_adapter() {
+async fn live_candles_need_the_okx_feed() {
     let state = short_tape_state();
     let answer = send(
         &state,
@@ -439,6 +440,12 @@ async fn live_candles_wait_for_the_okx_adapter() {
         None,
     )
     .await;
-    assert_eq!(answer, not_available());
+    assert_eq!(
+        answer,
+        (
+            400,
+            json!({ "error": "Live OKX market data is turned off (MOCHIPREP_OFFLINE=1)" })
+        )
+    );
     state.runtime.shutdown().await;
 }

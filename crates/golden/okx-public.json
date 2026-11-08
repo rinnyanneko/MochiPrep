@@ -1,0 +1,2428 @@
+{
+ "restBase": "https://okx.test",
+ "instruments": [
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "BTC-USDT-SWAP",
+    "uly": "BTC-USDT",
+    "instFamily": "BTC-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "BTC",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "0.01",
+    "lotSz": "0.01",
+    "minSz": "0.01",
+    "tickSz": "0.1",
+    "lever": "100"
+   },
+   "spec": {
+    "symbol": "BTCUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "BTC",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "0.0001",
+    "minQuantity": "0.0001",
+    "priceTick": "0.1",
+    "maxLeverage": 100,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "0.01",
+    "venueLotSize": "0.01"
+   }
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "ETH-USDT-SWAP",
+    "uly": "ETH-USDT",
+    "instFamily": "ETH-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "ETH",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "0.1",
+    "lotSz": "0.01",
+    "minSz": "0.01",
+    "tickSz": "0.01",
+    "lever": "100"
+   },
+   "spec": {
+    "symbol": "ETHUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "ETH",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "0.001",
+    "minQuantity": "0.001",
+    "priceTick": "0.01",
+    "maxLeverage": 100,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "0.1",
+    "venueLotSize": "0.01"
+   }
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "DOGE-USDT-SWAP",
+    "uly": "DOGE-USDT",
+    "instFamily": "DOGE-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "DOGE",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "1000",
+    "lotSz": "0.01",
+    "minSz": "0.01",
+    "tickSz": "0.00001",
+    "lever": "75"
+   },
+   "spec": {
+    "symbol": "DOGEUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "DOGE",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "10",
+    "minQuantity": "10",
+    "priceTick": "0.00001",
+    "maxLeverage": 75,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "1000",
+    "venueLotSize": "0.01"
+   }
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "PEPE-USDT-SWAP",
+    "uly": "PEPE-USDT",
+    "instFamily": "PEPE-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "PEPE",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "10000000",
+    "lotSz": "0.1",
+    "minSz": "0.1",
+    "tickSz": "0.0000000001",
+    "lever": "50"
+   },
+   "spec": {
+    "symbol": "PEPEUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "PEPE",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "1000000",
+    "minQuantity": "1000000",
+    "priceTick": "0.0000000001",
+    "maxLeverage": 50,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "10000000",
+    "venueLotSize": "0.1"
+   }
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "1INCH-USDT-SWAP",
+    "uly": "1INCH-USDT",
+    "instFamily": "1INCH-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "1INCH",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "1",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.0001",
+    "lever": ""
+   },
+   "spec": {
+    "symbol": "1INCHUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "1INCH",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "1",
+    "minQuantity": "1",
+    "priceTick": "0.0001",
+    "maxLeverage": 1,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "1",
+    "venueLotSize": "1"
+   }
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "TINY-USDT-SWAP",
+    "uly": "TINY-USDT",
+    "instFamily": "TINY-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "TINY",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "0.0001",
+    "lotSz": "0.001",
+    "minSz": "0.003",
+    "tickSz": "0.000001",
+    "lever": "abc"
+   },
+   "spec": {
+    "symbol": "TINYUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "TINY",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "0.0000001",
+    "minQuantity": "0.0000003",
+    "priceTick": "0.000001",
+    "maxLeverage": 1,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "0.0001",
+    "venueLotSize": "0.001"
+   }
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "NOLEV-USDT-SWAP",
+    "uly": "NOLEV-USDT",
+    "instFamily": "NOLEV-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "NOLEV",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "10",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.001"
+   },
+   "spec": {
+    "symbol": "NOLEVUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "NOLEV",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "10",
+    "minQuantity": "10",
+    "priceTick": "0.001",
+    "maxLeverage": 1,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "10",
+    "venueLotSize": "1"
+   }
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "ZERO-USDT-SWAP",
+    "uly": "ZERO-USDT",
+    "instFamily": "ZERO-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "ZERO",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "1",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.01",
+    "lever": "0"
+   },
+   "spec": {
+    "symbol": "ZEROUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "ZERO",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "1",
+    "minQuantity": "1",
+    "priceTick": "0.01",
+    "maxLeverage": 1,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "1",
+    "venueLotSize": "1"
+   }
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "SPACE-USDT-SWAP",
+    "uly": "SPACE-USDT",
+    "instFamily": "SPACE-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "SPACE",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "1",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.01",
+    "lever": " 20 "
+   },
+   "spec": {
+    "symbol": "SPACEUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "SPACE",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "1",
+    "minQuantity": "1",
+    "priceTick": "0.01",
+    "maxLeverage": 20,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "1",
+    "venueLotSize": "1"
+   }
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "BTC-USD-SWAP",
+    "uly": "BTC-USD",
+    "instFamily": "BTC-USD",
+    "settleCcy": "BTC",
+    "ctValCcy": "USD",
+    "ctType": "inverse",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "100",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.1",
+    "lever": "100"
+   },
+   "spec": null
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "NEW-USDT-SWAP",
+    "uly": "NEW-USDT",
+    "instFamily": "NEW-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "NEW",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "preopen",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "1",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.01",
+    "lever": "20"
+   },
+   "spec": null
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "PRE-USDT-SWAP",
+    "uly": "PRE-USDT",
+    "instFamily": "PRE-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "PRE",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "pre_market",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "1",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.01",
+    "lever": "5"
+   },
+   "spec": null
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "TSLA-USDT-SWAP",
+    "uly": "TSLA-USDT",
+    "instFamily": "TSLA-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "TSLA",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "3",
+    "listTime": "1611916828000",
+    "ctVal": "0.01",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.01",
+    "lever": "10"
+   },
+   "spec": null
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "SATS-USDT-SWAP",
+    "uly": "SATS-USDT",
+    "instFamily": "SATS-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "1000SATS",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "1",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.0000001",
+    "lever": "20"
+   },
+   "spec": null
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "XAU-USDT-SWAP",
+    "uly": "XAU-USDT",
+    "instFamily": "XAU-USDT",
+    "settleCcy": "USDC",
+    "ctValCcy": "XAU",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "0.001",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.1",
+    "lever": "50"
+   },
+   "spec": null
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "NOTICK-USDT-SWAP",
+    "uly": "NOTICK-USDT",
+    "instFamily": "NOTICK-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "NOTICK",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "1",
+    "lotSz": "1",
+    "minSz": "1",
+    "lever": "20"
+   },
+   "spec": null
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "EMPTY-USDT-SWAP",
+    "uly": "EMPTY-USDT",
+    "instFamily": "EMPTY-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "EMPTY",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "1",
+    "lotSz": "",
+    "minSz": "1",
+    "tickSz": "0.01",
+    "lever": "20"
+   },
+   "spec": null
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "btc-USDT-SWAP",
+    "uly": "btc-USDT",
+    "instFamily": "btc-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "btc",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "1",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.01",
+    "lever": "20"
+   },
+   "spec": null
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "BTC-USDT-250627",
+    "uly": "BTC-USDT-250627",
+    "instFamily": "BTC-USDT-250627",
+    "settleCcy": "USDT",
+    "ctValCcy": "BTC",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "0.01",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.1",
+    "lever": "100"
+   },
+   "spec": null
+  },
+  {
+   "row": {
+    "instType": "SWAP",
+    "instId": "-USDT-SWAP",
+    "uly": "-USDT",
+    "instFamily": "-USDT",
+    "settleCcy": "USDT",
+    "ctValCcy": "",
+    "ctType": "linear",
+    "ctMult": "1",
+    "state": "live",
+    "ruleType": "normal",
+    "instCategory": "1",
+    "listTime": "1611916828000",
+    "ctVal": "1",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.01",
+    "lever": "20"
+   },
+   "spec": null
+  },
+  {
+   "row": {
+    "ctVal": "1",
+    "lotSz": "1",
+    "minSz": "1",
+    "tickSz": "0.01"
+   },
+   "spec": null
+  }
+ ],
+ "list": {
+  "reply": {
+   "code": "0",
+   "msg": "",
+   "data": [
+    {
+     "instType": "SWAP",
+     "instId": "BTC-USDT-SWAP",
+     "uly": "BTC-USDT",
+     "instFamily": "BTC-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "BTC",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "0.01",
+     "lotSz": "0.01",
+     "minSz": "0.01",
+     "tickSz": "0.1",
+     "lever": "100"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "ETH-USDT-SWAP",
+     "uly": "ETH-USDT",
+     "instFamily": "ETH-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "ETH",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "0.1",
+     "lotSz": "0.01",
+     "minSz": "0.01",
+     "tickSz": "0.01",
+     "lever": "100"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "DOGE-USDT-SWAP",
+     "uly": "DOGE-USDT",
+     "instFamily": "DOGE-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "DOGE",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1000",
+     "lotSz": "0.01",
+     "minSz": "0.01",
+     "tickSz": "0.00001",
+     "lever": "75"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "PEPE-USDT-SWAP",
+     "uly": "PEPE-USDT",
+     "instFamily": "PEPE-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "PEPE",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "10000000",
+     "lotSz": "0.1",
+     "minSz": "0.1",
+     "tickSz": "0.0000000001",
+     "lever": "50"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "1INCH-USDT-SWAP",
+     "uly": "1INCH-USDT",
+     "instFamily": "1INCH-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "1INCH",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.0001",
+     "lever": ""
+    },
+    {
+     "instType": "SWAP",
+     "instId": "TINY-USDT-SWAP",
+     "uly": "TINY-USDT",
+     "instFamily": "TINY-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "TINY",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "0.0001",
+     "lotSz": "0.001",
+     "minSz": "0.003",
+     "tickSz": "0.000001",
+     "lever": "abc"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "NOLEV-USDT-SWAP",
+     "uly": "NOLEV-USDT",
+     "instFamily": "NOLEV-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "NOLEV",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "10",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.001"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "ZERO-USDT-SWAP",
+     "uly": "ZERO-USDT",
+     "instFamily": "ZERO-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "ZERO",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "0"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "SPACE-USDT-SWAP",
+     "uly": "SPACE-USDT",
+     "instFamily": "SPACE-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "SPACE",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": " 20 "
+    },
+    {
+     "instType": "SWAP",
+     "instId": "BTC-USD-SWAP",
+     "uly": "BTC-USD",
+     "instFamily": "BTC-USD",
+     "settleCcy": "BTC",
+     "ctValCcy": "USD",
+     "ctType": "inverse",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "100",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.1",
+     "lever": "100"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "NEW-USDT-SWAP",
+     "uly": "NEW-USDT",
+     "instFamily": "NEW-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "NEW",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "preopen",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "20"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "PRE-USDT-SWAP",
+     "uly": "PRE-USDT",
+     "instFamily": "PRE-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "PRE",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "pre_market",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "5"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "TSLA-USDT-SWAP",
+     "uly": "TSLA-USDT",
+     "instFamily": "TSLA-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "TSLA",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "3",
+     "listTime": "1611916828000",
+     "ctVal": "0.01",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "10"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "SATS-USDT-SWAP",
+     "uly": "SATS-USDT",
+     "instFamily": "SATS-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "1000SATS",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.0000001",
+     "lever": "20"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "XAU-USDT-SWAP",
+     "uly": "XAU-USDT",
+     "instFamily": "XAU-USDT",
+     "settleCcy": "USDC",
+     "ctValCcy": "XAU",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "0.001",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.1",
+     "lever": "50"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "NOTICK-USDT-SWAP",
+     "uly": "NOTICK-USDT",
+     "instFamily": "NOTICK-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "NOTICK",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "lever": "20"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "EMPTY-USDT-SWAP",
+     "uly": "EMPTY-USDT",
+     "instFamily": "EMPTY-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "EMPTY",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "20"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "btc-USDT-SWAP",
+     "uly": "btc-USDT",
+     "instFamily": "btc-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "btc",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "20"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "BTC-USDT-250627",
+     "uly": "BTC-USDT-250627",
+     "instFamily": "BTC-USDT-250627",
+     "settleCcy": "USDT",
+     "ctValCcy": "BTC",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "0.01",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.1",
+     "lever": "100"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "-USDT-SWAP",
+     "uly": "-USDT",
+     "instFamily": "-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "20"
+    },
+    {
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01"
+    }
+   ]
+  },
+  "specs": [
+   {
+    "symbol": "1INCHUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "1INCH",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "1",
+    "minQuantity": "1",
+    "priceTick": "0.0001",
+    "maxLeverage": 1,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "1",
+    "venueLotSize": "1"
+   },
+   {
+    "symbol": "BTCUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "BTC",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "0.0001",
+    "minQuantity": "0.0001",
+    "priceTick": "0.1",
+    "maxLeverage": 100,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "0.01",
+    "venueLotSize": "0.01"
+   },
+   {
+    "symbol": "DOGEUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "DOGE",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "10",
+    "minQuantity": "10",
+    "priceTick": "0.00001",
+    "maxLeverage": 75,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "1000",
+    "venueLotSize": "0.01"
+   },
+   {
+    "symbol": "ETHUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "ETH",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "0.001",
+    "minQuantity": "0.001",
+    "priceTick": "0.01",
+    "maxLeverage": 100,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "0.1",
+    "venueLotSize": "0.01"
+   },
+   {
+    "symbol": "NOLEVUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "NOLEV",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "10",
+    "minQuantity": "10",
+    "priceTick": "0.001",
+    "maxLeverage": 1,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "10",
+    "venueLotSize": "1"
+   },
+   {
+    "symbol": "PEPEUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "PEPE",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "1000000",
+    "minQuantity": "1000000",
+    "priceTick": "0.0000000001",
+    "maxLeverage": 50,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "10000000",
+    "venueLotSize": "0.1"
+   },
+   {
+    "symbol": "SPACEUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "SPACE",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "1",
+    "minQuantity": "1",
+    "priceTick": "0.01",
+    "maxLeverage": 20,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "1",
+    "venueLotSize": "1"
+   },
+   {
+    "symbol": "TINYUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "TINY",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "0.0000001",
+    "minQuantity": "0.0000003",
+    "priceTick": "0.000001",
+    "maxLeverage": 1,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "0.0001",
+    "venueLotSize": "0.001"
+   },
+   {
+    "symbol": "ZEROUSDT",
+    "marketType": "CRYPTO_PERP",
+    "baseCurrency": "ZERO",
+    "quoteCurrency": "USDT",
+    "settlementCurrency": "USDT",
+    "contractSize": "1",
+    "quantityStep": "1",
+    "minQuantity": "1",
+    "priceTick": "0.01",
+    "maxLeverage": 1,
+    "maintenanceMarginRate": "0.005",
+    "fundingIntervalHours": 8,
+    "venueContractValue": "1",
+    "venueLotSize": "1"
+   }
+  ],
+  "badReply": {
+   "code": "0",
+   "msg": "",
+   "data": [
+    {
+     "instType": "SWAP",
+     "instId": "BTC-USDT-SWAP",
+     "uly": "BTC-USDT",
+     "instFamily": "BTC-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "BTC",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "0.01",
+     "lotSz": "0.01",
+     "minSz": "0.01",
+     "tickSz": "0.1",
+     "lever": "100"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "ETH-USDT-SWAP",
+     "uly": "ETH-USDT",
+     "instFamily": "ETH-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "ETH",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "0.1",
+     "lotSz": "0.01",
+     "minSz": "0.01",
+     "tickSz": "0.01",
+     "lever": "100"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "DOGE-USDT-SWAP",
+     "uly": "DOGE-USDT",
+     "instFamily": "DOGE-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "DOGE",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1000",
+     "lotSz": "0.01",
+     "minSz": "0.01",
+     "tickSz": "0.00001",
+     "lever": "75"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "PEPE-USDT-SWAP",
+     "uly": "PEPE-USDT",
+     "instFamily": "PEPE-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "PEPE",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "10000000",
+     "lotSz": "0.1",
+     "minSz": "0.1",
+     "tickSz": "0.0000000001",
+     "lever": "50"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "1INCH-USDT-SWAP",
+     "uly": "1INCH-USDT",
+     "instFamily": "1INCH-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "1INCH",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.0001",
+     "lever": ""
+    },
+    {
+     "instType": "SWAP",
+     "instId": "TINY-USDT-SWAP",
+     "uly": "TINY-USDT",
+     "instFamily": "TINY-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "TINY",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "0.0001",
+     "lotSz": "0.001",
+     "minSz": "0.003",
+     "tickSz": "0.000001",
+     "lever": "abc"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "NOLEV-USDT-SWAP",
+     "uly": "NOLEV-USDT",
+     "instFamily": "NOLEV-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "NOLEV",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "10",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.001"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "ZERO-USDT-SWAP",
+     "uly": "ZERO-USDT",
+     "instFamily": "ZERO-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "ZERO",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "0"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "SPACE-USDT-SWAP",
+     "uly": "SPACE-USDT",
+     "instFamily": "SPACE-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "SPACE",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": " 20 "
+    },
+    {
+     "instType": "SWAP",
+     "instId": "BTC-USD-SWAP",
+     "uly": "BTC-USD",
+     "instFamily": "BTC-USD",
+     "settleCcy": "BTC",
+     "ctValCcy": "USD",
+     "ctType": "inverse",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "100",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.1",
+     "lever": "100"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "NEW-USDT-SWAP",
+     "uly": "NEW-USDT",
+     "instFamily": "NEW-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "NEW",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "preopen",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "20"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "PRE-USDT-SWAP",
+     "uly": "PRE-USDT",
+     "instFamily": "PRE-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "PRE",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "pre_market",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "5"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "TSLA-USDT-SWAP",
+     "uly": "TSLA-USDT",
+     "instFamily": "TSLA-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "TSLA",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "3",
+     "listTime": "1611916828000",
+     "ctVal": "0.01",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "10"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "SATS-USDT-SWAP",
+     "uly": "SATS-USDT",
+     "instFamily": "SATS-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "1000SATS",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.0000001",
+     "lever": "20"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "XAU-USDT-SWAP",
+     "uly": "XAU-USDT",
+     "instFamily": "XAU-USDT",
+     "settleCcy": "USDC",
+     "ctValCcy": "XAU",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "0.001",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.1",
+     "lever": "50"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "NOTICK-USDT-SWAP",
+     "uly": "NOTICK-USDT",
+     "instFamily": "NOTICK-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "NOTICK",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "lever": "20"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "EMPTY-USDT-SWAP",
+     "uly": "EMPTY-USDT",
+     "instFamily": "EMPTY-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "EMPTY",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "20"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "btc-USDT-SWAP",
+     "uly": "btc-USDT",
+     "instFamily": "btc-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "btc",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "20"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "BTC-USDT-250627",
+     "uly": "BTC-USDT-250627",
+     "instFamily": "BTC-USDT-250627",
+     "settleCcy": "USDT",
+     "ctValCcy": "BTC",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "0.01",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.1",
+     "lever": "100"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "-USDT-SWAP",
+     "uly": "-USDT",
+     "instFamily": "-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "20"
+    },
+    {
+     "ctVal": "1",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "BADVAL-USDT-SWAP",
+     "uly": "BADVAL-USDT",
+     "instFamily": "BADVAL-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "BADVAL",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "abc",
+     "lotSz": "1",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "20"
+    },
+    {
+     "instType": "SWAP",
+     "instId": "BADLOT-USDT-SWAP",
+     "uly": "BADLOT-USDT",
+     "instFamily": "BADLOT-USDT",
+     "settleCcy": "USDT",
+     "ctValCcy": "BADLOT",
+     "ctType": "linear",
+     "ctMult": "1",
+     "state": "live",
+     "ruleType": "normal",
+     "instCategory": "1",
+     "listTime": "1611916828000",
+     "ctVal": "1",
+     "lotSz": "1,5",
+     "minSz": "1",
+     "tickSz": "0.01",
+     "lever": "20"
+    }
+   ]
+  },
+  "badError": "[DecimalError] Invalid argument: abc"
+ },
+ "candles": {
+  "replies": {
+   "https://okx.test/api/v5/market/candles?instId=BTC-USDT-SWAP&bar=1m&limit=3": [
+    200,
+    {
+     "code": "0",
+     "msg": "",
+     "data": [
+      [
+       "1767229200000",
+       "67950.1",
+       "68010",
+       "67900.5",
+       "68001.2",
+       "1520.5",
+       "15.205",
+       "1033444.12",
+       "0"
+      ],
+      [
+       "1767225600000",
+       "67890",
+       "67990.9",
+       "67850",
+       "67950.1",
+       "2210",
+       "22.1",
+       "1501234.5",
+       "1"
+      ],
+      [
+       "1767222000000",
+       "67800.25",
+       "67900",
+       "67700",
+       "67890",
+       "1800.25",
+       "18.0025",
+       "1222333.4",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "https://okx.test/api/v5/market/candles?instId=ETH-USDT-SWAP&bar=1H&limit=300": [
+    200,
+    {
+     "code": "0",
+     "msg": "",
+     "data": [
+      [
+       "1767229200000",
+       "67950.1",
+       "68010",
+       "67900.5",
+       "68001.2",
+       "1520.5",
+       "15.205",
+       "1033444.12",
+       "0"
+      ],
+      [
+       "1767225600000",
+       "67890",
+       "67990.9",
+       "67850",
+       "67950.1",
+       "2210",
+       "22.1",
+       "1501234.5",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "https://okx.test/api/v5/market/candles?instId=DOGE-USDT-SWAP&bar=4H&limit=300": [
+    200,
+    {
+     "code": "51001",
+     "msg": "Instrument ID does not exist",
+     "data": []
+    }
+   ],
+   "https://okx.test/api/v5/market/candles?instId=SOL-USDT-SWAP&bar=15m&limit=50": [
+    503,
+    {
+     "code": "0",
+     "msg": "",
+     "data": []
+    }
+   ]
+  },
+  "parsed": [
+   {
+    "time": 1767222000000,
+    "open": 67800.25,
+    "high": 67900,
+    "low": 67700,
+    "close": 67890,
+    "volume": 18.0025,
+    "closed": true
+   },
+   {
+    "time": 1767225600000,
+    "open": 67890,
+    "high": 67990.9,
+    "low": 67850,
+    "close": 67950.1,
+    "volume": 22.1,
+    "closed": true
+   },
+   {
+    "time": 1767229200000,
+    "open": 67950.1,
+    "high": 68010,
+    "low": 67900.5,
+    "close": 68001.2,
+    "volume": 15.205,
+    "closed": false
+   }
+  ],
+  "results": [
+   {
+    "symbol": "BTCUSDT",
+    "timeframe": "1m",
+    "limit": 3,
+    "url": "https://okx.test/api/v5/market/candles?instId=BTC-USDT-SWAP&bar=1m&limit=3",
+    "candles": [
+     {
+      "time": 1767222000000,
+      "open": 67800.25,
+      "high": 67900,
+      "low": 67700,
+      "close": 67890,
+      "volume": 18.0025,
+      "closed": true
+     },
+     {
+      "time": 1767225600000,
+      "open": 67890,
+      "high": 67990.9,
+      "low": 67850,
+      "close": 67950.1,
+      "volume": 22.1,
+      "closed": true
+     },
+     {
+      "time": 1767229200000,
+      "open": 67950.1,
+      "high": 68010,
+      "low": 67900.5,
+      "close": 68001.2,
+      "volume": 15.205,
+      "closed": false
+     }
+    ]
+   },
+   {
+    "symbol": "ETHUSDT",
+    "timeframe": "1h",
+    "limit": 1000,
+    "url": "https://okx.test/api/v5/market/candles?instId=ETH-USDT-SWAP&bar=1H&limit=300",
+    "candles": [
+     {
+      "time": 1767225600000,
+      "open": 67890,
+      "high": 67990.9,
+      "low": 67850,
+      "close": 67950.1,
+      "volume": 22.1,
+      "closed": true
+     },
+     {
+      "time": 1767229200000,
+      "open": 67950.1,
+      "high": 68010,
+      "low": 67900.5,
+      "close": 68001.2,
+      "volume": 15.205,
+      "closed": false
+     }
+    ]
+   },
+   {
+    "symbol": "DOGEUSDT",
+    "timeframe": "4h",
+    "limit": 300,
+    "url": "https://okx.test/api/v5/market/candles?instId=DOGE-USDT-SWAP&bar=4H&limit=300",
+    "error": "OKX error 51001: Instrument ID does not exist"
+   },
+   {
+    "symbol": "SOLUSDT",
+    "timeframe": "15m",
+    "limit": 50,
+    "url": "https://okx.test/api/v5/market/candles?instId=SOL-USDT-SWAP&bar=15m&limit=50",
+    "error": "OKX HTTP 503"
+   },
+   {
+    "symbol": "BTCUSDT",
+    "timeframe": "5m",
+    "limit": 10,
+    "url": "https://okx.test/api/v5/market/candles?instId=BTC-USDT-SWAP&bar=5m&limit=10",
+    "error": "fetch failed"
+   }
+  ]
+ },
+ "messages": {
+  "tracked": [
+   "DOGEUSDT"
+  ],
+  "steps": [
+   {
+    "raw": "{\"arg\":{\"channel\":\"mark-price\",\"instId\":\"BTC-USDT-SWAP\"},\"data\":[{\"instType\":\"SWAP\",\"instId\":\"BTC-USDT-SWAP\",\"markPx\":\"67890.5\",\"ts\":\"1767225600100\"}]}",
+    "quote": null
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"funding-rate\",\"instId\":\"BTC-USDT-SWAP\"},\"data\":[{\"instType\":\"SWAP\",\"instId\":\"BTC-USDT-SWAP\",\"fundingRate\":\"0.0001\",\"fundingTime\":\"1767254400000\",\"nextFundingTime\":\"1767283200000\"}]}",
+    "quote": null
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"tickers\",\"instId\":\"BTC-USDT-SWAP\"},\"data\":[{\"instType\":\"SWAP\",\"instId\":\"BTC-USDT-SWAP\",\"last\":\"67890.1\",\"lastSz\":\"0.1\",\"askPx\":\"67890.2\",\"askSz\":\"12\",\"bidPx\":\"67890\",\"bidSz\":\"8\",\"ts\":\"1767225600123\"}]}",
+    "quote": {
+     "source": "LIVE",
+     "symbol": "BTCUSDT",
+     "bid": "67890",
+     "ask": "67890.2",
+     "last": "67890.1",
+     "mark": "67890.5",
+     "markEstimated": false,
+     "fundingRate": "0.0001",
+     "nextFundingTime": 1767254400000,
+     "ts": 1767225600123
+    }
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"tickers\",\"instId\":\"ETH-USDT-SWAP\"},\"data\":[{\"instId\":\"ETH-USDT-SWAP\",\"last\":\"0.15\",\"askPx\":\"0.2\",\"bidPx\":\"0.1\",\"ts\":\"1767225600200\"}]}",
+    "quote": {
+     "source": "LIVE",
+     "symbol": "ETHUSDT",
+     "bid": "0.1",
+     "ask": "0.2",
+     "last": "0.15",
+     "mark": "0.15000000000000002",
+     "markEstimated": true,
+     "fundingRate": null,
+     "nextFundingTime": null,
+     "ts": 1767225600200
+    }
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"tickers\",\"instId\":\"SOL-USDT-SWAP\"},\"data\":[{\"instId\":\"SOL-USDT-SWAP\",\"last\":\"150\",\"askPx\":\"150.01\",\"bidPx\":\"149.99\"}]}",
+    "quote": null
+   },
+   {
+    "raw": "pong",
+    "quote": null
+   },
+   {
+    "raw": "{not json",
+    "quote": null
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"tickers\",\"instId\":\"XRP-USDT-SWAP\"},\"data\":[{\"last\":\"2\",\"askPx\":\"2.01\",\"bidPx\":\"1.99\",\"ts\":\"1\"}]}",
+    "quote": null
+   },
+   {
+    "raw": "{\"event\":\"subscribe\",\"arg\":{\"channel\":\"tickers\",\"instId\":\"BTC-USDT-SWAP\"},\"connId\":\"a1b2\"}",
+    "quote": null
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"tickers\",\"instId\":\"DOGE-USDT-SWAP\"},\"data\":[{\"last\":\"0.31\",\"askPx\":\"0.3101\",\"bidPx\":\"\",\"ts\":\"1767225600300\"}]}",
+    "quote": null
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"mark-price\",\"instId\":\"ETH-USDT-SWAP\"},\"data\":[{}]}",
+    "quote": null
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"tickers\",\"instId\":\"ETH-USDT-SWAP\"},\"data\":[{\"last\":\"3500.5\",\"askPx\":\"3500.6\",\"bidPx\":\"3500.4\",\"ts\":\"1767225600400\"}]}",
+    "quote": {
+     "source": "LIVE",
+     "symbol": "ETHUSDT",
+     "bid": "3500.4",
+     "ask": "3500.6",
+     "last": "3500.5",
+     "mark": "3500.5",
+     "markEstimated": true,
+     "fundingRate": null,
+     "nextFundingTime": null,
+     "ts": 1767225600400
+    }
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"mark-price\",\"instId\":\"SOL-USDT-SWAP\"},\"data\":[{\"markPx\":\"\"}]}",
+    "quote": null
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"tickers\",\"instId\":\"SOL-USDT-SWAP\"},\"data\":[{\"last\":\"150\",\"askPx\":\"150.01\",\"bidPx\":\"149.99\",\"ts\":\"1767225600500\"}]}",
+    "quote": {
+     "source": "LIVE",
+     "symbol": "SOLUSDT",
+     "bid": "149.99",
+     "ask": "150.01",
+     "last": "150",
+     "mark": "",
+     "markEstimated": true,
+     "fundingRate": null,
+     "nextFundingTime": null,
+     "ts": 1767225600500
+    }
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"funding-rate\",\"instId\":\"DOGE-USDT-SWAP\"},\"data\":[{\"fundingRate\":\"-0.00005\"}]}",
+    "quote": null
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"tickers\",\"instId\":\"DOGE-USDT-SWAP\"},\"data\":[{\"last\":\"0.31\",\"askPx\":\"0.3101\",\"bidPx\":\"0.3099\",\"ts\":\"1767225600600\"}]}",
+    "quote": {
+     "source": "LIVE",
+     "symbol": "DOGEUSDT",
+     "bid": "0.3099",
+     "ask": "0.3101",
+     "last": "0.31",
+     "mark": "0.31",
+     "markEstimated": true,
+     "fundingRate": "-0.00005",
+     "nextFundingTime": null,
+     "ts": 1767225600600
+    }
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"tickers\",\"instId\":\"BTC-USDT-SWAP\"},\"data\":[]}",
+    "quote": null
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"tickers\",\"instId\":\"BTC-USDT-SWAP\"},\"data\":[{\"last\":\"67891\",\"askPx\":\"67891.1\",\"bidPx\":\"67890.9\",\"ts\":\"0\"}]}",
+    "quote": null
+   },
+   {
+    "raw": "{\"arg\":{\"channel\":\"tickers\",\"instId\":\"BTC-USDT-SWAP\"},\"data\":[{\"last\":\"67891\",\"askPx\":\"67891.1\",\"bidPx\":\"67890.9\",\"ts\":\"1767225600700\"}]}",
+    "quote": {
+     "source": "LIVE",
+     "symbol": "BTCUSDT",
+     "bid": "67890.9",
+     "ask": "67891.1",
+     "last": "67891",
+     "mark": "67890.5",
+     "markEstimated": false,
+     "fundingRate": "0.0001",
+     "nextFundingTime": 1767254400000,
+     "ts": 1767225600700
+    }
+   }
+  ],
+  "final": [
+   {
+    "source": "LIVE",
+    "symbol": "BTCUSDT",
+    "bid": "67890.9",
+    "ask": "67891.1",
+    "last": "67891",
+    "mark": "67890.5",
+    "markEstimated": false,
+    "fundingRate": "0.0001",
+    "nextFundingTime": 1767254400000,
+    "ts": 1767225600700
+   },
+   {
+    "source": "LIVE",
+    "symbol": "ETHUSDT",
+    "bid": "3500.4",
+    "ask": "3500.6",
+    "last": "3500.5",
+    "mark": "3500.5",
+    "markEstimated": true,
+    "fundingRate": null,
+    "nextFundingTime": null,
+    "ts": 1767225600400
+   },
+   {
+    "source": "LIVE",
+    "symbol": "SOLUSDT",
+    "bid": "149.99",
+    "ask": "150.01",
+    "last": "150",
+    "mark": "",
+    "markEstimated": true,
+    "fundingRate": null,
+    "nextFundingTime": null,
+    "ts": 1767225600500
+   },
+   {
+    "source": "LIVE",
+    "symbol": "DOGEUSDT",
+    "bid": "0.3099",
+    "ask": "0.3101",
+    "last": "0.31",
+    "mark": "0.31",
+    "markEstimated": true,
+    "fundingRate": "-0.00005",
+    "nextFundingTime": null,
+    "ts": 1767225600600
+   },
+   null
+  ]
+ },
+ "polls": {
+  "tracked": [
+   "DOGEUSDT"
+  ],
+  "rounds": [
+   {
+    "replies": {
+     "https://okx.test/api/v5/market/ticker?instId=BTC-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "instId": "x",
+         "last": "67890.1",
+         "bidPx": "67890",
+         "askPx": "67890.2",
+         "ts": "1767225600123"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/public/mark-price?instType=SWAP&instId=BTC-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "markPx": "67890.5"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/public/funding-rate?instId=BTC-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "fundingRate": "0.0001",
+         "fundingTime": "1767254400000"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/market/ticker?instId=ETH-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "instId": "x",
+         "last": "3500.5",
+         "bidPx": "3500.4",
+         "askPx": "3500.6",
+         "ts": "1767225600200"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/public/mark-price?instType=SWAP&instId=ETH-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": []
+      }
+     ],
+     "https://okx.test/api/v5/public/funding-rate?instId=ETH-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "fundingRate": "0.0002",
+         "fundingTime": "1767254400000"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/market/ticker?instId=SOL-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": []
+      }
+     ],
+     "https://okx.test/api/v5/public/mark-price?instType=SWAP&instId=SOL-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "markPx": "150"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/public/funding-rate?instId=SOL-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "fundingRate": "0.0003",
+         "fundingTime": "1767254400000"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/market/ticker?instId=DOGE-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "instId": "x",
+         "last": "0.31",
+         "bidPx": "0.3099",
+         "askPx": "0.3101",
+         "ts": "1767225600300"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/public/mark-price?instType=SWAP&instId=DOGE-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "markPx": "0.31"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/public/funding-rate?instId=DOGE-USDT-SWAP": [
+      200,
+      {
+       "code": "50011",
+       "msg": "Too Many Requests",
+       "data": []
+      }
+     ]
+    },
+    "emitted": [
+     {
+      "source": "LIVE",
+      "symbol": "BTCUSDT",
+      "bid": "67890",
+      "ask": "67890.2",
+      "last": "67890.1",
+      "mark": "67890.5",
+      "markEstimated": false,
+      "fundingRate": "0.0001",
+      "nextFundingTime": 1767254400000,
+      "ts": 1767225600123
+     },
+     {
+      "source": "LIVE",
+      "symbol": "ETHUSDT",
+      "bid": "3500.4",
+      "ask": "3500.6",
+      "last": "3500.5",
+      "mark": "3500.5",
+      "markEstimated": true,
+      "fundingRate": "0.0002",
+      "nextFundingTime": 1767254400000,
+      "ts": 1767225600200
+     }
+    ],
+    "quotes": [
+     {
+      "source": "LIVE",
+      "symbol": "BTCUSDT",
+      "bid": "67890",
+      "ask": "67890.2",
+      "last": "67890.1",
+      "mark": "67890.5",
+      "markEstimated": false,
+      "fundingRate": "0.0001",
+      "nextFundingTime": 1767254400000,
+      "ts": 1767225600123
+     },
+     {
+      "source": "LIVE",
+      "symbol": "ETHUSDT",
+      "bid": "3500.4",
+      "ask": "3500.6",
+      "last": "3500.5",
+      "mark": "3500.5",
+      "markEstimated": true,
+      "fundingRate": "0.0002",
+      "nextFundingTime": 1767254400000,
+      "ts": 1767225600200
+     },
+     null,
+     null,
+     null
+    ]
+   },
+   {
+    "replies": {
+     "https://okx.test/api/v5/market/ticker?instId=BTC-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "instId": "x",
+         "last": "67900",
+         "bidPx": "67899.9",
+         "askPx": "67900.1",
+         "ts": "1767225605123"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/public/mark-price?instType=SWAP&instId=BTC-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": []
+      }
+     ],
+     "https://okx.test/api/v5/public/funding-rate?instId=BTC-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "fundingRate": "0.0001",
+         "fundingTime": "1767254400000"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/market/ticker?instId=ETH-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "instId": "x",
+         "last": "3501",
+         "bidPx": "3500.9",
+         "askPx": "3501.1",
+         "ts": "1767225605200"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/public/mark-price?instType=SWAP&instId=ETH-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "markPx": "3501"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/public/funding-rate?instId=ETH-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "fundingRate": "0.0002"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/market/ticker?instId=SOL-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "instId": "x",
+         "last": "151",
+         "bidPx": "150.99",
+         "askPx": "151.01",
+         "ts": "1767225605300"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/public/mark-price?instType=SWAP&instId=SOL-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": []
+      }
+     ],
+     "https://okx.test/api/v5/public/funding-rate?instId=SOL-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": []
+      }
+     ],
+     "https://okx.test/api/v5/market/ticker?instId=DOGE-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "instId": "x",
+         "last": "0.32",
+         "bidPx": "0.3199",
+         "askPx": "0.3201",
+         "ts": "1767225605400"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/public/mark-price?instType=SWAP&instId=DOGE-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "markPx": "0.32"
+        }
+       ]
+      }
+     ],
+     "https://okx.test/api/v5/public/funding-rate?instId=DOGE-USDT-SWAP": [
+      200,
+      {
+       "code": "0",
+       "msg": "",
+       "data": [
+        {
+         "fundingRate": "-0.0001",
+         "fundingTime": "1767254400000"
+        }
+       ]
+      }
+     ]
+    },
+    "emitted": [
+     {
+      "source": "LIVE",
+      "symbol": "BTCUSDT",
+      "bid": "67899.9",
+      "ask": "67900.1",
+      "last": "67900",
+      "mark": "67900",
+      "markEstimated": true,
+      "fundingRate": "0.0001",
+      "nextFundingTime": 1767254400000,
+      "ts": 1767225605123
+     },
+     {
+      "source": "LIVE",
+      "symbol": "DOGEUSDT",
+      "bid": "0.3199",
+      "ask": "0.3201",
+      "last": "0.32",
+      "mark": "0.32",
+      "markEstimated": false,
+      "fundingRate": "-0.0001",
+      "nextFundingTime": 1767254400000,
+      "ts": 1767225605400
+     },
+     {
+      "source": "LIVE",
+      "symbol": "ETHUSDT",
+      "bid": "3500.9",
+      "ask": "3501.1",
+      "last": "3501",
+      "mark": "3501",
+      "markEstimated": false,
+      "fundingRate": "0.0002",
+      "nextFundingTime": null,
+      "ts": 1767225605200
+     },
+     {
+      "source": "LIVE",
+      "symbol": "SOLUSDT",
+      "bid": "150.99",
+      "ask": "151.01",
+      "last": "151",
+      "mark": "151",
+      "markEstimated": true,
+      "fundingRate": null,
+      "nextFundingTime": null,
+      "ts": 1767225605300
+     }
+    ],
+    "quotes": [
+     {
+      "source": "LIVE",
+      "symbol": "BTCUSDT",
+      "bid": "67899.9",
+      "ask": "67900.1",
+      "last": "67900",
+      "mark": "67900",
+      "markEstimated": true,
+      "fundingRate": "0.0001",
+      "nextFundingTime": 1767254400000,
+      "ts": 1767225605123
+     },
+     {
+      "source": "LIVE",
+      "symbol": "ETHUSDT",
+      "bid": "3500.9",
+      "ask": "3501.1",
+      "last": "3501",
+      "mark": "3501",
+      "markEstimated": false,
+      "fundingRate": "0.0002",
+      "nextFundingTime": null,
+      "ts": 1767225605200
+     },
+     {
+      "source": "LIVE",
+      "symbol": "SOLUSDT",
+      "bid": "150.99",
+      "ask": "151.01",
+      "last": "151",
+      "mark": "151",
+      "markEstimated": true,
+      "fundingRate": null,
+      "nextFundingTime": null,
+      "ts": 1767225605300
+     },
+     {
+      "source": "LIVE",
+      "symbol": "DOGEUSDT",
+      "bid": "0.3199",
+      "ask": "0.3201",
+      "last": "0.32",
+      "mark": "0.32",
+      "markEstimated": false,
+      "fundingRate": "-0.0001",
+      "nextFundingTime": 1767254400000,
+      "ts": 1767225605400
+     },
+     null
+    ]
+   }
+  ]
+ }
+}

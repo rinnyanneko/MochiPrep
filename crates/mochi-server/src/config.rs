@@ -13,6 +13,10 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// Exact `Origin` values a browser may send. Their URL hosts also form the Host allowlist.
     pub allowed_origins: Vec<String>,
+    /// `MOCHIPREP_OFFLINE=1`: no connection to OKX at all, so e2e and local runs can stay off the
+    /// network. Live quotes, live candles and adding pairs are then unavailable. Node has no
+    /// such switch; it always connects.
+    pub offline: bool,
 }
 
 impl Config {
@@ -22,7 +26,8 @@ impl Config {
     }
 }
 
-/// Reads `MOCHIPREP_PORT`, `MOCHIPREP_DATA_DIR` and `MOCHIPREP_ALLOWED_ORIGINS`.
+/// Reads `MOCHIPREP_PORT`, `MOCHIPREP_DATA_DIR`, `MOCHIPREP_ALLOWED_ORIGINS` and
+/// `MOCHIPREP_OFFLINE`.
 ///
 /// Panics on a port that is not a number: Node would fail to listen on it too, and a server
 /// silently falling back to another port would leave the web app pointing at nothing.
@@ -67,6 +72,7 @@ pub fn config_from(var: impl Fn(&str) -> Option<String>) -> Config {
         port,
         data_dir,
         allowed_origins,
+        offline: var("MOCHIPREP_OFFLINE").is_some_and(|value| value.trim() == "1"),
     }
 }
 

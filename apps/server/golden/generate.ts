@@ -59,6 +59,7 @@ import { newDataKey, seal, wrapWithPassword } from '../src/vault.js';
 import { paperScenariosFixture, paperTrailingScenariosFixture } from './paper-scenarios.js';
 import { apiScriptFixture } from './api-script.js';
 import { validationFixture } from './validation.js';
+import { okxPublicFixture } from './okx-public.js';
 
 const ROUND_CASES = [
   0.5, 1.5, 2.5, -0.5, -1.5, -2.5, 2.4999999999999996, 0.49999999999999994, -0.49999999999999994,
@@ -1528,6 +1529,7 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     'node-created.sqlite': nodeCreatedDatabase(),
     'vault.json': await vaultFixture(),
     'validation.json': await validationFixture(),
+    'okx-public.json': await okxPublicFixture(),
     // Last: it registers a pair in the module-global INSTRUMENTS while it runs.
     'api-script.json': await apiScriptFixture(),
   };

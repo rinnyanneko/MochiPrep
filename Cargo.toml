@@ -31,3 +31,10 @@ tracing = "0.1"
 url = "2"
 regex = "1"
 uuid = { version = "1", features = ["v4"] }
+futures-util = "0.3"
+# OKX public market data (crates/mochi-market). TLS is rustls with the ring provider and the
+# Mozilla root store, set up once in code, so the build needs no system TLS library.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1"

@@ -470,3 +470,15 @@ fn config_defaults_and_port() {
     assert!(config.data_dir.is_absolute());
     assert!(config.data_dir.ends_with("some/dir"));
 }
+
+#[test]
+fn offline_only_when_asked() {
+    assert!(!config_from(|_| None).offline);
+    let offline = |value: &str| {
+        let value = value.to_string();
+        config_from(move |name| (name == "MOCHIPREP_OFFLINE").then(|| value.clone())).offline
+    };
+    assert!(offline("1"));
+    assert!(!offline("0"));
+    assert!(!offline(""));
+}

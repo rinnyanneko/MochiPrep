@@ -11,7 +11,7 @@
 
 use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING};
 use axum::http::{HeaderMap, StatusCode};
-use mochi_domain::jsnum::js_number_string;
+use mochi_domain::jsnum::{is_js_space, js_number_string, js_string_to_number, js_trim};
 use mochi_domain::{DataSource, Timeframe, TrailingStopSpec};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer};
@@ -874,29 +874,6 @@ fn js_number_value(x: f64) -> Value {
 
 // ---- JS semantics ----------------------------------------------------------------------------
 
-/// The characters JS `String.prototype.trim` removes (WhiteSpace and LineTerminator). Rust's
-/// `trim` uses a different set: it keeps U+FEFF and removes U+0085.
-fn is_js_space(c: char) -> bool {
-    matches!(
-        c,
-        '\u{0009}'..='\u{000D}'
-            | ' '
-            | '\u{00A0}'
-            | '\u{1680}'
-            | '\u{2000}'..='\u{200A}'
-            | '\u{2028}'
-            | '\u{2029}'
-            | '\u{202F}'
-            | '\u{205F}'
-            | '\u{3000}'
-            | '\u{FEFF}'
-    )
-}
-
-fn js_trim(s: &str) -> &str {
-    s.trim_matches(is_js_space)
-}
-
 /// JS `Number(value)` for a JSON value.
 fn js_to_number(value: &Value) -> f64 {
     match value {
@@ -928,84 +905,6 @@ fn js_to_string(value: &Value) -> String {
             .join(","),
         Value::Object(_) => "[object Object]".to_string(),
     }
-}
-
-/// JS `Number(string)`: trimmed; empty is 0; `Infinity`; `0x`/`0o`/`0b` integers; otherwise a
-/// decimal literal with optional sign, fraction and exponent, or NaN.
-fn js_string_to_number(s: &str) -> f64 {
-    let text = js_trim(s);
-    if text.is_empty() {
-        return 0.0;
-    }
-    match text {
-        "Infinity" | "+Infinity" => return f64::INFINITY,
-        "-Infinity" => return f64::NEG_INFINITY,
-        _ => {}
-    }
-    let radix = match text.get(..2) {
-        Some("0x" | "0X") => Some(16),
-        Some("0o" | "0O") => Some(8),
-        Some("0b" | "0B") => Some(2),
-        _ => None,
-    };
-    if let Some(radix) = radix {
-        let digits = &text[2..];
-        if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
-            return f64::NAN;
-        }
-        // Exact while it fits u128; beyond that the value is far past every bound checked here.
-        return match u128::from_str_radix(digits, radix) {
-            Ok(n) => n as f64,
-            Err(_) => digits.chars().fold(0.0, |acc, c| {
-                acc * f64::from(radix) + f64::from(c.to_digit(radix).unwrap_or(0))
-            }),
-        };
-    }
-    if is_js_decimal_literal(text) {
-        // Rust parses this grammar with the same correct rounding (and overflow to infinity).
-        text.parse::<f64>().unwrap_or(f64::NAN)
-    } else {
-        f64::NAN
-    }
-}
-
-/// `[+-]? (digits [. digits?] | . digits) ([eE] [+-]? digits)?`. Checked first because Rust's
-/// parser also accepts words like "inf" and "nan", which JS does not.
-fn is_js_decimal_literal(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    if matches!(bytes.first(), Some(b'+' | b'-')) {
-        i += 1;
-    }
-    let count_digits = |from: usize| {
-        bytes[from..]
-            .iter()
-            .take_while(|b| b.is_ascii_digit())
-            .count()
-    };
-    let whole = count_digits(i);
-    i += whole;
-    let mut fraction = 0;
-    if bytes.get(i) == Some(&b'.') {
-        i += 1;
-        fraction = count_digits(i);
-        i += fraction;
-    }
-    if whole == 0 && fraction == 0 {
-        return false;
-    }
-    if matches!(bytes.get(i), Some(b'e' | b'E')) {
-        i += 1;
-        if matches!(bytes.get(i), Some(b'+' | b'-')) {
-            i += 1;
-        }
-        let exponent = count_digits(i);
-        if exponent == 0 {
-            return false;
-        }
-        i += exponent;
-    }
-    i == bytes.len()
 }
 
 // ---- Fastify's body parser -------------------------------------------------------------------

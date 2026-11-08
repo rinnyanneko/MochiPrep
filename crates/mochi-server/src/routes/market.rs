@@ -15,27 +15,45 @@ pub fn router() -> Router<AppState> {
         .route("/api/market/quotes", get(quotes))
 }
 
-/// Oldest first. The pair must be tradable on that source, as for an order.
+/// Oldest first. The pair must be tradable on that source, as for an order. Live candles come
+/// from OKX REST (at most 300, cached 3 s), awaited outside the runtime task.
 async fn candles(
     State(state): State<AppState>,
     RawQuery(query): RawQuery,
 ) -> Result<Json<Vec<Candle>>, ApiError> {
     let query: CandleQuery =
         validate::parse_query(Schema::CandleQuery, query.as_deref().unwrap_or(""))?;
-    let candles = state
+    let symbol = query.symbol.clone();
+    let source = query.source;
+    let replay = state
         .runtime
         .call(move |runtime| {
-            runtime.assert_tradable(&query.symbol, query.source)?;
-            match query.source {
+            runtime.assert_tradable(&symbol, source)?;
+            Ok(match source {
                 DataSource::Replay => {
-                    Ok(runtime.replay_candles(&query.symbol, query.timeframe, query.limit))
+                    Some(runtime.replay_candles(&symbol, query.timeframe, query.limit))
                 }
-                // Node fetches these from OKX REST; the OKX public adapter is not ported yet.
-                DataSource::Live => Err(ApiError::not_available()),
-            }
+                DataSource::Live => None,
+            })
         })
         .await??;
-    Ok(Json(candles))
+    if let Some(candles) = replay {
+        return Ok(Json(candles));
+    }
+    let live = state.runtime.call(|runtime| runtime.live()).await?;
+    match live
+        .candles(&query.symbol, query.timeframe, query.limit)
+        .await
+    {
+        Ok(candles) => Ok(Json(candles)),
+        Err(message) => {
+            let error = state
+                .runtime
+                .call(move |runtime| runtime.api_error(message))
+                .await?;
+            Err(error)
+        }
+    }
 }
 
 /// The latest quote of every registered pair that has one on that source.

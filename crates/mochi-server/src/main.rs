@@ -4,6 +4,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mochi_market::okx_public::{OkxPublicFeed, REST_BASE, WS_URL};
 use mochi_server::{app, load_config, AppState, RuntimeHandle, RuntimeOptions};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -28,7 +29,13 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let runtime = match RuntimeHandle::start(RuntimeOptions::new(db)) {
+    // Public market data only: the feed never holds or sends a credential.
+    let options = if config.offline {
+        RuntimeOptions::new(db)
+    } else {
+        RuntimeOptions::with_live_feed(db, OkxPublicFeed::new(REST_BASE, WS_URL))
+    };
+    let runtime = match RuntimeHandle::start(options) {
         Ok(runtime) => runtime,
         Err(error) => {
             eprintln!("Cannot start: {error}");
@@ -52,6 +59,9 @@ async fn main() -> ExitCode {
         config.port,
         config.data_dir.display()
     );
+    if config.offline {
+        println!("MOCHIPREP_OFFLINE=1: not connecting to OKX market data");
+    }
 
     let (signalled, on_signal) = oneshot::channel::<()>();
     let server = axum::serve(listener, app(state))

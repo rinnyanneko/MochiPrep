@@ -27,9 +27,11 @@ use mochi_domain::{
     InstrumentSpecification, PaperAccount, PositionSide, Quote, ReplayState, ServerEvent,
     Timeframe, ToastLevel, Topic, VaultStatus, DEFAULT_SYMBOLS,
 };
+use mochi_market::okx_public::OkxPublicFeed;
 use mochi_market::replay::{ReplayMarketData, TapeTooShort};
 use mochi_store::{
-    get_setting, has_vault, list_instruments, rows, set_setting, SqlitePaperStore, StoreError,
+    delete_instrument, get_setting, has_vault, list_instruments, rows, save_instrument,
+    set_setting, SqlitePaperStore, StoreError,
 };
 use rusqlite::Connection;
 use serde::{Serialize, Serializer};
@@ -68,6 +70,8 @@ pub struct RuntimeOptions {
     pub live: Arc<dyn LiveFeed>,
     /// Quotes the live feed receives, in arrival order. `None` when it sends none.
     pub live_quotes: Option<mpsc::Receiver<Quote>>,
+    /// The live feed's connection changes, each sent to the web app as a `feed` event.
+    pub live_statuses: Option<mpsc::UnboundedReceiver<FeedStatus>>,
 }
 
 impl RuntimeOptions {
@@ -78,6 +82,20 @@ impl RuntimeOptions {
             replay_minutes: None,
             live: Arc::new(OfflineFeed),
             live_quotes: None,
+            live_statuses: None,
+        }
+    }
+
+    /// The real OKX public feed, its quotes and status changes wired to the runtime.
+    pub fn with_live_feed(db: Connection, feed: OkxPublicFeed) -> Self {
+        let live_quotes = Some(feed.quotes());
+        let live_statuses = Some(feed.statuses());
+        RuntimeOptions {
+            db,
+            replay_minutes: None,
+            live: Arc::new(feed),
+            live_quotes,
+            live_statuses,
         }
     }
 }
@@ -120,11 +138,17 @@ pub struct RuntimeHandle {
 impl RuntimeHandle {
     /// Builds the runtime and spawns its task. Must be called inside a tokio runtime.
     pub fn start(options: RuntimeOptions) -> Result<Self, StartError> {
-        let live_quotes = options.live_quotes;
+        let live = LiveChannels {
+            quotes: options.live_quotes,
+            statuses: options.live_statuses,
+        };
         let runtime = Runtime::open(options.db, options.replay_minutes, options.live)?;
         let events = runtime.events.sender();
         let (commands, inbox) = mpsc::channel(COMMAND_QUEUE);
-        tokio::spawn(run(runtime, inbox, live_quotes));
+        // After the added pairs are tracked, so the first subscribe covers them (Node's
+        // `runtime.start()` after the constructor).
+        runtime.live.start();
+        tokio::spawn(run(runtime, inbox, live));
         Ok(RuntimeHandle { commands, events })
     }
 
@@ -382,6 +406,73 @@ impl Runtime {
         &self.instruments
     }
 
+    /// Node's `INSTRUMENTS[symbol]`: a built-in or added pair.
+    pub fn has_instrument(&self, symbol: &str) -> bool {
+        self.instruments.iter().any(|spec| spec.symbol == symbol)
+    }
+
+    /// The live feed, for the routes that await it (candles, the OKX instrument list) outside
+    /// this task.
+    pub fn live(&self) -> Arc<dyn LiveFeed> {
+        self.live.clone()
+    }
+
+    /// The second half of Node's `addInstrument`, once the spec has come fresh from OKX: saved,
+    /// registered, tracked live.
+    pub fn add_instrument(&mut self, spec: InstrumentSpecification) -> Result<(), ApiError> {
+        save_instrument(self.connection(), &spec).map_err(|e| self.api_error(e))?;
+        let symbol = spec.symbol.clone();
+        self.register_instrument(spec);
+        self.live.track(&symbol);
+        self.invalidate(&[Topic::Instruments]);
+        Ok(())
+    }
+
+    /// Node's `removeInstrument`, refusals in its order. An exchange account has no session in
+    /// this backend, so, as in Node while disconnected, it has no positions to check.
+    pub fn remove_instrument(&mut self, symbol: &str) -> Result<(), ApiError> {
+        if DEFAULT_SYMBOLS.contains(&symbol) {
+            return Err(ApiError::bad_request(format!("{symbol} is built in")));
+        }
+        if !self.has_instrument(symbol) {
+            return Err(ApiError::bad_request(format!(
+                "{symbol} is not an added pair"
+            )));
+        }
+        let agents = rows::list_agents(self.connection()).map_err(|e| self.api_error(e))?;
+        if agents.iter().any(|agent| agent.symbol == symbol) {
+            return Err(ApiError::bad_request("Agents still use this pair"));
+        }
+        let store = self.engine.store();
+        for account in store.list_accounts().map_err(|e| self.api_error(e))? {
+            if account.venue == AccountVenue::Paper {
+                let positions = store
+                    .list_open_positions(&account.id)
+                    .map_err(|e| self.api_error(e))?;
+                if positions.iter().any(|p| p.symbol == symbol) {
+                    return Err(ApiError::bad_request(format!(
+                        "{} has an open {symbol} position",
+                        account.name
+                    )));
+                }
+            }
+            let orders = store
+                .list_open_orders(&account.id)
+                .map_err(|e| self.api_error(e))?;
+            if orders.iter().any(|o| o.symbol == symbol) {
+                return Err(ApiError::bad_request(format!(
+                    "{} has open {symbol} orders",
+                    account.name
+                )));
+            }
+        }
+        delete_instrument(self.connection(), symbol).map_err(|e| self.api_error(e))?;
+        self.live.untrack(symbol);
+        self.unregister_instrument(symbol);
+        self.invalidate(&[Topic::Instruments]);
+        Ok(())
+    }
+
     // ---- accounts -------------------------------------------------------------------------
 
     /// The account, or Node's 404 `Unknown account`.
@@ -469,8 +560,7 @@ impl Runtime {
             .collect()
     }
 
-    /// Replay candles, oldest first. Live candles come from OKX REST, which this backend does
-    /// not have yet.
+    /// Replay candles, oldest first. Live candles come from the live feed, awaited by the route.
     pub fn replay_candles(&self, symbol: &str, timeframe: Timeframe, limit: usize) -> Vec<Candle> {
         lock(&self.replay).get_candles(symbol, timeframe, limit)
     }
@@ -744,15 +834,19 @@ enum Wake {
     FlushInvalidate,
     LiveQuote(Quote),
     LiveFeedClosed,
+    LiveStatus(FeedStatus),
+    LiveStatusesClosed,
     LiveTick,
 }
 
+/// What the live feed sends the runtime task.
+struct LiveChannels {
+    quotes: Option<mpsc::Receiver<Quote>>,
+    statuses: Option<mpsc::UnboundedReceiver<FeedStatus>>,
+}
+
 /// The runtime task: handles one thing at a time until shut down.
-async fn run(
-    mut runtime: Runtime,
-    mut inbox: mpsc::Receiver<Command>,
-    mut live_quotes: Option<mpsc::Receiver<Quote>>,
-) {
+async fn run(mut runtime: Runtime, mut inbox: mpsc::Receiver<Command>, mut live: LiveChannels) {
     // The first tick is one second away, like setInterval's.
     let mut live_tick = interval_at(Instant::now() + LIVE_TICK, LIVE_TICK);
     live_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -765,22 +859,34 @@ async fn run(
             },
             () = runtime.clock.next_tick() => Wake::ReplayTick,
             () = sleep_until_some(flush_at) => Wake::FlushInvalidate,
-            quote = next_live_quote(&mut live_quotes) => match quote {
+            quote = next_quote(&mut live.quotes) => match quote {
                 Some(quote) => Wake::LiveQuote(quote),
                 None => Wake::LiveFeedClosed,
+            },
+            status = next_status(&mut live.statuses) => match status {
+                Some(status) => Wake::LiveStatus(status),
+                None => Wake::LiveStatusesClosed,
             },
             _ = live_tick.tick() => Wake::LiveTick,
         };
         let work: Box<dyn FnOnce(&mut Runtime)> = match wake {
             Wake::HandlesDropped => break,
             Wake::LiveFeedClosed => {
-                live_quotes = None;
+                live.quotes = None;
+                continue;
+            }
+            Wake::LiveStatusesClosed => {
+                live.statuses = None;
                 continue;
             }
             Wake::Command(command) => command,
             Wake::ReplayTick => Box::new(Runtime::on_replay_tick),
             Wake::FlushInvalidate => Box::new(|runtime| runtime.events.flush_invalidate()),
             Wake::LiveQuote(quote) => Box::new(move |runtime| runtime.on_live_quote(quote)),
+            // Node's `live.onStatus((status) => this.emit({ type: 'feed', status }))`.
+            Wake::LiveStatus(status) => {
+                Box::new(move |runtime| runtime.emit(ServerEvent::Feed { status }))
+            }
             Wake::LiveTick => Box::new(Runtime::live_tick),
         };
         // A panic fails only this piece of work, as a thrown error fails one request in Node;
@@ -790,15 +896,17 @@ async fn run(
             runtime.recover_from_panic(panic.as_ref());
         }
         if let Some(done) = runtime.stopping.take() {
-            // Node's `stop()`: pause, and drop pending timers. Dropping the runtime closes the
-            // database before `shutdown` returns.
+            // Node's `stop()`: pause, stop the live feed, and drop pending timers. Dropping the
+            // runtime closes the database before `shutdown` returns.
             runtime.set_playing(false);
+            runtime.live.stop();
             drop(runtime);
             let _ = done.send(());
             return;
         }
     }
     runtime.set_playing(false);
+    runtime.live.stop();
 }
 
 async fn sleep_until_some(at: Option<Instant>) {
@@ -808,9 +916,18 @@ async fn sleep_until_some(at: Option<Instant>) {
     }
 }
 
-async fn next_live_quote(quotes: &mut Option<mpsc::Receiver<Quote>>) -> Option<Quote> {
+async fn next_quote(quotes: &mut Option<mpsc::Receiver<Quote>>) -> Option<Quote> {
     match quotes {
         Some(quotes) => quotes.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+async fn next_status(
+    statuses: &mut Option<mpsc::UnboundedReceiver<FeedStatus>>,
+) -> Option<FeedStatus> {
+    match statuses {
+        Some(statuses) => statuses.recv().await,
         None => std::future::pending().await,
     }
 }
