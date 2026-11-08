@@ -1,9 +1,8 @@
-import type { ExternalProtection } from '@mochiprep/shared';
+import { CANCEL_PENDING_PREFIX, type ExternalProtection } from '@mochiprep/shared';
 
 const KIND_LABEL: Record<ExternalProtection['kind'], string> = { STOP_LOSS: 'SL', TAKE_PROFIT: 'TP', TRAILING: 'trail' };
 
-/** The engine prefixes this onto the detail of MochiPrep's own algo whose cancel has not gone through yet. */
-export const CANCEL_PENDING_PREFIX = 'ours, cancel pending:';
+export { CANCEL_PENDING_PREFIX };
 
 /**
  * Badge text for a protection order MochiPrep does not currently manage. The owner's own OKX orders are

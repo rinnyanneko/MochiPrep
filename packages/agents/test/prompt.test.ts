@@ -42,6 +42,26 @@ describe('prompts', () => {
     expect(withExternal).toMatch(/MochiPrep will not change them/);
   });
 
+  it('lists MochiPrep\'s own algos awaiting cancel apart from the owner\'s orders', () => {
+    const owner = { kind: 'STOP_LOSS', triggerPrice: '90', detail: 'SL trigger 90' } as const;
+    const ours = { kind: 'STOP_LOSS', triggerPrice: '92', detail: 'ours, cancel pending: SL trigger 92' } as const;
+    const payloadOf = (externalProtection: unknown[]) => {
+      const text = buildUserPrompt(context({ ...position, externalProtection } as unknown as PositionView), { allowTrailingStop: false });
+      return JSON.parse(text.slice('Market data:\n'.length, text.indexOf('\n\nStrategy notes'))).position;
+    };
+    const both = payloadOf([owner, ours]);
+    expect(both.externalProtection).toEqual([owner]);
+    expect(both.externalProtectionNote).toMatch(/owner's own orders/);
+    expect(both.cancellingProtection).toEqual([ours]);
+    expect(both.cancellingProtectionNote).toMatch(/MochiPrep's own/);
+    expect(both.cancellingProtectionNote).not.toMatch(/owner/);
+
+    const onlyOurs = payloadOf([ours]);
+    expect(onlyOurs.externalProtection).toBeUndefined();
+    expect(onlyOurs.externalProtectionNote).toBeUndefined();
+    expect(onlyOurs.cancellingProtection).toEqual([ours]);
+  });
+
   it('passes exchange-supplied protection as bounded data, never instructions', () => {
     const external = { kind: 'TRAILING', triggerPrice: null, detail: 'x'.repeat(500), algoId: 'secret-id', extra: 'drop me' };
     const text = buildUserPrompt(context({ ...position, externalProtection: [external] } as unknown as PositionView), { allowTrailingStop: false });

@@ -150,12 +150,18 @@ export interface TrailingStopView extends TrailingStopSpec {
   triggerPrice: string | null;
 }
 
-/** A protective order that lives on the exchange but was not placed through MochiPrep. */
+/**
+ * A protective order on the exchange that MochiPrep does not manage: the owner's own, or one of
+ * MochiPrep's whose cancel has not gone through yet (its detail starts with CANCEL_PENDING_PREFIX).
+ */
 export interface ExternalProtection {
   kind: 'STOP_LOSS' | 'TAKE_PROFIT' | 'TRAILING';
   triggerPrice: string | null;
   detail: string;
 }
+
+/** Prefixed onto the detail of MochiPrep's own algo whose cancel has not gone through yet. */
+export const CANCEL_PENDING_PREFIX = 'ours, cancel pending:';
 
 /** Bounds shared by the risk engine and engine validation, so both refuse the same callbacks. */
 export const TRAILING_LIMITS = { minRatio: '0.001', maxRatio: '0.3', maxSpreadFraction: '0.3' } as const;

@@ -14,6 +14,7 @@ import {
   type ProtectionResult,
 } from '@mochiprep/core';
 import {
+  CANCEL_PENDING_PREFIX,
   listSymbols,
   type AccountBalance,
   type AccountVenue,
@@ -840,7 +841,7 @@ export class OkxExecutionEngine implements ExecutionEngine {
     // Still live on OKX as of this sync, so still shown, marked, until a later sync no longer lists it.
     for (const { row, algo } of cancel) {
       if (!isHeld(row)) continue;
-      entry(row.symbol).external.push(...externalOf(algo).map((e) => ({ ...e, detail: `ours, cancel pending: ${e.detail}` })));
+      entry(row.symbol).external.push(...externalOf(algo).map((e) => ({ ...e, detail: `${CANCEL_PENDING_PREFIX} ${e.detail}` })));
     }
     let failure: string | null = null;
     for (const reason of new Set(cancel.map((c) => c.reason))) {
