@@ -79,7 +79,7 @@ Add a provider in **Settings**, paste its key, then pick it when creating an age
 - OKX order handling is untested against the real exchange.
 - Paper trading uses one 0.5% maintenance rate for every pair, while OKX uses tiers, so simulated liquidation is less accurate on small coins.
 - Simplified fills, funding, and isolated liquidation; no order-book queue, partial liquidity, maintenance tiers, cross margin, or exchange-identical liquidation.
-- OKX credentials and arming disappear on restart by design. AI keys do not.
+- Arming always ends on restart. OKX credentials are kept only in memory unless you set a master password and choose to save them, in which case they are stored encrypted and you unlock after each restart. AI keys persist across restarts, encrypted when a master password is set.
 
 ## License
 
