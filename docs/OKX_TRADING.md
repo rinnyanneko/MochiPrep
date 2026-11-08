@@ -36,7 +36,7 @@ These assumptions still need checking on the real exchange:
 | Unknown outcome | After a timeout the order stays open and is looked up by client ID. It is **never resent**. |
 | Stop All | Stops every agent and disarms real orders. Open positions and their stops stay on OKX. |
 
-An agent in Suggest mode can run without arming, because it places nothing. Accepting a suggestion needs an armed account, except for a CLOSE, and the risk engine runs again at that moment.
+An agent in Suggest mode can run without arming, because it places nothing. Accepting a suggestion needs an armed account, except for a CLOSE or a PROTECT, and the risk engine runs again at that moment. A PROTECT accepted while disarmed still goes through the arming rule for protection changes below, so one that adds risk is refused.
 
 Agents go through the same risk engine as paper trading, then the ceilings above. On an exchange account, the stricter of the agent's limit and the account's ceiling applies.
 
@@ -48,7 +48,7 @@ Closing is always allowed while connected, even when disarmed, so you can never 
 
 A position's protection is its stop loss, take-profit and an optional trailing stop. On OKX each leg is an algo order: stop loss and take-profit are `conditional` and the trailing stop is `move_order_stop`, all reduce-only. You can change them from the position's pencil button, and an agent can with a `PROTECT` decision (only with the trailing-stop switch on, for the trailing part). Both take the same path.
 
-**Placed before cancelled.** Every changed leg is placed first, and old or removed algos are cancelled only after OKX accepted all the new ones, so the position is never left without a stop. Two stops may briefly coexist. If a placement is refused, nothing is cancelled and the old protection stays.
+**Placed before cancelled.** Every changed leg is placed first, and old or removed algos are cancelled only after OKX accepted all the new ones, so the position is never left without a stop. Two stops may briefly coexist. If a placement is refused, the legs OKX accepted before the refusal stay in force and replace their old algos; nothing else is cancelled. The outcome is `ORDER_REJECTED`, showing the protection now in force.
 
 **Arming.** A change that can only lower risk works while disarmed, like an exit. These need the account armed (OKX Demo accounts always are):
 
@@ -58,11 +58,15 @@ A position's protection is its stop loss, take-profit and an optional trailing s
 
 Adding a stop loss or a trailing stop where there was none, moving the stop loss toward the price, and narrowing a trailing callback of the same kind and activation price do not. A refused change says `NOT_ARMED: this change increases risk`. Other refusals are `PROTECTION_PENDING` (an earlier change is still awaiting OKX), `EXCHANGE_NOT_SYNCED`, `NO_MARKET_DATA` and `MARKET_DATA_STALE`.
 
+**Risk budget.** A stop loss that is new, or looser than the current one, must keep the loss if it fired from the last price within the agent's risk per trade. Keeping or tightening the stop is always allowed, so a trade in profit can keep its stop. OKX leaves the liquidation price empty for some positions; MochiPrep then treats it as unknown and skips the check that the stop triggers before liquidation.
+
 **External orders.** Stops and targets you place in the OKX app are shown on the position as External and are read-only. MochiPrep never cancels or edits them, and they are not counted as its own protection.
 
 **Awaiting confirmation.** If OKX does not answer a placement, the order is never resent. The dialog says "Sent to OKX, awaiting confirmation", the old protection stays in force, and the next sync looks the order up by its client ID. Further changes are refused until it is resolved.
 
 **Cleanup.** If a position disappears from OKX, MochiPrep's own leftover algos are cancelled only after the position has been missing for two syncs at least 10 seconds apart, so one bad read cannot remove a stop. A cancel that fails shows on the position as a Cancel pending badge (not External, because it is still MochiPrep's own order) and is retried on every sync.
+
+Protection belongs to a position only if its side closes it: a sell for a long, a buy for a short. If a position on the other side appears within the cleanup wait (opened in the OKX app, say), the old algos are cancelled at once and never shown as its protection. An algo cancelled because its position closed is never taken up by a later position. While MochiPrep's protection from a closed position is still being cleaned up, a new position on that pair is refused with `PROTECTION_PENDING: protection from the previous position is still being cleaned up`. Exits are never affected.
 
 **Not verified on OKX Demo yet.** Live trailing stops and protection changes have not been verified on OKX Demo, and they are untested with real money. Treat all of this as experimental until you have tried it on a Demo account. These behaviours are UNCONFIRMED, each with what MochiPrep does meanwhile:
 
@@ -72,6 +76,7 @@ Adding a stop loss or a trailing stop where there was none, moving the stop loss
 4. **Cancelling trailing stops.** Whether `cancel-algos` cancels a `move_order_stop` is not confirmed. A failed cancel shows as a Cancel pending badge and is retried on every sync.
 5. **Algos when a position closes.** What OKX does with reduce-only algos once the position closes is not confirmed. MochiPrep cancels its own after the cleanup wait above, and does not touch External ones.
 6. **Which price trailing tracks.** Whether OKX trails the last, mark or index price is not confirmed. On OKX, MochiPrep shows the trigger price OKX reports and no extreme of its own.
+7. **Fixed size.** Protection algos are sent with a fixed `sz`, the position size when they were placed. If you add to the position in the OKX app, MochiPrep's stop covers only the original size until the protection is changed again.
 
 ## Trading pairs
 
