@@ -90,6 +90,8 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
                 unrealized_pnl,
                 stop_loss,
                 take_profit,
+                trailing_stop: None,
+                external_protection: Vec::new(),
                 position,
             });
         }

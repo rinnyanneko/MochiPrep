@@ -55,6 +55,11 @@ const toOrder = (r: Row): Order => ({
   reservedMargin: r.reserved_margin,
   attachedStopLoss: r.attached_stop_loss,
   attachedTakeProfit: r.attached_take_profit,
+  trailingKind: r.trailing_kind,
+  trailingCallback: r.trailing_callback,
+  trailingActivationPrice: r.trailing_activation_price,
+  trailingExtreme: r.trailing_extreme,
+  attachedTrailingStop: r.attached_trailing_stop ? JSON.parse(r.attached_trailing_stop) : null,
   rejectReason: r.reject_reason,
   exchangeOrderId: r.exchange_order_id,
   agentId: r.agent_id,
@@ -127,6 +132,7 @@ const toAgent = (r: Row): Agent => ({
   intervalSec: r.interval_sec,
   executionMode: r.execution_mode,
   useNews: !!r.use_news,
+  allowTrailingStop: !!r.allow_trailing_stop,
   status: r.status,
   running: !!r.running,
   nextRunAt: r.next_run_at,
@@ -236,17 +242,19 @@ export class SqliteStore implements PaperStore, AgentStore {
   insertOrder(o: Order) {
     this.run(
       `INSERT INTO orders (id,account_id,client_order_id,symbol,side,type,quantity,price,trigger_price,leverage,reduce_only,close_position,status,
-        filled_quantity,avg_fill_price,reserved_margin,attached_stop_loss,attached_take_profit,reject_reason,exchange_order_id,agent_id,decision_id,created_at,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        filled_quantity,avg_fill_price,reserved_margin,attached_stop_loss,attached_take_profit,trailing_kind,trailing_callback,trailing_activation_price,trailing_extreme,
+        attached_trailing_stop,reject_reason,exchange_order_id,agent_id,decision_id,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       o.id, o.accountId, o.clientOrderId, o.symbol, o.side, o.type, o.quantity, o.price, o.triggerPrice, o.leverage,
       o.reduceOnly ? 1 : 0, o.closePosition ? 1 : 0, o.status, o.filledQuantity, o.avgFillPrice, o.reservedMargin,
-      o.attachedStopLoss, o.attachedTakeProfit, o.rejectReason, o.exchangeOrderId, o.agentId, o.decisionId, o.createdAt, o.updatedAt,
+      o.attachedStopLoss, o.attachedTakeProfit, o.trailingKind, o.trailingCallback, o.trailingActivationPrice, o.trailingExtreme,
+      o.attachedTrailingStop ? JSON.stringify(o.attachedTrailingStop) : null, o.rejectReason, o.exchangeOrderId, o.agentId, o.decisionId, o.createdAt, o.updatedAt,
     );
   }
   saveOrder(o: Order) {
     this.run(
-      'UPDATE orders SET quantity=?, status=?, filled_quantity=?, avg_fill_price=?, reserved_margin=?, reject_reason=?, exchange_order_id=?, updated_at=? WHERE id=?',
-      o.quantity, o.status, o.filledQuantity, o.avgFillPrice, o.reservedMargin, o.rejectReason, o.exchangeOrderId, o.updatedAt, o.id,
+      'UPDATE orders SET quantity=?, status=?, filled_quantity=?, avg_fill_price=?, reserved_margin=?, trailing_extreme=?, reject_reason=?, exchange_order_id=?, updated_at=? WHERE id=?',
+      o.quantity, o.status, o.filledQuantity, o.avgFillPrice, o.reservedMargin, o.trailingExtreme, o.rejectReason, o.exchangeOrderId, o.updatedAt, o.id,
     );
   }
   getOrder(id: string) {
@@ -350,17 +358,17 @@ export class SqliteStore implements PaperStore, AgentStore {
   // agents
   insertAgent(a: Agent) {
     this.run(
-      `INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,risk,interval_sec,execution_mode,use_news,status,running,next_run_at,last_run_at,
-        status_detail,consecutive_errors,is_demo,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      a.id, a.name, a.providerId, a.model, a.symbol, a.timeframe, a.strategy, a.accountId, JSON.stringify(a.risk), a.intervalSec, a.executionMode, a.useNews ? 1 : 0, a.status,
+      `INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,risk,interval_sec,execution_mode,use_news,allow_trailing_stop,status,running,next_run_at,last_run_at,
+        status_detail,consecutive_errors,is_demo,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      a.id, a.name, a.providerId, a.model, a.symbol, a.timeframe, a.strategy, a.accountId, JSON.stringify(a.risk), a.intervalSec, a.executionMode, a.useNews ? 1 : 0, a.allowTrailingStop ? 1 : 0, a.status,
       a.running ? 1 : 0, a.nextRunAt, a.lastRunAt, a.statusDetail, a.consecutiveErrors, a.isDemo ? 1 : 0, a.createdAt,
     );
   }
   saveAgent(a: Agent) {
     this.run(
-      `UPDATE agents SET name=?, provider_id=?, model=?, symbol=?, timeframe=?, strategy=?, account_id=?, risk=?, interval_sec=?, execution_mode=?, use_news=?, status=?, running=?,
+      `UPDATE agents SET name=?, provider_id=?, model=?, symbol=?, timeframe=?, strategy=?, account_id=?, risk=?, interval_sec=?, execution_mode=?, use_news=?, allow_trailing_stop=?, status=?, running=?,
         next_run_at=?, last_run_at=?, status_detail=?, consecutive_errors=? WHERE id=?`,
-      a.name, a.providerId, a.model, a.symbol, a.timeframe, a.strategy, a.accountId, JSON.stringify(a.risk), a.intervalSec, a.executionMode, a.useNews ? 1 : 0, a.status,
+      a.name, a.providerId, a.model, a.symbol, a.timeframe, a.strategy, a.accountId, JSON.stringify(a.risk), a.intervalSec, a.executionMode, a.useNews ? 1 : 0, a.allowTrailingStop ? 1 : 0, a.status,
       a.running ? 1 : 0, a.nextRunAt, a.lastRunAt, a.statusDetail, a.consecutiveErrors, a.id,
     );
   }

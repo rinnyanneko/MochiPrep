@@ -80,7 +80,7 @@ fn opens_node_database_without_reapplying() {
         applied_at(&raw)
     };
     let conn = open_database(&path).unwrap();
-    assert_eq!(applied_at(&conn).len(), 7);
+    assert_eq!(applied_at(&conn).len(), 8);
     assert_eq!(applied_at(&conn), applied_before);
     let name: String = conn
         .query_row(
@@ -103,19 +103,19 @@ fn applied_at(conn: &Connection) -> Vec<(String, i64)> {
 #[test]
 fn older_schema_gets_only_the_new_migration() {
     let conn = open_in_memory_bare();
-    migrate_with(&conn, &MIGRATIONS[..6]).unwrap();
+    migrate_with(&conn, &MIGRATIONS[..7]).unwrap();
     conn.execute_batch(
         "INSERT INTO providers (id, name, kind, default_model, created_at) \
          VALUES ('p1', 'P', 'mock', 'm', 1)",
     )
     .unwrap();
     let before = migration_names(&conn);
-    assert_eq!(before.len(), 6);
+    assert_eq!(before.len(), 7);
 
     migrate_with(&conn, MIGRATIONS).unwrap();
     let after = migration_names(&conn);
     let added: Vec<&String> = after.iter().filter(|n| !before.contains(n)).collect();
-    assert_eq!(added, vec!["007_vault.sql"]);
+    assert_eq!(added, vec!["008_trailing_stop.sql"]);
     let rows: i64 = conn
         .query_row("SELECT COUNT(*) FROM providers", [], |r| r.get(0))
         .unwrap();

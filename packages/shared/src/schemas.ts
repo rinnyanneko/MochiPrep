@@ -46,6 +46,12 @@ export const CreateAccountSchema = z.strictObject({
   initialBalance: decimalString.default('10000'),
 });
 
+export const TrailingStopSchema = z.strictObject({
+  kind: z.enum(['RATIO', 'SPREAD']),
+  callback: decimalString,
+  activationPrice: decimalString.nullable(),
+});
+
 export const PlaceOrderSchema = z.strictObject({
   accountId: z.string().min(1),
   clientOrderId: z.string().min(1).max(128),
@@ -58,11 +64,13 @@ export const PlaceOrderSchema = z.strictObject({
   reduceOnly: z.boolean().optional(),
   stopLoss: decimalString.nullish(),
   takeProfit: decimalString.nullish(),
+  trailingStop: TrailingStopSchema.nullish(),
 });
 
 export const ProtectionSchema = z.strictObject({
   stopLoss: decimalString.nullable(),
   takeProfit: decimalString.nullable(),
+  trailingStop: TrailingStopSchema.nullable(),
 });
 
 export const ClosePositionSchema = z.strictObject({
@@ -109,6 +117,7 @@ export const AgentInputSchema = z.strictObject({
   intervalSec: z.number().int().min(10).max(86_400),
   executionMode: z.enum(['AUTO', 'SIGNAL']).default('SIGNAL'),
   useNews: z.boolean().default(false),
+  allowTrailingStop: z.boolean().default(false),
 });
 
 export const NewsSourceInputSchema = z.strictObject({

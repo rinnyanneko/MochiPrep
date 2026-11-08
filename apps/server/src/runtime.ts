@@ -430,13 +430,14 @@ export class Runtime {
   // ---- agents & providers ---------------------------------------------------------------
 
   createAgent(
-    input: Omit<Agent, 'id' | 'status' | 'running' | 'nextRunAt' | 'lastRunAt' | 'statusDetail' | 'consecutiveErrors' | 'isDemo' | 'createdAt' | 'executionMode' | 'useNews'> & Partial<Pick<Agent, 'executionMode' | 'useNews'>>,
+    input: Omit<Agent, 'id' | 'status' | 'running' | 'nextRunAt' | 'lastRunAt' | 'statusDetail' | 'consecutiveErrors' | 'isDemo' | 'createdAt' | 'executionMode' | 'useNews' | 'allowTrailingStop'> & Partial<Pick<Agent, 'executionMode' | 'useNews' | 'allowTrailingStop'>>,
     isDemo = false,
   ): Agent {
     this.assertAgentRefs(input.providerId, input.accountId, input.symbol);
     const agent: Agent = {
       executionMode: 'AUTO',
       useNews: false,
+      allowTrailingStop: false,
       ...input,
       id: `agent_${randomUUID()}`,
       status: 'IDLE',

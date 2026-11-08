@@ -124,7 +124,41 @@ export interface FeedStatus {
 }
 
 export type OrderSide = 'BUY' | 'SELL';
-export type OrderType = 'MARKET' | 'LIMIT' | 'STOP_MARKET' | 'TAKE_PROFIT_MARKET';
+export type OrderType = 'MARKET' | 'LIMIT' | 'STOP_MARKET' | 'TAKE_PROFIT_MARKET' | 'TRAILING_STOP_MARKET';
+
+/** RATIO: the callback is a fraction of the extreme price. SPREAD: it is a price distance. */
+export type TrailingKind = 'RATIO' | 'SPREAD';
+
+export interface TrailingStopSpec {
+  kind: TrailingKind;
+  callback: string;
+  /** The stop only starts trailing once the last price reaches this; null = active at once. */
+  activationPrice: string | null;
+}
+
+/** What a position is protected by. Null means that leg is not set. */
+export interface Protection {
+  stopLoss: string | null;
+  takeProfit: string | null;
+  trailingStop: TrailingStopSpec | null;
+}
+
+export interface TrailingStopView extends TrailingStopSpec {
+  /** Highest (long) or lowest (short) last price since activation; null until active. */
+  extreme: string | null;
+  /** Current trigger price; null until active. */
+  triggerPrice: string | null;
+}
+
+/** A protective order that lives on the exchange but was not placed through MochiPrep. */
+export interface ExternalProtection {
+  kind: 'STOP_LOSS' | 'TAKE_PROFIT' | 'TRAILING';
+  triggerPrice: string | null;
+  detail: string;
+}
+
+/** Bounds shared by the risk engine and engine validation, so both refuse the same callbacks. */
+export const TRAILING_LIMITS = { minRatio: '0.001', maxRatio: '0.3', maxSpreadFraction: '0.3' } as const;
 export type OrderStatus = 'OPEN' | 'FILLED' | 'CANCELED' | 'REJECTED';
 export type PositionSide = 'LONG' | 'SHORT';
 
@@ -141,6 +175,7 @@ export interface OrderRequest {
   reduceOnly?: boolean;
   stopLoss?: string | null;
   takeProfit?: string | null;
+  trailingStop?: TrailingStopSpec | null;
   agentId?: string | null;
   decisionId?: string | null;
 }
@@ -168,6 +203,14 @@ export interface Order {
   reservedMargin: string;
   attachedStopLoss: string | null;
   attachedTakeProfit: string | null;
+  /** Set on a TRAILING_STOP_MARKET order. */
+  trailingKind: TrailingKind | null;
+  trailingCallback: string | null;
+  trailingActivationPrice: string | null;
+  /** Best last price seen since activation. Stored, so a restart does not reset the trail. */
+  trailingExtreme: string | null;
+  /** Trailing stop to arm when this entry order fills. */
+  attachedTrailingStop: TrailingStopSpec | null;
   rejectReason: string | null;
   /** OKX ordId once the exchange has acknowledged the order. */
   exchangeOrderId: string | null;
@@ -226,6 +269,8 @@ export interface PositionView extends Position {
   unrealizedPnl: string;
   stopLoss: string | null;
   takeProfit: string | null;
+  trailingStop: TrailingStopView | null;
+  externalProtection: ExternalProtection[];
 }
 
 export interface PaperAccountConfig {
@@ -398,6 +443,8 @@ export interface Agent {
   executionMode: ExecutionMode;
   /** Live data only: the replay tape is synthetic, so real headlines would not match it. */
   useNews: boolean;
+  /** Owner's switch: may this agent set or change a trailing stop. Off for existing agents. */
+  allowTrailingStop: boolean;
   status: AgentStatus;
   /** True while the schedule is armed. Always false after a backend restart. */
   running: boolean;

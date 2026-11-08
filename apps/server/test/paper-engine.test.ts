@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
-import type { OrderRequest, Quote } from '@mochiprep/shared';
+import { AgentInputSchema, DEFAULT_RISK_SETTINGS, type OrderRequest, type Quote } from '@mochiprep/shared';
 import { auditLedger, d, PaperExecutionEngine } from '@mochiprep/core';
 import { openDatabase } from '../src/db/database';
 import { SqliteStore } from '../src/db/store';
@@ -300,6 +300,41 @@ describe('PaperExecutionEngine with SQLite', () => {
     expect(result.order.status).toBe('REJECTED');
     expect(result.order.rejectReason).toContain('MARKET_DATA_STALE');
     expect(store.listFills(accountId, 10)).toHaveLength(0);
+  });
+
+  it('stores and reads the trailing fields of an order', () => {
+    const base = engine.placeOrderSync(request({ clientOrderId: 'trail-base' })).order;
+    const order = {
+      ...base,
+      id: 'trail-1',
+      clientOrderId: 'trail-1',
+      type: 'TRAILING_STOP_MARKET' as const,
+      trailingKind: 'RATIO' as const,
+      trailingCallback: '0.02',
+      trailingActivationPrice: '105',
+      trailingExtreme: '110.5',
+      attachedTrailingStop: { kind: 'SPREAD' as const, callback: '1.5', activationPrice: null },
+    };
+    store.insertOrder(order);
+    expect(store.getOrder('trail-1')).toEqual(order);
+    store.saveOrder({ ...order, trailingExtreme: '112' });
+    expect(store.getOrder('trail-1')!.trailingExtreme).toBe('112');
+    // An ordinary order keeps them all empty.
+    expect(store.getOrder(base.id)).toMatchObject({ trailingKind: null, trailingCallback: null, trailingActivationPrice: null, trailingExtreme: null, attachedTrailingStop: null });
+  });
+
+  it('keeps allowTrailingStop through save and load, off by default', () => {
+    store.insertProvider({ id: 'p1', name: 'p', kind: 'OPENAI', baseUrl: null, defaultModel: 'm', inputPricePerMTok: null, outputPricePerMTok: null, createdAt: 1 });
+    const agent = {
+      id: 'a1', name: 'a', providerId: 'p1', model: 'm', symbol: 'BTCUSDT', timeframe: '15m' as const, strategy: '', accountId,
+      risk: DEFAULT_RISK_SETTINGS, intervalSec: 900, executionMode: 'SIGNAL' as const, useNews: false, allowTrailingStop: false,
+      status: 'IDLE' as const, running: false, nextRunAt: null, lastRunAt: null, statusDetail: null, consecutiveErrors: 0, isDemo: false, createdAt: 1,
+    };
+    store.insertAgent(agent);
+    expect(store.getAgent('a1')!.allowTrailingStop).toBe(false);
+    store.saveAgent({ ...agent, allowTrailingStop: true });
+    expect(store.getAgent('a1')!.allowTrailingStop).toBe(true);
+    expect(AgentInputSchema.parse({ name: 'n', providerId: 'p1', model: 'm', symbol: 'BTCUSDT', timeframe: '15m', strategy: '', accountId, intervalSec: 900 }).allowTrailingStop).toBe(false);
   });
 
   it('keeps the ledger auditable through a fixed pseudo-random trade sequence', () => {

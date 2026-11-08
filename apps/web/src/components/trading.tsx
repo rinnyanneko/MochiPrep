@@ -116,7 +116,7 @@ export function PositionsTable({ positions, actions = true, editable = true, acc
   );
 }
 
-const ORDER_LABEL: Record<Order['type'], string> = { MARKET: 'Market', LIMIT: 'Limit', STOP_MARKET: 'Stop loss', TAKE_PROFIT_MARKET: 'Take profit' };
+const ORDER_LABEL: Record<Order['type'], string> = { MARKET: 'Market', LIMIT: 'Limit', STOP_MARKET: 'Stop loss', TAKE_PROFIT_MARKET: 'Take profit', TRAILING_STOP_MARKET: 'Trailing stop' };
 const ORDER_TONE: Record<Order['status'], Tone> = { OPEN: 'info', FILLED: 'up', CANCELED: 'neutral', REJECTED: 'down' };
 
 export function OrdersTable({ orders, cancellable, emptyText }: { orders: Order[]; cancellable?: boolean; emptyText: string }) {

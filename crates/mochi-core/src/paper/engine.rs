@@ -507,6 +507,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             reduce_only: Some(true),
             stop_loss: None,
             take_profit: None,
+            trailing_stop: None,
             agent_id: None,
             decision_id: None,
         })
@@ -571,6 +572,11 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             reserved_margin: "0".to_string(),
             attached_stop_loss: request.stop_loss.clone(),
             attached_take_profit: request.take_profit.clone(),
+            trailing_kind: None,
+            trailing_callback: None,
+            trailing_activation_price: None,
+            trailing_extreme: None,
+            attached_trailing_stop: request.trailing_stop.clone(),
             reject_reason: None,
             exchange_order_id: None,
             agent_id: request.agent_id.clone(),
@@ -1073,6 +1079,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
                 reduce_only: Some(true),
                 stop_loss: None,
                 take_profit: None,
+                trailing_stop: None,
                 agent_id: None,
                 decision_id: None,
             };

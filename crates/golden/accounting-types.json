@@ -264,6 +264,15 @@
     "reservedMargin": "0",
     "attachedStopLoss": "65000",
     "attachedTakeProfit": "70000",
+    "trailingKind": "RATIO",
+    "trailingCallback": "0.02",
+    "trailingActivationPrice": "68000",
+    "trailingExtreme": "69000.5",
+    "attachedTrailingStop": {
+     "kind": "SPREAD",
+     "callback": "150.5",
+     "activationPrice": "68500"
+    },
     "rejectReason": "none",
     "exchangeOrderId": "987654321",
     "agentId": "agent-1",
@@ -290,6 +299,11 @@
     "reservedMargin": "0",
     "attachedStopLoss": null,
     "attachedTakeProfit": null,
+    "trailingKind": null,
+    "trailingCallback": null,
+    "trailingActivationPrice": null,
+    "trailingExtreme": null,
+    "attachedTrailingStop": null,
     "rejectReason": null,
     "exchangeOrderId": null,
     "agentId": null,
@@ -316,6 +330,15 @@
     "reservedMargin": "0",
     "attachedStopLoss": "65000",
     "attachedTakeProfit": "70000",
+    "trailingKind": "RATIO",
+    "trailingCallback": "0.02",
+    "trailingActivationPrice": "68000",
+    "trailingExtreme": "69000.5",
+    "attachedTrailingStop": {
+     "kind": "SPREAD",
+     "callback": "150.5",
+     "activationPrice": "68500"
+    },
     "rejectReason": "none",
     "exchangeOrderId": "987654321",
     "agentId": "agent-1",
@@ -342,6 +365,15 @@
     "reservedMargin": "0",
     "attachedStopLoss": "65000",
     "attachedTakeProfit": "70000",
+    "trailingKind": "RATIO",
+    "trailingCallback": "0.02",
+    "trailingActivationPrice": "68000",
+    "trailingExtreme": "69000.5",
+    "attachedTrailingStop": {
+     "kind": "SPREAD",
+     "callback": "150.5",
+     "activationPrice": "68500"
+    },
     "rejectReason": "none",
     "exchangeOrderId": "987654321",
     "agentId": "agent-1",
@@ -368,6 +400,15 @@
     "reservedMargin": "0",
     "attachedStopLoss": "65000",
     "attachedTakeProfit": "70000",
+    "trailingKind": "RATIO",
+    "trailingCallback": "0.02",
+    "trailingActivationPrice": "68000",
+    "trailingExtreme": "69000.5",
+    "attachedTrailingStop": {
+     "kind": "SPREAD",
+     "callback": "150.5",
+     "activationPrice": "68500"
+    },
     "rejectReason": "none",
     "exchangeOrderId": "987654321",
     "agentId": "agent-1",
@@ -394,6 +435,50 @@
     "reservedMargin": "0",
     "attachedStopLoss": "65000",
     "attachedTakeProfit": "70000",
+    "trailingKind": "RATIO",
+    "trailingCallback": "0.02",
+    "trailingActivationPrice": "68000",
+    "trailingExtreme": "69000.5",
+    "attachedTrailingStop": {
+     "kind": "SPREAD",
+     "callback": "150.5",
+     "activationPrice": "68500"
+    },
+    "rejectReason": "none",
+    "exchangeOrderId": "987654321",
+    "agentId": "agent-1",
+    "decisionId": "dec-1",
+    "createdAt": 1700000000000,
+    "updatedAt": 1700000001000
+   },
+   {
+    "id": "ord-1",
+    "accountId": "acc-1",
+    "clientOrderId": "cli-1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "TRAILING_STOP_MARKET",
+    "quantity": "0.5",
+    "price": "67000.5",
+    "triggerPrice": "66000",
+    "leverage": 3,
+    "reduceOnly": true,
+    "closePosition": false,
+    "status": "FILLED",
+    "filledQuantity": "0.5",
+    "avgFillPrice": "67000.5",
+    "reservedMargin": "0",
+    "attachedStopLoss": "65000",
+    "attachedTakeProfit": "70000",
+    "trailingKind": "RATIO",
+    "trailingCallback": "0.02",
+    "trailingActivationPrice": "68000",
+    "trailingExtreme": "69000.5",
+    "attachedTrailingStop": {
+     "kind": "SPREAD",
+     "callback": "150.5",
+     "activationPrice": "68500"
+    },
     "rejectReason": "none",
     "exchangeOrderId": "987654321",
     "agentId": "agent-1",
@@ -420,6 +505,15 @@
     "reservedMargin": "0",
     "attachedStopLoss": "65000",
     "attachedTakeProfit": "70000",
+    "trailingKind": "RATIO",
+    "trailingCallback": "0.02",
+    "trailingActivationPrice": "68000",
+    "trailingExtreme": "69000.5",
+    "attachedTrailingStop": {
+     "kind": "SPREAD",
+     "callback": "150.5",
+     "activationPrice": "68500"
+    },
     "rejectReason": "none",
     "exchangeOrderId": "987654321",
     "agentId": "agent-1",
@@ -446,6 +540,15 @@
     "reservedMargin": "0",
     "attachedStopLoss": "65000",
     "attachedTakeProfit": "70000",
+    "trailingKind": "RATIO",
+    "trailingCallback": "0.02",
+    "trailingActivationPrice": "68000",
+    "trailingExtreme": "69000.5",
+    "attachedTrailingStop": {
+     "kind": "SPREAD",
+     "callback": "150.5",
+     "activationPrice": "68500"
+    },
     "rejectReason": "none",
     "exchangeOrderId": "987654321",
     "agentId": "agent-1",
@@ -472,6 +575,15 @@
     "reservedMargin": "0",
     "attachedStopLoss": "65000",
     "attachedTakeProfit": "70000",
+    "trailingKind": "RATIO",
+    "trailingCallback": "0.02",
+    "trailingActivationPrice": "68000",
+    "trailingExtreme": "69000.5",
+    "attachedTrailingStop": {
+     "kind": "SPREAD",
+     "callback": "150.5",
+     "activationPrice": "68500"
+    },
     "rejectReason": "none",
     "exchangeOrderId": "987654321",
     "agentId": "agent-1",
@@ -498,6 +610,15 @@
     "reservedMargin": "0",
     "attachedStopLoss": "65000",
     "attachedTakeProfit": "70000",
+    "trailingKind": "RATIO",
+    "trailingCallback": "0.02",
+    "trailingActivationPrice": "68000",
+    "trailingExtreme": "69000.5",
+    "attachedTrailingStop": {
+     "kind": "SPREAD",
+     "callback": "150.5",
+     "activationPrice": "68500"
+    },
     "rejectReason": "none",
     "exchangeOrderId": "987654321",
     "agentId": "agent-1",
@@ -524,6 +645,15 @@
     "reservedMargin": "0",
     "attachedStopLoss": "65000",
     "attachedTakeProfit": "70000",
+    "trailingKind": "RATIO",
+    "trailingCallback": "0.02",
+    "trailingActivationPrice": "68000",
+    "trailingExtreme": "69000.5",
+    "attachedTrailingStop": {
+     "kind": "SPREAD",
+     "callback": "150.5",
+     "activationPrice": "68500"
+    },
     "rejectReason": "none",
     "exchangeOrderId": "987654321",
     "agentId": "agent-1",
@@ -550,6 +680,15 @@
     "reservedMargin": "0",
     "attachedStopLoss": "65000",
     "attachedTakeProfit": "70000",
+    "trailingKind": "RATIO",
+    "trailingCallback": "0.02",
+    "trailingActivationPrice": "68000",
+    "trailingExtreme": "69000.5",
+    "attachedTrailingStop": {
+     "kind": "SPREAD",
+     "callback": "150.5",
+     "activationPrice": "68500"
+    },
     "rejectReason": "none",
     "exchangeOrderId": "987654321",
     "agentId": "agent-1",
@@ -571,6 +710,11 @@
     "reduceOnly": true,
     "stopLoss": "140",
     "takeProfit": "170",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.01",
+     "activationPrice": null
+    },
     "agentId": "agent-1",
     "decisionId": "dec-1"
    },
@@ -595,6 +739,11 @@
     "reduceOnly": true,
     "stopLoss": "140",
     "takeProfit": "170",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.01",
+     "activationPrice": null
+    },
     "agentId": "agent-1",
     "decisionId": "dec-1"
    },
@@ -610,6 +759,11 @@
     "reduceOnly": true,
     "stopLoss": "140",
     "takeProfit": "170",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.01",
+     "activationPrice": null
+    },
     "agentId": "agent-1",
     "decisionId": "dec-1"
    },
@@ -625,6 +779,11 @@
     "reduceOnly": true,
     "stopLoss": "140",
     "takeProfit": "170",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.01",
+     "activationPrice": null
+    },
     "agentId": "agent-1",
     "decisionId": "dec-1"
    },
@@ -640,6 +799,11 @@
     "reduceOnly": true,
     "stopLoss": "140",
     "takeProfit": "170",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.01",
+     "activationPrice": null
+    },
     "agentId": "agent-1",
     "decisionId": "dec-1"
    }
@@ -665,6 +829,15 @@
      "reservedMargin": "0",
      "attachedStopLoss": "65000",
      "attachedTakeProfit": "70000",
+     "trailingKind": "RATIO",
+     "trailingCallback": "0.02",
+     "trailingActivationPrice": "68000",
+     "trailingExtreme": "69000.5",
+     "attachedTrailingStop": {
+      "kind": "SPREAD",
+      "callback": "150.5",
+      "activationPrice": "68500"
+     },
      "rejectReason": "none",
      "exchangeOrderId": "987654321",
      "agentId": "agent-1",
@@ -722,6 +895,11 @@
      "reservedMargin": "0",
      "attachedStopLoss": null,
      "attachedTakeProfit": null,
+     "trailingKind": null,
+     "trailingCallback": null,
+     "trailingActivationPrice": null,
+     "trailingExtreme": null,
+     "attachedTrailingStop": null,
      "rejectReason": null,
      "exchangeOrderId": null,
      "agentId": null,
@@ -939,7 +1117,21 @@
     "markPrice": "67500.5",
     "unrealizedPnl": "250",
     "stopLoss": "65000",
-    "takeProfit": "70000"
+    "takeProfit": "70000",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.02",
+     "activationPrice": "68000",
+     "extreme": "69000.5",
+     "triggerPrice": "67620.49"
+    },
+    "externalProtection": [
+     {
+      "kind": "TRAILING",
+      "triggerPrice": null,
+      "detail": "callback 1%"
+     }
+    ]
    },
    {
     "id": "pos-1",
@@ -963,7 +1155,9 @@
     "markPrice": null,
     "unrealizedPnl": "0",
     "stopLoss": null,
-    "takeProfit": null
+    "takeProfit": null,
+    "trailingStop": null,
+    "externalProtection": []
    }
   ],
   "ledgerEvent": [

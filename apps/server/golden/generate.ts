@@ -684,6 +684,11 @@ function accountingTypesFixture() {
     reservedMargin: '0',
     attachedStopLoss: '65000',
     attachedTakeProfit: '70000',
+    trailingKind: 'RATIO',
+    trailingCallback: '0.02',
+    trailingActivationPrice: '68000',
+    trailingExtreme: '69000.5',
+    attachedTrailingStop: { kind: 'SPREAD', callback: '150.5', activationPrice: '68500' },
     rejectReason: 'none',
     exchangeOrderId: '987654321',
     agentId: 'agent-1',
@@ -703,6 +708,11 @@ function accountingTypesFixture() {
     avgFillPrice: null,
     attachedStopLoss: null,
     attachedTakeProfit: null,
+    trailingKind: null,
+    trailingCallback: null,
+    trailingActivationPrice: null,
+    trailingExtreme: null,
+    attachedTrailingStop: null,
     rejectReason: null,
     exchangeOrderId: null,
     agentId: null,
@@ -737,6 +747,7 @@ function accountingTypesFixture() {
     reduceOnly: true,
     stopLoss: '140',
     takeProfit: '170',
+    trailingStop: { kind: 'RATIO', callback: '0.01', activationPrice: null },
     agentId: 'agent-1',
     decisionId: 'dec-1',
   };
@@ -783,6 +794,8 @@ function accountingTypesFixture() {
     unrealizedPnl: '250',
     stopLoss: '65000',
     takeProfit: '70000',
+    trailingStop: { kind: 'RATIO', callback: '0.02', activationPrice: '68000', extreme: '69000.5', triggerPrice: '67620.49' },
+    externalProtection: [{ kind: 'TRAILING', triggerPrice: null, detail: 'callback 1%' }],
   };
   const viewMinimal: PositionView = {
     ...positionOpen,
@@ -790,6 +803,8 @@ function accountingTypesFixture() {
     unrealizedPnl: '0',
     stopLoss: null,
     takeProfit: null,
+    trailingStop: null,
+    externalProtection: [],
   };
 
   const resultFull: OrderResult = { order: orderFull, fills: [fillFull, fillTaker], duplicate: true };
@@ -820,7 +835,7 @@ function accountingTypesFixture() {
     memo: '',
   };
   // Every variant of every enum, so a mistyped rename cannot hide.
-  const orderTypes: Order['type'][] = ['MARKET', 'LIMIT', 'STOP_MARKET', 'TAKE_PROFIT_MARKET'];
+  const orderTypes: Order['type'][] = ['MARKET', 'LIMIT', 'STOP_MARKET', 'TAKE_PROFIT_MARKET', 'TRAILING_STOP_MARKET'];
   const orderStatuses: Order['status'][] = ['OPEN', 'FILLED', 'CANCELED', 'REJECTED'];
   const orderSides: Order['side'][] = ['BUY', 'SELL'];
   const positionSides: Position['side'][] = ['LONG', 'SHORT'];

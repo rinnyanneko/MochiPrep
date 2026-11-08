@@ -149,6 +149,24 @@ fn enum_col<T: DeserializeOwned>(r: &Row, column: &str) -> rusqlite::Result<T> {
     serde_json::from_value(serde_json::Value::String(text)).map_err(|e| conversion_error(column, e))
 }
 
+/// A nullable enum column.
+fn opt_enum_col<T: DeserializeOwned>(r: &Row, column: &str) -> rusqlite::Result<Option<T>> {
+    let text: Option<String> = r.get(column)?;
+    text.map(|t| {
+        serde_json::from_value(serde_json::Value::String(t))
+            .map_err(|e| conversion_error(column, e))
+    })
+    .transpose()
+}
+
+/// A nullable JSON column. NULL and '' both read as none, like the truthiness test in TS.
+fn json_col<T: DeserializeOwned>(r: &Row, column: &str) -> rusqlite::Result<Option<T>> {
+    let text: Option<String> = r.get(column)?;
+    text.filter(|t| !t.is_empty())
+        .map(|t| serde_json::from_str(&t).map_err(|e| conversion_error(column, e)))
+        .transpose()
+}
+
 fn limits_text(limits: &Option<RiskSettings>) -> Result<Option<String>, StoreFailure> {
     limits
         .as_ref()
@@ -205,6 +223,11 @@ fn to_order(r: &Row) -> rusqlite::Result<Order> {
         reserved_margin: r.get("reserved_margin")?,
         attached_stop_loss: r.get("attached_stop_loss")?,
         attached_take_profit: r.get("attached_take_profit")?,
+        trailing_kind: opt_enum_col(r, "trailing_kind")?,
+        trailing_callback: r.get("trailing_callback")?,
+        trailing_activation_price: r.get("trailing_activation_price")?,
+        trailing_extreme: r.get("trailing_extreme")?,
+        attached_trailing_stop: json_col(r, "attached_trailing_stop")?,
         reject_reason: r.get("reject_reason")?,
         exchange_order_id: r.get("exchange_order_id")?,
         agent_id: r.get("agent_id")?,
@@ -388,8 +411,9 @@ impl PaperStore for SqlitePaperStore {
     fn insert_order(&self, o: &Order) -> Result<(), StoreFailure> {
         self.run(
             "INSERT INTO orders (id,account_id,client_order_id,symbol,side,type,quantity,price,trigger_price,leverage,reduce_only,close_position,status,
-              filled_quantity,avg_fill_price,reserved_margin,attached_stop_loss,attached_take_profit,reject_reason,exchange_order_id,agent_id,decision_id,created_at,updated_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              filled_quantity,avg_fill_price,reserved_margin,attached_stop_loss,attached_take_profit,trailing_kind,trailing_callback,trailing_activation_price,trailing_extreme,
+              attached_trailing_stop,reject_reason,exchange_order_id,agent_id,decision_id,created_at,updated_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             params![
                 o.id,
                 o.account_id,
@@ -409,6 +433,13 @@ impl PaperStore for SqlitePaperStore {
                 o.reserved_margin,
                 o.attached_stop_loss,
                 o.attached_take_profit,
+                o.trailing_kind.as_ref().map(enum_text),
+                o.trailing_callback,
+                o.trailing_activation_price,
+                o.trailing_extreme,
+                o.attached_trailing_stop
+                    .as_ref()
+                    .map(|spec| serde_json::to_string(spec).expect("a trailing spec is plain data")),
                 o.reject_reason,
                 o.exchange_order_id,
                 o.agent_id,
@@ -421,13 +452,14 @@ impl PaperStore for SqlitePaperStore {
 
     fn save_order(&self, o: &Order) -> Result<(), StoreFailure> {
         self.run(
-            "UPDATE orders SET quantity=?, status=?, filled_quantity=?, avg_fill_price=?, reserved_margin=?, reject_reason=?, exchange_order_id=?, updated_at=? WHERE id=?",
+            "UPDATE orders SET quantity=?, status=?, filled_quantity=?, avg_fill_price=?, reserved_margin=?, trailing_extreme=?, reject_reason=?, exchange_order_id=?, updated_at=? WHERE id=?",
             params![
                 o.quantity,
                 enum_text(&o.status),
                 o.filled_quantity,
                 o.avg_fill_price,
                 o.reserved_margin,
+                o.trailing_extreme,
                 o.reject_reason,
                 o.exchange_order_id,
                 o.updated_at,

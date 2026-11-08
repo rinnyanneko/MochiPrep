@@ -240,6 +240,11 @@ export class PaperExecutionEngine implements ExecutionEngine {
       reservedMargin: '0',
       attachedStopLoss: request.stopLoss ?? null,
       attachedTakeProfit: request.takeProfit ?? null,
+      trailingKind: null,
+      trailingCallback: null,
+      trailingActivationPrice: null,
+      trailingExtreme: null,
+      attachedTrailingStop: request.trailingStop ?? null,
       rejectReason: null,
       exchangeOrderId: null,
       agentId: request.agentId ?? null,
@@ -586,7 +591,7 @@ export class PaperExecutionEngine implements ExecutionEngine {
     }
 
     const open = this.store.listOpenOrdersForMarket(source, symbol);
-    const rank = { STOP_MARKET: 0, TAKE_PROFIT_MARKET: 1, LIMIT: 2, MARKET: 3 } as const;
+    const rank = { STOP_MARKET: 0, TRAILING_STOP_MARKET: 0, TAKE_PROFIT_MARKET: 1, LIMIT: 2, MARKET: 3 } as const;
     open.sort((a, b) => rank[a.type] - rank[b.type] || a.createdAt - b.createdAt);
     for (const candidate of open) {
       // An earlier order in this pass may have closed the position and canceled this one.
@@ -799,6 +804,8 @@ export class PaperExecutionEngine implements ExecutionEngine {
           : '0',
         stopLoss: protection('STOP_MARKET'),
         takeProfit: protection('TAKE_PROFIT_MARKET'),
+        trailingStop: null,
+        externalProtection: [],
       };
     });
   }

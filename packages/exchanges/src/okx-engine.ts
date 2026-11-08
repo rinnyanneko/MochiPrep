@@ -135,6 +135,11 @@ export class OkxExecutionEngine implements ExecutionEngine {
       reservedMargin: '0',
       attachedStopLoss: request.stopLoss ?? null,
       attachedTakeProfit: request.takeProfit ?? null,
+      trailingKind: null,
+      trailingCallback: null,
+      trailingActivationPrice: null,
+      trailingExtreme: null,
+      attachedTrailingStop: request.trailingStop ?? null,
       rejectReason: null,
       exchangeOrderId: null,
       agentId: request.agentId ?? null,
@@ -394,6 +399,8 @@ export class OkxExecutionEngine implements ExecutionEngine {
         unrealizedPnl: p.upl || '0',
         stopLoss: entry?.attachedStopLoss ?? null,
         takeProfit: entry?.attachedTakeProfit ?? null,
+        trailingStop: null,
+        externalProtection: [],
       },
     ];
   }

@@ -25,7 +25,7 @@ fn required(value: &Option<String>) -> Result<Dec, EngineError> {
 /// Stops first, then targets, then limits: the pessimistic order `onQuote` evaluates them in.
 fn rank(order_type: OrderType) -> u8 {
     match order_type {
-        OrderType::StopMarket => 0,
+        OrderType::StopMarket | OrderType::TrailingStopMarket => 0,
         OrderType::TakeProfitMarket => 1,
         OrderType::Limit => 2,
         OrderType::Market => 3,
@@ -167,6 +167,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
                 reduce_only: Some(true),
                 stop_loss: None,
                 take_profit: None,
+                trailing_stop: None,
                 agent_id: None,
                 decision_id: None,
             };
