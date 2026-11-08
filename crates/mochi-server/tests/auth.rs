@@ -278,6 +278,67 @@ async fn unmatched_api_path_with_token_is_json_404() {
     }
 }
 
+/// The guard reads the raw path, as Node's `request.url.split('?')[0]` does: no decoding and no
+/// normalising, so no spelling of an API path skips the token.
+#[tokio::test]
+async fn path_spellings_never_skip_the_token() {
+    let state = state();
+    // Under `/api/`, but not exactly `/api/session`: the token is required.
+    for path in ["/api/session/", "/api/../api/health", "/api/session?x=1/"] {
+        let request = get(path).body(Body::empty()).unwrap();
+        let (status, body) = send(app(state.clone()), request).await;
+        let expected = if path.starts_with("/api/session?") {
+            StatusCode::OK
+        } else {
+            StatusCode::UNAUTHORIZED
+        };
+        assert_eq!(status, expected, "{path}: {body}");
+    }
+    // Not under `/api/`, so no token is asked for, and no route or file matches either.
+    for path in ["//api/health", "/API/health", "/Api/session"] {
+        let (status, body) = send(app(state.clone()), get(path).body(Body::empty()).unwrap()).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+        assert_eq!(body, serde_json::json!({ "error": "Not found" }));
+    }
+}
+
+/// Node keeps the first Host (it drops duplicates of that header) and joins repeated Origins
+/// with ", ", which matches no allowed origin.
+#[tokio::test]
+async fn duplicate_host_and_origin_headers() {
+    let state = state();
+    let with_hosts = |hosts: [&str; 2]| {
+        Request::get("/api/health")
+            .header("host", hosts[0])
+            .header("host", hosts[1])
+            .header("authorization", bearer(&state))
+            .body(Body::empty())
+            .unwrap()
+    };
+    let (status, _) = send(app(state.clone()), with_hosts([HOST, "evil.invalid"])).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = send(app(state.clone()), with_hosts(["evil.invalid", HOST])).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body, serde_json::json!({ "error": "Host not allowed" }));
+
+    for origins in [
+        ["http://localhost:8787", "http://localhost:8787"],
+        ["http://localhost:8787", "http://evil.invalid"],
+    ] {
+        for path in ["/api/health", "/api/session", "/"] {
+            let request = get(path)
+                .header("origin", origins[0])
+                .header("origin", origins[1])
+                .header("authorization", bearer(&state))
+                .body(Body::empty())
+                .unwrap();
+            let (status, body) = send(app(state.clone()), request).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{path} {origins:?}");
+            assert_eq!(body, serde_json::json!({ "error": "Origin not allowed" }));
+        }
+    }
+}
+
 #[tokio::test]
 async fn body_over_256_kib_is_413_with_error_json() {
     let state = state();

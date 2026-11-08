@@ -223,6 +223,37 @@ async fn slow_client_is_dropped_without_blocking_others() {
     state.runtime.shutdown().await;
 }
 
+#[tokio::test]
+async fn a_client_leaving_mid_stream_leaves_the_runtime_alone() {
+    let state = state_with(options());
+    assert_eq!(state.runtime.subscriber_count(), 0);
+    let mut leaving = connect(&state).await.into_body();
+    let mut staying = connect(&state).await.into_body();
+    assert_eq!(state.runtime.subscriber_count(), 2);
+    skip_snapshot(&mut leaving).await;
+    skip_snapshot(&mut staying).await;
+    state.runtime.call(|rt| rt.emit(toast(1))).await.unwrap();
+    assert_eq!(next_event(&mut leaving).await["message"], "toast 1");
+
+    // The browser tab closes: the response body is dropped mid-stream.
+    drop(leaving);
+    timeout(Duration::from_secs(5), async {
+        while state.runtime.subscriber_count() != 1 {
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the stream's subscription ends with it");
+
+    // Everything else carries on: calls are answered, events reach the other client.
+    state.runtime.call(|rt| rt.emit(toast(2))).await.unwrap();
+    assert_eq!(next_event(&mut staying).await["message"], "toast 1");
+    assert_eq!(next_event(&mut staying).await["message"], "toast 2");
+    state.runtime.step_replay(3).await.unwrap();
+    assert!(state.runtime.replay_state().await.unwrap().now.is_some());
+    state.runtime.shutdown().await;
+}
+
 /// The raw bytes read until the server closes the connection.
 async fn read_to_close(stream: &mut TcpStream, buffer: &mut Vec<u8>) {
     let mut chunk = [0u8; 4096];

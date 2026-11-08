@@ -1,9 +1,16 @@
+use std::future::IntoFuture;
 use std::net::Ipv4Addr;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mochi_server::{app, load_config, AppState, RuntimeHandle, RuntimeOptions};
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
+use tokio::time::sleep;
+
+/// How long open requests get to finish after a shutdown signal.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -46,14 +53,33 @@ async fn main() -> ExitCode {
         config.data_dir.display()
     );
 
-    let served = axum::serve(listener, app(state))
+    let (signalled, on_signal) = oneshot::channel::<()>();
+    let server = axum::serve(listener, app(state))
         .with_graceful_shutdown(async move {
             shutdown_signal().await;
             // Open event streams never finish on their own, and graceful shutdown waits for
             // every response to finish.
             streams.close_all();
+            let _ = signalled.send(());
         })
-        .await;
+        .into_future();
+    // A client that stops reading can hold its response open past `close_all`. Give requests a
+    // few seconds to finish, then stop waiting, so the database is always closed cleanly.
+    let grace_over = async {
+        if on_signal.await.is_ok() {
+            sleep(SHUTDOWN_GRACE).await;
+        } else {
+            // The server ended without a signal; its own result decides.
+            std::future::pending::<()>().await;
+        }
+    };
+    let served = tokio::select! {
+        served = server => served,
+        () = grace_over => {
+            eprintln!("Some requests were still open after {} s; closing anyway", SHUTDOWN_GRACE.as_secs());
+            Ok(())
+        }
+    };
     // Pauses the replay and closes the database, as Node's shutdown does.
     runtime.shutdown().await;
     if let Err(error) = served {

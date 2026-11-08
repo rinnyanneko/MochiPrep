@@ -29,6 +29,8 @@ pub struct AppState {
     pub runtime: RuntimeHandle,
     /// The open `/api/events` streams, ended together on shutdown.
     pub streams: routes::events::SseStreams,
+    /// The web app's files: the embedded build, or a test's own.
+    pub web: routes::static_files::WebFiles,
 }
 
 impl AppState {
@@ -38,6 +40,7 @@ impl AppState {
             config,
             runtime,
             streams: routes::events::SseStreams::default(),
+            web: routes::static_files::web_dist,
         }
     }
 }

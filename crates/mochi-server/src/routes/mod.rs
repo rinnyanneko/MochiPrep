@@ -3,10 +3,12 @@
 pub mod accounts;
 pub mod events;
 pub mod instruments;
+pub mod later;
 pub mod market;
 pub mod orders;
 pub mod replay;
 pub mod state;
+pub mod static_files;
 
 use axum::extract::State;
 use axum::http::HeaderMap;
@@ -29,6 +31,7 @@ pub fn router() -> Router<AppState> {
         .merge(accounts::router())
         .merge(orders::router())
         .merge(replay::router())
+        .merge(later::router())
 }
 
 /// Hands out the token without asking for one. The guard has already refused a foreign Host or

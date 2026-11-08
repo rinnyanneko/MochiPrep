@@ -1,5 +1,14 @@
+import type { DatabaseSync } from 'node:sqlite';
+import { PaperExecutionEngine } from '@mochiprep/core';
 import { TAPE_MINUTES, TAPE_START } from '@mochiprep/market-data';
-import { unregisterInstrument, type InstrumentSpecification } from '@mochiprep/shared';
+import {
+  DEFAULT_ACCOUNT_CONFIG,
+  DEFAULT_RISK_SETTINGS,
+  unregisterInstrument,
+  type DecisionRecord,
+  type InstrumentSpecification,
+  type RiskSettings,
+} from '@mochiprep/shared';
 import { buildApp } from '../src/app.js';
 import { openDatabase } from '../src/db/database.js';
 import { SqliteStore } from '../src/db/store.js';
@@ -12,7 +21,9 @@ import { Runtime } from '../src/runtime.js';
  *
  * The app is built as main.ts builds it, except that `runtime.start()` is never called: the live
  * OKX feed stays disconnected and nothing touches the network. The tape is short
- * (REPLAY_MINUTES) so the fixture stays quick to make.
+ * (REPLAY_MINUTES) so the fixture stays quick to make. Before the runtime is built, the database
+ * gets the rows of later plans' tables (`seedLaterPlanRows`), recorded in the fixture's `seed` so
+ * the Rust test starts from the same database.
  *
  * Two things in a response cannot match across runs, so one normaliser (`ApiNormaliser`, mirrored
  * in the Rust test) rewrites them in the recorded text:
@@ -85,6 +96,93 @@ export const ADDED_INSTRUMENT: InstrumentSpecification = {
   venueLotSize: '0.01',
 };
 
+/** Seeded rows are stamped before every tape time, so they sort first and are never wall-clock. */
+const SEED_TIME = TAPE_START;
+/** Far past any replay time: the seeded suggestion stays pending however far the tape plays. */
+const NEVER = TAPE_START + 10 * 365 * 86_400_000;
+export const SEED_AGENT_ID = 'agent_seed';
+/** Tables the seed writes, in an order that satisfies their foreign keys. */
+const SEED_TABLES = ['accounts', 'ledger_events', 'equity_history', 'providers', 'provider_keys', 'agents', 'decisions'] as const;
+
+function decision(fields: Partial<DecisionRecord> & Pick<DecisionRecord, 'id' | 'accountId' | 'ts' | 'outcome' | 'estimatedCost'>): DecisionRecord {
+  return {
+    agentId: SEED_AGENT_ID,
+    agentName: 'Seeded agent',
+    source: 'REPLAY',
+    venue: 'PAPER',
+    trigger: 'SCHEDULE',
+    providerKind: 'OPENAI_COMPATIBLE',
+    model: 'gpt-golden',
+    symbol: 'ETHUSDT',
+    timeframe: '15m',
+    snapshot: null,
+    indicators: { rsi14: 41.25, ema20: null },
+    decision: {
+      symbol: 'ETHUSDT', action: 'LONG', orderType: 'LIMIT', entryPrice: 3400.5, stopLoss: 3300, takeProfit: null,
+      reason: 'Seeded for the golden script', confidence: 0.7, expiresAt: null,
+    },
+    rawResponse: '{"action":"LONG"}',
+    validationError: null,
+    risk: null,
+    outcomeDetail: null,
+    news: null,
+    newsError: null,
+    signalExpiresAt: null,
+    orderId: null,
+    fillIds: [],
+    latencyMs: 1234,
+    inputTokens: 800,
+    outputTokens: 120,
+    isMock: false,
+    ...fields,
+  };
+}
+
+/**
+ * Rows the tables of later plans hold before the server starts, written through the store as the
+ * Node backend writes them: an account an agent trades, two exchange accounts, a provider with a
+ * plaintext key and an extra header, an agent the restart must pause, and two decisions (one a
+ * pending suggestion). Returns them as read back, so the Rust test can insert the same rows.
+ */
+function seedLaterPlanRows(db: DatabaseSync) {
+  const store = new SqliteStore(db);
+  let n = 0;
+  const engine = new PaperExecutionEngine({
+    store,
+    getQuote: () => undefined,
+    now: () => SEED_TIME,
+    newId: (prefix) => `${prefix}_seed${++n}`,
+  });
+  const account = engine.createAccount({ name: 'Agent account', source: 'REPLAY' });
+  const exchange = (id: string, venue: 'OKX_DEMO' | 'OKX_LIVE', limits: RiskSettings | null, at: number) =>
+    store.insertAccount({
+      id, name: `${venue} account`, source: 'LIVE', venue, exchangeUid: `uid-${id}`, liveLimits: limits, isDemo: false,
+      initialBalance: '0', walletBalance: '0', usedMargin: '0', realizedPnl: '0', feesPaid: '0', fundingPaid: '0',
+      config: DEFAULT_ACCOUNT_CONFIG, createdAt: at,
+    });
+  exchange('acct_seedokx1', 'OKX_DEMO', { ...DEFAULT_RISK_SETTINGS, maxLeverage: 2, maxNotional: 250.5 }, SEED_TIME + 1);
+  exchange('acct_seedokx2', 'OKX_LIVE', null, SEED_TIME + 2);
+  store.insertProvider({
+    id: 'prov_seed', name: 'Gateway', kind: 'OPENAI_COMPATIBLE', baseUrl: 'https://gateway.example/v1', defaultModel: 'gpt-golden',
+    inputPricePerMTok: 2.5, outputPricePerMTok: 10, extraHeaders: { 'x-team': 'not-shown', 'x-route': 'eu' }, createdAt: SEED_TIME,
+  });
+  store.saveProviderKey('prov_seed', 'sk-golden-not-a-real-key');
+  // The store stamps the key with the wall clock, which would change the fixture on every run.
+  db.prepare('UPDATE provider_keys SET updated_at=?').run(SEED_TIME);
+  store.insertAgent({
+    id: SEED_AGENT_ID, name: 'Seeded agent', providerId: 'prov_seed', model: 'gpt-golden', symbol: 'ETHUSDT', timeframe: '15m',
+    strategy: 'Buy dips, "carefully".', accountId: account.id, risk: DEFAULT_RISK_SETTINGS, intervalSec: 900, executionMode: 'SIGNAL',
+    useNews: false, allowTrailingStop: true, status: 'ANALYZING', running: true, nextRunAt: SEED_TIME + 900_000, lastRunAt: SEED_TIME,
+    statusDetail: null, consecutiveErrors: 1, isDemo: false, createdAt: SEED_TIME,
+  });
+  store.insertDecision(decision({ id: 'dec_seed1', accountId: account.id, ts: SEED_TIME + 60_000, outcome: 'HOLD', estimatedCost: '0.1' }));
+  store.insertDecision(decision({
+    id: 'dec_seed2', accountId: account.id, ts: SEED_TIME + 120_000, outcome: 'SIGNAL', estimatedCost: '0.2', signalExpiresAt: NEVER,
+  }));
+  const rows = SEED_TABLES.map((table) => ({ table, rows: db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() }));
+  return { accountId: account.id, rows };
+}
+
 interface Request {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE';
   path: string;
@@ -113,6 +211,8 @@ const json = (value: unknown) => JSON.stringify(value);
 export async function apiScriptFixture() {
   const db = openDatabase(':memory:');
   new SqliteStore(db).saveInstrument(ADDED_INSTRUMENT);
+  const seed = seedLaterPlanRows(db);
+  const agentAccount = seed.accountId;
   const runtime = new Runtime({ db, replayMinutes: REPLAY_MINUTES });
   const { app, token } = buildApp(runtime, {
     host: '127.0.0.1',
@@ -187,6 +287,24 @@ export async function apiScriptFixture() {
     await send({ method: 'GET', path: '/api/accounts', repeat: { char: 'x', length: 300_000 } });
     await get('/api/accounts');
 
+    // ---- later plans' areas, read-only ----------------------------------------------------
+    // The restart has paused the seeded agent, and the runtime has added the mock provider.
+    await get('/api/agents');
+    await get('/api/providers');
+    await get('/api/signals');
+    await get('/api/signals?limit=1');
+    await get('/api/decisions');
+    await get('/api/decisions?limit=1');
+    await get(`/api/decisions?agentId=${SEED_AGENT_ID}&limit=5`);
+    await get('/api/decisions?agentId=agent_nope');
+    await get('/api/decisions?agentId=');
+    await get('/api/decisions?limit=0&agentId=x&extra=1');
+    await get('/api/decisions?limit=abc');
+    await get('/api/arena');
+    await get('/api/vault');
+    await get('/api/exchange/status');
+    await del(`/api/accounts/${agentAccount}`);
+
     // ---- market ---------------------------------------------------------------------------
     const quotes = await get('/api/market/quotes?source=REPLAY');
     await get('/api/market/quotes?source=LIVE');
@@ -249,7 +367,30 @@ export async function apiScriptFixture() {
     await del('/api/orders/ord_nope');
     await send({ method: 'DELETE', path: '/api/orders/ord_nope', body: '{', contentType: 'application/json' });
 
+    // Quote-driven fills through the runtime: a LIMIT sell just above the market and a tight trailing
+    // stop, placed right before a batch of steps on the account the seeded agent trades.
+    const near = (await get('/api/market/quotes?source=REPLAY')) as Array<{ symbol: string; last: string }>;
+    const nearLast = (symbol: string) => Number(near.find((q) => q.symbol === symbol)!.last);
+    const cents = (value: number) => (Math.floor(value * 100) / 100).toFixed(2);
+    await post('/api/orders', {
+      accountId: agentAccount, clientOrderId: 'near-limit', symbol: 'SOLUSDT', side: 'SELL', type: 'LIMIT', quantity: '1',
+      price: cents(nearLast('SOLUSDT') * 1.001), stopLoss: cents(nearLast('SOLUSDT') * 1.01), leverage: 2,
+    });
+    await post('/api/orders', {
+      accountId: agentAccount, clientOrderId: 'near-trail', symbol: 'ETHUSDT', side: 'BUY', type: 'MARKET', quantity: '0.1', leverage: 2,
+      trailingStop: { kind: 'RATIO', callback: '0.001', activationPrice: null },
+    });
+
     await post('/api/replay', { steps: 40 });
+
+    const agentOrders = (await get(`/api/accounts/${agentAccount}/orders`)) as Array<{ clientOrderId: string; type: string; status: string }>;
+    // The fixture exists to prove these fills; a tape or engine change that loses one is a script bug.
+    if (agentOrders.find((o) => o.clientOrderId === 'near-limit')?.status !== 'FILLED') throw new Error('api-script: the LIMIT did not fill');
+    if (!agentOrders.some((o) => o.type === 'TRAILING_STOP_MARKET' && o.status === 'FILLED')) throw new Error('api-script: the trailing stop did not trigger');
+    await get(`/api/accounts/${agentAccount}/fills`);
+    await get(`/api/accounts/${agentAccount}/positions`);
+    await get(`/api/accounts/${agentAccount}/closed-positions`);
+    await get('/api/arena');
 
     // ---- positions and protection ---------------------------------------------------------
     await get(`/api/accounts/${main}/positions`);
@@ -329,11 +470,17 @@ export async function apiScriptFixture() {
     await get('/api/market/quotes?source=REPLAY');
     await get('/api/instruments');
     await get('/api/state');
+    await get(`/api/accounts/${agentAccount}/ledger`);
+    await get(`/api/accounts/${agentAccount}/audit`);
+    await get('/api/arena');
+    await get('/api/agents');
+    await get('/api/exchange/status');
 
     return {
       about: 'A scripted Node session (apps/server/golden/api-script.ts); Rust replays it in tests/golden_api.rs.',
       replayMinutes: REPLAY_MINUTES,
       addedInstruments: [ADDED_INSTRUMENT],
+      seed: seed.rows,
       normalised: {
         ids: { prefixes: ID_PREFIXES, as: '<prefix>_<n>, numbered per prefix in first-seen order' },
         wallClock: { fields: WALL_CLOCK_FIELDS, after: WALL_CLOCK_AFTER, as: WALL_CLOCK },

@@ -21,6 +21,7 @@ use http_body_util::{BodyExt, LengthLimitError, Limited};
 use subtle::ConstantTimeEq;
 
 use crate::error::ApiError;
+use crate::routes;
 use crate::validate;
 use crate::AppState;
 
@@ -47,9 +48,10 @@ pub fn protect(router: Router<AppState>, state: AppState) -> Router {
             .collect(),
     });
     router
-        // Fastify's default 404 is `{message, error, statusCode}`. We answer `{"error"}` on
-        // purpose, so every failure has the one shape the web client reads.
-        .fallback(not_found)
+        // A path no route claims may be a file of the web build; any other is a 404. Fastify's
+        // default 404 is `{message, error, statusCode}`. We answer `{"error"}` on purpose, so
+        // every failure has the one shape the web client reads.
+        .fallback(routes::static_files::serve)
         // Fastify has no 405: a known path with another method is a plain 404 there too.
         .method_not_allowed_fallback(not_found)
         .layer(middleware::from_fn_with_state(guard, guard_request))

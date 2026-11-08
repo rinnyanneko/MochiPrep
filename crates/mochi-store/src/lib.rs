@@ -2,6 +2,7 @@
 //! `schema_migrations` bookkeeping, so either backend can open a database the other created.
 
 mod paper;
+pub mod rows;
 mod settings;
 
 pub use paper::SqlitePaperStore;

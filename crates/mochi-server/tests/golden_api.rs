@@ -1,7 +1,9 @@
-//! The paper, market, replay, state and instrument routes against `crates/golden/api-script.json`:
-//! a session `apps/server/golden/api-script.ts` recorded from the Node app. The same requests go
-//! through the Rust app, which must answer with the same status and the same body bytes, once
-//! random ids and wall-clock times are normalised the same way on both sides.
+//! The paper, market, replay, state and instrument routes, and the read-only GETs of the later
+//! plans' areas, against `crates/golden/api-script.json`: a session
+//! `apps/server/golden/api-script.ts` recorded from the Node app over a database seeded with an
+//! agent, a provider, decisions and exchange accounts. The same requests go through the Rust app,
+//! which must answer with the same status and the same body bytes, once random ids and
+//! wall-clock times are normalised the same way on both sides.
 //!
 //! The tests after it cover what the script cannot reach through HTTP alone: an account that
 //! agents use, and exchange accounts, which this backend cannot trade yet.
@@ -17,6 +19,7 @@ use mochi_domain::InstrumentSpecification;
 use mochi_server::config::{config_from, Config};
 use mochi_server::{app, AppState, RuntimeHandle, RuntimeOptions};
 use regex::{Captures, Regex};
+use rusqlite::types::Value as SqlValue;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -111,14 +114,51 @@ fn config() -> Config {
     config
 }
 
-/// The runtime Node's script ran against: a fresh database with the fixture's added pairs, the
-/// same tape length, and no live feed.
+/// A JSON value as Node's `node:sqlite` read it back, for inserting the same row here.
+fn sql_value(value: &Value) -> SqlValue {
+    match value {
+        Value::Null => SqlValue::Null,
+        Value::Number(n) => match n.as_i64() {
+            Some(n) => SqlValue::Integer(n),
+            None => SqlValue::Real(n.as_f64().unwrap()),
+        },
+        Value::String(text) => SqlValue::Text(text.clone()),
+        other => panic!("node:sqlite never returns {other}"),
+    }
+}
+
+/// The rows Node's script wrote before its server started (the tables of later plans), inserted
+/// as they were read back. The columns' affinity stores each value as Node's insert did.
+fn insert_seed(db: &rusqlite::Connection, seed: &Value) {
+    for table in seed.as_array().unwrap() {
+        let name = table["table"].as_str().unwrap();
+        for row in table["rows"].as_array().unwrap() {
+            let row = row.as_object().unwrap();
+            let columns: Vec<&str> = row.keys().map(String::as_str).collect();
+            let sql = format!(
+                "INSERT INTO {name} ({}) VALUES ({})",
+                columns.join(","),
+                vec!["?"; columns.len()].join(",")
+            );
+            db.execute(
+                &sql,
+                rusqlite::params_from_iter(row.values().map(sql_value)),
+            )
+            .unwrap();
+        }
+    }
+}
+
+/// The runtime Node's script ran against: a fresh database with the fixture's added pairs and
+/// seeded rows, the same tape length, and no live feed. Starting it seeds the mock provider and
+/// pauses the seeded agent, as Node's constructor did.
 fn state(fixture: &Value) -> AppState {
     let db = mochi_store::open_in_memory().unwrap();
     for spec in fixture["addedInstruments"].as_array().unwrap() {
         let spec: InstrumentSpecification = serde_json::from_value(spec.clone()).unwrap();
         mochi_store::save_instrument(&db, &spec).unwrap();
     }
+    insert_seed(&db, &fixture["seed"]);
     let mut options = RuntimeOptions::new(db);
     options.replay_minutes = Some(fixture["replayMinutes"].as_u64().unwrap() as usize);
     AppState::new(Arc::new(config()), RuntimeHandle::start(options).unwrap())
@@ -243,20 +283,7 @@ fn not_available() -> (u16, Value) {
 async fn an_account_that_agents_use_cannot_be_deleted() {
     let state = short_tape_state();
     let id = new_account(&state).await;
-    state
-        .runtime
-        .call(|runtime| {
-            runtime
-                .connection()
-                .execute(
-                    "INSERT INTO providers (id,name,kind,base_url,default_model,created_at)
-                     VALUES ('mock','Mock','MOCK',NULL,'m',1)",
-                    [],
-                )
-                .unwrap()
-        })
-        .await
-        .unwrap();
+    // The runtime seeded the 'mock' provider when it started.
     sql(
         &state,
         "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,risk,

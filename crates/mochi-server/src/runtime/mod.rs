@@ -29,7 +29,7 @@ use mochi_domain::{
 };
 use mochi_market::replay::{ReplayMarketData, TapeTooShort};
 use mochi_store::{
-    get_setting, has_vault, list_instruments, set_setting, SqlitePaperStore, StoreError,
+    get_setting, has_vault, list_instruments, rows, set_setting, SqlitePaperStore, StoreError,
 };
 use rusqlite::Connection;
 use serde::{Serialize, Serializer};
@@ -131,6 +131,11 @@ impl RuntimeHandle {
     /// Every event from now on. A receiver that falls behind skips the oldest events.
     pub fn subscribe(&self) -> broadcast::Receiver<ServerEvent> {
         self.events.subscribe()
+    }
+
+    /// How many event subscriptions are open: one per connected `/api/events` stream.
+    pub fn subscriber_count(&self) -> usize {
+        self.events.receiver_count()
     }
 
     /// Runs `work` on the runtime task and returns its result. Calls run one at a time, in the
@@ -290,6 +295,8 @@ impl Runtime {
             stopping: None,
         };
 
+        // The mock provider the demo needs, if this database does not have it yet.
+        rows::seed_mock_provider(runtime.connection(), unix_ms())?;
         for spec in list_instruments(runtime.connection())? {
             runtime.live.track(&spec.symbol);
             runtime.register_instrument(spec);
@@ -302,6 +309,12 @@ impl Runtime {
         let speed = get_setting::<u32>(runtime.connection(), "replay.speed")?;
         runtime.clock.set_speed(speed.unwrap_or(DEFAULT_SPEED));
         runtime.last_replay_equity_at = lock(&runtime.replay).now();
+        // Agents never survive the process: nothing trades after a restart until the owner
+        // starts it. This backend cannot run agents yet, but the database it shares with Node
+        // must show the same state Node would.
+        if rows::pause_agents_after_restart(runtime.connection())? > 0 {
+            runtime.invalidate(&[Topic::Agents]);
+        }
         Ok(runtime)
     }
 
@@ -494,20 +507,24 @@ impl Runtime {
         vec![replay, self.live.status()]
     }
 
+    /// Nothing in this backend unlocks a vault yet, so one that exists is LOCKED.
+    pub fn vault_status(&self) -> Result<VaultStatus, ApiError> {
+        Ok(
+            if has_vault(self.connection()).map_err(|e| self.api_error(e))? {
+                VaultStatus::Locked
+            } else {
+                VaultStatus::Off
+            },
+        )
+    }
+
     pub fn state(&self) -> Result<StateBody, ApiError> {
-        let conn = self.connection();
-        let demo =
-            get_setting::<serde_json::Value>(conn, "demo.active").map_err(|e| self.api_error(e))?;
-        // Nothing in this backend unlocks a vault yet, so one that exists is LOCKED.
-        let vault = if has_vault(conn).map_err(|e| self.api_error(e))? {
-            VaultStatus::Locked
-        } else {
-            VaultStatus::Off
-        };
+        let demo = get_setting::<serde_json::Value>(self.connection(), "demo.active")
+            .map_err(|e| self.api_error(e))?;
         Ok(StateBody {
             // Node's `=== true`: any other stored value is not active.
             demo_active: demo == Some(serde_json::Value::Bool(true)),
-            vault,
+            vault: self.vault_status()?,
             replay: self.replay_state(),
             feeds: self.feeds(),
             instruments: self.instruments.clone(),
