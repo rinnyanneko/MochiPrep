@@ -9,7 +9,7 @@ use axum::http::{Request, StatusCode};
 use axum::routing::post;
 use axum::Router;
 use mochi_server::config::{config_from, Config};
-use mochi_server::{app, auth, routes, AppState, RuntimeHandle};
+use mochi_server::{app, auth, routes, AppState, RuntimeHandle, RuntimeOptions};
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -26,7 +26,10 @@ fn config_with(extra_origins: Option<&str>) -> Config {
 }
 
 fn state_with(config: Config) -> AppState {
-    AppState::new(Arc::new(config), RuntimeHandle::default())
+    // A short tape: these tests never step it, and the full one takes a while to generate.
+    let mut options = RuntimeOptions::new(mochi_store::open_in_memory().unwrap());
+    options.replay_minutes = Some(mochi_market::tape::WARMUP_MINUTES + 10);
+    AppState::new(Arc::new(config), RuntimeHandle::start(options).unwrap())
 }
 
 fn state() -> AppState {

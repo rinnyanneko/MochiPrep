@@ -40,9 +40,12 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
     /// Advances the simulation by one observed quote. Order of evaluation is fixed and
     /// pessimistic: funding, liquidation, stop-loss, trailing stop, take-profit, resting limits.
     /// Gaps between quotes are never interpolated, so a stop fills at the first quote past it.
+    /// There is no quote-age check here: an observed quote is replayed however old it is, and
+    /// the 60 s rule applies only when an order is placed.
     ///
-    /// On an error, events already queued by committed steps stay queued until the next flush,
-    /// as they do in TypeScript.
+    /// Each funding payment, liquidation and order evaluation commits on its own, and its events
+    /// go out as soon as it has (see `settle`). TypeScript instead keeps every event queued until
+    /// the end, so after a failure it would later report changes that were rolled back.
     pub fn on_quote(&mut self, quote: &Quote) -> Result<(), EngineError> {
         let instrument = self.instrument(&quote.symbol)?;
         let interval = Self::funding_interval_ms(instrument)?;
@@ -51,7 +54,8 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             .store
             .list_open_positions_for_market(quote.source, &quote.symbol)?
         {
-            self.apply_funding(position, quote, interval)?;
+            let step = self.apply_funding(position, quote, interval);
+            self.settle(step)?;
         }
 
         for position in self
@@ -65,7 +69,8 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
                 PositionSide::Short => mark.gte(&threshold),
             };
             if liquidated {
-                self.liquidate(position, quote)?;
+                let step = self.liquidate(position, quote);
+                self.settle(step)?;
             }
         }
 
@@ -78,12 +83,28 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             // An earlier order in this pass may have closed the position and canceled this one.
             if let Some(order) = self.store.get_order(&candidate.id)? {
                 if order.status == OrderStatus::Open {
-                    self.evaluate_order(order, quote)?;
+                    let step = self.evaluate_order(order, quote);
+                    self.settle(step)?;
                 }
             }
         }
-        self.flush();
         Ok(())
+    }
+
+    /// Ends one step of `on_quote`: a committed step's events are emitted, a failed step's
+    /// events are dropped with its rollback (as `set_protection` does), and the error stops the
+    /// quote. Steps that committed before it stay committed and reported.
+    fn settle(&mut self, step: Result<(), EngineError>) -> Result<(), EngineError> {
+        match step {
+            Ok(()) => {
+                self.flush();
+                Ok(())
+            }
+            Err(e) => {
+                self.drop_queued();
+                Err(e)
+            }
+        }
     }
 
     /// Pays or receives funding for every boundary passed since the last one, at this quote's
@@ -269,7 +290,8 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
         }
 
         let Some(position) = position else {
-            self.close_order(&mut order, Some("Position closed"), quote.ts)?;
+            self.store
+                .transaction(|| self.close_order(&mut order, Some("Position closed"), quote.ts))?;
             return Ok(());
         };
         let is_long = position.side == PositionSide::Long;
@@ -289,8 +311,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
                 .map_err(|e| math_error("the trailing extreme", e))?;
                 if extreme != order.trailing_extreme {
                     order.trailing_extreme = extreme.clone();
-                    // One row and no wallet or margin change, so it needs no store transaction.
-                    self.store.save_order(&order)?;
+                    self.store.transaction(|| self.store.save_order(&order))?;
                 }
                 match extreme {
                     None => false,
@@ -378,7 +399,8 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             .store
             .get_order(&order.id)?
             .ok_or_else(|| EngineError::Invalid(format!("Unknown order {}", order.id)))?;
-        self.close_order(&mut fresh, Some(&rejection.message()), ts)?;
+        self.store
+            .transaction(|| self.close_order(&mut fresh, Some(&rejection.message()), ts))?;
         self.queue(EngineEvent::Order { order: fresh });
         Ok(())
     }

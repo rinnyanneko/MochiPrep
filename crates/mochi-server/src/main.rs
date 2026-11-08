@@ -2,13 +2,27 @@ use std::net::Ipv4Addr;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use mochi_server::{app, load_config, AppState, RuntimeHandle};
+use mochi_server::{app, load_config, AppState, RuntimeHandle, RuntimeOptions};
 use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> ExitCode {
     let config = Arc::new(load_config());
-    let state = AppState::new(config.clone(), RuntimeHandle::default());
+    let db = match mochi_store::open_database(&config.db_path()) {
+        Ok(db) => db,
+        Err(error) => {
+            eprintln!("Cannot open {}: {error}", config.db_path().display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let runtime = match RuntimeHandle::start(RuntimeOptions::new(db)) {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("Cannot start: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let state = AppState::new(config.clone(), runtime.clone());
 
     // Loopback only, never 0.0.0.0: the token is the only other thing between the network and
     // trading keys.
@@ -25,10 +39,12 @@ async fn main() -> ExitCode {
         config.data_dir.display()
     );
 
-    if let Err(error) = axum::serve(listener, app(state))
+    let served = axum::serve(listener, app(state))
         .with_graceful_shutdown(shutdown_signal())
-        .await
-    {
+        .await;
+    // Pauses the replay and closes the database, as Node's shutdown does.
+    runtime.shutdown().await;
+    if let Err(error) = served {
         eprintln!("Server error: {error}");
         return ExitCode::FAILURE;
     }

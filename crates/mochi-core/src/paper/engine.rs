@@ -78,7 +78,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
     }
 
     /// A rolled-back transaction's events never happened.
-    fn drop_queued(&mut self) {
+    pub(super) fn drop_queued(&mut self) {
         self.queued.get_mut().clear();
     }
 
@@ -223,7 +223,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
         let mut order = self.build_order(&request, now);
         order.status = OrderStatus::Rejected;
         order.reject_reason = Some(rejection.message());
-        self.store.insert_order(&order)?;
+        self.store.transaction(|| self.store.insert_order(&order))?;
         (self.on_event)(EngineEvent::Order {
             order: order.clone(),
         });
@@ -246,7 +246,9 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             )));
         }
         let account = self.require_account(&order.account_id)?;
-        self.close_order(&mut order, None, (self.now)(account.source))?;
+        let now = (self.now)(account.source);
+        self.store
+            .transaction(|| self.close_order(&mut order, None, now))?;
         (self.on_event)(EngineEvent::Order { order });
         Ok(())
     }

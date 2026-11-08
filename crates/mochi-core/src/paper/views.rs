@@ -152,13 +152,15 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
     pub fn record_equity(&mut self, account_id: &str) -> Result<(), EngineError> {
         let account = self.require_account(account_id)?;
         let balance = self.balance_of(account_id)?;
-        self.store.upsert_equity_point(&EquityPoint {
+        let point = EquityPoint {
             account_id: account_id.to_string(),
             ts: (self.now)(account.source),
             equity: balance.equity,
             wallet: balance.wallet_balance,
             unrealized: balance.unrealized_pnl,
-        })?;
+        };
+        self.store
+            .transaction(|| self.store.upsert_equity_point(&point))?;
         Ok(())
     }
 }

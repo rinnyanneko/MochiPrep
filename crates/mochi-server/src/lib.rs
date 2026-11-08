@@ -5,6 +5,7 @@ pub mod auth;
 pub mod config;
 pub mod error;
 pub mod routes;
+pub mod runtime;
 pub mod validate;
 
 use std::fmt;
@@ -16,13 +17,7 @@ use rand::RngCore;
 
 pub use config::{load_config, Config};
 pub use error::ApiError;
-
-/// Stand-in for the runtime handle that Task 4 builds; routes take it from the state already.
-/// Not a unit struct, so callers already write `RuntimeHandle::default()` as they will later.
-#[derive(Clone, Default)]
-pub struct RuntimeHandle {
-    _placeholder: (),
-}
+pub use runtime::{RuntimeHandle, RuntimeOptions};
 
 /// Shared by every request.
 #[derive(Clone)]

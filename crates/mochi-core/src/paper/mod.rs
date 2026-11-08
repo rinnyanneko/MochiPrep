@@ -10,7 +10,7 @@ mod types;
 mod views;
 
 pub use engine::PaperExecutionEngine;
-pub use store::{PaperStore, StoreFailure};
+pub use store::{PaperStore, StoreFailure, StoreFailureKind};
 pub use trailing::{advance_extreme, trailing_trigger, validate_trailing};
 pub use types::{
     AccountConfigOverrides, Clock, CreateAccountArgs, EngineError, EngineEvent, EventSink,

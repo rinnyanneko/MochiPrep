@@ -20,7 +20,7 @@ const TIMEFRAMES: [(Timeframe, &str); 5] = [
 #[test]
 fn meta_matches() {
     let meta = &golden("replay.json")["meta"];
-    let feed = ReplayMarketData::new(None);
+    let feed = ReplayMarketData::new(None).unwrap();
     assert_eq!(feed.len() as i64, meta["len"].as_i64().unwrap());
     assert_eq!(feed.position(), WARMUP_MINUTES);
     assert_eq!(
@@ -34,7 +34,7 @@ fn meta_matches() {
 #[test]
 fn steps_match() {
     let golden = golden("replay.json");
-    let mut feed = ReplayMarketData::new(None);
+    let mut feed = ReplayMarketData::new(None).unwrap();
     for want in golden["steps"].as_array().unwrap() {
         let got = serde_json::to_value(feed.step()).unwrap();
         assert_eq!(&got, want);
@@ -44,7 +44,7 @@ fn steps_match() {
 #[test]
 fn snapshots_match() {
     let golden = golden("replay.json");
-    let mut feed = ReplayMarketData::new(None);
+    let mut feed = ReplayMarketData::new(None).unwrap();
     for snapshot in golden["snapshots"].as_array().unwrap() {
         let cursor = snapshot["cursor"].as_i64().unwrap();
         feed.seek(cursor);
@@ -86,7 +86,7 @@ fn snapshots_match() {
 #[test]
 fn edges_match() {
     let edges = &golden("replay.json")["edges"];
-    let mut feed = ReplayMarketData::new(None);
+    let mut feed = ReplayMarketData::new(None).unwrap();
     feed.seek(-5);
     assert_eq!(
         feed.position() as i64,
@@ -117,7 +117,7 @@ fn hex(bytes: &[u8]) -> String {
 #[test]
 fn full_step_sequence_hash_matches() {
     let golden = golden("replay.json");
-    let mut feed = ReplayMarketData::new(None);
+    let mut feed = ReplayMarketData::new(None).unwrap();
     let mut hash = Sha256::new();
     let mut step_count = 0;
     loop {
@@ -143,7 +143,7 @@ fn full_step_sequence_hash_matches() {
 #[test]
 fn candle_hash_matches() {
     let golden = golden("replay.json");
-    let mut feed = ReplayMarketData::new(None);
+    let mut feed = ReplayMarketData::new(None).unwrap();
     let mut hash = Sha256::new();
     for cursor in [5760, 9000, 20000, 25919] {
         feed.seek(cursor);
@@ -173,7 +173,7 @@ fn candle_hash_matches() {
 
 #[test]
 fn unknown_symbol_has_no_quote_or_candles() {
-    let feed = ReplayMarketData::new(None);
+    let feed = ReplayMarketData::new(None).unwrap();
     assert!(feed.get_quote("DOGEUSDT").is_none());
     assert!(feed.get_candles("DOGEUSDT", Timeframe::M1, 5).is_empty());
 }
