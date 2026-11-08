@@ -62,14 +62,14 @@ Adding a stop loss or a trailing stop where there was none, moving the stop loss
 
 **Awaiting confirmation.** If OKX does not answer a placement, the order is never resent. The dialog says "Sent to OKX, awaiting confirmation", the old protection stays in force, and the next sync looks the order up by its client ID. Further changes are refused until it is resolved.
 
-**Cleanup.** If a position disappears from OKX, MochiPrep's own leftover algos are cancelled only after the position has been missing for two syncs at least 10 seconds apart, so one bad read cannot remove a stop. A cancel that fails shows as `ours, cancel pending` on the position and is retried.
+**Cleanup.** If a position disappears from OKX, MochiPrep's own leftover algos are cancelled only after the position has been missing for two syncs at least 10 seconds apart, so one bad read cannot remove a stop. A cancel that fails shows on the position as a Cancel pending badge (not External, because it is still MochiPrep's own order) and is retried on every sync.
 
 **Not verified on OKX Demo yet.** Live trailing stops and protection changes have not been verified on OKX Demo, and they are untested with real money. Treat all of this as experimental until you have tried it on a Demo account. These behaviours are UNCONFIRMED, each with what MochiPrep does meanwhile:
 
 1. **Callback range.** The `callbackRatio` range OKX accepts is not confirmed. MochiPrep limits it to 0.001 to 0.3 (0.1% to 30%) and refuses anything else before sending.
-2. **Activation direction.** Which side of the price `activePx` may sit on is not confirmed. MochiPrep assumes at or above the price for a long and at or below it for a short, and in practice requires the activation price to be beyond the current price in that direction, refusing the rest before sending.
+2. **Activation direction.** Which side of the price `activePx` may sit on is not confirmed. MochiPrep assumes OKX starts tracking once the last price reaches the activation price (at or above it for a long, at or below it for a short). Separately, MochiPrep itself refuses, before sending, an activation price that is not strictly beyond the reference price in that direction: the entry price when opening, the last price for an open position.
 3. **Separate attached orders.** Whether a stop loss, take-profit and trailing stop can be attached to an entry as separate `attachAlgoOrds` elements is not confirmed. MochiPrep sends one element per leg. If OKX refuses, an entry with protection fails and nothing is placed.
-4. **Cancelling trailing stops.** Whether `cancel-algos` cancels a `move_order_stop` is not confirmed. A failed cancel shows as `ours, cancel pending` and is retried on every sync.
+4. **Cancelling trailing stops.** Whether `cancel-algos` cancels a `move_order_stop` is not confirmed. A failed cancel shows as a Cancel pending badge and is retried on every sync.
 5. **Algos when a position closes.** What OKX does with reduce-only algos once the position closes is not confirmed. MochiPrep cancels its own after the cleanup wait above, and does not touch External ones.
 6. **Which price trailing tracks.** Whether OKX trails the last, mark or index price is not confirmed. On OKX, MochiPrep shows the trigger price OKX reports and no extreme of its own.
 

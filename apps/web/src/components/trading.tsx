@@ -5,7 +5,6 @@ import type {
   AiTrailingStop,
   DecisionOutcome,
   DecisionRecord,
-  ExternalProtection,
   Fill,
   LedgerEvent,
   Order,
@@ -16,6 +15,7 @@ import type {
 } from '@mochiprep/shared';
 import { api } from '@/lib/api';
 import { money, pct, pnlClass, price, qty, shortId, signedMoney } from '@/lib/format';
+import { externalBadgeLabel } from '@/lib/protection';
 import { cn } from '@/lib/utils';
 import { attempt, useApp, useDateTime, useSourceAccounts } from '@/store';
 import { Badge, Button, Dialog, Field, Input, Segmented, Select, Table, type Tone } from './ui';
@@ -128,7 +128,7 @@ function ProtectionDialog({ position, onClose }: { position: PositionView; onClo
           </div>
         )}
         {position.externalProtection.length > 0 && (
-          <p className="text-xs text-ink-3">Orders marked External were placed on OKX itself. MochiPrep never changes them.</p>
+          <p className="text-xs text-ink-3">Orders marked External were placed on OKX itself, and MochiPrep never changes them. Cancel pending marks an old MochiPrep order that OKX has not yet confirmed cancelled; MochiPrep keeps retrying it.</p>
         )}
       </div>
       <div className="mt-4 flex justify-end gap-2">
@@ -152,13 +152,12 @@ function ProtectionExtras({ p }: { p: PositionView }) {
       )}
       {p.externalProtection.map((e, i) => (
         <Badge key={i} data-testid="external-protection" title={e.detail}>
-          External {EXTERNAL_LABEL[e.kind]}{e.triggerPrice ? ` ${price(e.triggerPrice, p.symbol)}` : ''}
+          {externalBadgeLabel(e, e.triggerPrice ? price(e.triggerPrice, p.symbol) : null)}
         </Badge>
       ))}
     </div>
   );
 }
-const EXTERNAL_LABEL: Record<ExternalProtection['kind'], string> = { STOP_LOSS: 'SL', TAKE_PROFIT: 'TP', TRAILING: 'trail' };
 
 export function PositionsTable({ positions, actions = true, editable = true, accountNames }: { positions: PositionView[]; actions?: boolean; editable?: boolean; accountNames?: Map<string, string> }) {
   const [editing, setEditing] = useState<PositionView | null>(null);
