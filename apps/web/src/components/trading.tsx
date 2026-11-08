@@ -11,9 +11,9 @@ import type {
   PositionView,
 } from '@mochiprep/shared';
 import { api } from '@/lib/api';
-import { dateTime, money, pct, pnlClass, price, qty, shortId, signedMoney } from '@/lib/format';
+import { money, pct, pnlClass, price, qty, shortId, signedMoney } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { attempt, useApp, useSourceAccounts } from '@/store';
+import { attempt, useApp, useDateTime, useSourceAccounts } from '@/store';
 import { Badge, Button, Dialog, Field, Input, Select, Table, type Tone } from './ui';
 
 export function AccountPicker({ allowAll, className }: { allowAll?: boolean; className?: string }) {
@@ -47,8 +47,8 @@ export function useCurrentAccount() {
   return accounts.find((a) => a.id === accountId) ?? accounts[0];
 }
 
-export const sideBadge = (side: Position['side']) => <Badge tone={side === 'LONG' ? 'up' : 'down'}>{side}</Badge>;
-const orderSide = (side: Order['side']) => <span className={side === 'BUY' ? 'text-up' : 'text-down'}>{side}</span>;
+export const sideBadge = (side: Position['side']) => <Badge tone={side === 'LONG' ? 'rise' : 'fall'}>{side}</Badge>;
+const orderSide = (side: Order['side']) => <span className={side === 'BUY' ? 'text-rise' : 'text-fall'}>{side}</span>;
 
 function ProtectionDialog({ position, onClose }: { position: PositionView; onClose(): void }) {
   const [stop, setStop] = useState(position.stopLoss ?? '');
@@ -120,6 +120,7 @@ const ORDER_LABEL: Record<Order['type'], string> = { MARKET: 'Market', LIMIT: 'L
 const ORDER_TONE: Record<Order['status'], Tone> = { OPEN: 'info', FILLED: 'up', CANCELED: 'neutral', REJECTED: 'down' };
 
 export function OrdersTable({ orders, cancellable, emptyText }: { orders: Order[]; cancellable?: boolean; emptyText: string }) {
+  const dateTime = useDateTime();
   return (
     <Table head={['Time', 'Symbol', 'Side', 'Type', 'Size', 'Price', 'Status', 'Order', ...(cancellable ? [''] : [])]} empty={orders.length === 0 && emptyText}>
       {orders.map((o) => (
@@ -147,6 +148,7 @@ export function OrdersTable({ orders, cancellable, emptyText }: { orders: Order[
 }
 
 export function FillsTable({ fills, emptyText = 'No fills yet.' }: { fills: Fill[]; emptyText?: string }) {
+  const dateTime = useDateTime();
   return (
     <Table head={['Time', 'Symbol', 'Side', 'Size', 'Price', 'Fee', 'Realized PnL', 'Liquidity', 'Fill']} empty={fills.length === 0 && emptyText}>
       {fills.map((f) => (
@@ -167,6 +169,7 @@ export function FillsTable({ fills, emptyText = 'No fills yet.' }: { fills: Fill
 }
 
 export function ClosedPositionsTable({ positions }: { positions: Position[] }) {
+  const dateTime = useDateTime();
   return (
     <Table head={['Closed', 'Symbol', 'Side', 'Max size', 'Entry', 'Exit', 'Gross PnL', 'Fees', 'Funding', 'Net PnL', 'Result']} empty={positions.length === 0 && 'No closed positions yet.'}>
       {positions.map((p) => {
@@ -192,6 +195,7 @@ export function ClosedPositionsTable({ positions }: { positions: Position[] }) {
 }
 
 export function LedgerTable({ events }: { events: LedgerEvent[] }) {
+  const dateTime = useDateTime();
   return (
     <Table head={['#', 'Time', 'Event', 'Wallet change', 'Margin change', 'Wallet after', 'Memo']} empty={events.length === 0 && 'The ledger is empty.'}>
       {events.map((e) => (
@@ -227,9 +231,10 @@ const OUTCOME: Record<DecisionOutcome, { label: string; tone: Tone }> = {
 export const OutcomeBadge = ({ outcome }: { outcome: DecisionOutcome }) => <Badge tone={OUTCOME[outcome].tone}>{OUTCOME[outcome].label}</Badge>;
 export const OUTCOME_OPTIONS = Object.entries(OUTCOME).map(([value, o]) => ({ value: value as DecisionOutcome, label: o.label }));
 
-export const actionTone = (action?: string): Tone => (action === 'LONG' ? 'up' : action === 'SHORT' ? 'down' : action === 'CLOSE' ? 'accent' : 'neutral');
+export const actionTone = (action?: string): Tone => (action === 'LONG' ? 'rise' : action === 'SHORT' ? 'fall' : action === 'CLOSE' ? 'accent' : 'neutral');
 
 export function DecisionList({ decisions, selected, onSelect, emptyText }: { decisions: DecisionRecord[]; selected?: string; onSelect(d: DecisionRecord): void; emptyText: string }) {
+  const dateTime = useDateTime();
   if (decisions.length === 0) return <p className="px-5 py-8 text-center text-[13px] text-ink-3">{emptyText}</p>;
   return (
     <ul className="divide-y divide-line">
@@ -263,6 +268,7 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
 );
 
 export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
+  const dateTime = useDateTime();
   const [showRaw, setShowRaw] = useState(false);
   const ai = d.decision;
   return (

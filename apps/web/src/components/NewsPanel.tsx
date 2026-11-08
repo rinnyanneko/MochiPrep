@@ -2,11 +2,12 @@ import { Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import type { NewsItem, NewsSource, SymbolId } from '@mochiprep/shared';
 import { api } from '@/lib/api';
-import { dateTime } from '@/lib/format';
-import { attempt, useQuery } from '@/store';
+
+import { attempt, useDateTime, useQuery } from '@/store';
 import { Badge, Button, Card, CardHeader, Input } from './ui';
 
 export function NewsPanel({ symbol }: { symbol: SymbolId }) {
+  const dateTime = useDateTime();
   const { data, error } = useQuery(() => api.get<{ items: NewsItem[]; error: string | null }>(`/news?symbol=${symbol}`), [symbol], ['news']);
   return (
     <Card className="mt-3" data-testid="news-panel">

@@ -19,10 +19,10 @@ import {
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '@/lib/api';
-import { dateTime } from '@/lib/format';
+
 import { DYOR_NOTICE } from '@/lib/notices';
 import { cn } from '@/lib/utils';
-import { attempt, useApp, useSourceSignals, type Page } from '@/store';
+import { attempt, useApp, useDateTime, useSourceSignals, type Page } from '@/store';
 import { Mochi, MOOD_LABEL, type MochiMood } from './Mochi';
 import { Badge, Button, Dialog, Segmented, Select, type Tone } from './ui';
 import { UnlockBanner } from './VaultCard';
@@ -153,6 +153,7 @@ export function FeedBadge() {
 }
 
 function ReplayControls() {
+  const dateTime = useDateTime();
   const replay = useApp((s) => s.replay);
   if (!replay) return null;
   const send = (body: object) => attempt(() => api.post('/replay', body));

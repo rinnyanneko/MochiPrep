@@ -6,9 +6,9 @@ import { PageTitle } from '@/components/Shell';
 import { DecisionDetail, DecisionList, VenueBadge } from '@/components/trading';
 import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Segmented, Select, Textarea, type Tone } from '@/components/ui';
 import { api } from '@/lib/api';
-import { dateTime, money, pct, pnlClass } from '@/lib/format';
+import { money, pct, pnlClass } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { attempt, useApp, useQuery, useSourceAccounts, useSymbols, type AccountView } from '@/store';
+import { attempt, useApp, useDateTime, useQuery, useSourceAccounts, useSymbols, type AccountView } from '@/store';
 
 const STATUS: Record<AgentStatus, { tone: Tone; mood: MochiMood; label: string }> = {
   IDLE: { tone: 'neutral', mood: 'sleeping', label: 'Idle' },
@@ -183,6 +183,7 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
 }
 
 function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; selected: boolean; onSelect(): void; onEdit(): void }) {
+  const dateTime = useDateTime();
   const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
   const provider = useApp((s) => s.providers.find((p) => p.id === agent.providerId));
   const [busy, setBusy] = useState(false);

@@ -1,7 +1,8 @@
 import { TIMEFRAME_MS, type DecisionRecord, type Fill, type Order, type PositionView, type SymbolId, type Timeframe } from '@mochiprep/shared';
 import { qty, signedMoney } from './format';
 
-export type ChartTone = 'up' | 'down' | 'neutral' | 'warn' | 'info';
+/** rise and fall are market direction and follow the color flip. danger is a status and does not. */
+export type ChartTone = 'rise' | 'fall' | 'danger' | 'neutral' | 'warn' | 'info';
 
 export interface PriceLineSpec {
   /** Stable across updates, so a moving PnL label edits the line rather than recreating it. */
@@ -44,13 +45,13 @@ export function buildMarkers(fills: Fill[], symbol: SymbolId, timeframe: Timefra
       const letter = fill.side === 'BUY' ? 'B' : 'S';
       const place = { id: fill.id, barTime: barTimeOf(fill.ts, timeframe), position: fill.side === 'BUY' ? 'belowBar' : 'aboveBar' } as const;
       if (fill.liquidity === 'LIQUIDATION') {
-        return { ...place, text: `Liq ${signedMoney(pnl)}`, tone: 'down', shape: 'circle' };
+        return { ...place, text: `Liq ${signedMoney(pnl)}`, tone: 'danger', shape: 'circle' };
       }
       return {
         ...place,
         // Only a closing fill has realized PnL. An entry just says which way it went.
         text: pnl === 0 ? letter : `${letter} ${signedMoney(pnl)}`,
-        tone: fill.side === 'BUY' ? 'up' : 'down',
+        tone: fill.side === 'BUY' ? 'rise' : 'fall',
         shape: fill.side === 'BUY' ? 'arrowUp' : 'arrowDown',
       };
     });
@@ -84,10 +85,10 @@ export function buildPriceLines(positions: PositionView[], orders: Order[], symb
     } else {
       const { pnl, roePct } = openPnl(position, mark);
       const roe = roePct === null ? '' : ` (${roePct > 0 ? '+' : roePct < 0 ? '−' : ''}${Math.abs(roePct).toFixed(2)}%)`;
-      lines.push({ id: 'entry', price: Number(position.entryPrice), label: `${size}  ${signedMoney(pnl)}${roe}`, tone: pnl >= 0 ? 'up' : 'down' });
+      lines.push({ id: 'entry', price: Number(position.entryPrice), label: `${size}  ${signedMoney(pnl)}${roe}`, tone: pnl >= 0 ? 'rise' : 'fall' });
     }
-    if (position.takeProfit) lines.push({ id: 'tp', price: Number(position.takeProfit), label: 'TP', tone: 'up' });
-    if (position.stopLoss) lines.push({ id: 'sl', price: Number(position.stopLoss), label: 'SL', tone: 'down' });
+    if (position.takeProfit) lines.push({ id: 'tp', price: Number(position.takeProfit), label: 'TP', tone: 'rise' });
+    if (position.stopLoss) lines.push({ id: 'sl', price: Number(position.stopLoss), label: 'SL', tone: 'fall' });
     if (Number(position.liquidationPrice) > 0) lines.push({ id: 'liq', price: Number(position.liquidationPrice), label: 'Liq', tone: 'warn' });
   }
   for (const order of orders) {
@@ -105,8 +106,8 @@ export function buildSignalLines(signals: DecisionRecord[], symbol: SymbolId): P
     if (signal.symbol !== symbol || !ai || !entry) return [];
     const key = `signal:${signal.id}`;
     const lines: PriceLineSpec[] = [{ id: `${key}:entry`, price: Number(entry), label: `Suggested ${ai.action}`, tone: 'info' }];
-    if (ai.takeProfit !== null) lines.push({ id: `${key}:tp`, price: ai.takeProfit, label: 'Suggested TP', tone: 'up' });
-    if (ai.stopLoss !== null) lines.push({ id: `${key}:sl`, price: ai.stopLoss, label: 'Suggested SL', tone: 'down' });
+    if (ai.takeProfit !== null) lines.push({ id: `${key}:tp`, price: ai.takeProfit, label: 'Suggested TP', tone: 'rise' });
+    if (ai.stopLoss !== null) lines.push({ id: `${key}:sl`, price: ai.stopLoss, label: 'Suggested SL', tone: 'fall' });
     return lines;
   });
 }

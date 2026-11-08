@@ -2,12 +2,13 @@ import { Check, TriangleAlert, X } from 'lucide-react';
 import { useState } from 'react';
 import type { DecisionRecord } from '@mochiprep/shared';
 import { api } from '@/lib/api';
-import { dateTime, money, price, qty } from '@/lib/format';
-import { attempt, useApp, useSourceSignals } from '@/store';
+import { money, price, qty } from '@/lib/format';
+import { attempt, useApp, useDateTime, useSourceSignals } from '@/store';
 import { actionTone, VenueBadge } from './trading';
 import { Badge, Button, Card, CardHeader, Dialog } from './ui';
 
 function SignalRow({ signal, onExecute }: { signal: DecisionRecord; onExecute(): void }) {
+  const dateTime = useDateTime();
   const ai = signal.decision!;
   const sized = signal.risk?.sized;
   const venue = useApp((s) => s.accounts.find((a) => a.id === signal.accountId)?.venue) ?? signal.venue;
