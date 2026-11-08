@@ -70,7 +70,8 @@ export const PlaceOrderSchema = z.strictObject({
 export const ProtectionSchema = z.strictObject({
   stopLoss: decimalString.nullable(),
   takeProfit: decimalString.nullable(),
-  trailingStop: TrailingStopSchema.nullable(),
+  /** Absent keeps the current trailing stop; null removes it. */
+  trailingStop: TrailingStopSchema.nullable().optional(),
 });
 
 export const ClosePositionSchema = z.strictObject({

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
-import { AgentInputSchema, DEFAULT_RISK_SETTINGS, type OrderRequest, type Quote } from '@mochiprep/shared';
+import { AgentInputSchema, DEFAULT_RISK_SETTINGS, ProtectionSchema, type OrderRequest, type Quote } from '@mochiprep/shared';
 import { auditLedger, d, PaperExecutionEngine } from '@mochiprep/core';
 import { openDatabase } from '../src/db/database';
 import { SqliteStore } from '../src/db/store';
@@ -321,6 +321,12 @@ describe('PaperExecutionEngine with SQLite', () => {
     expect(store.getOrder('trail-1')!.trailingExtreme).toBe('112');
     // An ordinary order keeps them all empty.
     expect(store.getOrder(base.id)).toMatchObject({ trailingKind: null, trailingCallback: null, trailingActivationPrice: null, trailingExtreme: null, attachedTrailingStop: null });
+  });
+
+  it('accepts a protection body without trailingStop and still rejects unknown keys', () => {
+    expect(ProtectionSchema.parse({ stopLoss: '90', takeProfit: null })).toEqual({ stopLoss: '90', takeProfit: null });
+    expect(ProtectionSchema.parse({ stopLoss: null, takeProfit: null, trailingStop: null }).trailingStop).toBeNull();
+    expect(ProtectionSchema.safeParse({ stopLoss: '90', takeProfit: null, extra: 1 }).success).toBe(false);
   });
 
   it('keeps allowTrailingStop through save and load, off by default', () => {
