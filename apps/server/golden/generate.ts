@@ -1387,6 +1387,28 @@ function riskFixture() {
     make({ decision: protectDec({ stopLoss: 90 }), openPositions: [position('BTCUSDT', 'LONG', '5')] }),
     make({ decision: protectDec({ stopLoss: 89.99 }), openPositions: [position('BTCUSDT', 'LONG', '5')] }),
     make({ settings: settings({ maxRiskPerTradePct: 0 }), decision: protectDec({}), openPositions: [held] }),
+    // The budget applies only to a new or looser stop. 5 BTC with a stop at 90, the last at 110.
+    ...[
+      [90, '90'], [98, '90'], [100, '105'], [89, '90'], [98, null],
+    ].map(([stopLoss, current]) => make({
+      decision: protectDec({ stopLoss: stopLoss as number, takeProfit: 130 }),
+      openPositions: [position('BTCUSDT', 'LONG', '5')],
+      quote: { ...base, bid: '109', ask: '111', last: '110', mark: '110' },
+      protection: { ...heldProtection, stopLoss: current as string | null },
+    })),
+    make({
+      decision: protectDec({ stopLoss: 98, takeProfit: 130 }), openPositions: [position('BTCUSDT', 'LONG', '5')],
+      quote: { ...base, bid: '109', ask: '111', last: '110', mark: '110' }, protection: null,
+    }),
+    // A short loosens upwards: 5 BTC with a stop at 110, the last at 90.
+    ...[102, 110, 111].map((stopLoss) => make({
+      decision: protectDec({ stopLoss, takeProfit: 80 }),
+      openPositions: [{ ...position('BTCUSDT', 'SHORT', '5'), liquidationPrice: '200' }],
+      quote: { ...base, bid: '89', ask: '91', last: '90', mark: '90' },
+      protection: { ...heldProtection, stopLoss: '110' },
+    })),
+    // OKX sends liqPx empty, or 0, for some positions: stop-before-liq is skipped.
+    ...['', '0'].map((liquidationPrice) => make({ decision: protectDec({}), openPositions: [{ ...held, liquidationPrice }] })),
     // Past liquidation (70 for the long, 130 for the short).
     make({ decision: protectDec({ stopLoss: 70 }), openPositions: [held] }),
     make({ decision: protectDec({ stopLoss: 65 }), openPositions: [held] }),

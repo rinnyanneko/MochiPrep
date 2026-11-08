@@ -137,4 +137,44 @@ describe('risk engine', () => {
     expect(failed({ decision: protect({}) })).toEqual(['has-position']);
     expect(failed({ openPositions: [held], now: 40_000, decision: protect({}) })).toEqual(['freshness']);
   });
+
+  it('PROTECT measures the risk budget only when the stop is new or looser than the current one', () => {
+    // Long 5 at 100 with a stop at 90 and a 50 USDT budget; the last price has risen to 110.
+    const five = [{ ...held, quantity: '5' }];
+    const up = { ...quote, bid: '109', ask: '111', last: '110', mark: '110' };
+    const current = { stopLoss: '90', takeProfit: '120', trailingStop: null };
+    const at = (stopLoss: number, protection: unknown = current) =>
+      evaluateRisk(riskInput({ openPositions: five, quote: up, protection, decision: protect({ stopLoss, takeProfit: 130 }) })).checks;
+    const ids = (checks: ReturnType<typeof at>) => checks.filter((c) => !c.passed).map((c) => c.id);
+    // Keeping 90 or tightening to 98 reduces risk, so the budget does not apply.
+    expect(ids(at(90))).toEqual([]);
+    expect(at(90).some((c) => c.id === 'protect-risk')).toBe(false);
+    expect(ids(at(98))).toEqual([]);
+    expect(at(98).some((c) => c.id === 'protect-risk')).toBe(false);
+    // Loosening is measured from the last price: 100 is 10 away (50 USDT), 99.99 is past it.
+    expect(ids(at(100, { ...current, stopLoss: '105' }))).toEqual([]);
+    expect(at(100, { ...current, stopLoss: '105' }).some((c) => c.id === 'protect-risk')).toBe(true);
+    expect(ids(at(89, current))).toEqual(['protect-risk']);
+    // No current stop: always measured.
+    expect(ids(at(98, { ...current, stopLoss: null }))).toEqual(['protect-risk']);
+    expect(ids(at(98, null))).toEqual(['protect-risk']);
+    // A short loosens upwards.
+    const short = [{ ...held, side: 'SHORT', quantity: '5', liquidationPrice: '200' }];
+    const down = { ...quote, bid: '89', ask: '91', last: '90', mark: '90' };
+    const shortAt = (stopLoss: number) =>
+      evaluateRisk(riskInput({ openPositions: short, quote: down, protection: { ...current, stopLoss: '110' }, decision: protect({ stopLoss, takeProfit: 80 }) }))
+        .checks.filter((c) => !c.passed).map((c) => c.id);
+    expect(shortAt(102)).toEqual([]);
+    expect(shortAt(110)).toEqual([]);
+    expect(shortAt(111)).toEqual(['protect-risk']);
+  });
+
+  it('PROTECT skips stop-before-liq when the liquidation price is unknown', () => {
+    // OKX sends liqPx empty, or 0, for some positions.
+    for (const liquidationPrice of ['', '0']) {
+      const checks = evaluateRisk(riskInput({ openPositions: [{ ...held, liquidationPrice }], decision: protect({}) })).checks;
+      expect(checks.some((c) => c.id === 'stop-before-liq')).toBe(false);
+      expect(checks.filter((c) => !c.passed)).toEqual([]);
+    }
+  });
 });

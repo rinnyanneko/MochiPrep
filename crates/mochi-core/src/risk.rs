@@ -32,8 +32,9 @@ pub struct RiskInput {
     pub fees: PaperAccountConfig,
     /// The agent's switch: when off, any `trailingStop` in the decision, null included, is refused.
     pub allow_trailing_stop: bool,
-    /// The current protection of this symbol's open position, or None without one. No check reads
-    /// it: PROTECT states the full target, and a kept trailing stop was validated when it was set.
+    /// The current protection of this symbol's open position, or None without one. PROTECT states
+    /// the full target, and a kept trailing stop was validated when it was set; only the current
+    /// stop loss is read, to tell a looser stop (budget applies) from a kept or tighter one.
     pub protection: Option<Protection>,
 }
 
@@ -548,39 +549,74 @@ fn protect(
 
     if let Some(stop) = decision.stop_loss {
         let stop_dec = number(stop);
-        let liquidation = Dec::parse(&existing.liquidation_price)?;
-        let before_liq = if side == PositionSide::Long {
-            stop_dec.gt(&liquidation)
-        } else {
-            stop_dec.lt(&liquidation)
+        // OKX sends liqPx empty, or 0, for some positions: the liquidation price is then unknown
+        // and there is nothing to compare against.
+        if let Some(liquidation) = known_liquidation(&existing.liquidation_price)? {
+            let before_liq = if side == PositionSide::Long {
+                stop_dec.gt(&liquidation)
+            } else {
+                stop_dec.lt(&liquidation)
+            };
+            checks.check(
+                "stop-before-liq",
+                "Stop triggers before liquidation",
+                before_liq,
+                format!(
+                    "stop {}, liquidation {}",
+                    js_number_string(stop),
+                    liquidation.to_fixed_dp(2)
+                ),
+            );
+        }
+        // Keeping or tightening the stop only reduces risk, so a trade in profit can always keep
+        // its stop. A new or looser stop must fit the budget: the loss if it fired from here, on
+        // the size held.
+        let current = input
+            .protection
+            .as_ref()
+            .and_then(|protection| protection.stop_loss.as_deref());
+        let looser = match current {
+            None => true,
+            Some(current) => {
+                let current = Dec::parse(current)?;
+                if side == PositionSide::Long {
+                    stop_dec.lt(&current)
+                } else {
+                    stop_dec.gt(&current)
+                }
+            }
         };
-        checks.check(
-            "stop-before-liq",
-            "Stop triggers before liquidation",
-            before_liq,
-            format!(
-                "stop {}, liquidation {}",
-                js_number_string(stop),
-                liquidation.to_fixed_dp(2)
-            ),
-        );
-        // The loss if the new stop fired from here, on the size already held.
-        let risk = Dec::parse(&existing.quantity)?.mul(&abs(last.sub(&stop_dec)));
-        let budget = Dec::parse(&input.balance.equity)?
-            .mul(&number(settings.max_risk_per_trade_pct))
-            .div(&number(100.0))?;
-        checks.check(
-            "protect-risk",
-            "Risk per trade",
-            risk.lte(&budget),
-            format!(
-                "risk {} USDT, limit {} USDT",
-                risk.to_fixed_dp(2),
-                budget.to_fixed_dp(2)
-            ),
-        );
+        if looser {
+            let risk = Dec::parse(&existing.quantity)?.mul(&abs(last.sub(&stop_dec)));
+            let budget = Dec::parse(&input.balance.equity)?
+                .mul(&number(settings.max_risk_per_trade_pct))
+                .div(&number(100.0))?;
+            checks.check(
+                "protect-risk",
+                "Risk per trade",
+                risk.lte(&budget),
+                format!(
+                    "risk {} USDT, limit {} USDT",
+                    risk.to_fixed_dp(2),
+                    budget.to_fixed_dp(2)
+                ),
+            );
+        }
     }
     Ok(())
+}
+
+/// None when OKX left the liquidation price empty or 0, which it does for some positions.
+fn known_liquidation(price: &str) -> Result<Option<Dec>, Unevaluable> {
+    if price.trim().is_empty() {
+        return Ok(None);
+    }
+    let liquidation = Dec::parse(price)?;
+    Ok(if liquidation.is_zero() {
+        None
+    } else {
+        Some(liquidation)
+    })
 }
 
 /// The model writes numbers; the trailing rule reads decimal strings, as the engine stores them.

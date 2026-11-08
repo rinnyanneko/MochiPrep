@@ -35,8 +35,9 @@ export interface RiskInput {
   /** The agent's switch: when off, any `trailingStop` in the decision, null included, is refused. */
   allowTrailingStop: boolean;
   /**
-   * The current protection of this symbol's open position, or null without one. No check reads
-   * it: PROTECT states the full target, and a kept trailing stop was validated when it was set.
+   * The current protection of this symbol's open position, or null without one. PROTECT states
+   * the full target, and a kept trailing stop was validated when it was set; only the current stop
+   * loss is read, to tell a looser stop (budget applies) from a kept or tighter one.
    */
   protection: Protection | null;
 }
@@ -266,17 +267,26 @@ function protect(
 
   if (decision.stopLoss !== null) {
     const stop = d(decision.stopLoss);
-    const liquidation = d(existing.liquidationPrice);
-    check(
-      'stop-before-liq',
-      'Stop triggers before liquidation',
-      side === 'LONG' ? stop.gt(liquidation) : stop.lt(liquidation),
-      `stop ${decision.stopLoss}, liquidation ${liquidation.toFixed(2)}`,
-    );
-    // The loss if the new stop fired from here, on the size already held.
-    const risk = d(existing.quantity).mul(last.minus(stop).abs());
-    const budget = d(input.balance.equity).mul(settings.maxRiskPerTradePct).div(100);
-    check('protect-risk', 'Risk per trade', risk.lte(budget), `risk ${risk.toFixed(2)} USDT, limit ${budget.toFixed(2)} USDT`);
+    // OKX sends liqPx empty, or 0, for some positions: the liquidation price is then unknown and
+    // there is nothing to compare against.
+    if (liquidationKnown(existing.liquidationPrice)) {
+      const liquidation = d(existing.liquidationPrice);
+      check(
+        'stop-before-liq',
+        'Stop triggers before liquidation',
+        side === 'LONG' ? stop.gt(liquidation) : stop.lt(liquidation),
+        `stop ${decision.stopLoss}, liquidation ${liquidation.toFixed(2)}`,
+      );
+    }
+    // Keeping or tightening the stop only reduces risk, so a trade in profit can always keep its
+    // stop. A new or looser stop must fit the budget: the loss if it fired from here, on the size held.
+    const current = input.protection?.stopLoss ?? null;
+    const looser = current === null || (side === 'LONG' ? stop.lt(d(current)) : stop.gt(d(current)));
+    if (looser) {
+      const risk = d(existing.quantity).mul(last.minus(stop).abs());
+      const budget = d(input.balance.equity).mul(settings.maxRiskPerTradePct).div(100);
+      check('protect-risk', 'Risk per trade', risk.lte(budget), `risk ${risk.toFixed(2)} USDT, limit ${budget.toFixed(2)} USDT`);
+    }
   }
 
   return finish();
@@ -296,6 +306,10 @@ function checkTrailing(check: Check, side: PositionSide, reference: Dec, ai: AiT
   const refusal = validateTrailing(side, reference, spec, d(getInstrument(symbol).priceTick));
   const activation = spec.activationPrice === null ? 'no activation price' : `activation ${spec.activationPrice}`;
   check('trailing-stop', 'Trailing stop valid', refusal === null, refusal ?? `${spec.kind} ${spec.callback}, ${activation} for ${side}`);
+}
+
+function liquidationKnown(price: string): boolean {
+  return price.trim() !== '' && !d(price).isZero();
 }
 
 function stopOnCorrectSide(side: PositionSide, reference: Dec, stop: number | null): boolean {
