@@ -1,6 +1,10 @@
 //! SQLite store shared with the Node backend: same pragmas, same migration files, same
 //! `schema_migrations` bookkeeping, so either backend can open a database the other created.
 
+mod paper;
+
+pub use paper::SqlitePaperStore;
+
 use rusqlite::Connection;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -49,6 +53,12 @@ pub enum StoreError {
         name: String,
         source: rusqlite::Error,
     },
+    /// Another connection held a read, so the WAL could not be truncated and the old page
+    /// images, possibly plaintext secrets, are still in it. Retry once that reader is done.
+    #[error(
+        "WAL checkpoint was blocked by another connection; deleted data may remain in the WAL"
+    )]
+    CheckpointBlocked,
 }
 
 // secure_delete zeroes freed content, so a key removed when sealing does not linger in free pages.
@@ -82,8 +92,12 @@ pub fn open_in_memory() -> Result<Connection, StoreError> {
 /// gone: until then old page images still sit in the WAL. Callers only call it outside a
 /// transaction, since a checkpoint cannot truncate while one is open.
 pub fn scrub(conn: &Connection) -> Result<(), StoreError> {
-    // The pragma returns a row, so it is read rather than executed.
-    conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+    // The pragma reports (busy, log, checkpointed) as a row instead of failing: busy = 1 means
+    // a reader stopped the truncation, and claiming success then would hide lingering plaintext.
+    let busy: i64 = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))?;
+    if busy != 0 {
+        return Err(StoreError::CheckpointBlocked);
+    }
     Ok(())
 }
 
