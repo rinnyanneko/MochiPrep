@@ -1039,6 +1039,41 @@ describe('OKX execution', () => {
         await app.close();
       });
 
+      it('accepts a PROTECT while unarmed, leaving the arming rule to the protection gate', async () => {
+        const account = await connect('OKX_LIVE');
+        runtime.arm(account.id, ARM_PHRASE);
+        await runtime.execution(account.id).placeOrder(order(account.id)); // long, stop at 74000
+        runtime.disarm();
+        const agent = asSignal(account.id);
+        const protect = (stopLoss: number) =>
+          vi.spyOn(longDecision, 'complete').mockResolvedValue({
+            text: JSON.stringify({ symbol: 'BTCUSDT', action: 'PROTECT', orderType: 'MARKET', entryPrice: null, stopLoss, takeProfit: null, reason: 'test', confidence: 0.7, expiresAt: null }),
+            inputTokens: 1,
+            outputTokens: 1,
+          });
+
+        // Tighter: lowers risk, so it needs no arming, like an exit.
+        protect(74_500);
+        const tighter = (await runtime.runner.runCycle(agent.id, 'RUN_ONCE'))!;
+        expect(tighter.outcome).toBe('SIGNAL');
+        expect(() => runtime.assertCanExecuteSignal(tighter)).not.toThrow();
+        const placed = okx.algoPlaced.length;
+        expect((await runtime.runner.executeSignal(tighter.id)).outcome).toBe('EXECUTED');
+        expect(okx.algoPlaced).toHaveLength(placed + 1);
+        expect(await runtime.execution(account.id).protectionOf(account.id, 'BTCUSDT')).toMatchObject({ stopLoss: '74500' });
+
+        // Looser: accepted here, refused by the gate, nothing sent.
+        protect(73_500);
+        const looser = (await runtime.runner.runCycle(agent.id, 'RUN_ONCE'))!;
+        expect(() => runtime.assertCanExecuteSignal(looser)).not.toThrow();
+        const refused = await runtime.runner.executeSignal(looser.id);
+        expect(refused).toMatchObject({ outcome: 'ORDER_REJECTED' });
+        expect(refused.outcomeDetail).toContain('NOT_ARMED');
+        expect(okx.algoPlaced).toHaveLength(placed + 1);
+        expect(await runtime.execution(account.id).protectionOf(account.id, 'BTCUSDT')).toMatchObject({ stopLoss: '74500' });
+        vi.restoreAllMocks();
+      });
+
       it('still passes account ceilings when accepted', async () => {
         const account = await connect('OKX_LIVE');
         runtime.arm(account.id, ARM_PHRASE);
