@@ -44,6 +44,7 @@ const SANITIZE_CASES = [
   'x\r\ny\tz\u000Bv\u000Cw',
   '؀۝܏࢐࢑࣢ arabic and syriac format',
   '\u{110BD}\u{13430}\u{13438}\u{1BCA0}\u{1BCA3} more format',
+  'egyptian \u{13439}a\u{1343A}b\u{1343B}c\u{1343C}d\u{1343D}e\u{1343E}f\u{1343F} Unicode 15 format',
   ' leading and trailing 　',
   '​'.repeat(50) + 'hidden',
   'surrogate-adjacent \u{1F600}​\u{1F601}‮\u{1F602}',
@@ -103,6 +104,8 @@ const FEED_CASES: Array<[string, string]> = [
   ['<item><title>Dc date</title><dc:date>2026-11-06T19:00:00Z</dc:date></item>', 'Dates'],
   ['<item><title>Published only</title><published>2026-11-06T18:00:00Z</published></item>', 'Dates'],
   [item('Bad date', 'yesterday'), 'Dates'],
+  // V8 knows only the US zone names: any other drops the item.
+  [item('Cet', 'Fri, 06 Nov 2026 20:09:18 CET') + item('Bst', 'Fri, 06 Nov 2026 20:09:18 BST') + item('Ist', 'Fri, 06 Nov 2026 20:09:18 IST') + item('Kept', DATE), 'Dates'],
   [item('Date entity', '2026-11-06T20:00:00&#90;'), 'Dates'],
   [item('Date cdata', '<![CDATA[ Fri, 06 Nov 2026 20:00:00 GMT ]]>'), 'Dates'],
   [item('Future', 'Sat, 07 Nov 2026 07:00:00 GMT') + item('Old', 'Thu, 05 Nov 2026 05:00:00 GMT'), 'Dates'],
@@ -146,6 +149,8 @@ const ZONED_DATES = [
   'Nov 6 2026 2026 2026 UTC', '1 2 3 4 UTC', 'Nov 6 2026 am UTC', 'Fri, 06 Nov 2026 20:09:18 +0000\u{1F600}',
   'Fri, 06 Nov 2026 20:09:18 +0000 �', '\u{1F600} 6 Nov 2026 UTC', 'Ａ 6 Nov 2026 UTC', 'Sept 6 2026 UTC',
   'Mayday 6 2026 UTC', 'jan 6 2026 utc', 'JANUARY 6 2026 GMT', 'Nov 6 2026 20:00:00Z', 'Nov 6 2026 20:00:00+0100',
+  'Fri, 06 Nov 2026 20:09:18 CET', 'Fri, 06 Nov 2026 20:09:18 BST', 'Fri, 06 Nov 2026 20:09:18 IST',
+  'Fri, 06 Nov 2026 20:09:18 JST', 'Fri, 06 Nov 2026 20:09:18 AEST', 'Fri, 06 Nov 2026 20:09:18 CEST',
   'Nov 6 2026 20:00:00x UTC', '2026-11-06T20:00:00.Z', '2026-11-06T20:00:00+24:00', '2026-11-06T20:00:00+23:59',
 ];
 

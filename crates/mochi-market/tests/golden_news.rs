@@ -139,3 +139,23 @@ fn validate_feed_url_matches_node() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// A 3 MB feed of empty blocks must parse in linear time: the refresh runs on a tokio worker,
+/// and a quadratic scan would stall it (and every `/api/news` reader) for minutes.
+#[test]
+fn large_feeds_parse_in_linear_time() {
+    for block in [
+        "<item></item>",
+        "<entry></entry>",
+        "<item></item><entry></entry>",
+    ] {
+        let xml = block.repeat(3_000_000 / block.len());
+        let started = std::time::Instant::now();
+        assert!(parse_feed(&xml, "S").is_empty());
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "{block}: {elapsed:?}"
+        );
+    }
+}

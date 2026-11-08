@@ -385,26 +385,28 @@ fn web_url(text: &str) -> String {
 /// The `<item>` and `<entry>` blocks: `/<(item|entry)[\s>][\s\S]*?<\/\1>/gi`.
 fn feed_blocks(xml: &str) -> Vec<&str> {
     let lower = xml.to_ascii_lowercase();
-    let names = ["item", "entry"];
-    // Once a name has no closer after some start, it has none after any later start.
-    let mut unclosed = [false, false];
+    let opens = ["<item", "<entry"];
+    let closes = ["</item>", "</entry>"];
+    // The next `<item` / `<entry` at or after `pos`, found once and reused until `pos` passes
+    // it, so the scan stays linear; `None` means there is none left. A name whose closer is
+    // missing after some start has none after any later start either, so it is dropped too.
+    let find_from = |name: usize, from: usize| lower[from..].find(opens[name]).map(|at| from + at);
+    let mut next = [find_from(0, 0), find_from(1, 0)];
     let mut blocks = Vec::new();
     let mut pos = 0;
     loop {
-        let next = names
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| !unclosed[*i])
-            .filter_map(|(i, name)| {
-                lower[pos..]
-                    .find(&format!("<{name}"))
-                    .map(|at| (pos + at, i))
-            })
+        for (name, at) in next.iter_mut().enumerate() {
+            if at.is_some_and(|found| found < pos) {
+                *at = find_from(name, pos);
+            }
+        }
+        let candidate = (0..2)
+            .filter_map(|name| next[name].map(|at| (at, name)))
             .min();
-        let Some((start, which)) = next else {
+        let Some((start, which)) = candidate else {
             return blocks;
         };
-        let after = start + 1 + names[which].len();
+        let after = start + opens[which].len();
         let body = match xml[after..].chars().next() {
             Some(c) if c == '>' || is_js_space(c) => after + c.len_utf8(),
             _ => {
@@ -412,15 +414,14 @@ fn feed_blocks(xml: &str) -> Vec<&str> {
                 continue;
             }
         };
-        let close = format!("</{}>", names[which]);
-        match lower[body..].find(&close) {
+        match lower[body..].find(closes[which]) {
             Some(at) => {
-                let end = body + at + close.len();
+                let end = body + at + closes[which].len();
                 blocks.push(&xml[start..end]);
                 pos = end;
             }
             None => {
-                unclosed[which] = true;
+                next[which] = None;
                 pos = start + 1;
             }
         }

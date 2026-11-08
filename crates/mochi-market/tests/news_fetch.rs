@@ -214,7 +214,7 @@ async fn fourth_redirect_refused() {
     let mut start = source("a");
 
     // Three redirects are followed.
-    start.url = "https://a.test/1".into();
+    start.url = "https://a.test/0".into();
     let items = fetch_source(s.feeds.as_ref(), &start).await.unwrap();
     assert_eq!(items[0].title, "Three hops");
 

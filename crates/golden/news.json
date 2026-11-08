@@ -150,6 +150,11 @@
    "loneSurrogates": false
   },
   {
+   "input": "egyptian 𓐹a𓐺b𓐻c𓐼d𓐽e𓐾f𓐿 Unicode 15 format",
+   "output": "egyptian a b c d e f Unicode 15 format",
+   "loneSurrogates": false
+  },
+  {
    "input": " leading and trailing 　",
    "output": "leading and trailing",
    "loneSurrogates": false
@@ -784,6 +789,20 @@
    "items": []
   },
   {
+   "xml": "<item><title>Cet</title><pubDate>Fri, 06 Nov 2026 20:09:18 CET</pubDate></item><item><title>Bst</title><pubDate>Fri, 06 Nov 2026 20:09:18 BST</pubDate></item><item><title>Ist</title><pubDate>Fri, 06 Nov 2026 20:09:18 IST</pubDate></item><item><title>Kept</title><pubDate>Fri, 06 Nov 2026 20:09:18 +0000</pubDate></item>",
+   "source": "Dates",
+   "loneSurrogates": false,
+   "items": [
+    {
+     "id": "Dates:Kept",
+     "source": "Dates",
+     "title": "Kept",
+     "url": "",
+     "publishedAt": 1793995758000
+    }
+   ]
+  },
+  {
    "xml": "<item><title>Date entity</title><pubDate>2026-11-06T20:00:00&#90;</pubDate></item>",
    "source": "Dates",
    "loneSurrogates": false,
@@ -1408,6 +1427,36 @@
    "text": "Nov 6 2026 20:00:00+0100",
    "local": false,
    "ms": 1793991600000
+  },
+  {
+   "text": "Fri, 06 Nov 2026 20:09:18 CET",
+   "local": false,
+   "ms": null
+  },
+  {
+   "text": "Fri, 06 Nov 2026 20:09:18 BST",
+   "local": false,
+   "ms": null
+  },
+  {
+   "text": "Fri, 06 Nov 2026 20:09:18 IST",
+   "local": false,
+   "ms": null
+  },
+  {
+   "text": "Fri, 06 Nov 2026 20:09:18 JST",
+   "local": false,
+   "ms": null
+  },
+  {
+   "text": "Fri, 06 Nov 2026 20:09:18 AEST",
+   "local": false,
+   "ms": null
+  },
+  {
+   "text": "Fri, 06 Nov 2026 20:09:18 CEST",
+   "local": false,
+   "ms": null
   },
   {
    "text": "Nov 6 2026 20:00:00x UTC",
