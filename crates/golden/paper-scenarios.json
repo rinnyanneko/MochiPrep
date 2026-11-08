@@ -33980,8 +33980,11 @@
     "op": "setProtection",
     "accountId": "acct_1",
     "symbol": "BTCUSDT",
-    "stopLoss": "95",
-    "takeProfit": null
+    "protection": {
+     "stopLoss": "95",
+     "takeProfit": null,
+     "trailingStop": null
+    }
    },
    {
     "op": "placeOrder",
@@ -33999,15 +34002,21 @@
     "op": "setProtection",
     "accountId": "acct_1",
     "symbol": "BTCUSDT",
-    "stopLoss": "105",
-    "takeProfit": null
+    "protection": {
+     "stopLoss": "105",
+     "takeProfit": null,
+     "trailingStop": null
+    }
    },
    {
     "op": "setProtection",
     "accountId": "acct_1",
     "symbol": "BTCUSDT",
-    "stopLoss": null,
-    "takeProfit": "90"
+    "protection": {
+     "stopLoss": null,
+     "takeProfit": "90",
+     "trailingStop": null
+    }
    },
    {
     "op": "clearQuote",
@@ -34018,15 +34027,21 @@
     "op": "setProtection",
     "accountId": "acct_1",
     "symbol": "BTCUSDT",
-    "stopLoss": "95",
-    "takeProfit": null
+    "protection": {
+     "stopLoss": "95",
+     "takeProfit": null,
+     "trailingStop": null
+    }
    },
    {
     "op": "setProtection",
     "accountId": "acct_missing",
     "symbol": "BTCUSDT",
-    "stopLoss": "95",
-    "takeProfit": null
+    "protection": {
+     "stopLoss": "95",
+     "takeProfit": null,
+     "trailingStop": null
+    }
    }
   ],
   "steps": [
@@ -37595,22 +37610,31 @@
     "op": "setProtection",
     "accountId": "acct_1",
     "symbol": "BTCUSDT",
-    "stopLoss": "95",
-    "takeProfit": "110"
+    "protection": {
+     "stopLoss": "95",
+     "takeProfit": "110",
+     "trailingStop": null
+    }
    },
    {
     "op": "setProtection",
     "accountId": "acct_1",
     "symbol": "BTCUSDT",
-    "stopLoss": "90",
-    "takeProfit": null
+    "protection": {
+     "stopLoss": "90",
+     "takeProfit": null,
+     "trailingStop": null
+    }
    },
    {
     "op": "setProtection",
     "accountId": "acct_1",
     "symbol": "BTCUSDT",
-    "stopLoss": null,
-    "takeProfit": null
+    "protection": {
+     "stopLoss": null,
+     "takeProfit": null,
+     "trailingStop": null
+    }
    }
   ],
   "steps": [

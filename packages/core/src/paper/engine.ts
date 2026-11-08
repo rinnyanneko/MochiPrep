@@ -12,12 +12,15 @@ import {
   type Position,
   type PositionSide,
   type PositionView,
+  type Protection,
   type Quote,
   type SymbolId,
+  type TrailingStopSpec,
+  type TrailingStopView,
 } from '@mochiprep/shared';
 import { d, floorToStep, max, min, roundToStep, str, ZERO, type Dec } from '../decimal';
 import { getInstrument } from '../instruments';
-import type { ExecutionEngine } from '../trading/execution';
+import type { ExecutionEngine, ProtectionResult } from '../trading/execution';
 import {
   isMarketable,
   isRestingLimitFilled,
@@ -26,6 +29,7 @@ import {
   marketFillPrice,
 } from '../trading/fill-model';
 import { linearPerp } from '../trading/perp';
+import { advanceExtreme, trailingTrigger, validateTrailing } from '../trading/trailing';
 import type { PaperStore } from './store';
 
 /** No fill may be priced off a quote older than this, whatever the caller's own limits are. */
@@ -53,6 +57,24 @@ class OrderRejection extends Error {
 }
 
 const sideOf = (order: { side: 'BUY' | 'SELL' }): PositionSide => (order.side === 'BUY' ? 'LONG' : 'SHORT');
+
+/** The spec a TRAILING_STOP_MARKET order was created from. */
+const trailingSpecOf = (order: Order): TrailingStopSpec => ({
+  kind: order.trailingKind!,
+  callback: order.trailingCallback!,
+  activationPrice: order.trailingActivationPrice,
+});
+
+const sameTrailing = (a: TrailingStopSpec, b: TrailingStopSpec) =>
+  a.kind === b.kind &&
+  d(a.callback).eq(b.callback) &&
+  (a.activationPrice === null ? b.activationPrice === null : b.activationPrice !== null && d(a.activationPrice).eq(b.activationPrice));
+
+const attachedProtection = (order: Order): Protection => ({
+  stopLoss: order.attachedStopLoss,
+  takeProfit: order.attachedTakeProfit,
+  trailingStop: order.attachedTrailingStop,
+});
 
 /** A self-contained perpetuals simulator. See docs/PAPER_ENGINE.md for the exact rules. */
 export class PaperExecutionEngine implements ExecutionEngine {
@@ -152,6 +174,19 @@ export class PaperExecutionEngine implements ExecutionEngine {
     return this.balanceOf(accountId);
   }
 
+  async setProtection(
+    accountId: string,
+    symbol: SymbolId,
+    protection: Protection,
+    _meta: { clientOrderId: string; agentId: string | null; decisionId: string | null },
+  ): Promise<ProtectionResult> {
+    return this.setProtectionSync(accountId, symbol, protection);
+  }
+
+  async protectionOf(accountId: string, symbol: SymbolId): Promise<Protection> {
+    return this.protectionOfSync(accountId, symbol);
+  }
+
   // ---- orders ---------------------------------------------------------------------------
 
   placeOrderSync(request: OrderRequest): OrderResult {
@@ -205,19 +240,33 @@ export class PaperExecutionEngine implements ExecutionEngine {
     });
   }
 
-  /** Replaces the stop-loss and take-profit protecting an open position. Null removes one. */
-  setProtection(accountId: string, symbol: SymbolId, stopLoss: string | null, takeProfit: string | null): void {
+  /** Replaces the whole protection of an open position. A null leg removes that leg. */
+  setProtectionSync(accountId: string, symbol: SymbolId, protection: Protection): ProtectionResult {
     const account = this.requireAccount(accountId);
     const position = this.store.getOpenPosition(accountId, symbol);
     if (!position) throw new Error(`No open ${symbol} position`);
     const quote = this.deps.getQuote(account.source, symbol);
     if (!quote) throw new Error('No market data');
-    this.validateProtection(position.side, d(quote.last), stopLoss, takeProfit);
+    this.validateProtection(position.side, d(quote.last), protection, getInstrument(symbol).priceTick);
+    const before = this.protectionOfSync(accountId, symbol);
     const now = this.deps.now(account.source);
     this.store.transaction(() => {
-      this.replaceProtection(position, stopLoss, takeProfit, now);
+      this.replaceProtection(position, protection, quote.last, now);
     });
     this.flush();
+    return { before, after: this.protectionOfSync(accountId, symbol) };
+  }
+
+  /** The stop-loss, take-profit and trailing stop resting for a symbol; null legs are not set. */
+  protectionOfSync(accountId: string, symbol: SymbolId): Protection {
+    this.requireAccount(accountId);
+    const orders = this.store.listOpenOrders(accountId).filter((o) => o.symbol === symbol && o.closePosition);
+    const trailing = orders.find((o) => o.type === 'TRAILING_STOP_MARKET');
+    return {
+      stopLoss: orders.find((o) => o.type === 'STOP_MARKET')?.triggerPrice ?? null,
+      takeProfit: orders.find((o) => o.type === 'TAKE_PROFIT_MARKET')?.triggerPrice ?? null,
+      trailingStop: trailing ? trailingSpecOf(trailing) : null,
+    };
   }
 
   private buildOrder(request: OrderRequest, now: number): Order {
@@ -275,6 +324,9 @@ export class PaperExecutionEngine implements ExecutionEngine {
       if (request.stopLoss || request.takeProfit) {
         throw new OrderRejection('INVALID_PROTECTION', 'reduce-only orders cannot attach SL/TP');
       }
+      if (request.trailingStop) {
+        throw new OrderRejection('INVALID_PROTECTION', 'reduce-only orders cannot attach a trailing stop');
+      }
       quantity = min(quantity, d(position.quantity));
     }
     if (quantity.lt(instrument.minQuantity)) {
@@ -291,7 +343,7 @@ export class PaperExecutionEngine implements ExecutionEngine {
 
     const reference = request.type === 'LIMIT' ? d(order.price!) : d(request.side === 'BUY' ? quote.ask : quote.bid);
     if (!order.reduceOnly) {
-      this.validateProtection(sideOf(order), reference, order.attachedStopLoss, order.attachedTakeProfit);
+      this.validateProtection(sideOf(order), reference, attachedProtection(order), instrument.priceTick);
     }
 
     const crosses = request.type === 'MARKET' || isMarketable(request.side, order.price!, quote);
@@ -317,11 +369,12 @@ export class PaperExecutionEngine implements ExecutionEngine {
       price = request.side === 'BUY' ? min(price, d(order.price!)) : max(price, d(order.price!));
     }
     this.store.insertOrder(order);
-    const fill = this.fillOrder(account, order, quantity, price, 'TAKER', now);
+    const fill = this.fillOrder(account, order, quantity, price, 'TAKER', quote.last, now);
     return { order, fills: [fill], duplicate: false };
   }
 
-  private validateProtection(side: PositionSide, reference: Dec, stopLoss: string | null, takeProfit: string | null) {
+  private validateProtection(side: PositionSide, reference: Dec, protection: Protection, tick: string) {
+    const { stopLoss, takeProfit, trailingStop } = protection;
     if (stopLoss) {
       const ok = side === 'LONG' ? d(stopLoss).lt(reference) : d(stopLoss).gt(reference);
       if (!ok) throw new OrderRejection('INVALID_PROTECTION', `stop ${stopLoss} is on the wrong side of ${reference.toFixed()} for ${side}`);
@@ -330,17 +383,25 @@ export class PaperExecutionEngine implements ExecutionEngine {
       const ok = side === 'LONG' ? d(takeProfit).gt(reference) : d(takeProfit).lt(reference);
       if (!ok) throw new OrderRejection('INVALID_PROTECTION', `target ${takeProfit} is on the wrong side of ${reference.toFixed()} for ${side}`);
     }
+    if (trailingStop) {
+      const refused = validateTrailing(side, reference, trailingStop, d(tick));
+      if (refused) throw new OrderRejection('INVALID_PROTECTION', refused);
+    }
   }
 
   // ---- fills & accounting ---------------------------------------------------------------
 
-  /** Applies one fill to the position and ledger. Must run inside a transaction. */
+  /**
+   * Applies one fill to the position and ledger. Must run inside a transaction. `last` is the
+   * last price of the quote the fill came from; a trailing stop attached on fill starts there.
+   */
   private fillOrder(
     account: PaperAccount,
     order: Order,
     quantity: Dec,
     price: Dec,
     liquidity: 'MAKER' | 'TAKER',
+    last: string,
     ts: number,
   ): Fill {
     const instrument = getInstrument(order.symbol);
@@ -457,8 +518,8 @@ export class PaperExecutionEngine implements ExecutionEngine {
       if (available.lt(0)) {
         throw new OrderRejection('INSUFFICIENT_MARGIN', `short by ${available.neg().toFixed(2)} USDT after fee`);
       }
-      if (position && (order.attachedStopLoss || order.attachedTakeProfit)) {
-        this.replaceProtection(position, order.attachedStopLoss, order.attachedTakeProfit, ts);
+      if (position && (order.attachedStopLoss || order.attachedTakeProfit || order.attachedTrailingStop)) {
+        this.replaceProtection(position, attachedProtection(order), last, ts);
       }
     }
     this.queued.push({ kind: 'fill', fill, order });
@@ -521,11 +582,23 @@ export class PaperExecutionEngine implements ExecutionEngine {
 
   // ---- protection orders ----------------------------------------------------------------
 
-  private replaceProtection(position: Position, stopLoss: string | null, takeProfit: string | null, ts: number) {
+  /**
+   * Cancels every protection order on the position and creates the requested ones. `last` is the
+   * last price of the quote in hand: a trailing stop without an activation price starts tracking
+   * there. An unchanged trailing stop keeps the extreme it had tracked, so restating it (to change
+   * only the stop-loss, say) never loosens its trigger or puts an activated one back to sleep.
+   */
+  private replaceProtection(position: Position, protection: Protection, last: string, ts: number) {
+    const { stopLoss, takeProfit, trailingStop } = protection;
+    let carried: string | null | undefined;
     for (const order of this.store.listOpenOrders(position.accountId)) {
-      if (order.symbol === position.symbol && order.closePosition) this.closeOrder(order, 'CANCELED', null, ts);
+      if (order.symbol !== position.symbol || !order.closePosition) continue;
+      if (order.type === 'TRAILING_STOP_MARKET' && trailingStop && sameTrailing(trailingSpecOf(order), trailingStop)) {
+        carried = order.trailingExtreme;
+      }
+      this.closeOrder(order, 'CANCELED', null, ts);
     }
-    const make = (type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET', trigger: string) => {
+    const make = (type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET' | 'TRAILING_STOP_MARKET', trigger: string | null, extra: Partial<Order> = {}) => {
       const order: Order = {
         ...this.buildOrder(
           {
@@ -543,12 +616,22 @@ export class PaperExecutionEngine implements ExecutionEngine {
         type,
         triggerPrice: trigger,
         closePosition: true,
+        ...extra,
       };
       this.store.insertOrder(order);
       this.queued.push({ kind: 'order', order });
     };
     if (stopLoss) make('STOP_MARKET', stopLoss);
     if (takeProfit) make('TAKE_PROFIT_MARKET', takeProfit);
+    if (trailingStop) {
+      const fresh = trailingStop.activationPrice === null ? str(d(last)) : null;
+      make('TRAILING_STOP_MARKET', null, {
+        trailingKind: trailingStop.kind,
+        trailingCallback: trailingStop.callback,
+        trailingActivationPrice: trailingStop.activationPrice,
+        trailingExtreme: carried === undefined ? fresh : carried,
+      });
+    }
   }
 
   /** Flat positions cannot be reduced: clears every reduce-only order on the symbol. */
@@ -572,8 +655,8 @@ export class PaperExecutionEngine implements ExecutionEngine {
 
   /**
    * Advances the simulation by one observed quote. Order of evaluation is fixed and pessimistic:
-   * funding, liquidation, stop-loss, take-profit, resting limits. Gaps between quotes are never
-   * interpolated, so a stop fills at the first quote past it.
+   * funding, liquidation, stop-loss, trailing stop, take-profit, resting limits. Gaps between
+   * quotes are never interpolated, so a stop fills at the first quote past it.
    */
   onQuote(quote: Quote): void {
     const { source, symbol } = quote;
@@ -591,7 +674,7 @@ export class PaperExecutionEngine implements ExecutionEngine {
     }
 
     const open = this.store.listOpenOrdersForMarket(source, symbol);
-    const rank = { STOP_MARKET: 0, TRAILING_STOP_MARKET: 0, TAKE_PROFIT_MARKET: 1, LIMIT: 2, MARKET: 3 } as const;
+    const rank = { STOP_MARKET: 0, TRAILING_STOP_MARKET: 1, TAKE_PROFIT_MARKET: 2, LIMIT: 3, MARKET: 4 } as const;
     open.sort((a, b) => rank[a.type] - rank[b.type] || a.createdAt - b.createdAt);
     for (const candidate of open) {
       // An earlier order in this pass may have closed the position and canceled this one.
@@ -711,7 +794,7 @@ export class PaperExecutionEngine implements ExecutionEngine {
     if (order.type === 'LIMIT') {
       if (!isRestingLimitFilled(order.side, order.price!, quote)) return;
       const quantity = order.reduceOnly ? min(d(order.quantity), d(position?.quantity ?? 0)) : d(order.quantity);
-      this.fillResting(account, order, quantity, d(order.price!), 'MAKER', quote.ts);
+      this.fillResting(account, order, quantity, d(order.price!), 'MAKER', quote);
       return;
     }
 
@@ -720,22 +803,37 @@ export class PaperExecutionEngine implements ExecutionEngine {
       return;
     }
     const isLong = position.side === 'LONG';
-    const triggered = order.type === 'STOP_MARKET'
-      ? isStopTriggered(isLong, order.triggerPrice!, quote.last)
-      : isTakeProfitTriggered(isLong, order.triggerPrice!, quote.last);
+    let triggered: boolean;
+    if (order.type === 'TRAILING_STOP_MARKET') {
+      // The extreme moves first, with this quote's last, and is saved on its own so that a
+      // restart resumes from it; only then is the trigger it implies compared with last.
+      const spec = trailingSpecOf(order);
+      const extreme = advanceExtreme(position.side, spec, order.trailingExtreme, d(quote.last));
+      if (extreme !== order.trailingExtreme) {
+        order.trailingExtreme = extreme;
+        this.store.saveOrder(order);
+      }
+      triggered = extreme !== null
+        && isStopTriggered(isLong, trailingTrigger(position.side, spec, d(extreme), d(instrument.priceTick)), quote.last);
+    } else {
+      triggered = order.type === 'STOP_MARKET'
+        ? isStopTriggered(isLong, order.triggerPrice!, quote.last)
+        : isTakeProfitTriggered(isLong, order.triggerPrice!, quote.last);
+    }
     if (!triggered) return;
     const quantity = d(position.quantity);
     const price = marketFillPrice(order.side, quantity, quote, account.config, instrument);
-    this.fillResting(account, order, quantity, price, 'TAKER', quote.ts);
+    this.fillResting(account, order, quantity, price, 'TAKER', quote);
   }
 
-  private fillResting(account: PaperAccount, order: Order, quantity: Dec, price: Dec, liquidity: 'MAKER' | 'TAKER', ts: number) {
+  private fillResting(account: PaperAccount, order: Order, quantity: Dec, price: Dec, liquidity: 'MAKER' | 'TAKER', quote: Quote) {
+    const ts = quote.ts;
     try {
       this.store.transaction(() => {
         order.reservedMargin = '0';
         order.quantity = str(quantity);
         this.store.saveOrder(order);
-        this.fillOrder(account, order, quantity, price, liquidity, ts);
+        this.fillOrder(account, order, quantity, price, liquidity, quote.last, ts);
       });
     } catch (error) {
       this.queued = this.queued.filter((e) => !(e.kind === 'fill' && e.order.id === order.id));
@@ -796,6 +894,13 @@ export class PaperExecutionEngine implements ExecutionEngine {
       const quote = this.deps.getQuote(account.source, position.symbol);
       const protection = (type: Order['type']) =>
         orders.find((o) => o.symbol === position.symbol && o.type === type)?.triggerPrice ?? null;
+      const trailing = orders.find((o) => o.symbol === position.symbol && o.type === 'TRAILING_STOP_MARKET');
+      const trailingView = (order: Order): TrailingStopView => {
+        const spec = trailingSpecOf(order);
+        const extreme = order.trailingExtreme;
+        const tick = d(getInstrument(position.symbol).priceTick);
+        return { ...spec, extreme, triggerPrice: extreme === null ? null : str(trailingTrigger(position.side, spec, d(extreme), tick)) };
+      };
       return {
         ...position,
         markPrice: quote?.mark ?? null,
@@ -804,7 +909,7 @@ export class PaperExecutionEngine implements ExecutionEngine {
           : '0',
         stopLoss: protection('STOP_MARKET'),
         takeProfit: protection('TAKE_PROFIT_MARKET'),
-        trailingStop: null,
+        trailingStop: trailing ? trailingView(trailing) : null,
         externalProtection: [],
       };
     });

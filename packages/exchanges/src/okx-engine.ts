@@ -1,4 +1,4 @@
-import { d, floorToStep, getInstrument, min, roundToStep, ZERO, type ExecutionEngine } from '@mochiprep/core';
+import { d, floorToStep, getInstrument, min, roundToStep, ZERO, type ExecutionEngine, type ProtectionResult } from '@mochiprep/core';
 import {
   listSymbols,
   type AccountBalance,
@@ -10,6 +10,7 @@ import {
   type OrderResult,
   type PaperAccount,
   type PositionView,
+  type Protection,
   type Quote,
   type RiskSettings,
   type SymbolId,
@@ -108,6 +109,16 @@ export class OkxExecutionEngine implements ExecutionEngine {
     const first = this.deps.store.listEquity(accountId, 2000).find((p) => p.ts >= dayStart);
     const base = first?.equity ?? balance.equity;
     return { dailyPnl: d(balance.equity).minus(base).toFixed(), dayStartEquity: base };
+  }
+
+  /** Only what was attached on entry is known locally until the algo-order sync exists. */
+  async protectionOf(_accountId: string, symbol: SymbolId): Promise<Protection> {
+    const view = this.positions.find((p) => p.symbol === symbol);
+    return { stopLoss: view?.stopLoss ?? null, takeProfit: view?.takeProfit ?? null, trailingStop: null };
+  }
+
+  async setProtection(): Promise<ProtectionResult> {
+    throw new Error('Protection changes on OKX are not implemented yet');
   }
 
   placeOrder(request: OrderRequest): Promise<OrderResult> {

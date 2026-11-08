@@ -218,8 +218,8 @@ impl Harness {
                 .set_protection(
                     &text("accountId"),
                     &text("symbol"),
-                    op["stopLoss"].as_str(),
-                    op["takeProfit"].as_str(),
+                    op["protection"]["stopLoss"].as_str(),
+                    op["protection"]["takeProfit"].as_str(),
                 )
                 .map(|()| None),
             other => panic!("op {other} is not ported yet"),

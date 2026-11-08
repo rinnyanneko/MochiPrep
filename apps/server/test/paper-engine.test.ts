@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
 import { AgentInputSchema, DEFAULT_RISK_SETTINGS, ProtectionSchema, type OrderRequest, type Quote } from '@mochiprep/shared';
-import { auditLedger, d, PaperExecutionEngine } from '@mochiprep/core';
+import { advanceExtreme, auditLedger, d, PaperExecutionEngine, trailingTrigger, validateTrailing } from '@mochiprep/core';
 import { openDatabase } from '../src/db/database';
 import { SqliteStore } from '../src/db/store';
 
@@ -359,6 +359,49 @@ describe('PaperExecutionEngine with SQLite', () => {
       }
     }
     expect(auditLedger(store.getAccount(accountId)!, store.listLedger(accountId))).toEqual([]);
+  });
+});
+
+describe('trailing stop rules', () => {
+  it('trailingTrigger floors a long ratio trigger to the tick', () => {
+    const spec = { kind: 'RATIO' as const, callback: '0.01', activationPrice: null };
+    expect(trailingTrigger('LONG', spec, d('100.37'), d('0.01')).toFixed()).toBe('99.36');
+  });
+
+  it('trailingTrigger ceils a short spread trigger to the tick', () => {
+    const spec = { kind: 'SPREAD' as const, callback: '1.234', activationPrice: null };
+    expect(trailingTrigger('SHORT', spec, d('100.00'), d('0.01')).toFixed()).toBe('101.24');
+  });
+
+  it('advanceExtreme waits for the activation price', () => {
+    const spec = { kind: 'RATIO' as const, callback: '0.01', activationPrice: '105' };
+    let extreme: string | null = null;
+    const seen: (string | null)[] = [];
+    for (const last of ['104', '105', '103', '107']) {
+      extreme = advanceExtreme('LONG', spec, extreme, d(last));
+      seen.push(extreme);
+    }
+    expect(seen).toEqual([null, '105', '105', '107']);
+    // Without an activation price it tracks at once, and a short follows the low.
+    const open = { kind: 'SPREAD' as const, callback: '1', activationPrice: null };
+    expect(advanceExtreme('SHORT', open, null, d('100'))).toBe('100');
+    expect(advanceExtreme('SHORT', open, '100', d('101'))).toBe('100');
+    expect(advanceExtreme('SHORT', open, '100', d('98.5'))).toBe('98.5');
+  });
+
+  it('validateTrailing rejects a ratio of 0.0009 and 0.31 and an activation below a long reference', () => {
+    const tick = d('0.1');
+    const ratio = (callback: string) => ({ kind: 'RATIO' as const, callback, activationPrice: null });
+    expect(validateTrailing('LONG', d('100'), ratio('0.0009'), tick)).toMatch(/ratio 0.0009/);
+    expect(validateTrailing('LONG', d('100'), ratio('0.31'), tick)).toMatch(/ratio 0.31/);
+    expect(validateTrailing('LONG', d('100'), ratio('0.001'), tick)).toBeNull();
+    expect(validateTrailing('LONG', d('100'), ratio('0.3'), tick)).toBeNull();
+    expect(validateTrailing('LONG', d('100'), { ...ratio('0.01'), activationPrice: '99' }, tick)).toMatch(/activation 99/);
+    expect(validateTrailing('SHORT', d('100'), { ...ratio('0.01'), activationPrice: '99' }, tick)).toBeNull();
+    const spread = (callback: string) => ({ kind: 'SPREAD' as const, callback, activationPrice: null });
+    expect(validateTrailing('LONG', d('100'), spread('0.05'), tick)).toMatch(/below one tick/);
+    expect(validateTrailing('LONG', d('100'), spread('30.1'), tick)).toMatch(/exceeds/);
+    expect(validateTrailing('LONG', d('100'), spread('30'), tick)).toBeNull();
   });
 });
 

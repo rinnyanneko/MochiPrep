@@ -232,11 +232,13 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
     return result;
   });
   app.put<{ Params: PositionParams }>('/api/positions/:accountId/:symbol/protection', async (request) => {
-    const { stopLoss, takeProfit } = ProtectionSchema.parse(request.body);
+    const { stopLoss, takeProfit, trailingStop } = ProtectionSchema.parse(request.body);
     const symbol = SymbolSchema.parse(request.params.symbol);
     const accountId = requireAccount(request.params.accountId);
     if (runtime.store.getAccount(accountId)!.venue !== 'PAPER') throw new Error('Change stops for exchange positions on OKX');
-    runtime.engine.setProtection(accountId, symbol, stopLoss, takeProfit);
+    // An absent trailingStop keeps the current one, so a client that only edits SL/TP cannot drop it.
+    const kept = trailingStop === undefined ? runtime.engine.protectionOfSync(accountId, symbol).trailingStop : trailingStop;
+    runtime.engine.setProtectionSync(accountId, symbol, { stopLoss, takeProfit, trailingStop: kept });
     runtime.invalidate('orders', 'positions');
     return { ok: true };
   });

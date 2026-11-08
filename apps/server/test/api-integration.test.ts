@@ -1,6 +1,7 @@
 import { createServer } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
+import { d } from '@mochiprep/core';
 import { DEFAULT_RISK_SETTINGS } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database';
 import { buildApp } from '../src/app';
@@ -91,6 +92,23 @@ describe('API decision-to-position integration', () => {
 
     const audit = await app.inject({ method: 'GET', url: `/api/accounts/${account.id}/audit`, headers: headers() });
     expect(audit.json()).toEqual({ consistent: true, issues: [] });
+  });
+
+  it('keeps the trailing stop when a protection body omits it, and removes it on null', async () => {
+    const account = runtime.engine.createAccount({ name: 'trail', source: 'REPLAY' });
+    const trailingStop = { kind: 'RATIO' as const, callback: '0.01', activationPrice: null };
+    const opened = runtime.engine.placeOrderSync({
+      accountId: account.id, clientOrderId: 'open', symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET', quantity: '0.01', leverage: 3, trailingStop,
+    });
+    expect(opened.order.status).toBe('FILLED');
+    const stopLoss = d(opened.order.avgFillPrice!).mul('0.9').toDecimalPlaces(1).toFixed();
+    const put = (payload: Record<string, unknown>) =>
+      app.inject({ method: 'PUT', url: `/api/positions/${account.id}/BTCUSDT/protection`, headers: headers(), payload });
+
+    expect((await put({ stopLoss, takeProfit: null })).statusCode).toBe(200);
+    expect(runtime.engine.protectionOfSync(account.id, 'BTCUSDT')).toEqual({ stopLoss, takeProfit: null, trailingStop });
+    expect((await put({ stopLoss, takeProfit: null, trailingStop: null })).statusCode).toBe(200);
+    expect(runtime.engine.protectionOfSync(account.id, 'BTCUSDT')).toEqual({ stopLoss, takeProfit: null, trailingStop: null });
   });
 
   it('enforces host and token checks', async () => {
