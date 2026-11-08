@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { auditLedger, PaperExecutionEngine, type EngineEvent } from '@mochiprep/core';
-import type { DataSource, OrderRequest, PaperAccountConfig, Quote } from '@mochiprep/shared';
+import { auditLedger, d, PaperExecutionEngine, type EngineEvent } from '@mochiprep/core';
+import type { DataSource, OrderRequest, PaperAccountConfig, Protection, Quote, TrailingStopSpec } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database.js';
 import { SqliteStore } from '../src/db/store.js';
 
@@ -29,7 +29,7 @@ export type Op =
   | { op: 'placeOrder'; request: OrderRequest }
   | { op: 'cancelOrder'; orderId: string }
   | { op: 'closePosition'; accountId: string; symbol: string; fraction: number; clientOrderId: string }
-  | { op: 'setProtection'; accountId: string; symbol: string; stopLoss: string | null; takeProfit: string | null }
+  | { op: 'setProtection'; accountId: string; symbol: string; protection: Protection }
   | { op: 'recordEquity'; accountId: string }
   // Writes a trigger price straight to the orders table, to reach states the validated API
   // refuses to create (a stop and a target that overlap).
@@ -78,6 +78,15 @@ const read = (what: 'balance' | 'positions' | 'openOrders' | 'dailyRisk', accoun
   what,
   accountId,
 });
+
+/** A setProtection op; the protection given is the whole new state. */
+const protect = (
+  stopLoss: string | null,
+  takeProfit: string | null,
+  trailingStop: Protection['trailingStop'] = null,
+  accountId = ACCOUNT,
+  symbol = 'BTCUSDT',
+): Op => ({ op: 'setProtection', accountId, symbol, protection: { stopLoss, takeProfit, trailingStop } });
 
 const place = (overrides: Partial<OrderRequest> & Pick<OrderRequest, 'clientOrderId'>): Op => ({
   op: 'placeOrder',
@@ -279,13 +288,13 @@ export const SCENARIOS: Scenario[] = [
   scenario('cancel an unknown order', [{ op: 'cancelOrder', orderId: 'ord_missing' }], 'end'),
   scenario('cancel a filled order', [place({ clientOrderId: 'open' }), { op: 'cancelOrder', orderId: 'ord_3' }]),
   scenario('setProtection with no position, no quote, and a stop on the wrong side', [
-    { op: 'setProtection', accountId: ACCOUNT, symbol: 'BTCUSDT', stopLoss: '95', takeProfit: null },
+    protect('95', null),
     place({ clientOrderId: 'open' }),
-    { op: 'setProtection', accountId: ACCOUNT, symbol: 'BTCUSDT', stopLoss: '105', takeProfit: null },
-    { op: 'setProtection', accountId: ACCOUNT, symbol: 'BTCUSDT', stopLoss: null, takeProfit: '90' },
+    protect('105', null),
+    protect(null, '90'),
     { op: 'clearQuote', source: 'REPLAY', symbol: 'BTCUSDT' },
-    { op: 'setProtection', accountId: ACCOUNT, symbol: 'BTCUSDT', stopLoss: '95', takeProfit: null },
-    { op: 'setProtection', accountId: 'acct_missing', symbol: 'BTCUSDT', stopLoss: '95', takeProfit: null },
+    protect('95', null),
+    protect('95', null, null, 'acct_missing'),
   ]),
   scenario('rejects leverage 0 and 101', [
     place({ clientOrderId: 'zero', leverage: 0 }),
@@ -307,9 +316,9 @@ export const SCENARIOS: Scenario[] = [
   ]),
   scenario('sets, replaces and removes protection on an open position', [
     place({ clientOrderId: 'open' }),
-    { op: 'setProtection', accountId: ACCOUNT, symbol: 'BTCUSDT', stopLoss: '95', takeProfit: '110' },
-    { op: 'setProtection', accountId: ACCOUNT, symbol: 'BTCUSDT', stopLoss: '90', takeProfit: null },
-    { op: 'setProtection', accountId: ACCOUNT, symbol: 'BTCUSDT', stopLoss: null, takeProfit: null },
+    protect('95', '110'),
+    protect('90', null),
+    protect(null, null),
   ]),
   scenario('attaches protection on entry, rejects misplaced or reduce-only protection', [
     place({ clientOrderId: 'bad-stop', stopLoss: '102' }),
@@ -448,6 +457,168 @@ export const SCENARIOS: Scenario[] = [
   ]),
 ];
 
+// ---- trailing stops ------------------------------------------------------------------------
+// SOLUSDT has a 0.01 tick, so the trigger rounding shows. Quotes are 0.05 either side of last,
+// and mark follows last so liquidation stays out of the way.
+
+const solQuote = (ts: number, last: string, extra: Partial<Quote> = {}): Quote => ({
+  source: 'REPLAY', symbol: 'SOLUSDT',
+  bid: d(last).minus('0.05').toFixed(), ask: d(last).plus('0.05').toFixed(),
+  last, mark: last, markEstimated: false, fundingRate: '0', nextFundingTime: null, ts, ...extra,
+});
+/** Sets the latest SOLUSDT quote without passing it to onQuote. */
+const sol = (ts: number, last: string, extra: Partial<Quote> = {}): Op => ({ op: 'quote', quote: solQuote(ts, last, extra), feed: false });
+/** Sets the latest SOLUSDT quote and passes it to onQuote. */
+const solFeed = (ts: number, last: string, extra: Partial<Quote> = {}): Op => ({ op: 'quote', quote: solQuote(ts, last, extra), feed: true });
+const placeSol = (overrides: Partial<OrderRequest> & Pick<OrderRequest, 'clientOrderId'>): Op =>
+  place({ symbol: 'SOLUSDT', ...overrides });
+const ratio = (callback: string, activationPrice: string | null = null): TrailingStopSpec => ({ kind: 'RATIO', callback, activationPrice });
+const spread = (callback: string, activationPrice: string | null = null): TrailingStopSpec => ({ kind: 'SPREAD', callback, activationPrice });
+const protectSol = (stopLoss: string | null, takeProfit: string | null, trailingStop: TrailingStopSpec | null): Op =>
+  protect(stopLoss, takeProfit, trailingStop, ACCOUNT, 'SOLUSDT');
+
+const trailingScenario = (name: string, ops: Op[]): Scenario => scenario(name, [sol(T, '100'), ...ops]);
+
+export const TRAILING_SCENARIOS: Scenario[] = [
+  trailingScenario('trailing-ratio-follows-and-triggers', [
+    // Starts tracking at the entry quote's last (100): trigger 99.
+    placeSol({ clientOrderId: 'open', trailingStop: ratio('0.01') }),
+    read('positions'),
+    solFeed(T + 1, '102'),
+    // 104.5 x 0.99 = 103.455, floored to 103.45.
+    solFeed(T + 2, '104.5'),
+    solFeed(T + 3, '103.5'),
+    read('positions'),
+    // Last reaches the trigger: closes the whole position at the bid, as taker.
+    solFeed(T + 4, '103.45'),
+    read('positions'),
+    read('openOrders'),
+    read('balance'),
+  ]),
+  trailingScenario('trailing-spread-short', [
+    placeSol({ clientOrderId: 'open', side: 'SELL', trailingStop: spread('1.5') }),
+    // The low moves to 98: trigger 99.5.
+    solFeed(T + 1, '98'),
+    solFeed(T + 2, '99.4'),
+    // A bounce never lowers the low; a new low moves the trigger to 98.75.
+    solFeed(T + 3, '97.25'),
+    read('positions'),
+    solFeed(T + 4, '98.8'),
+    read('positions'),
+    read('balance'),
+  ]),
+  trailingScenario('trailing-activation-price', [
+    placeSol({ clientOrderId: 'open', trailingStop: ratio('0.02', '105') }),
+    read('positions'),
+    solFeed(T + 1, '104'),
+    // Below where an active 2% trail would be, but it is not active yet.
+    solFeed(T + 2, '97'),
+    read('positions'),
+    solFeed(T + 3, '105'),
+    solFeed(T + 4, '108'),
+    read('positions'),
+    // 108 x 0.98 = 105.84.
+    solFeed(T + 5, '105.84'),
+    read('positions'),
+  ]),
+  trailingScenario('trailing-gap', [
+    {
+      op: 'createAccount',
+      args: {
+        name: 'slippage', source: 'REPLAY', initialBalance: '10000',
+        config: { takerFeeRate: '0.001', makerFeeRate: '0.0002', slippageBps: '10', impactBpsPerMillion: '0' },
+      },
+    },
+    placeSol({ clientOrderId: 'open', accountId: 'acct_3', trailingStop: ratio('0.01') }),
+    // 100.37 x 0.99 = 99.3663, floored to 99.36.
+    solFeed(T + 1, '100.37'),
+    read('positions', 'acct_3'),
+    // The next quote gaps to 95: the fill is that quote's bid less slippage, never 99.36.
+    solFeed(T + 2, '95', { bid: '94.9', ask: '95.1' }),
+    read('positions', 'acct_3'),
+    read('balance', 'acct_3'),
+  ]),
+  trailingScenario('trailing-and-stop-same-quote', [
+    placeSol({ clientOrderId: 'open', stopLoss: '98', trailingStop: ratio('0.01') }),
+    solFeed(T + 1, '101'),
+    // Both the stop (98) and the trail (99.99) are through: the stop closes, the trail is canceled.
+    solFeed(T + 2, '97.5'),
+    read('positions'),
+    read('openOrders'),
+  ]),
+  trailingScenario('trailing-survives-add', [
+    placeSol({ clientOrderId: 'first', trailingStop: ratio('0.01') }),
+    solFeed(T + 1, '110'),
+    sol(T + 2, '109.5'),
+    // Adding without protection leaves the trail and its extreme (110) alone.
+    placeSol({ clientOrderId: 'add' }),
+    read('positions'),
+    // 110 x 0.99 = 108.9: the trail closes the whole enlarged position.
+    solFeed(T + 3, '108.9'),
+    read('positions'),
+    read('balance'),
+  ]),
+  trailingScenario('trailing-replaced-and-removed', [
+    placeSol({ clientOrderId: 'open', stopLoss: '95', trailingStop: ratio('0.01') }),
+    solFeed(T + 1, '103'),
+    sol(T + 2, '102'),
+    // Restating the same trail keeps its extreme (103) rather than restarting at 102.
+    protectSol('96', null, ratio('0.01')),
+    read('positions'),
+    // A different callback is a new trail and starts at the current last.
+    protectSol('96', null, ratio('0.02')),
+    read('positions'),
+    // An activation price must be above a long's last; this one is below.
+    protectSol('96', null, ratio('0.01', '101')),
+    protectSol('96', null, spread('2', '104')),
+    read('positions'),
+    protectSol('96', null, null),
+    read('positions'),
+    read('openOrders'),
+  ]),
+  trailingScenario('trailing-activated-restated', [
+    placeSol({ clientOrderId: 'open', stopLoss: '95', trailingStop: ratio('0.02', '105') }),
+    solFeed(T + 1, '105'),
+    solFeed(T + 2, '108'),
+    sol(T + 3, '107'),
+    // Only the stop-loss changes. The activation price (105) is now behind the market, yet the
+    // restated trail is the one already resting, so it is kept with its extreme (108).
+    protectSol('97', null, ratio('0.02', '105')),
+    read('positions'),
+    // An add-on entry restating the same trail is accepted too and keeps the extreme.
+    placeSol({ clientOrderId: 'add', stopLoss: '97', trailingStop: ratio('0.02', '105') }),
+    read('positions'),
+    // A changed trail is checked in full: an activation below a long's last is refused.
+    protectSol('97', null, ratio('0.03', '105')),
+    read('positions'),
+  ]),
+  trailingScenario('trailing-attached-to-limit-entry', [
+    placeSol({ clientOrderId: 'rest', type: 'LIMIT', price: '95', stopLoss: '90', trailingStop: ratio('0.01') }),
+    read('openOrders'),
+    // The ask reaches the limit: fills as maker and arms the trail from this quote's last.
+    solFeed(T + 1, '94.95'),
+    read('positions'),
+    solFeed(T + 2, '96'),
+    // 96 x 0.99 = 95.04.
+    solFeed(T + 3, '95.04'),
+    read('positions'),
+    read('openOrders'),
+  ]),
+  trailingScenario('trailing-rejected-bad-callback', [
+    placeSol({ clientOrderId: 'ratio-low', trailingStop: ratio('0.0009') }),
+    placeSol({ clientOrderId: 'ratio-high', trailingStop: ratio('0.31') }),
+    placeSol({ clientOrderId: 'spread-tiny', trailingStop: spread('0.001') }),
+    placeSol({ clientOrderId: 'spread-wide', trailingStop: spread('40') }),
+    placeSol({ clientOrderId: 'activation-below', trailingStop: ratio('0.01', '99') }),
+    placeSol({ clientOrderId: 'short-activation-above', side: 'SELL', trailingStop: ratio('0.01', '101') }),
+    placeSol({ clientOrderId: 'open' }),
+    placeSol({ clientOrderId: 'reduce-trail', side: 'SELL', reduceOnly: true, trailingStop: ratio('0.01') }),
+    protectSol(null, null, ratio('0.5')),
+    protectSol(null, null, spread('31')),
+    read('openOrders'),
+  ]),
+];
+
 /** Raw rows with SQLite's own types, so TEXT '1' and INTEGER 1 stay different. */
 function snapshot(db: DatabaseSync): Record<string, unknown[]> {
   const rows: Record<string, unknown[]> = {};
@@ -531,7 +702,9 @@ function createRunner() {
       case 'closePosition':
         return engine.closePosition(op.accountId, op.symbol, op.fraction, op.clientOrderId);
       case 'setProtection':
-        engine.setProtection(op.accountId, op.symbol, op.stopLoss, op.takeProfit);
+        // The result is not recorded: the scenarios' rows and later reads already show it, and
+        // keeping it out leaves the pre-trailing fixture unchanged apart from the op shape.
+        engine.setProtectionSync(op.accountId, op.symbol, op.protection);
         return undefined;
       case 'recordEquity':
         engine.recordEquity(op.accountId);
@@ -580,4 +753,9 @@ export function runScenario(scenario: Scenario) {
 
 export function paperScenariosFixture() {
   return SCENARIOS.map(runScenario);
+}
+
+/** Kept apart from paper-scenarios.json until the Rust engine replays trailing stops. */
+export function paperTrailingScenariosFixture() {
+  return TRAILING_SCENARIOS.map(runScenario);
 }

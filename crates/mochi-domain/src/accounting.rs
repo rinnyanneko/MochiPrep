@@ -6,7 +6,7 @@
 //! open-ended (instruments come from OKX). Optional TS fields (`?`) are skipped when `None`;
 //! `X | null` fields serialize as `null`.
 
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::jsnum::js_number_raw;
 use crate::market::DataSource;
@@ -40,7 +40,76 @@ pub enum OrderType {
     Limit,
     StopMarket,
     TakeProfitMarket,
+    TrailingStopMarket,
 }
+
+/// RATIO: the callback is a fraction of the extreme price. SPREAD: it is a price distance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum TrailingKind {
+    Ratio,
+    Spread,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrailingStopSpec {
+    pub kind: TrailingKind,
+    pub callback: String,
+    /// The stop only starts trailing once the last price reaches this; None = active at once.
+    pub activation_price: Option<String>,
+}
+
+/// What a position is protected by. None means that leg is not set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Protection {
+    pub stop_loss: Option<String>,
+    pub take_profit: Option<String>,
+    pub trailing_stop: Option<TrailingStopSpec>,
+}
+
+/// A `TrailingStopSpec` plus its live state. TS uses `extends`, so the JSON is one flat object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrailingStopView {
+    #[serde(flatten)]
+    pub spec: TrailingStopSpec,
+    /// Highest (long) or lowest (short) last price since activation; None until active.
+    pub extreme: Option<String>,
+    /// Current trigger price; None until active.
+    pub trigger_price: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ExternalProtectionKind {
+    StopLoss,
+    TakeProfit,
+    Trailing,
+}
+
+/// A protective order that lives on the exchange but was not placed through MochiPrep.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalProtection {
+    pub kind: ExternalProtectionKind,
+    pub trigger_price: Option<String>,
+    pub detail: String,
+}
+
+/// Bounds shared by the risk engine and engine validation, so both refuse the same callbacks.
+pub struct TrailingLimits {
+    pub min_ratio: &'static str,
+    pub max_ratio: &'static str,
+    pub max_spread_fraction: &'static str,
+}
+
+pub const TRAILING_LIMITS: TrailingLimits = TrailingLimits {
+    min_ratio: "0.001",
+    max_ratio: "0.3",
+    max_spread_fraction: "0.3",
+};
 
 /// The two types a caller may request (`OrderRequest.type`, `AiDecisionData.orderType`);
 /// stops and take-profits are only ever created by the engine.
@@ -113,6 +182,8 @@ pub enum AiAction {
     Short,
     Close,
     Hold,
+    /// Sets the full protection of the open position: a value sets a leg, null removes it.
+    Protect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,6 +208,8 @@ pub struct OrderRequest {
     pub stop_loss: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub take_profit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trailing_stop: Option<TrailingStopSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -169,6 +242,14 @@ pub struct Order {
     pub reserved_margin: String,
     pub attached_stop_loss: Option<String>,
     pub attached_take_profit: Option<String>,
+    /// Set on a TRAILING_STOP_MARKET order.
+    pub trailing_kind: Option<TrailingKind>,
+    pub trailing_callback: Option<String>,
+    pub trailing_activation_price: Option<String>,
+    /// Best last price seen since activation. Stored, so a restart does not reset the trail.
+    pub trailing_extreme: Option<String>,
+    /// Trailing stop to arm when this entry order fills.
+    pub attached_trailing_stop: Option<TrailingStopSpec>,
     pub reject_reason: Option<String>,
     /// OKX ordId once the exchange has acknowledged the order.
     pub exchange_order_id: Option<String>,
@@ -239,6 +320,8 @@ pub struct PositionView {
     pub unrealized_pnl: String,
     pub stop_loss: Option<String>,
     pub take_profit: Option<String>,
+    pub trailing_stop: Option<TrailingStopView>,
+    pub external_protection: Vec<ExternalProtection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -388,6 +471,35 @@ pub struct AiDecisionData {
     #[serde(serialize_with = "serialize_js_number")]
     pub confidence: f64,
     pub expires_at: Option<String>,
+    /// The outer None is an absent key (keep the current trailing stop, or none); `Some(None)` is
+    /// an explicit null (remove it). The two mean different things, so both must round-trip.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present"
+    )]
+    pub trailing_stop: Option<Option<AiTrailingStop>>,
+}
+
+/// A trailing stop as the model writes it: numbers, converted to decimal strings before use.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTrailingStop {
+    pub kind: TrailingKind,
+    #[serde(serialize_with = "serialize_js_number")]
+    pub callback: f64,
+    #[serde(serialize_with = "serialize_js_number_or_null")]
+    pub activation_price: Option<f64>,
+}
+
+/// Called only when the key is present, so a JSON null becomes `Some(None)`; `default` covers
+/// the absent key.
+fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

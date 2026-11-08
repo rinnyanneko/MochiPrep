@@ -35,6 +35,7 @@ export function isMarketable(side: OrderSide, limit: DecInput, quote: Quote): bo
  */
 export const isRestingLimitFilled = isMarketable;
 
+/** Stop-loss and trailing stop: a long triggers when last falls to the trigger, a short when it rises to it. */
 export function isStopTriggered(positionIsLong: boolean, trigger: DecInput, last: DecInput): boolean {
   return positionIsLong ? d(last).lte(trigger) : d(last).gte(trigger);
 }

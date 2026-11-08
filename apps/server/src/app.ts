@@ -232,13 +232,19 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
     return result;
   });
   app.put<{ Params: PositionParams }>('/api/positions/:accountId/:symbol/protection', async (request) => {
-    const { stopLoss, takeProfit } = ProtectionSchema.parse(request.body);
+    const { stopLoss, takeProfit, trailingStop } = ProtectionSchema.parse(request.body);
     const symbol = SymbolSchema.parse(request.params.symbol);
     const accountId = requireAccount(request.params.accountId);
-    if (runtime.store.getAccount(accountId)!.venue !== 'PAPER') throw new Error('Change stops for exchange positions on OKX');
-    runtime.engine.setProtection(accountId, symbol, stopLoss, takeProfit);
+    const engine = runtime.execution(accountId);
+    // An absent trailingStop keeps the current one, so a client that only edits SL/TP cannot drop it.
+    const kept = trailingStop === undefined ? (await engine.protectionOf(accountId, symbol)).trailingStop : trailingStop;
+    // A refusal (NOT_ARMED, PROTECTION_PENDING, ...) throws and reaches the client as a 400 with its reason.
+    const { before, after, pending } = await engine.setProtection(
+      accountId, symbol, { stopLoss, takeProfit, trailingStop: kept },
+      { clientOrderId: `manual:${randomUUID()}`, agentId: null, decisionId: null },
+    );
     runtime.invalidate('orders', 'positions');
-    return { ok: true };
+    return { ok: true, pending, before, after };
   });
 
   // ---- AI providers ---------------------------------------------------------------------

@@ -430,13 +430,14 @@ export class Runtime {
   // ---- agents & providers ---------------------------------------------------------------
 
   createAgent(
-    input: Omit<Agent, 'id' | 'status' | 'running' | 'nextRunAt' | 'lastRunAt' | 'statusDetail' | 'consecutiveErrors' | 'isDemo' | 'createdAt' | 'executionMode' | 'useNews'> & Partial<Pick<Agent, 'executionMode' | 'useNews'>>,
+    input: Omit<Agent, 'id' | 'status' | 'running' | 'nextRunAt' | 'lastRunAt' | 'statusDetail' | 'consecutiveErrors' | 'isDemo' | 'createdAt' | 'executionMode' | 'useNews' | 'allowTrailingStop'> & Partial<Pick<Agent, 'executionMode' | 'useNews' | 'allowTrailingStop'>>,
     isDemo = false,
   ): Agent {
     this.assertAgentRefs(input.providerId, input.accountId, input.symbol);
     const agent: Agent = {
       executionMode: 'AUTO',
       useNews: false,
+      allowTrailingStop: false,
       ...input,
       id: `agent_${randomUUID()}`,
       status: 'IDLE',
@@ -824,11 +825,14 @@ export class Runtime {
 
   /**
    * Checked before a suggestion is consumed: an order refused here would burn its idempotency
-   * key, and the user could not retry after arming. Exits need no arming.
+   * key, and the user could not retry after arming. Exits need no arming. Neither does PROTECT
+   * here: the OKX engine's protection gate refuses, while disarmed, any change that adds risk, and
+   * lets one that only lowers it through, like an exit.
    */
   assertCanExecuteSignal(signal: DecisionRecord) {
     const account = this.store.getAccount(signal.accountId);
-    if (account?.venue !== 'OKX_LIVE' || signal.decision?.action === 'CLOSE') return;
+    const action = signal.decision?.action;
+    if (account?.venue !== 'OKX_LIVE' || action === 'CLOSE' || action === 'PROTECT') return;
     if (!this.exchanges.get(account.id)?.armed) throw new Error(`${account.name} is not armed. Arm it in Settings first.`);
   }
 

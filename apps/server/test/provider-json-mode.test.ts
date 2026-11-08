@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
 import { createRemoteProvider } from '@mochiprep/ai-providers';
-import { SYSTEM_PROMPT } from '@mochiprep/agents';
+import { buildSystemPrompt } from '@mochiprep/agents';
 import type { ProviderKind } from '@mochiprep/shared';
 import { buildApp } from '../src/app';
 import { openDatabase } from '../src/db/database';
@@ -52,6 +52,6 @@ describe('JSON mode prompts', () => {
   });
 
   it('keeps the word json in the agent prompt', () => {
-    expect(SYSTEM_PROMPT.toLowerCase()).toContain('json');
+    expect(buildSystemPrompt({ allowTrailingStop: false }).toLowerCase()).toContain('json');
   });
 });

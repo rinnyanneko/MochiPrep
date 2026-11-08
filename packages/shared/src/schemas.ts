@@ -10,7 +10,7 @@ const positive = z.number().finite().positive();
 export const AiDecisionSchema = z
   .strictObject({
     symbol: z.string().min(1).max(32),
-    action: z.enum(['LONG', 'SHORT', 'CLOSE', 'HOLD']),
+    action: z.enum(['LONG', 'SHORT', 'CLOSE', 'HOLD', 'PROTECT']),
     orderType: z.enum(['MARKET', 'LIMIT']),
     entryPrice: positive.nullable(),
     stopLoss: positive.nullable(),
@@ -18,6 +18,11 @@ export const AiDecisionSchema = z
     reason: z.string().min(1).max(4000),
     confidence: z.number().min(0).max(1),
     expiresAt: z.iso.datetime({ offset: true }).nullable(),
+    // optional keeps the key absent when the model omits it: absent means unchanged, null means remove.
+    trailingStop: z
+      .strictObject({ kind: z.enum(['RATIO', 'SPREAD']), callback: positive, activationPrice: positive.nullable() })
+      .nullable()
+      .optional(),
   })
   .superRefine((value, ctx) => {
     if (value.orderType === 'LIMIT' && value.entryPrice === null && (value.action === 'LONG' || value.action === 'SHORT')) {
@@ -46,6 +51,12 @@ export const CreateAccountSchema = z.strictObject({
   initialBalance: decimalString.default('10000'),
 });
 
+export const TrailingStopSchema = z.strictObject({
+  kind: z.enum(['RATIO', 'SPREAD']),
+  callback: decimalString,
+  activationPrice: decimalString.nullable(),
+});
+
 export const PlaceOrderSchema = z.strictObject({
   accountId: z.string().min(1),
   clientOrderId: z.string().min(1).max(128),
@@ -58,11 +69,14 @@ export const PlaceOrderSchema = z.strictObject({
   reduceOnly: z.boolean().optional(),
   stopLoss: decimalString.nullish(),
   takeProfit: decimalString.nullish(),
+  trailingStop: TrailingStopSchema.nullish(),
 });
 
 export const ProtectionSchema = z.strictObject({
   stopLoss: decimalString.nullable(),
   takeProfit: decimalString.nullable(),
+  /** Absent keeps the current trailing stop; null removes it. */
+  trailingStop: TrailingStopSchema.nullable().optional(),
 });
 
 export const ClosePositionSchema = z.strictObject({
@@ -109,6 +123,7 @@ export const AgentInputSchema = z.strictObject({
   intervalSec: z.number().int().min(10).max(86_400),
   executionMode: z.enum(['AUTO', 'SIGNAL']).default('SIGNAL'),
   useNews: z.boolean().default(false),
+  allowTrailingStop: z.boolean().default(false),
 });
 
 export const NewsSourceInputSchema = z.strictObject({

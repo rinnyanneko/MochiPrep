@@ -15,11 +15,12 @@ use mochi_domain::{
     default_account_config, AccountVenue, DataSource, EntryOrderType, EquityPoint, Fill,
     InstrumentSpecification, LedgerEvent, LedgerEventType, Liquidity, Order, OrderRequest,
     OrderResult, OrderSide, OrderStatus, OrderType, PaperAccount, PaperAccountConfig, Position,
-    PositionSide, PositionStatus, Quote,
+    PositionSide, PositionStatus, Protection, Quote, TrailingStopSpec,
 };
 use serde::{Deserialize, Serialize};
 
 use super::store::{PaperStore, StoreFailure};
+use super::trailing::validate_trailing;
 use crate::{fill_model, perp, CoreError};
 
 /// No fill may be priced off a quote older than this, whatever the caller's own limits are.
@@ -48,6 +49,13 @@ pub enum EngineEvent {
     Order {
         order: Order,
     },
+}
+
+/// The protection of a position just before and just after a change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProtectionResult {
+    pub before: Protection,
+    pub after: Protection,
 }
 
 /// A failure the caller sees. `Invalid` is what TypeScript throws as a plain `Error`, with the
@@ -181,6 +189,41 @@ pub(super) fn closing_side(side: PositionSide) -> OrderSide {
     match side {
         PositionSide::Long => OrderSide::Sell,
         PositionSide::Short => OrderSide::Buy,
+    }
+}
+
+/// The spec a TRAILING_STOP_MARKET order was created from. TS asserts the fields with `!`; a row
+/// without them is corrupt, so the port refuses it.
+pub(super) fn trailing_spec_of(order: &Order) -> Result<TrailingStopSpec, EngineError> {
+    match (order.trailing_kind, &order.trailing_callback) {
+        (Some(kind), Some(callback)) => Ok(TrailingStopSpec {
+            kind,
+            callback: callback.clone(),
+            activation_price: order.trailing_activation_price.clone(),
+        }),
+        _ => Err(EngineError::Invalid(format!(
+            "Trailing order {} has no trailing spec",
+            order.id
+        ))),
+    }
+}
+
+fn same_trailing(a: &TrailingStopSpec, b: &TrailingStopSpec) -> Result<bool, EngineError> {
+    if a.kind != b.kind || !dec(&a.callback)?.eq_value(&dec(&b.callback)?) {
+        return Ok(false);
+    }
+    Ok(match (&a.activation_price, &b.activation_price) {
+        (None, None) => true,
+        (Some(x), Some(y)) => dec(x)?.eq_value(&dec(y)?),
+        _ => false,
+    })
+}
+
+fn attached_protection(order: &Order) -> Protection {
+    Protection {
+        stop_loss: order.attached_stop_loss.clone(),
+        take_profit: order.attached_take_profit.clone(),
+        trailing_stop: order.attached_trailing_stop.clone(),
     }
 }
 
@@ -507,19 +550,19 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             reduce_only: Some(true),
             stop_loss: None,
             take_profit: None,
+            trailing_stop: None,
             agent_id: None,
             decision_id: None,
         })
     }
 
-    /// Replaces the stop-loss and take-profit protecting an open position. `None` removes one.
+    /// Replaces the whole protection of an open position. A `None` leg removes that leg.
     pub fn set_protection(
         &mut self,
         account_id: &str,
         symbol: &str,
-        stop_loss: Option<&str>,
-        take_profit: Option<&str>,
-    ) -> Result<(), EngineError> {
+        protection: &Protection,
+    ) -> Result<ProtectionResult, EngineError> {
         let account = self.require_account(account_id)?;
         let position = self
             .store
@@ -527,25 +570,59 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             .ok_or_else(|| EngineError::Invalid(format!("No open {symbol} position")))?;
         let quote = (self.get_quote)(account.source, symbol)
             .ok_or_else(|| EngineError::Invalid("No market data".to_string()))?;
-        let stop_loss = stop_loss.map(str::to_string);
-        let take_profit = take_profit.map(str::to_string);
-        self.validate_protection(position.side, &dec(&quote.last)?, &stop_loss, &take_profit)
-            .map_err(Attempt::into_error)?;
+        let before = self.protection_of(account_id, symbol)?;
+        let tick = self.instrument(symbol)?.price_tick.clone();
+        self.validate_protection(
+            position.side,
+            &dec(&quote.last)?,
+            protection,
+            &tick,
+            before.trailing_stop.as_ref(),
+        )
+        .map_err(Attempt::into_error)?;
         let now = (self.now)(account.source);
         let outcome = self
             .store
-            .transaction(|| self.replace_protection(&position, &stop_loss, &take_profit, now));
+            .transaction(|| self.replace_protection(&position, protection, &quote.last, now));
         match outcome {
-            Ok(()) => {
-                self.flush();
-                Ok(())
-            }
+            Ok(()) => self.flush(),
             // TS leaves these queued until the next flush; they describe rolled-back orders.
             Err(e) => {
                 self.drop_queued();
-                Err(e)
+                return Err(e);
             }
         }
+        let after = self.protection_of(account_id, symbol)?;
+        Ok(ProtectionResult { before, after })
+    }
+
+    /// The stop-loss, take-profit and trailing stop resting for a symbol; `None` legs are not set.
+    pub fn protection_of(&self, account_id: &str, symbol: &str) -> Result<Protection, EngineError> {
+        self.require_account(account_id)?;
+        let orders: Vec<Order> = self
+            .store
+            .list_open_orders(account_id)?
+            .into_iter()
+            .filter(|o| o.symbol == symbol && o.close_position)
+            .collect();
+        let trigger_of = |order_type| {
+            orders
+                .iter()
+                .find(|o| o.order_type == order_type)
+                .and_then(|o| o.trigger_price.clone())
+        };
+        let trailing_stop = match orders
+            .iter()
+            .find(|o| o.order_type == OrderType::TrailingStopMarket)
+        {
+            Some(order) => Some(trailing_spec_of(order)?),
+            None => None,
+        };
+        Ok(Protection {
+            stop_loss: trigger_of(OrderType::StopMarket),
+            take_profit: trigger_of(OrderType::TakeProfitMarket),
+            trailing_stop,
+        })
     }
 
     pub(super) fn build_order(&self, request: &OrderRequest, now: i64) -> Order {
@@ -571,6 +648,11 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             reserved_margin: "0".to_string(),
             attached_stop_loss: request.stop_loss.clone(),
             attached_take_profit: request.take_profit.clone(),
+            trailing_kind: None,
+            trailing_callback: None,
+            trailing_activation_price: None,
+            trailing_extreme: None,
+            attached_trailing_stop: request.trailing_stop.clone(),
             reject_reason: None,
             exchange_order_id: None,
             agent_id: request.agent_id.clone(),
@@ -628,6 +710,12 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
                     "reduce-only orders cannot attach SL/TP",
                 ));
             }
+            if request.trailing_stop.is_some() {
+                return Err(reject(
+                    "INVALID_PROTECTION",
+                    "reduce-only orders cannot attach a trailing stop",
+                ));
+            }
             quantity = quantity.min(&held);
         }
         if quantity.lt(&dec(&instrument.min_quantity)?) {
@@ -662,11 +750,21 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             })?,
         };
         if !order.reduce_only {
+            // Adding to a position keeps its trailing stop when the entry restates it; a flip
+            // does not.
+            let kept = match &position {
+                Some(p) if p.side == side_of(order.side) => {
+                    self.protection_of(&account.id, &request.symbol)?
+                        .trailing_stop
+                }
+                _ => None,
+            };
             self.validate_protection(
                 side_of(order.side),
                 &reference,
-                &order.attached_stop_loss,
-                &order.attached_take_profit,
+                &attached_protection(&order),
+                &instrument.price_tick,
+                kept.as_ref(),
             )?;
         }
 
@@ -729,6 +827,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             &quantity,
             &price,
             Liquidity::Taker,
+            &quote.last,
             now,
         )?;
         Ok(OrderResult {
@@ -738,14 +837,18 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
         })
     }
 
+    /// `kept` is the trailing stop already resting on the position. Restating it unchanged skips
+    /// its checks: it was validated when created, and an activated one would otherwise fail
+    /// forever because its activation price is no longer ahead of the market.
     fn validate_protection(
         &self,
         side: PositionSide,
         reference: &Dec,
-        stop_loss: &Option<String>,
-        take_profit: &Option<String>,
+        protection: &Protection,
+        tick: &str,
+        kept: Option<&TrailingStopSpec>,
     ) -> Result<(), Attempt> {
-        if let Some(stop) = given(stop_loss) {
+        if let Some(stop) = given(&protection.stop_loss) {
             let level = dec(stop)?;
             let ok = match side {
                 PositionSide::Long => level.lt(reference),
@@ -762,7 +865,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
                 ));
             }
         }
-        if let Some(target) = given(take_profit) {
+        if let Some(target) = given(&protection.take_profit) {
             let level = dec(target)?;
             let ok = match side {
                 PositionSide::Long => level.gt(reference),
@@ -779,13 +882,29 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
                 ));
             }
         }
+        if let Some(trailing) = &protection.trailing_stop {
+            let unchanged = match kept {
+                Some(kept) => same_trailing(kept, trailing)?,
+                None => false,
+            };
+            if !unchanged {
+                let refused = validate_trailing(side, reference, trailing, &dec(tick)?)
+                    .map_err(|e| math_error("the trailing stop check", e))?;
+                if let Some(refused) = refused {
+                    return Err(reject("INVALID_PROTECTION", refused));
+                }
+            }
+        }
         Ok(())
     }
 
     // ---- fills & accounting ---------------------------------------------------------------
 
     /// Applies one fill to the position and ledger. Must run inside a transaction: it can still
-    /// reject after writing, and only a rollback undoes those writes.
+    /// reject after writing, and only a rollback undoes those writes. `last` is the last price of
+    /// the quote the fill came from; a trailing stop attached on fill starts there.
+    // One more argument than clippy likes; each is a distinct input of the TS function.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn fill_order(
         &self,
         account: &mut PaperAccount,
@@ -793,6 +912,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
         quantity: &Dec,
         price: &Dec,
         liquidity: Liquidity,
+        last: &str,
         ts: i64,
     ) -> Result<Fill, Attempt> {
         let instrument = self.instrument(&order.symbol)?;
@@ -990,14 +1110,10 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
                 ));
             }
             let protected = given(&order.attached_stop_loss).is_some()
-                || given(&order.attached_take_profit).is_some();
+                || given(&order.attached_take_profit).is_some()
+                || order.attached_trailing_stop.is_some();
             if let (Some(position), true) = (&position, protected) {
-                self.replace_protection(
-                    position,
-                    &order.attached_stop_loss,
-                    &order.attached_take_profit,
-                    ts,
-                )?;
+                self.replace_protection(position, &attached_protection(order), last, ts)?;
             }
         }
         self.queue(EngineEvent::Fill {
@@ -1047,19 +1163,37 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
 
     // ---- protection orders ----------------------------------------------------------------
 
+    /// Cancels every protection order on the position and creates the requested ones. `last` is
+    /// the last price of the quote in hand: a trailing stop without an activation price starts
+    /// tracking there. An unchanged trailing stop keeps the extreme it had tracked, so restating it
+    /// (to change only the stop-loss, say) never loosens its trigger or puts an activated one back
+    /// to sleep.
     fn replace_protection(
         &self,
         position: &Position,
-        stop_loss: &Option<String>,
-        take_profit: &Option<String>,
+        protection: &Protection,
+        last: &str,
         ts: i64,
     ) -> Result<(), EngineError> {
+        // Outer None: no matching trail rested (TS `undefined`); inner None: it was not active.
+        let mut carried: Option<Option<String>> = None;
         for mut order in self.store.list_open_orders(&position.account_id)? {
-            if order.symbol == position.symbol && order.close_position {
-                self.close_order(&mut order, None, ts)?;
+            if order.symbol != position.symbol || !order.close_position {
+                continue;
             }
+            if let (OrderType::TrailingStopMarket, Some(wanted)) =
+                (order.order_type, &protection.trailing_stop)
+            {
+                if same_trailing(&trailing_spec_of(&order)?, wanted)? {
+                    carried = Some(order.trailing_extreme.clone());
+                }
+            }
+            self.close_order(&mut order, None, ts)?;
         }
-        let make = |order_type: OrderType, trigger: &str| -> Result<(), EngineError> {
+        let make = |order_type: OrderType,
+                    trigger: Option<&str>,
+                    trailing: Option<(&TrailingStopSpec, Option<String>)>|
+         -> Result<(), EngineError> {
             // The protect id is drawn before the order id, as in the TS object literal.
             let request = OrderRequest {
                 account_id: position.account_id.clone(),
@@ -1073,24 +1207,39 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
                 reduce_only: Some(true),
                 stop_loss: None,
                 take_profit: None,
+                trailing_stop: None,
                 agent_id: None,
                 decision_id: None,
             };
-            let order = Order {
+            let mut order = Order {
                 order_type,
-                trigger_price: Some(trigger.to_string()),
+                trigger_price: trigger.map(str::to_string),
                 close_position: true,
                 ..self.build_order(&request, ts)
             };
+            if let Some((spec, extreme)) = trailing {
+                order.trailing_kind = Some(spec.kind);
+                order.trailing_callback = Some(spec.callback.clone());
+                order.trailing_activation_price = spec.activation_price.clone();
+                order.trailing_extreme = extreme;
+            }
             self.store.insert_order(&order)?;
             self.queue(EngineEvent::Order { order });
             Ok(())
         };
-        if let Some(stop) = given(stop_loss) {
-            make(OrderType::StopMarket, stop)?;
+        if let Some(stop) = given(&protection.stop_loss) {
+            make(OrderType::StopMarket, Some(stop), None)?;
         }
-        if let Some(target) = given(take_profit) {
-            make(OrderType::TakeProfitMarket, target)?;
+        if let Some(target) = given(&protection.take_profit) {
+            make(OrderType::TakeProfitMarket, Some(target), None)?;
+        }
+        if let Some(spec) = &protection.trailing_stop {
+            let extreme = match carried {
+                Some(extreme) => extreme,
+                None if spec.activation_price.is_none() => Some(dec(last)?.to_fixed()),
+                None => None,
+            };
+            make(OrderType::TrailingStopMarket, None, Some((spec, extreme)))?;
         }
         Ok(())
     }

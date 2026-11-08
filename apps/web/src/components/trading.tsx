@@ -9,12 +9,15 @@ import type {
   Order,
   Position,
   PositionView,
+  Protection,
+  TrailingStopSpec,
 } from '@mochiprep/shared';
 import { api } from '@/lib/api';
 import { money, pct, pnlClass, price, qty, shortId, signedMoney } from '@/lib/format';
+import { externalBadgeLabel, trailingText } from '@/lib/protection';
 import { cn } from '@/lib/utils';
 import { attempt, useApp, useDateTime, useSourceAccounts } from '@/store';
-import { Badge, Button, Dialog, Field, Input, Select, Table, type Tone } from './ui';
+import { Badge, Button, Dialog, Field, Input, Segmented, Select, Table, type Tone } from './ui';
 
 export function AccountPicker({ allowAll, className }: { allowAll?: boolean; className?: string }) {
   const accounts = useSourceAccounts();
@@ -50,17 +53,52 @@ export function useCurrentAccount() {
 export const sideBadge = (side: Position['side']) => <Badge tone={side === 'LONG' ? 'rise' : 'fall'}>{side}</Badge>;
 const orderSide = (side: Order['side']) => <span className={side === 'BUY' ? 'text-rise' : 'text-fall'}>{side}</span>;
 
+/** Moves the decimal point of a plain decimal string, so a percent and a ratio convert without float math. */
+function shiftPoint(value: string, places: number): string {
+  const [int = '', frac = ''] = value.trim().split('.');
+  let digits = int + frac;
+  let point = int.length + places;
+  if (point <= 0) {
+    digits = '0'.repeat(1 - point) + digits;
+    point = 1;
+  } else if (point > digits.length) {
+    digits += '0'.repeat(point - digits.length);
+  }
+  const whole = digits.slice(0, point).replace(/^0+(?=\d)/, '') || '0';
+  const rest = digits.slice(point).replace(/0+$/, '');
+  return rest ? `${whole}.${rest}` : whole;
+}
+const isDecimal = (v: string) => /^\d+(\.\d+)?$/.test(v.trim());
+
+type TrailKind = TrailingStopSpec['kind'] | 'NONE';
+
 function ProtectionDialog({ position, onClose }: { position: PositionView; onClose(): void }) {
   const [stop, setStop] = useState(position.stopLoss ?? '');
   const [target, setTarget] = useState(position.takeProfit ?? '');
+  const current = position.trailingStop;
+  const [kind, setKind] = useState<TrailKind>(current?.kind ?? 'NONE');
+  // A ratio is shown as a percent: 0.01 reads 1.
+  const [callback, setCallback] = useState(current ? (current.kind === 'RATIO' ? shiftPoint(current.callback, 2) : current.callback) : '');
+  const [activation, setActivation] = useState(current?.activationPrice ?? '');
+  const [saving, setSaving] = useState(false);
+  const toast = useApp((s) => s.toast);
   const save = async () => {
-    const ok = await attempt(() =>
-      api.put(`/positions/${position.accountId}/${position.symbol}/protection`, {
+    if (kind !== 'NONE' && !isDecimal(callback)) return toast('error', 'Enter the callback as a positive number');
+    const trailingStop: TrailingStopSpec | null =
+      kind === 'NONE' ? null : { kind, callback: kind === 'RATIO' ? shiftPoint(callback, -2) : callback.trim(), activationPrice: activation.trim() || null };
+    setSaving(true);
+    const result = await attempt(() =>
+      api.put<{ pending: boolean }>(`/positions/${position.accountId}/${position.symbol}/protection`, {
         stopLoss: stop.trim() || null,
         takeProfit: target.trim() || null,
+        trailingStop,
       }),
     );
-    if (ok) onClose();
+    setSaving(false);
+    if (!result) return;
+    // On OKX an unanswered placement is resolved later; the dialog must not claim it is in force.
+    if (result.pending) toast('warn', 'Sent to OKX, awaiting confirmation. The old protection stays until OKX confirms.');
+    onClose();
   };
   return (
     <Dialog open onOpenChange={onClose} title={`Protection for ${position.symbol}`} description={`${position.side} ${qty(position.quantity)} from ${price(position.entryPrice, position.symbol)}. Leave a field empty to remove it.`}>
@@ -68,11 +106,55 @@ function ProtectionDialog({ position, onClose }: { position: PositionView; onClo
         <Field label="Stop loss"><Input inputMode="decimal" value={stop} onChange={(e) => setStop(e.target.value)} /></Field>
         <Field label="Take profit"><Input inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} /></Field>
       </div>
+      <div className="mt-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs font-semibold text-ink-2">Trailing stop</span>
+          <Segmented<TrailKind>
+            label="Trailing stop kind"
+            value={kind}
+            onChange={setKind}
+            options={[{ value: 'NONE', label: 'None' }, { value: 'RATIO', label: 'Percent' }, { value: 'SPREAD', label: 'Price' }]}
+          />
+        </div>
+        {kind !== 'NONE' && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={kind === 'RATIO' ? 'Callback (%)' : 'Callback (USDT)'}>
+              <Input aria-label="Trailing callback" inputMode="decimal" value={callback} onChange={(e) => setCallback(e.target.value)} />
+            </Field>
+            <Field label="Activation price" hint="Optional">
+              <Input aria-label="Trailing activation price" inputMode="decimal" value={activation} onChange={(e) => setActivation(e.target.value)} />
+            </Field>
+          </div>
+        )}
+        {position.externalProtection.length > 0 && (
+          <p className="text-xs text-ink-3">Orders marked External were placed on OKX itself, and MochiPrep never changes them. Cancel pending marks an old MochiPrep order that OKX has not yet confirmed cancelled; MochiPrep keeps retrying it.</p>
+        )}
+      </div>
       <div className="mt-4 flex justify-end gap-2">
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="primary" onClick={save}>Save</Button>
+        <Button variant="primary" onClick={save} disabled={saving}>Save</Button>
       </div>
     </Dialog>
+  );
+}
+
+/** Trailing trigger and the owner's own OKX-app orders, under the fixed stop and target. */
+function ProtectionExtras({ p }: { p: PositionView }) {
+  const trail = p.trailingStop;
+  if (!trail && p.externalProtection.length === 0) return null;
+  return (
+    <div className="mt-0.5 flex flex-wrap justify-end gap-1 text-[11px]">
+      {trail && (
+        <Badge tone="info" data-testid="trailing-trigger">
+          Trail {trail.triggerPrice ? price(trail.triggerPrice, p.symbol) : trailingText(trail)}
+        </Badge>
+      )}
+      {p.externalProtection.map((e, i) => (
+        <Badge key={i} data-testid="external-protection" title={e.detail}>
+          {externalBadgeLabel(e, e.triggerPrice ? price(e.triggerPrice, p.symbol) : null)}
+        </Badge>
+      ))}
+    </div>
   );
 }
 
@@ -97,7 +179,10 @@ export function PositionsTable({ positions, actions = true, editable = true, acc
             <td className="num text-warn">{price(p.liquidationPrice, p.symbol)}</td>
             <td className="num">{money(p.margin)}</td>
             <td className="num">{p.leverage}x</td>
-            <td className="num text-ink-2">{p.stopLoss ? price(p.stopLoss, p.symbol) : '–'} / {p.takeProfit ? price(p.takeProfit, p.symbol) : '–'}</td>
+            <td className="num text-ink-2">
+              {p.stopLoss ? price(p.stopLoss, p.symbol) : '–'} / {p.takeProfit ? price(p.takeProfit, p.symbol) : '–'}
+              <ProtectionExtras p={p} />
+            </td>
             <td className={cn('num font-semibold', pnlClass(p.unrealizedPnl))}>{signedMoney(p.unrealizedPnl)}</td>
             {actions && (
               <td>
@@ -116,7 +201,7 @@ export function PositionsTable({ positions, actions = true, editable = true, acc
   );
 }
 
-const ORDER_LABEL: Record<Order['type'], string> = { MARKET: 'Market', LIMIT: 'Limit', STOP_MARKET: 'Stop loss', TAKE_PROFIT_MARKET: 'Take profit' };
+const ORDER_LABEL: Record<Order['type'], string> = { MARKET: 'Market', LIMIT: 'Limit', STOP_MARKET: 'Stop loss', TAKE_PROFIT_MARKET: 'Take profit', TRAILING_STOP_MARKET: 'Trailing stop' };
 const ORDER_TONE: Record<Order['status'], Tone> = { OPEN: 'info', FILLED: 'up', CANCELED: 'neutral', REJECTED: 'down' };
 
 export function OrdersTable({ orders, cancellable, emptyText }: { orders: Order[]; cancellable?: boolean; emptyText: string }) {
@@ -267,6 +352,8 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
   </div>
 );
 
+const protectionText = (p: Protection) => `SL ${p.stopLoss ?? '–'} · TP ${p.takeProfit ?? '–'} · trailing ${trailingText(p.trailingStop)}`;
+
 export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
   const dateTime = useDateTime();
   const [showRaw, setShowRaw] = useState(false);
@@ -299,6 +386,7 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
           <div className="mt-2">
             <Row label="Order">{ai.orderType}{ai.entryPrice ? ` @ ${ai.entryPrice}` : ''}</Row>
             <Row label="Stop / Target">{ai.stopLoss ?? '–'} / {ai.takeProfit ?? '–'}</Row>
+            {ai.trailingStop !== undefined && <Row label="Trailing stop">{ai.trailingStop === null ? 'Remove' : trailingText(ai.trailingStop)}</Row>}
             <Row label="Confidence (uncalibrated)">{(ai.confidence * 100).toFixed(0)}%</Row>
           </div>
         </section>
@@ -347,6 +435,8 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
       <section>
         <h3 className="mb-1 text-xs font-semibold text-ink-2">Execution</h3>
         <Row label="Result">{d.outcomeDetail ?? 'No order placed'}</Row>
+        {d.protectionBefore && <Row label="Protection before">{protectionText(d.protectionBefore)}</Row>}
+        {d.protectionAfter && <Row label="Protection after">{protectionText(d.protectionAfter)}</Row>}
         <Row label="Order ID">{shortId(d.orderId)}</Row>
         <Row label="Fill IDs">{d.fillIds.length ? d.fillIds.map(shortId).join(', ') : '–'}</Row>
         <Row label="Latency">{d.latencyMs === null ? '–' : `${d.latencyMs} ms`}</Row>

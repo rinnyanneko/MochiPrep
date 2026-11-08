@@ -13,7 +13,20 @@ The engine never invents a tradable price and never treats an OHLC path as execu
 - Cancelling an open order releases its reservation. Reservations are not ledger balances; they reduce available balance while the order is open.
 - Stop-loss and take-profit orders fill as takers at the first quote after their trigger condition becomes observable. A gap therefore fills at that quote's slipped bid or ask, not at the trigger.
 
-For each quote the engine evaluates funding, liquidation, stop-loss, take-profit, and resting limits in that order. If stop-loss and take-profit are both true on the same quote, the stop-loss closes the position and the take-profit is cancelled.
+For each quote the engine evaluates funding, liquidation, stop-loss, trailing stop, take-profit, and resting limits in that order. If stop-loss and take-profit are both true on the same quote, the stop-loss closes the position and the take-profit is cancelled.
+
+## Trailing stops
+
+A position may have one trailing stop on top of its fixed stop-loss. It is a `TRAILING_STOP_MARKET` order with a kind (`RATIO`, a fraction of the extreme, or `SPREAD`, a price distance), a callback and an optional activation price.
+
+- **Tracking.** The engine tracks the extreme of the observed `last` price: the highest for a long, the lowest for a short. A trail with no activation price starts at the `last` of the quote it was created with. A trail with an activation price is dormant until a long's `last` reaches or exceeds it, or a short's `last` reaches or falls below it; the extreme then starts at that `last`. The extreme only moves in the trader's favour.
+- **Trigger.** A long triggers at `extreme × (1 − ratio)` or `extreme − spread`; a short at `extreme × (1 + ratio)` or `extreme + spread`. The trigger is rounded to the tick against the trader: floored for a long, ceiled for a short.
+- **Evaluation.** On each quote the extreme is first advanced with that quote's `last` and saved, then the trail triggers when a long's `last` is at or below the trigger, or a short's is at or above it. Like a stop-loss, it then closes the whole position as taker at that quote's slipped bid or ask. A gap through the trigger fills at the gapped quote, never at the trigger price.
+- **Same quote as the stop-loss.** The stop-loss is evaluated first. If both are through on one quote, the stop-loss closes the position and the trail is cancelled.
+- **Adding.** Adding to the position without protection leaves the trail and its extreme alone, and it closes the whole enlarged quantity.
+- **Changing protection.** Setting protection replaces stop-loss, take-profit and trail together in one transaction. Restating the same trail (same kind, callback and activation price) carries its extreme over, so changing only the stop-loss never loosens the trail or puts an activated trail back to sleep. A different trail starts afresh.
+- **Restart.** The extreme is stored on the order row (`trailing_extreme`). After a restart the engine resumes from the stored extreme; it does not reset to the next quote.
+- **Limits.** A `RATIO` callback must be between 0.001 and 0.3. A `SPREAD` callback must be at least one tick and at most 30% of the reference price. An activation price must be on the profitable side of the reference: above it for a long, below for a short. The reference is the entry price (ask, bid or limit) for an attached trail and `last` for an open position. Reduce-only orders cannot attach a trail.
 
 ## Positions, margin, PnL, and fees
 

@@ -3,8 +3,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AiProvider } from '@mochiprep/ai-providers';
-import { DEFAULT_RISK_SETTINGS } from '@mochiprep/shared';
+import { PaperExecutionEngine } from '@mochiprep/core';
+import { DEFAULT_RISK_SETTINGS, type Quote } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database';
+import { SqliteStore } from '../src/db/store';
 import { Runtime } from '../src/runtime';
 
 const holdProvider: AiProvider = {
@@ -76,5 +78,41 @@ describe('file database recovery', () => {
     expect(second.providerFor(second.store.getProvider('remote')!)).toBe(holdProvider);
     await second.stop();
     secondDb.close();
+  });
+
+  it('trailing extreme survives a restart', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mochiprep-trailing-'));
+    dirs.push(dir);
+    const path = join(dir, 'state.sqlite');
+    let quote: Quote = { source: 'REPLAY', symbol: 'BTCUSDT', bid: '99.9', ask: '100.1', last: '100', mark: '100', markEstimated: false, fundingRate: '0', nextFundingTime: null, ts: 1_000 };
+    const at = (ts: number, last: string): Quote => ({ ...quote, bid: last, ask: last, last, mark: last, ts });
+    const open = (file: string) => {
+      const db = openDatabase(file);
+      const store = new SqliteStore(db);
+      return { db, store, engine: new PaperExecutionEngine({ store, getQuote: () => quote, now: () => quote.ts }) };
+    };
+
+    const first = open(path);
+    const account = first.engine.createAccount({ name: 'trail', source: 'REPLAY', config: { slippageBps: '0', impactBpsPerMillion: '0' } });
+    first.engine.placeOrderSync({
+      accountId: account.id, clientOrderId: 'open', symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET',
+      quantity: '0.01', leverage: 3, trailingStop: { kind: 'RATIO', callback: '0.01', activationPrice: null },
+    });
+    quote = at(2_000, '110');
+    first.engine.onQuote(quote);
+    expect(first.engine.positionViews(account.id)[0]!.trailingStop).toMatchObject({ extreme: '110', triggerPrice: '108.9' });
+    first.db.close();
+
+    // A fresh engine on the same file must resume from 110, not restart at the next last.
+    const second = open(path);
+    quote = at(3_000, '109');
+    second.engine.onQuote(quote);
+    expect(second.engine.positionViews(account.id)[0]!.trailingStop).toMatchObject({ extreme: '110', triggerPrice: '108.9' });
+    quote = at(4_000, '108.89');
+    second.engine.onQuote(quote);
+    expect(second.engine.positionViews(account.id)).toEqual([]);
+    // Filled at that quote's bid, floored to BTCUSDT's 0.1 tick.
+    expect(second.store.listFills(account.id, 10)[0]).toMatchObject({ side: 'SELL', price: '108.8', liquidity: 'TAKER' });
+    second.db.close();
   });
 });

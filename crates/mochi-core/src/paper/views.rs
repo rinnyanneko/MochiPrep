@@ -1,11 +1,16 @@
 //! Read models over the paper books: balance, position views, open orders, daily risk, and the
 //! equity history point. A port of the read-model section of `packages/core/src/paper/engine.ts`.
 
-use mochi_domain::{AccountBalance, EquityPoint, LedgerEventType, Order, OrderType, PositionView};
+use mochi_domain::{
+    AccountBalance, EquityPoint, LedgerEventType, Order, OrderType, PositionView, TrailingStopView,
+};
 use serde::Serialize;
 
-use super::engine::{dec, money, zero, EngineError, PaperExecutionEngine};
+use super::engine::{
+    dec, math_error, money, trailing_spec_of, zero, EngineError, PaperExecutionEngine,
+};
 use super::store::PaperStore;
+use super::trailing::trailing_trigger;
 use crate::perp;
 
 const DAY_MS: i64 = 86_400_000;
@@ -60,7 +65,8 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
         })
     }
 
-    /// Open positions with their mark, open PnL and the first stop and target protecting each.
+    /// Open positions with their mark, open PnL and the first stop, target and trailing stop
+    /// protecting each.
     pub fn position_views(&self, account_id: &str) -> Result<Vec<PositionView>, EngineError> {
         let account = self.require_account(account_id)?;
         let orders = self.store.list_open_orders(account_id)?;
@@ -85,11 +91,38 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             };
             let stop_loss = protection(OrderType::StopMarket);
             let take_profit = protection(OrderType::TakeProfitMarket);
+            let trailing = orders.iter().find(|o| {
+                o.symbol == position.symbol && o.order_type == OrderType::TrailingStopMarket
+            });
+            let trailing_stop = match trailing {
+                None => None,
+                Some(order) => {
+                    let spec = trailing_spec_of(order)?;
+                    let extreme = order.trailing_extreme.clone();
+                    let trigger_price = match &extreme {
+                        None => None,
+                        Some(extreme) => {
+                            let tick = dec(&self.instrument(&position.symbol)?.price_tick)?;
+                            let trigger =
+                                trailing_trigger(position.side, &spec, &dec(extreme)?, &tick)
+                                    .map_err(|e| math_error("the trailing trigger", e))?;
+                            Some(trigger.to_fixed())
+                        }
+                    };
+                    Some(TrailingStopView {
+                        spec,
+                        extreme,
+                        trigger_price,
+                    })
+                }
+            };
             views.push(PositionView {
                 mark_price: quote.map(|q| q.mark),
                 unrealized_pnl,
                 stop_loss,
                 take_profit,
+                trailing_stop,
+                external_protection: Vec::new(),
                 position,
             });
         }

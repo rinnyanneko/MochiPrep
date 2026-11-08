@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
-import type { OrderRequest, Quote } from '@mochiprep/shared';
-import { auditLedger, d, PaperExecutionEngine } from '@mochiprep/core';
+import { AgentInputSchema, DEFAULT_RISK_SETTINGS, ProtectionSchema, type OrderRequest, type Quote } from '@mochiprep/shared';
+import { advanceExtreme, auditLedger, d, PaperExecutionEngine, trailingTrigger, validateTrailing } from '@mochiprep/core';
 import { openDatabase } from '../src/db/database';
 import { SqliteStore } from '../src/db/store';
 
@@ -302,6 +302,55 @@ describe('PaperExecutionEngine with SQLite', () => {
     expect(store.listFills(accountId, 10)).toHaveLength(0);
   });
 
+  it('stores and reads the trailing fields of an order', () => {
+    const base = engine.placeOrderSync(request({ clientOrderId: 'trail-base' })).order;
+    const order = {
+      ...base,
+      id: 'trail-1',
+      clientOrderId: 'trail-1',
+      type: 'TRAILING_STOP_MARKET' as const,
+      trailingKind: 'RATIO' as const,
+      trailingCallback: '0.02',
+      trailingActivationPrice: '105',
+      trailingExtreme: '110.5',
+      attachedTrailingStop: { kind: 'SPREAD' as const, callback: '1.5', activationPrice: null },
+    };
+    store.insertOrder(order);
+    expect(store.getOrder('trail-1')).toEqual(order);
+    store.saveOrder({ ...order, trailingExtreme: '112' });
+    expect(store.getOrder('trail-1')!.trailingExtreme).toBe('112');
+    // An ordinary order keeps them all empty.
+    expect(store.getOrder(base.id)).toMatchObject({ trailingKind: null, trailingCallback: null, trailingActivationPrice: null, trailingExtreme: null, attachedTrailingStop: null });
+  });
+
+  it('lists open orders oldest first, with equal creation times in insertion order', () => {
+    const base = engine.placeOrderSync(request({ clientOrderId: 'order-base' })).order;
+    const open = (id: string, createdAt: number) => ({ ...base, id, clientOrderId: id, status: 'OPEN' as const, createdAt });
+    // Inserted out of id order and out of time order: id sorting would give a, b, c, d, e.
+    for (const [id, createdAt] of [['c', 5], ['e', 9], ['a', 5], ['d', 5], ['b', 1]] as const) store.insertOrder(open(id, createdAt));
+    expect(store.listOpenOrders(accountId).map((o) => o.id)).toEqual(['b', 'c', 'a', 'd', 'e']);
+  });
+
+  it('accepts a protection body without trailingStop and still rejects unknown keys', () => {
+    expect(ProtectionSchema.parse({ stopLoss: '90', takeProfit: null })).toEqual({ stopLoss: '90', takeProfit: null });
+    expect(ProtectionSchema.parse({ stopLoss: null, takeProfit: null, trailingStop: null }).trailingStop).toBeNull();
+    expect(ProtectionSchema.safeParse({ stopLoss: '90', takeProfit: null, extra: 1 }).success).toBe(false);
+  });
+
+  it('keeps allowTrailingStop through save and load, off by default', () => {
+    store.insertProvider({ id: 'p1', name: 'p', kind: 'OPENAI', baseUrl: null, defaultModel: 'm', inputPricePerMTok: null, outputPricePerMTok: null, createdAt: 1 });
+    const agent = {
+      id: 'a1', name: 'a', providerId: 'p1', model: 'm', symbol: 'BTCUSDT', timeframe: '15m' as const, strategy: '', accountId,
+      risk: DEFAULT_RISK_SETTINGS, intervalSec: 900, executionMode: 'SIGNAL' as const, useNews: false, allowTrailingStop: false,
+      status: 'IDLE' as const, running: false, nextRunAt: null, lastRunAt: null, statusDetail: null, consecutiveErrors: 0, isDemo: false, createdAt: 1,
+    };
+    store.insertAgent(agent);
+    expect(store.getAgent('a1')!.allowTrailingStop).toBe(false);
+    store.saveAgent({ ...agent, allowTrailingStop: true });
+    expect(store.getAgent('a1')!.allowTrailingStop).toBe(true);
+    expect(AgentInputSchema.parse({ name: 'n', providerId: 'p1', model: 'm', symbol: 'BTCUSDT', timeframe: '15m', strategy: '', accountId, intervalSec: 900 }).allowTrailingStop).toBe(false);
+  });
+
   it('keeps the ledger auditable through a fixed pseudo-random trade sequence', () => {
     let seed = 0x12345678;
     const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32);
@@ -318,6 +367,49 @@ describe('PaperExecutionEngine with SQLite', () => {
       }
     }
     expect(auditLedger(store.getAccount(accountId)!, store.listLedger(accountId))).toEqual([]);
+  });
+});
+
+describe('trailing stop rules', () => {
+  it('trailingTrigger floors a long ratio trigger to the tick', () => {
+    const spec = { kind: 'RATIO' as const, callback: '0.01', activationPrice: null };
+    expect(trailingTrigger('LONG', spec, d('100.37'), d('0.01')).toFixed()).toBe('99.36');
+  });
+
+  it('trailingTrigger ceils a short spread trigger to the tick', () => {
+    const spec = { kind: 'SPREAD' as const, callback: '1.234', activationPrice: null };
+    expect(trailingTrigger('SHORT', spec, d('100.00'), d('0.01')).toFixed()).toBe('101.24');
+  });
+
+  it('advanceExtreme waits for the activation price', () => {
+    const spec = { kind: 'RATIO' as const, callback: '0.01', activationPrice: '105' };
+    let extreme: string | null = null;
+    const seen: (string | null)[] = [];
+    for (const last of ['104', '105', '103', '107']) {
+      extreme = advanceExtreme('LONG', spec, extreme, d(last));
+      seen.push(extreme);
+    }
+    expect(seen).toEqual([null, '105', '105', '107']);
+    // Without an activation price it tracks at once, and a short follows the low.
+    const open = { kind: 'SPREAD' as const, callback: '1', activationPrice: null };
+    expect(advanceExtreme('SHORT', open, null, d('100'))).toBe('100');
+    expect(advanceExtreme('SHORT', open, '100', d('101'))).toBe('100');
+    expect(advanceExtreme('SHORT', open, '100', d('98.5'))).toBe('98.5');
+  });
+
+  it('validateTrailing rejects a ratio of 0.0009 and 0.31 and an activation below a long reference', () => {
+    const tick = d('0.1');
+    const ratio = (callback: string) => ({ kind: 'RATIO' as const, callback, activationPrice: null });
+    expect(validateTrailing('LONG', d('100'), ratio('0.0009'), tick)).toMatch(/ratio 0.0009/);
+    expect(validateTrailing('LONG', d('100'), ratio('0.31'), tick)).toMatch(/ratio 0.31/);
+    expect(validateTrailing('LONG', d('100'), ratio('0.001'), tick)).toBeNull();
+    expect(validateTrailing('LONG', d('100'), ratio('0.3'), tick)).toBeNull();
+    expect(validateTrailing('LONG', d('100'), { ...ratio('0.01'), activationPrice: '99' }, tick)).toMatch(/activation 99/);
+    expect(validateTrailing('SHORT', d('100'), { ...ratio('0.01'), activationPrice: '99' }, tick)).toBeNull();
+    const spread = (callback: string) => ({ kind: 'SPREAD' as const, callback, activationPrice: null });
+    expect(validateTrailing('LONG', d('100'), spread('0.05'), tick)).toMatch(/below one tick/);
+    expect(validateTrailing('LONG', d('100'), spread('30.1'), tick)).toMatch(/exceeds/);
+    expect(validateTrailing('LONG', d('100'), spread('30'), tick)).toBeNull();
   });
 });
 

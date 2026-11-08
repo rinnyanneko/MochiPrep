@@ -14,11 +14,14 @@ describe('suggestion mode', () => {
   let app: ReturnType<typeof buildApp>['app'];
   let token: string;
   let aiExpiresAt: string | null;
+  /** Replaces the default LONG with another decision built from the price the model saw. */
+  let override: ((price: number) => object) | null;
 
   const provider: AiProvider = {
     kind: 'OPENAI',
     complete: async (request) => {
       price = Number(request.context.quote.last);
+      if (override) return { text: JSON.stringify(override(price)), inputTokens: 1, outputTokens: 1 };
       return {
         text: JSON.stringify({
           symbol: 'BTCUSDT', action: 'LONG', orderType: 'MARKET', entryPrice: null, stopLoss: Math.round(price * 0.98),
@@ -40,6 +43,7 @@ describe('suggestion mode', () => {
 
   beforeEach(() => {
     aiExpiresAt = null;
+    override = null;
     db = openDatabase(':memory:');
     runtime = new Runtime({ db, replayMinutes: 6_000, providerFactory: () => provider });
     runtime.store.insertProvider({ id: 'remote', name: 'r', kind: 'OPENAI', baseUrl: null, defaultModel: 'm', inputPricePerMTok: null, outputPricePerMTok: null, createdAt: 1 });
@@ -183,6 +187,40 @@ describe('suggestion mode', () => {
     expect(runtime.replayState().playing).toBe(false);
   });
 
+  describe('PROTECT', () => {
+    const last = () => Number(runtime.replay.getQuote('BTCUSDT')!.last);
+    const protect = (stopLoss: number) => () => ({
+      symbol: 'BTCUSDT', action: 'PROTECT', orderType: 'MARKET', entryPrice: null, stopLoss, takeProfit: null,
+      reason: 'tighten', confidence: 0.6, expiresAt: null,
+    });
+    const openWithStop = (stopLoss: string) =>
+      runtime.engine.placeOrderSync({ accountId, clientOrderId: 'open', symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET', quantity: '0.01', leverage: 3, stopLoss });
+
+    it('a PROTECT signal expires when protection changed before it was accepted', async () => {
+      const loose = String(Math.round(last() * 0.95));
+      openWithStop(loose);
+      override = protect(Math.round(last() * 0.98));
+      const signal = await raise();
+      expect(signal.outcome).toBe('SIGNAL');
+      expect(signal.protectionBefore).toEqual({ stopLoss: loose, takeProfit: null, trailingStop: null });
+      runtime.engine.setProtectionSync(accountId, 'BTCUSDT', { stopLoss: String(Math.round(last() * 0.96)), takeProfit: null, trailingStop: null });
+      const result = await runtime.runner.executeSignal(signal.id);
+      expect(result).toMatchObject({ outcome: 'SIGNAL_EXPIRED', outcomeDetail: 'Protection changed since this suggestion' });
+      expect(runtime.engine.protectionOfSync(accountId, 'BTCUSDT').stopLoss).toBe(String(Math.round(last() * 0.96)));
+    });
+
+    it('an unchanged PROTECT signal is re-assessed and executed on accept', async () => {
+      openWithStop(String(Math.round(last() * 0.95)));
+      const tight = Math.round(last() * 0.98);
+      override = protect(tight);
+      const signal = await raise();
+      const result = await runtime.runner.executeSignal(signal.id);
+      expect(result).toMatchObject({ outcome: 'EXECUTED', outcomeDetail: 'Protection updated' });
+      expect(result.protectionAfter!.stopLoss).toBe(String(tight));
+      expect(runtime.engine.protectionOfSync(accountId, 'BTCUSDT').stopLoss).toBe(String(tight));
+    });
+  });
+
   describe('API', () => {
     it('lists, executes, and answers 409 once settled', async () => {
       const signal = await raise();
@@ -203,6 +241,20 @@ describe('suggestion mode', () => {
       const signal = await raise();
       await call('POST', '/api/agents/stop-all');
       expect(runtime.store.getDecision(signal.id)).toMatchObject({ outcome: 'SIGNAL_EXPIRED', outcomeDetail: 'Cleared by Stop All' });
+    });
+
+    it('saves the trailing-stop switch with PUT', async () => {
+      const created = agent();
+      expect(created.allowTrailingStop).toBe(false);
+      const response = await app.inject({
+        method: 'PUT', url: `/api/agents/${created.id}`, headers: { host: 'localhost:8787', authorization: `Bearer ${token}` },
+        payload: {
+          name: 'a', providerId: 'remote', model: 'm', symbol: 'BTCUSDT', timeframe: '15m', strategy: '', accountId,
+          intervalSec: 900, executionMode: 'SIGNAL', allowTrailingStop: true,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(runtime.store.getAgent(created.id)!.allowTrailingStop).toBe(true);
     });
 
     it('new agents default to suggesting', async () => {

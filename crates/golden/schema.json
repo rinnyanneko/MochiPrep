@@ -64,7 +64,7 @@
    "type": "table",
    "name": "agents",
    "tbl_name": "agents",
-   "sql": "CREATE TABLE agents (\n  id TEXT PRIMARY KEY,\n  name TEXT NOT NULL,\n  provider_id TEXT NOT NULL REFERENCES providers(id),\n  model TEXT NOT NULL,\n  symbol TEXT NOT NULL,\n  timeframe TEXT NOT NULL,\n  strategy TEXT NOT NULL,\n  account_id TEXT NOT NULL REFERENCES accounts(id),\n  risk TEXT NOT NULL,\n  interval_sec INTEGER NOT NULL,\n  status TEXT NOT NULL,\n  running INTEGER NOT NULL,\n  next_run_at INTEGER,\n  last_run_at INTEGER,\n  status_detail TEXT,\n  consecutive_errors INTEGER NOT NULL DEFAULT 0,\n  is_demo INTEGER NOT NULL DEFAULT 0,\n  created_at INTEGER NOT NULL\n, execution_mode TEXT NOT NULL DEFAULT 'AUTO', use_news INTEGER NOT NULL DEFAULT 0)"
+   "sql": "CREATE TABLE agents (\n  id TEXT PRIMARY KEY,\n  name TEXT NOT NULL,\n  provider_id TEXT NOT NULL REFERENCES providers(id),\n  model TEXT NOT NULL,\n  symbol TEXT NOT NULL,\n  timeframe TEXT NOT NULL,\n  strategy TEXT NOT NULL,\n  account_id TEXT NOT NULL REFERENCES accounts(id),\n  risk TEXT NOT NULL,\n  interval_sec INTEGER NOT NULL,\n  status TEXT NOT NULL,\n  running INTEGER NOT NULL,\n  next_run_at INTEGER,\n  last_run_at INTEGER,\n  status_detail TEXT,\n  consecutive_errors INTEGER NOT NULL DEFAULT 0,\n  is_demo INTEGER NOT NULL DEFAULT 0,\n  created_at INTEGER NOT NULL\n, execution_mode TEXT NOT NULL DEFAULT 'AUTO', use_news INTEGER NOT NULL DEFAULT 0, allow_trailing_stop INTEGER NOT NULL DEFAULT 0)"
   },
   {
    "type": "table",
@@ -100,7 +100,7 @@
    "type": "table",
    "name": "orders",
    "tbl_name": "orders",
-   "sql": "CREATE TABLE orders (\n  id TEXT PRIMARY KEY,\n  account_id TEXT NOT NULL REFERENCES accounts(id),\n  client_order_id TEXT NOT NULL,\n  symbol TEXT NOT NULL,\n  side TEXT NOT NULL,\n  type TEXT NOT NULL,\n  quantity TEXT NOT NULL,\n  price TEXT,\n  trigger_price TEXT,\n  leverage INTEGER NOT NULL,\n  reduce_only INTEGER NOT NULL,\n  close_position INTEGER NOT NULL,\n  status TEXT NOT NULL,\n  filled_quantity TEXT NOT NULL,\n  avg_fill_price TEXT,\n  reserved_margin TEXT NOT NULL,\n  attached_stop_loss TEXT,\n  attached_take_profit TEXT,\n  reject_reason TEXT,\n  agent_id TEXT,\n  decision_id TEXT,\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL, exchange_order_id TEXT,\n  UNIQUE (account_id, client_order_id)\n)"
+   "sql": "CREATE TABLE orders (\n  id TEXT PRIMARY KEY,\n  account_id TEXT NOT NULL REFERENCES accounts(id),\n  client_order_id TEXT NOT NULL,\n  symbol TEXT NOT NULL,\n  side TEXT NOT NULL,\n  type TEXT NOT NULL,\n  quantity TEXT NOT NULL,\n  price TEXT,\n  trigger_price TEXT,\n  leverage INTEGER NOT NULL,\n  reduce_only INTEGER NOT NULL,\n  close_position INTEGER NOT NULL,\n  status TEXT NOT NULL,\n  filled_quantity TEXT NOT NULL,\n  avg_fill_price TEXT,\n  reserved_margin TEXT NOT NULL,\n  attached_stop_loss TEXT,\n  attached_take_profit TEXT,\n  reject_reason TEXT,\n  agent_id TEXT,\n  decision_id TEXT,\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL, exchange_order_id TEXT, trailing_kind TEXT, trailing_callback TEXT, trailing_activation_price TEXT, trailing_extreme TEXT, attached_trailing_stop TEXT,\n  UNIQUE (account_id, client_order_id)\n)"
   },
   {
    "type": "table",
@@ -158,6 +158,7 @@
   "004_execution_mode.sql",
   "005_provider_headers.sql",
   "006_agent_news.sql",
-  "007_vault.sql"
+  "007_vault.sql",
+  "008_trailing_stop.sql"
  ]
 }

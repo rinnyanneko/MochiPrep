@@ -51,6 +51,8 @@ pub fn is_resting_limit_filled(
     is_marketable(side, limit, quote)
 }
 
+/// Stop-loss and trailing stop: a long triggers when last falls to the trigger, a short when it
+/// rises to it.
 pub fn is_stop_triggered(position_is_long: bool, trigger: &Dec, last: &Dec) -> bool {
     if position_is_long {
         last.lte(trigger)

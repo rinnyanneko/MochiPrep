@@ -1,6 +1,7 @@
 import { createServer } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
+import { d } from '@mochiprep/core';
 import { DEFAULT_RISK_SETTINGS } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database';
 import { buildApp } from '../src/app';
@@ -91,6 +92,61 @@ describe('API decision-to-position integration', () => {
 
     const audit = await app.inject({ method: 'GET', url: `/api/accounts/${account.id}/audit`, headers: headers() });
     expect(audit.json()).toEqual({ consistent: true, issues: [] });
+  });
+
+  it('keeps the trailing stop when a protection body omits it, and removes it on null', async () => {
+    const account = runtime.engine.createAccount({ name: 'trail', source: 'REPLAY' });
+    const trailingStop = { kind: 'RATIO' as const, callback: '0.01', activationPrice: null };
+    const opened = runtime.engine.placeOrderSync({
+      accountId: account.id, clientOrderId: 'open', symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET', quantity: '0.01', leverage: 3, trailingStop,
+    });
+    expect(opened.order.status).toBe('FILLED');
+    const stopLoss = d(opened.order.avgFillPrice!).mul('0.9').toDecimalPlaces(1).toFixed();
+    const put = (payload: Record<string, unknown>) =>
+      app.inject({ method: 'PUT', url: `/api/positions/${account.id}/BTCUSDT/protection`, headers: headers(), payload });
+
+    expect((await put({ stopLoss, takeProfit: null })).statusCode).toBe(200);
+    expect(runtime.engine.protectionOfSync(account.id, 'BTCUSDT')).toEqual({ stopLoss, takeProfit: null, trailingStop });
+    expect((await put({ stopLoss, takeProfit: null, trailingStop: null })).statusCode).toBe(200);
+    expect(runtime.engine.protectionOfSync(account.id, 'BTCUSDT')).toEqual({ stopLoss, takeProfit: null, trailingStop: null });
+  });
+
+  it('api: protection route sets a trailing stop on a paper position', async () => {
+    const account = runtime.engine.createAccount({ name: 'set-trail', source: 'REPLAY' });
+    runtime.engine.placeOrderSync({
+      accountId: account.id, clientOrderId: 'open', symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET', quantity: '0.01', leverage: 3,
+    });
+    const trailingStop = { kind: 'RATIO' as const, callback: '0.01', activationPrice: null };
+    const response = await app.inject({
+      method: 'PUT', url: `/api/positions/${account.id}/BTCUSDT/protection`, headers: headers(),
+      payload: { stopLoss: null, takeProfit: null, trailingStop },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: true, pending: false, after: { trailingStop } });
+    expect(runtime.engine.positionViews(account.id)[0]!.trailingStop).toMatchObject(trailingStop);
+  });
+
+  it('accepts an SL-only edit on a position whose trail has activated past its activation price', async () => {
+    const account = runtime.engine.createAccount({ name: 'activated', source: 'REPLAY' });
+    const opened = runtime.engine.placeOrderSync({
+      accountId: account.id, clientOrderId: 'open', symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET', quantity: '0.01', leverage: 3,
+      trailingStop: { kind: 'RATIO', callback: '0.01', activationPrice: null },
+    });
+    // Put the resting trail into the state it reaches after activating: an activation price that
+    // the market has since passed, and a tracked extreme. Validation refuses to create this directly.
+    const trail = runtime.engine.openOrders(account.id).find((o) => o.type === 'TRAILING_STOP_MARKET')!;
+    const activationPrice = d(opened.order.avgFillPrice!).mul('0.99').toDecimalPlaces(1).toFixed();
+    // saveOrder only writes mutable columns, so the activation price is set in SQL.
+    db.prepare('UPDATE orders SET trailing_activation_price=? WHERE id=?').run(activationPrice, trail.id);
+    const stopLoss = d(opened.order.avgFillPrice!).mul('0.9').toDecimalPlaces(1).toFixed();
+
+    const response = await app.inject({
+      method: 'PUT', url: `/api/positions/${account.id}/BTCUSDT/protection`, headers: headers(), payload: { stopLoss, takeProfit: null },
+    });
+    expect(response.statusCode).toBe(200);
+    const view = runtime.engine.positionViews(account.id)[0]!;
+    expect(view.stopLoss).toBe(stopLoss);
+    expect(view.trailingStop).toMatchObject({ activationPrice, extreme: trail.trailingExtreme });
   });
 
   it('enforces host and token checks', async () => {

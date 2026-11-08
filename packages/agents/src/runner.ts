@@ -1,4 +1,4 @@
-import { d, evaluateRisk, type ExecutionEngine } from '@mochiprep/core';
+import { d, evaluateRisk, ProtectionChangeError, type ExecutionEngine } from '@mochiprep/core';
 import { ProviderError, redactSecrets, type AiProvider, type MarketContext } from '@mochiprep/ai-providers';
 import type { MarketDataProvider } from '@mochiprep/market-data';
 import {
@@ -6,19 +6,22 @@ import {
   TIMEFRAME_MS,
   type Agent,
   type AiDecisionData,
+  type AiTrailingStop,
   type DataSource,
   type DecisionOutcome,
   type DecisionRecord,
   type NewsItem,
   type OrderRequest,
   type PaperAccount,
+  type Protection,
   type ProviderConfig,
   type Quote,
   type RiskSettings,
   type Topic,
+  type TrailingStopSpec,
 } from '@mochiprep/shared';
 import { parseDecision } from './parse';
-import { buildUserPrompt, SYSTEM_PROMPT } from './prompt';
+import { buildUserPrompt, buildSystemPrompt } from './prompt';
 
 export const MAX_CONSECUTIVE_ERRORS = 3;
 const MIN_CANDLES = 30;
@@ -226,9 +229,18 @@ export class AgentRunner {
         settle(signal, 'SIGNAL_EXPIRED', 'Expired before it was acted on');
       } else {
         const engine = this.deps.execution(agent.accountId);
-        signal.risk = await this.assess(agent, account, signal.decision!, engine, market, market.getQuote(agent.symbol) ?? null);
-        if (!signal.risk.approved) settle(signal, 'RISK_REJECTED', signal.risk.rejectionReasons.join(' | '));
-        else await this.execute(agent, signal.decision!, signal, engine);
+        const protection = await this.currentProtection(agent, engine);
+        // A PROTECT was judged against the stops it saw; applied over newer ones it could undo them.
+        const moved =
+          signal.decision!.action === 'PROTECT' &&
+          !(protection && signal.protectionBefore && sameProtection(protection, signal.protectionBefore));
+        if (moved) {
+          settle(signal, 'SIGNAL_EXPIRED', 'Protection changed since this suggestion');
+        } else {
+          signal.risk = await this.assess(agent, account, signal.decision!, engine, market, market.getQuote(agent.symbol) ?? null, protection);
+          if (!signal.risk.approved) settle(signal, 'RISK_REJECTED', signal.risk.rejectionReasons.join(' | '));
+          else await this.execute(agent, signal.decision!, signal, engine);
+        }
       }
       signal.signalExpiresAt = null;
       this.deps.store.saveDecision(signal);
@@ -239,7 +251,21 @@ export class AgentRunner {
     }
   }
 
-  private async assess(agent: Agent, account: PaperAccount, decision: AiDecisionData, engine: ExecutionEngine, market: MarketDataProvider, quote: Quote | null) {
+  /** The protection in force for the agent's symbol, or null without an open position. */
+  private async currentProtection(agent: Agent, engine: ExecutionEngine): Promise<Protection | null> {
+    const open = (await engine.getPositions(agent.accountId)).some((p) => p.symbol === agent.symbol);
+    return open ? engine.protectionOf(agent.accountId, agent.symbol) : null;
+  }
+
+  private async assess(
+    agent: Agent,
+    account: PaperAccount,
+    decision: AiDecisionData,
+    engine: ExecutionEngine,
+    market: MarketDataProvider,
+    quote: Quote | null,
+    protection: Protection | null,
+  ) {
     const daily = await engine.dailyRisk(agent.accountId);
     return evaluateRisk({
       decision,
@@ -252,10 +278,13 @@ export class AgentRunner {
       dailyPnl: daily.dailyPnl,
       dayStartEquity: daily.dayStartEquity,
       fees: account.config,
+      allowTrailingStop: agent.allowTrailingStop,
+      protection,
     });
   }
 
   private async execute(agent: Agent, decision: AiDecisionData, record: DecisionRecord, engine: ExecutionEngine) {
+    if (decision.action === 'PROTECT') return this.protect(agent, decision, record, engine);
     let result;
     try {
       result = await engine.placeOrder(await this.toOrder(agent, decision, record, engine));
@@ -272,6 +301,32 @@ export class AgentRunner {
       default:
         return settle(record, 'ORDER_REJECTED', result.order.rejectReason);
     }
+  }
+
+  /** Applies an approved PROTECT, merged onto the snapshot it was judged against. */
+  private async protect(agent: Agent, decision: AiDecisionData, record: DecisionRecord, engine: ExecutionEngine) {
+    const target = targetProtection(decision, record.protectionBefore!);
+    let pending: boolean;
+    let unchanged: boolean;
+    try {
+      const result = await engine.setProtection(agent.accountId, agent.symbol, target, {
+        clientOrderId: `protect:${record.id}`,
+        agentId: agent.id,
+        decisionId: record.id,
+      });
+      record.protectionBefore = result.before;
+      record.protectionAfter = result.after;
+      pending = result.pending;
+      unchanged = sameProtection(result.before, result.after);
+    } catch (error) {
+      // Refused part-way: legs already placed stay, so History shows what is in force now.
+      if (error instanceof ProtectionChangeError) record.protectionAfter = error.after;
+      return settle(record, 'ORDER_REJECTED', redactSecrets((error as Error).message, this.deps.secrets()));
+    }
+    if (pending) return settle(record, 'ORDER_PLACED', 'Protection change sent to OKX, awaiting confirmation');
+    // The engine aligns prices to the tick, so a target that differed only off the tick changes nothing.
+    if (unchanged) return settle(record, 'HOLD', 'Protection already as requested');
+    return settle(record, 'EXECUTED', 'Protection updated');
   }
 
   private finishCycle(agent: Agent, market: MarketDataProvider, record: DecisionRecord) {
@@ -406,8 +461,8 @@ export class AgentRunner {
       record.isMock = config.kind === 'MOCK';
       const response = await provider.complete({
         model: agent.model,
-        system: SYSTEM_PROMPT,
-        user: buildUserPrompt(context),
+        system: buildSystemPrompt({ allowTrailingStop: agent.allowTrailingStop }),
+        user: buildUserPrompt(context, { allowTrailingStop: agent.allowTrailingStop }),
         context,
       });
       text = response.text;
@@ -433,11 +488,25 @@ export class AgentRunner {
 
     // 8. Risk. Time and quote are re-read: the model may have taken a while.
     const latestQuote = market.getQuote(agent.symbol) ?? null;
-    record.risk = await this.assess(agent, account, parsed.decision, engine, market, stale ? null : latestQuote);
+    let protection;
+    try {
+      protection = await this.currentProtection(agent, engine);
+    } catch (error) {
+      return conclude('DATA_ERROR', `Could not read the account: ${(error as Error).message}`);
+    }
+    record.risk = await this.assess(agent, account, parsed.decision, engine, market, stale ? null : latestQuote, protection);
 
     if (trigger === 'ANALYZE') return conclude('ANALYSIS_ONLY', 'Analyze Now never places orders');
     if (!record.risk.approved) return conclude('RISK_REJECTED', record.risk.rejectionReasons.join(' | '));
     if (parsed.decision.action === 'HOLD') return conclude('HOLD');
+    if (parsed.decision.action === 'PROTECT') {
+      // Approval means a position was open; null here means it opened between the two reads.
+      if (!protection) return conclude('DATA_ERROR', 'The position changed while it was being checked');
+      if (sameProtection(targetProtection(parsed.decision, protection), protection)) {
+        return conclude('HOLD', 'Protection already as requested');
+      }
+      record.protectionBefore = protection;
+    }
 
     // A Stop pressed while the model was thinking must win.
     if (trigger === 'SCHEDULE' && !this.requireAgent(agent.id).running) {
@@ -483,6 +552,7 @@ export class AgentRunner {
       leverage: sized.leverage,
       stopLoss: plain(decision.stopLoss),
       takeProfit: plain(decision.takeProfit),
+      trailingStop: trailingSpec(decision.trailingStop ?? null),
     };
   }
 
@@ -501,6 +571,31 @@ function settle(record: DecisionRecord, outcome: DecisionOutcome, detail: string
 
 /** String(0.0000001) is "1e-7", which neither the API schema nor OKX accepts. */
 const plain = (price: number | null) => (price === null ? null : d(price).toFixed());
+
+const trailingSpec = (ai: AiTrailingStop | null): TrailingStopSpec | null =>
+  ai === null ? null : { kind: ai.kind, callback: plain(ai.callback)!, activationPrice: plain(ai.activationPrice) };
+
+/** What a PROTECT asks for: stop loss and take profit in full, and an absent trailingStop keeps the current one. */
+function targetProtection(decision: AiDecisionData, current: Protection): Protection {
+  return {
+    stopLoss: plain(decision.stopLoss),
+    takeProfit: plain(decision.takeProfit),
+    trailingStop: decision.trailingStop === undefined ? current.trailingStop : trailingSpec(decision.trailingStop),
+  };
+}
+
+/** Compared as decimals: the engine may store "60000.0" where the model wrote 60000. */
+const sameLeg = (a: string | null, b: string | null) => (a === null || b === null ? a === b : d(a).eq(d(b)));
+
+function sameProtection(a: Protection, b: Protection): boolean {
+  const x = a.trailingStop;
+  const y = b.trailingStop;
+  const sameTrailing =
+    x === null || y === null
+      ? x === y
+      : x.kind === y.kind && sameLeg(x.callback, y.callback) && sameLeg(x.activationPrice, y.activationPrice);
+  return sameTrailing && sameLeg(a.stopLoss, b.stopLoss) && sameLeg(a.takeProfit, b.takeProfit);
+}
 
 /** An exchange account's ceilings win over an agent's settings, so sizing stays inside them. */
 export function effectiveRisk(agent: RiskSettings, ceiling: RiskSettings | null): RiskSettings {
