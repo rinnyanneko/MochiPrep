@@ -10,12 +10,13 @@ use mochi_domain::{
     PaperAccount, Position, PositionSide, PositionStatus, Quote,
 };
 
-use super::engine::{
-    closing_side, dec, math_error, money, trailing_spec_of, zero, Attempt, EngineError,
-    EngineEvent, PaperExecutionEngine, Posting,
-};
+use super::engine::PaperExecutionEngine;
 use super::store::PaperStore;
 use super::trailing::{advance_extreme, trailing_trigger};
+use super::types::{
+    closing_side, dec, math_error, money, trailing_spec_of, zero, Attempt, EngineError,
+    EngineEvent, Posting,
+};
 use crate::{fill_model, perp};
 
 /// `d(value!)` on an optional string. decimal.js throws exactly this for `null`.
