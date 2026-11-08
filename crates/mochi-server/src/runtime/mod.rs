@@ -23,8 +23,9 @@ use mochi_core::paper::{
 };
 use mochi_domain::registry::Instruments;
 use mochi_domain::{
-    default_instruments, AccountVenue, DataSource, FeedState, FeedStatus, InstrumentSpecification,
-    PositionSide, Quote, ReplayState, ServerEvent, ToastLevel, Topic, VaultStatus, DEFAULT_SYMBOLS,
+    default_instruments, AccountBalance, AccountVenue, Candle, DataSource, FeedState, FeedStatus,
+    InstrumentSpecification, PaperAccount, PositionSide, Quote, ReplayState, ServerEvent,
+    Timeframe, ToastLevel, Topic, VaultStatus, DEFAULT_SYMBOLS,
 };
 use mochi_market::replay::{ReplayMarketData, TapeTooShort};
 use mochi_store::{
@@ -366,6 +367,99 @@ impl Runtime {
 
     pub fn instruments(&self) -> &[InstrumentSpecification] {
         &self.instruments
+    }
+
+    // ---- accounts -------------------------------------------------------------------------
+
+    /// The account, or Node's 404 `Unknown account`.
+    pub fn require_account(&self, id: &str) -> Result<PaperAccount, ApiError> {
+        self.engine
+            .store()
+            .get_account(id)
+            .map_err(|e| self.api_error(e))?
+            .ok_or_else(|| ApiError::not_found("Unknown account"))
+    }
+
+    /// Node's `balanceOf`: a read model that never fails for a missing exchange session. An
+    /// exchange account has no session in this backend yet, so it shows its last equity point,
+    /// or its initial balance before it has one, exactly as Node does while disconnected.
+    pub fn balance_of(&self, account: &PaperAccount) -> Result<AccountBalance, ApiError> {
+        if account.venue == AccountVenue::Paper {
+            return self
+                .engine
+                .balance_of(&account.id)
+                .map_err(|e| self.api_error(e));
+        }
+        let point = self
+            .engine
+            .store()
+            .list_equity(&account.id, 1)
+            .map_err(|e| self.api_error(e))?
+            .pop();
+        let equity = point
+            .as_ref()
+            .map_or_else(|| account.initial_balance.clone(), |p| p.equity.clone());
+        Ok(AccountBalance {
+            account_id: account.id.clone(),
+            initial_balance: account.initial_balance.clone(),
+            wallet_balance: point
+                .as_ref()
+                .map_or_else(|| equity.clone(), |p| p.wallet.clone()),
+            available_balance: "0".to_string(),
+            used_margin: "0".to_string(),
+            order_margin: "0".to_string(),
+            equity,
+            realized_pnl: "0".to_string(),
+            unrealized_pnl: point.map_or_else(|| "0".to_string(), |p| p.unrealized),
+            fees_paid: "0".to_string(),
+            funding_paid: "0".to_string(),
+        })
+    }
+
+    /// `{ ...account, balance }`, in Node's key order.
+    pub fn account_view(&self, id: &str) -> Result<serde_json::Value, ApiError> {
+        let account = self.require_account(id)?;
+        let balance = self.balance_of(&account)?;
+        let mut view = serde_json::to_value(&account).map_err(|e| self.api_error(e))?;
+        let balance = serde_json::to_value(&balance).map_err(|e| self.api_error(e))?;
+        if let serde_json::Value::Object(fields) = &mut view {
+            fields.insert("balance".to_string(), balance);
+        }
+        Ok(view)
+    }
+
+    // ---- market ---------------------------------------------------------------------------
+
+    /// Custom pairs exist only on live data: the replay tape has just the built-in three.
+    pub fn assert_tradable(&self, symbol: &str, source: DataSource) -> Result<(), ApiError> {
+        if !self.instruments.iter().any(|spec| spec.symbol == symbol) {
+            return Err(ApiError::bad_request(format!(
+                "{symbol} is not an added pair. Add it in Settings first."
+            )));
+        }
+        if source == DataSource::Replay && !DEFAULT_SYMBOLS.contains(&symbol) {
+            return Err(ApiError::bad_request(format!(
+                "{symbol} has no replay data. Use a Live OKX account."
+            )));
+        }
+        Ok(())
+    }
+
+    /// The latest quote of every registered pair that has one, in registry order.
+    pub fn quotes(&self, source: DataSource) -> Vec<Quote> {
+        self.instruments
+            .iter()
+            .filter_map(|spec| match source {
+                DataSource::Replay => lock(&self.replay).get_quote(&spec.symbol),
+                DataSource::Live => self.live.get_quote(&spec.symbol),
+            })
+            .collect()
+    }
+
+    /// Replay candles, oldest first. Live candles come from OKX REST, which this backend does
+    /// not have yet.
+    pub fn replay_candles(&self, symbol: &str, timeframe: Timeframe, limit: usize) -> Vec<Candle> {
+        lock(&self.replay).get_candles(symbol, timeframe, limit)
     }
 
     // ---- read models ----------------------------------------------------------------------

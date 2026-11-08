@@ -1,4 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
+
+use crate::jsnum::js_number_raw;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
@@ -33,16 +35,26 @@ impl Timeframe {
     }
 }
 
+/// JSON.stringify writes 3400, not 3400.0, and the API sends candles as Node writes them.
+fn serialize_js_number<S: Serializer>(x: &f64, serializer: S) -> Result<S::Ok, S::Error> {
+    js_number_raw(*x).serialize(serializer)
+}
+
 /// OHLCV stays `f64` because it only feeds charts and indicators, never the ledger.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Candle {
     /// Bar open time, ms since epoch.
     pub time: i64,
+    #[serde(serialize_with = "serialize_js_number")]
     pub open: f64,
+    #[serde(serialize_with = "serialize_js_number")]
     pub high: f64,
+    #[serde(serialize_with = "serialize_js_number")]
     pub low: f64,
+    #[serde(serialize_with = "serialize_js_number")]
     pub close: f64,
+    #[serde(serialize_with = "serialize_js_number")]
     pub volume: f64,
     /// False for the bar still forming. Agents only ever see closed bars.
     pub closed: bool,

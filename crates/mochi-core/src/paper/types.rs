@@ -43,7 +43,11 @@ pub enum EngineEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProtectionResult {
     pub before: Protection,
+    /// What is actually in force now. While `pending`, the old legs are still in force.
     pub after: Protection,
+    /// An exchange did not answer a placement; it is resolved by lookup, never resent. A paper
+    /// change is applied in one transaction, so here it is always false.
+    pub pending: bool,
 }
 
 /// A failure the caller sees. `Invalid` is what TypeScript throws as a plain `Error`, with the

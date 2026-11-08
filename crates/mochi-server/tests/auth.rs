@@ -309,10 +309,12 @@ async fn body_over_256_kib_is_413_with_error_json() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, serde_json::json!({ "len": 256 * 1024 }));
 
-    // A declared oversize content-length is refused before the body is read.
+    // A declared oversize content-length is refused before the body is read. (Without a
+    // content-type Fastify would answer 415 first; `golden_api` covers that order.)
     let declared = Request::post("/api/test/body")
         .header("host", HOST)
         .header("authorization", bearer(&state))
+        .header("content-type", "application/json")
         .header("content-length", (256 * 1024 + 1).to_string())
         .body(Body::empty())
         .unwrap();

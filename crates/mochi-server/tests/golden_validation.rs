@@ -227,6 +227,59 @@ fn protection_tells_absent_trailing_stop_from_null() {
     assert_eq!(removed.trailing_stop, Some(None));
 }
 
+/// The defaults Zod fills in must reach the typed structs the routes use, not only the JSON.
+#[test]
+fn typed_inputs_carry_zod_defaults() {
+    let account: CreateAccountInput = validate::parse_body(
+        Schema::CreateAccount,
+        &json!({ "name": "  Main ", "source": "LIVE" }),
+    )
+    .unwrap();
+    assert_eq!(
+        account,
+        CreateAccountInput {
+            name: "Main".to_string(),
+            source: mochi_domain::DataSource::Live,
+            initial_balance: "10000".to_string(),
+        }
+    );
+    let candles: CandleQuery = validate::parse_query(
+        Schema::CandleQuery,
+        "source=REPLAY&symbol=BTCUSDT&timeframe=15m",
+    )
+    .unwrap();
+    assert_eq!(
+        candles,
+        CandleQuery {
+            source: mochi_domain::DataSource::Replay,
+            symbol: "BTCUSDT".to_string(),
+            timeframe: mochi_domain::Timeframe::M15,
+            limit: 300,
+        }
+    );
+    let limit: LimitQuery = validate::parse_query(Schema::LimitQuery, "").unwrap();
+    assert_eq!(limit, LimitQuery { limit: 200 });
+    let limit: LimitQuery = validate::parse_query(Schema::LimitQuery, "limit=%2012%20").unwrap();
+    assert_eq!(limit, LimitQuery { limit: 12 });
+    let decisions: DecisionQuery = validate::parse_query(Schema::DecisionQuery, "").unwrap();
+    assert_eq!(
+        decisions,
+        DecisionQuery {
+            limit: 200,
+            agent_id: None
+        }
+    );
+    let decisions: DecisionQuery =
+        validate::parse_query(Schema::DecisionQuery, "agentId=a1&limit=5").unwrap();
+    assert_eq!(
+        decisions,
+        DecisionQuery {
+            limit: 5,
+            agent_id: Some("a1".to_string())
+        }
+    );
+}
+
 #[test]
 fn place_order_reads_null_and_absent_alike() {
     let base = json!({

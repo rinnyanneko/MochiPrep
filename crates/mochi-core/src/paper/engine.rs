@@ -343,7 +343,12 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             }
         }
         let after = self.protection_of(account_id, symbol)?;
-        Ok(ProtectionResult { before, after })
+        // A simulated change is applied in one transaction, so it is never pending.
+        Ok(ProtectionResult {
+            before,
+            after,
+            pending: false,
+        })
     }
 
     /// The stop-loss, take-profit and trailing stop resting for a symbol; `None` legs are not set.

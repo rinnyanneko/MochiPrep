@@ -1,0 +1,1514 @@
+{
+ "about": "A scripted Node session (apps/server/golden/api-script.ts); Rust replays it in tests/golden_api.rs.",
+ "replayMinutes": 6500,
+ "addedInstruments": [
+  {
+   "symbol": "DOGEUSDT",
+   "marketType": "CRYPTO_PERP",
+   "baseCurrency": "DOGE",
+   "quoteCurrency": "USDT",
+   "settlementCurrency": "USDT",
+   "contractSize": "1",
+   "quantityStep": "1",
+   "minQuantity": "1",
+   "priceTick": "0.00001",
+   "maxLeverage": 50,
+   "maintenanceMarginRate": "0.01",
+   "fundingIntervalHours": 8,
+   "venueContractValue": "1000",
+   "venueLotSize": "0.01"
+  }
+ ],
+ "normalised": {
+  "ids": {
+   "prefixes": [
+    "acct",
+    "ord",
+    "fill",
+    "pos",
+    "evt",
+    "protect"
+   ],
+   "as": "<prefix>_<n>, numbered per prefix in first-seen order"
+  },
+  "wallClock": {
+   "fields": [
+    "createdAt",
+    "updatedAt",
+    "ts"
+   ],
+   "after": 1768780800000,
+   "as": "<wall-clock>"
+  }
+ },
+ "steps": [
+  {
+   "method": "GET",
+   "path": "/api/state",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "{\"demoActive\":false,\"vault\":\"OFF\",\"replay\":{\"loaded\":true,\"playing\":false,\"speed\":20,\"now\":1767571260000,\"startTime\":1767571260000,\"endTime\":1767615600000,\"atEnd\":false,\"progress\":0},\"feeds\":[{\"source\":\"REPLAY\",\"provider\":\"Synthetic replay\",\"state\":\"OFFLINE_REPLAY\",\"lastMessageAt\":1767571260000},{\"source\":\"LIVE\",\"provider\":\"OKX public\",\"state\":\"DISCONNECTED\",\"lastMessageAt\":null}],\"instruments\":{\"BTCUSDT\":{\"symbol\":\"BTCUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"BTC\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"0.0001\",\"minQuantity\":\"0.0001\",\"priceTick\":\"0.1\",\"maxLeverage\":100,\"maintenanceMarginRate\":\"0.005\",\"fundingIntervalHours\":8,\"venueContractValue\":\"0.01\",\"venueLotSize\":\"0.01\"},\"ETHUSDT\":{\"symbol\":\"ETHUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"ETH\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"0.001\",\"minQuantity\":\"0.001\",\"priceTick\":\"0.01\",\"maxLeverage\":100,\"maintenanceMarginRate\":\"0.005\",\"fundingIntervalHours\":8,\"venueContractValue\":\"0.1\",\"venueLotSize\":\"0.01\"},\"SOLUSDT\":{\"symbol\":\"SOLUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"SOL\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"0.01\",\"minQuantity\":\"0.01\",\"priceTick\":\"0.01\",\"maxLeverage\":100,\"maintenanceMarginRate\":\"0.005\",\"fundingIntervalHours\":8,\"venueContractValue\":\"1\",\"venueLotSize\":\"0.01\"},\"DOGEUSDT\":{\"symbol\":\"DOGEUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"DOGE\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"1\",\"minQuantity\":\"1\",\"priceTick\":\"0.00001\",\"maxLeverage\":50,\"maintenanceMarginRate\":\"0.01\",\"fundingIntervalHours\":8,\"venueContractValue\":\"1000\",\"venueLotSize\":\"0.01\"}}}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/instruments",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"symbol\":\"BTCUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"BTC\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"0.0001\",\"minQuantity\":\"0.0001\",\"priceTick\":\"0.1\",\"maxLeverage\":100,\"maintenanceMarginRate\":\"0.005\",\"fundingIntervalHours\":8,\"venueContractValue\":\"0.01\",\"venueLotSize\":\"0.01\"},{\"symbol\":\"ETHUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"ETH\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"0.001\",\"minQuantity\":\"0.001\",\"priceTick\":\"0.01\",\"maxLeverage\":100,\"maintenanceMarginRate\":\"0.005\",\"fundingIntervalHours\":8,\"venueContractValue\":\"0.1\",\"venueLotSize\":\"0.01\"},{\"symbol\":\"SOLUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"SOL\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"0.01\",\"minQuantity\":\"0.01\",\"priceTick\":\"0.01\",\"maxLeverage\":100,\"maintenanceMarginRate\":\"0.005\",\"fundingIntervalHours\":8,\"venueContractValue\":\"1\",\"venueLotSize\":\"0.01\"},{\"symbol\":\"DOGEUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"DOGE\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"1\",\"minQuantity\":\"1\",\"priceTick\":\"0.00001\",\"maxLeverage\":50,\"maintenanceMarginRate\":\"0.01\",\"fundingIntervalHours\":8,\"venueContractValue\":\"1000\",\"venueLotSize\":\"0.01\"}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[]"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": "{\"name\":\"  Main  \",\"source\":\"REPLAY\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "37"
+   },
+   "status": 200,
+   "response": "{\"id\":\"acct_1\",\"name\":\"Main\",\"source\":\"REPLAY\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"10000\",\"walletBalance\":\"10000\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":1767571260000,\"balance\":{\"accountId\":\"acct_1\",\"initialBalance\":\"10000\",\"walletBalance\":\"10000\",\"availableBalance\":\"10000\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"10000\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/replay",
+   "body": "{\"steps\":1}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "11"
+   },
+   "status": 200,
+   "response": "{\"loaded\":true,\"playing\":false,\"speed\":20,\"now\":1767571320000,\"startTime\":1767571260000,\"endTime\":1767615600000,\"atEnd\":false,\"progress\":0.0013531799729364006}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": "{\"name\":\"Second\",\"source\":\"REPLAY\",\"initialBalance\":\"2500.5\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "61"
+   },
+   "status": 200,
+   "response": "{\"id\":\"acct_2\",\"name\":\"Second\",\"source\":\"REPLAY\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"2500.5\",\"walletBalance\":\"2500.5\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":1767571320000,\"balance\":{\"accountId\":\"acct_2\",\"initialBalance\":\"2500.5\",\"walletBalance\":\"2500.5\",\"availableBalance\":\"2500.5\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"2500.5\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": "{\"name\":\"Live paper\",\"source\":\"LIVE\",\"initialBalance\":\"1000\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "61"
+   },
+   "status": 200,
+   "response": "{\"id\":\"acct_3\",\"name\":\"Live paper\",\"source\":\"LIVE\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"1000\",\"walletBalance\":\"1000\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":\"<wall-clock>\",\"balance\":{\"accountId\":\"acct_3\",\"initialBalance\":\"1000\",\"walletBalance\":\"1000\",\"availableBalance\":\"1000\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"1000\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": "{}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "2"
+   },
+   "status": 400,
+   "response": "{\"error\":\"name: Invalid input: expected string, received undefined; source: Invalid option: expected one of \\\"REPLAY\\\"|\\\"LIVE\\\"\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": "{\"name\":\" \",\"source\":\"PAPER\",\"initialBalance\":\"1e3\",\"extra\":1}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "62"
+   },
+   "status": 400,
+   "response": "{\"error\":\"name: Too small: expected string to have >=1 characters; source: Invalid option: expected one of \\\"REPLAY\\\"|\\\"LIVE\\\"; initialBalance: expected a positive decimal string; input: Unrecognized key: \\\"extra\\\"\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": "{\"name\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"source\":\"LIVE\",\"initialBalance\":10}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "108"
+   },
+   "status": 400,
+   "response": "{\"error\":\"name: Too big: expected string to have <=60 characters; initialBalance: Invalid input: expected string, received number\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"input: Invalid input: expected object, received undefined\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": "{\"name\":",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "8"
+   },
+   "status": 400,
+   "response": "{\"error\":\"Body is not valid JSON but content-type is set to 'application/json'\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": "",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json"
+   },
+   "status": 400,
+   "response": "{\"error\":\"Body cannot be empty when content-type is set to 'application/json'\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": "{\"name\":\"a\",\"source\":\"REPLAY\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "text/plain",
+    "content-length": "30"
+   },
+   "status": 400,
+   "response": "{\"error\":\"input: Invalid input: expected object, received string\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": "<a/>",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/xml",
+    "content-length": "4"
+   },
+   "status": 415,
+   "response": "{\"error\":\"Unsupported Media Type\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": "{\"name\":\"a\",\"source\":\"REPLAY\"}",
+   "repeat": null,
+   "headers": {
+    "content-length": "30"
+   },
+   "status": 415,
+   "response": "{\"error\":\"Unsupported Media Type\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": null,
+   "repeat": {
+    "char": "x",
+    "length": 300000
+   },
+   "headers": {
+    "content-type": "application/xml",
+    "content-length": "300000"
+   },
+   "status": 415,
+   "response": "{\"error\":\"Unsupported Media Type\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts",
+   "body": null,
+   "repeat": {
+    "char": " ",
+    "length": 300000
+   },
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "300000"
+   },
+   "status": 413,
+   "response": "{\"error\":\"Request body is too large\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts",
+   "body": "not json",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "8"
+   },
+   "status": 200,
+   "response": "[{\"id\":\"acct_1\",\"name\":\"Main\",\"source\":\"REPLAY\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"10000\",\"walletBalance\":\"10000\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":1767571260000,\"balance\":{\"accountId\":\"acct_1\",\"initialBalance\":\"10000\",\"walletBalance\":\"10000\",\"availableBalance\":\"10000\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"10000\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}},{\"id\":\"acct_2\",\"name\":\"Second\",\"source\":\"REPLAY\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"2500.5\",\"walletBalance\":\"2500.5\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":1767571320000,\"balance\":{\"accountId\":\"acct_2\",\"initialBalance\":\"2500.5\",\"walletBalance\":\"2500.5\",\"availableBalance\":\"2500.5\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"2500.5\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}},{\"id\":\"acct_3\",\"name\":\"Live paper\",\"source\":\"LIVE\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"1000\",\"walletBalance\":\"1000\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":\"<wall-clock>\",\"balance\":{\"accountId\":\"acct_3\",\"initialBalance\":\"1000\",\"walletBalance\":\"1000\",\"availableBalance\":\"1000\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"1000\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts",
+   "body": null,
+   "repeat": {
+    "char": "x",
+    "length": 300000
+   },
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "300000"
+   },
+   "status": 200,
+   "response": "[{\"id\":\"acct_1\",\"name\":\"Main\",\"source\":\"REPLAY\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"10000\",\"walletBalance\":\"10000\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":1767571260000,\"balance\":{\"accountId\":\"acct_1\",\"initialBalance\":\"10000\",\"walletBalance\":\"10000\",\"availableBalance\":\"10000\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"10000\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}},{\"id\":\"acct_2\",\"name\":\"Second\",\"source\":\"REPLAY\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"2500.5\",\"walletBalance\":\"2500.5\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":1767571320000,\"balance\":{\"accountId\":\"acct_2\",\"initialBalance\":\"2500.5\",\"walletBalance\":\"2500.5\",\"availableBalance\":\"2500.5\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"2500.5\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}},{\"id\":\"acct_3\",\"name\":\"Live paper\",\"source\":\"LIVE\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"1000\",\"walletBalance\":\"1000\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":\"<wall-clock>\",\"balance\":{\"accountId\":\"acct_3\",\"initialBalance\":\"1000\",\"walletBalance\":\"1000\",\"availableBalance\":\"1000\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"1000\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"acct_1\",\"name\":\"Main\",\"source\":\"REPLAY\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"10000\",\"walletBalance\":\"10000\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":1767571260000,\"balance\":{\"accountId\":\"acct_1\",\"initialBalance\":\"10000\",\"walletBalance\":\"10000\",\"availableBalance\":\"10000\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"10000\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}},{\"id\":\"acct_2\",\"name\":\"Second\",\"source\":\"REPLAY\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"2500.5\",\"walletBalance\":\"2500.5\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":1767571320000,\"balance\":{\"accountId\":\"acct_2\",\"initialBalance\":\"2500.5\",\"walletBalance\":\"2500.5\",\"availableBalance\":\"2500.5\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"2500.5\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}},{\"id\":\"acct_3\",\"name\":\"Live paper\",\"source\":\"LIVE\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"1000\",\"walletBalance\":\"1000\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":\"<wall-clock>\",\"balance\":{\"accountId\":\"acct_3\",\"initialBalance\":\"1000\",\"walletBalance\":\"1000\",\"availableBalance\":\"1000\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"1000\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/quotes?source=REPLAY",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"source\":\"REPLAY\",\"symbol\":\"BTCUSDT\",\"bid\":\"63505.5\",\"ask\":\"63511.9\",\"last\":\"63508.7\",\"mark\":\"63508.7\",\"markEstimated\":false,\"fundingRate\":\"0.000036\",\"nextFundingTime\":1767600000000,\"ts\":1767571320000},{\"source\":\"REPLAY\",\"symbol\":\"ETHUSDT\",\"bid\":\"3229.30\",\"ask\":\"3229.62\",\"last\":\"3229.46\",\"mark\":\"3229.46\",\"markEstimated\":false,\"fundingRate\":\"-0.000267\",\"nextFundingTime\":1767600000000,\"ts\":1767571320000},{\"source\":\"REPLAY\",\"symbol\":\"SOLUSDT\",\"bid\":\"122.67\",\"ask\":\"122.69\",\"last\":\"122.68\",\"mark\":\"122.68\",\"markEstimated\":false,\"fundingRate\":\"-0.000326\",\"nextFundingTime\":1767600000000,\"ts\":1767571320000}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/quotes?source=LIVE",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/quotes?source=replay",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"source: Invalid option: expected one of \\\"REPLAY\\\"|\\\"LIVE\\\"\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/quotes",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"source: Invalid option: expected one of \\\"REPLAY\\\"|\\\"LIVE\\\"\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/candles?source=REPLAY&symbol=BTCUSDT&timeframe=15m&limit=3",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"time\":1767569400000,\"open\":63368.5,\"high\":63442.3,\"low\":63320.8,\"close\":63442.3,\"volume\":769.794,\"closed\":true},{\"time\":1767570300000,\"open\":63442.3,\"high\":63615.7,\"low\":63442.3,\"close\":63525.4,\"volume\":920.834,\"closed\":true},{\"time\":1767571200000,\"open\":63525.4,\"high\":63547,\"low\":63484.2,\"close\":63508.7,\"volume\":107.374,\"closed\":false}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/candles?source=REPLAY&symbol=ETHUSDT&timeframe=4h",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"time\":1767225600000,\"open\":3400,\"high\":3400,\"low\":3336.88,\"close\":3343.1,\"volume\":176197.902,\"closed\":true},{\"time\":1767240000000,\"open\":3343.1,\"high\":3348.04,\"low\":3319.01,\"close\":3327.73,\"volume\":187205.224,\"closed\":true},{\"time\":1767254400000,\"open\":3327.73,\"high\":3369.41,\"low\":3327.44,\"close\":3369.41,\"volume\":179703.116,\"closed\":true},{\"time\":1767268800000,\"open\":3369.41,\"high\":3422.36,\"low\":3367.99,\"close\":3421.16,\"volume\":176195.356,\"closed\":true},{\"time\":1767283200000,\"open\":3421.16,\"high\":3494.76,\"low\":3420.22,\"close\":3494.36,\"volume\":177670.732,\"closed\":true},{\"time\":1767297600000,\"open\":3494.36,\"high\":3523.86,\"low\":3483.58,\"close\":3513.37,\"volume\":182305.958,\"closed\":true},{\"time\":1767312000000,\"open\":3513.37,\"high\":3518.71,\"low\":3472.36,\"close\":3479.92,\"volume\":193214.009,\"closed\":true},{\"time\":1767326400000,\"open\":3479.92,\"high\":3488.35,\"low\":3428.23,\"close\":3437.88,\"volume\":184841.642,\"closed\":true},{\"time\":1767340800000,\"open\":3437.88,\"high\":3443.52,\"low\":3403.46,\"close\":3415.32,\"volume\":187014.546,\"closed\":true},{\"time\":1767355200000,\"open\":3415.32,\"high\":3416.68,\"low\":3348.83,\"close\":3349.52,\"volume\":189822.494,\"closed\":true},{\"time\":1767369600000,\"open\":3349.52,\"high\":3383.84,\"low\":3349.03,\"close\":3381,\"volume\":163178.022,\"closed\":true},{\"time\":1767384000000,\"open\":3381,\"high\":3417.69,\"low\":3380.72,\"close\":3414.69,\"volume\":164579.555,\"closed\":true},{\"time\":1767398400000,\"open\":3414.69,\"high\":3461.67,\"low\":3382.77,\"close\":3460.13,\"volume\":176210.074,\"closed\":true},{\"time\":1767412800000,\"open\":3460.13,\"high\":3488.78,\"low\":3456.17,\"close\":3488.03,\"volume\":176953.715,\"closed\":true},{\"time\":1767427200000,\"open\":3488.03,\"high\":3545.97,\"low\":3485.62,\"close\":3537.02,\"volume\":182829.087,\"closed\":true},{\"time\":1767441600000,\"open\":3537.02,\"high\":3562.25,\"low\":3489.94,\"close\":3492.12,\"volume\":183566.464,\"closed\":true},{\"time\":1767456000000,\"open\":3492.12,\"high\":3494.07,\"low\":3434.28,\"close\":3436.33,\"volume\":190790.432,\"closed\":true},{\"time\":1767470400000,\"open\":3436.33,\"high\":3448.96,\"low\":3384.67,\"close\":3391.46,\"volume\":190632.749,\"closed\":true},{\"time\":1767484800000,\"open\":3391.46,\"high\":3395.95,\"low\":3359.33,\"close\":3365.28,\"volume\":173867.085,\"closed\":true},{\"time\":1767499200000,\"open\":3365.28,\"high\":3374.1,\"low\":3344.77,\"close\":3346.1,\"volume\":166557.881,\"closed\":true},{\"time\":1767513600000,\"open\":3346.1,\"high\":3353.92,\"low\":3331.98,\"close\":3351,\"volume\":165841.216,\"closed\":true},{\"time\":1767528000000,\"open\":3351,\"high\":3357.44,\"low\":3343.63,\"close\":3354.14,\"volume\":163615.947,\"closed\":true},{\"time\":1767542400000,\"open\":3354.14,\"high\":3356.61,\"low\":3163.72,\"close\":3184.59,\"volume\":211987.359,\"closed\":true},{\"time\":1767556800000,\"open\":3184.59,\"high\":3234.23,\"low\":3182.96,\"close\":3227.04,\"volume\":179200.079,\"closed\":true},{\"time\":1767571200000,\"open\":3227.04,\"high\":3229.46,\"low\":3227.04,\"close\":3229.46,\"volume\":1359.632,\"closed\":false}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/candles?source=REPLAY&symbol=SOLUSDT&timeframe=1m&limit=2&extra=1",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"time\":1767571200000,\"open\":122.74,\"high\":122.77,\"low\":122.73,\"close\":122.77,\"volume\":12185.001,\"closed\":true},{\"time\":1767571260000,\"open\":122.77,\"high\":122.77,\"low\":122.68,\"close\":122.68,\"volume\":12896.135,\"closed\":true}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/candles?source=REPLAY&symbol=DOGEUSDT&timeframe=1m&limit=2",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"DOGEUSDT has no replay data. Use a Live OKX account.\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/candles?source=REPLAY&symbol=XRPUSDT&timeframe=1m",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"XRPUSDT is not an added pair. Add it in Settings first.\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/candles?source=REPLAY&symbol=btc&timeframe=2m&limit=0",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"symbol: expected a pair like DOGEUSDT; timeframe: Invalid option: expected one of \\\"1m\\\"|\\\"5m\\\"|\\\"15m\\\"|\\\"1h\\\"|\\\"4h\\\"; limit: Too small: expected number to be >=1\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/candles?source=LIVE&symbol=BTCUSDT&timeframe=1h&limit=1001",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"limit: Too big: expected number to be <=1000\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/candles?limit=1.5",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"source: Invalid option: expected one of \\\"REPLAY\\\"|\\\"LIVE\\\"; symbol: Invalid input: expected string, received undefined; timeframe: Invalid option: expected one of \\\"1m\\\"|\\\"5m\\\"|\\\"15m\\\"|\\\"1h\\\"|\\\"4h\\\"; limit: Invalid input: expected int, received number\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/candles",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"source: Invalid option: expected one of \\\"REPLAY\\\"|\\\"LIVE\\\"; symbol: Invalid input: expected string, received undefined; timeframe: Invalid option: expected one of \\\"1m\\\"|\\\"5m\\\"|\\\"15m\\\"|\\\"1h\\\"|\\\"4h\\\"\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/replay",
+   "body": "{\"steps\":5}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "11"
+   },
+   "status": 200,
+   "response": "{\"loaded\":true,\"playing\":false,\"speed\":20,\"now\":1767571620000,\"startTime\":1767571260000,\"endTime\":1767615600000,\"atEnd\":false,\"progress\":0.008119079837618403}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/replay",
+   "body": "{\"speed\":30}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "12"
+   },
+   "status": 200,
+   "response": "{\"loaded\":true,\"playing\":false,\"speed\":30,\"now\":1767571620000,\"startTime\":1767571260000,\"endTime\":1767615600000,\"atEnd\":false,\"progress\":0.008119079837618403}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/replay",
+   "body": "{\"playing\":false,\"speed\":1,\"steps\":1}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "37"
+   },
+   "status": 200,
+   "response": "{\"loaded\":true,\"playing\":false,\"speed\":1,\"now\":1767571680000,\"startTime\":1767571260000,\"endTime\":1767615600000,\"atEnd\":false,\"progress\":0.009472259810554804}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/replay",
+   "body": "{}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "2"
+   },
+   "status": 200,
+   "response": "{\"loaded\":true,\"playing\":false,\"speed\":1,\"now\":1767571680000,\"startTime\":1767571260000,\"endTime\":1767615600000,\"atEnd\":false,\"progress\":0.009472259810554804}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/replay",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"input: Invalid input: expected object, received undefined\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/replay",
+   "body": "{\"steps\":0,\"speed\":601,\"playing\":\"yes\",\"extra\":true}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "52"
+   },
+   "status": 400,
+   "response": "{\"error\":\"playing: Invalid input: expected boolean, received string; speed: Too big: expected number to be <=600; steps: Too small: expected number to be >=1; input: Unrecognized key: \\\"extra\\\"\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/replay",
+   "body": "{\"steps\":1.5}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "13"
+   },
+   "status": 400,
+   "response": "{\"error\":\"steps: Invalid input: expected int, received number\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/replay",
+   "body": "[1]",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "3"
+   },
+   "status": 400,
+   "response": "{\"error\":\"input: Invalid input: expected object, received array\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5,\"stopLoss\":\"61603\",\"takeProfit\":\"65414\",\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.02\",\"activationPrice\":null}}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "273"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_1\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.01\",\"avgFillPrice\":\"63517.7\",\"reservedMargin\":\"0\",\"attachedStopLoss\":\"61603\",\"attachedTakeProfit\":\"65414\",\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.02\",\"activationPrice\":null},\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},\"fills\":[{\"id\":\"fill_1\",\"orderId\":\"ord_1\",\"accountId\":\"acct_1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"quantity\":\"0.01\",\"price\":\"63517.7\",\"fee\":\"0.3175885\",\"realizedPnl\":\"0\",\"liquidity\":\"TAKER\",\"ts\":1767571680000}],\"duplicate\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "160"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_1\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.01\",\"avgFillPrice\":\"63517.7\",\"reservedMargin\":\"0\",\"attachedStopLoss\":\"61603\",\"attachedTakeProfit\":\"65414\",\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.02\",\"activationPrice\":null},\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},\"fills\":[{\"id\":\"fill_1\",\"orderId\":\"ord_1\",\"accountId\":\"acct_1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"quantity\":\"0.01\",\"price\":\"63517.7\",\"fee\":\"0.3175885\",\"realizedPnl\":\"0\",\"liquidity\":\"TAKER\",\"ts\":1767571680000}],\"duplicate\":true}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-2\",\"symbol\":\"ETHUSDT\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"quantity\":\"0.1\",\"leverage\":3,\"price\":\"2906\",\"stopLoss\":\"2583\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "191"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_2\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-2\",\"symbol\":\"ETHUSDT\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"quantity\":\"0.1\",\"price\":\"2906\",\"triggerPrice\":null,\"leverage\":3,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"OPEN\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"96.92478667\",\"attachedStopLoss\":\"2583\",\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},\"fills\":[],\"duplicate\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-3\",\"symbol\":\"SOLUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"2\",\"leverage\":5,\"price\":null,\"stopLoss\":null,\"takeProfit\":null,\"trailingStop\":null}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "225"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_3\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-3\",\"symbol\":\"SOLUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"2\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"2\",\"avgFillPrice\":\"122.69\",\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},\"fills\":[{\"id\":\"fill_2\",\"orderId\":\"ord_3\",\"accountId\":\"acct_1\",\"symbol\":\"SOLUSDT\",\"side\":\"SELL\",\"quantity\":\"2\",\"price\":\"122.69\",\"fee\":\"0.12269\",\"realizedPnl\":\"0\",\"liquidity\":\"TAKER\",\"ts\":1767571680000}],\"duplicate\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-4\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"1000\",\"leverage\":5}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "160"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_4\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-4\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"1000\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"REJECTED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":\"INSUFFICIENT_MARGIN: short by 13129940.73 USDT after fee\",\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},\"fills\":[],\"duplicate\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-5\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "159"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_5\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-5\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"REJECTED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":\"INVALID_PRICE: limit orders need a price\",\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},\"fills\":[],\"duplicate\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-6\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5,\"stopLoss\":\"69860\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "179"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_6\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-6\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"REJECTED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":\"69860\",\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":\"INVALID_PROTECTION: stop 69860 is on the wrong side of 63511.3 for LONG\",\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},\"fills\":[],\"duplicate\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-7\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.00001\",\"leverage\":5}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "163"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_7\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-7\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.00001\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"REJECTED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":\"INVALID_QUANTITY: minimum is 0.0001\",\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},\"fills\":[],\"duplicate\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_2\",\"clientOrderId\":\"cli-8\",\"symbol\":\"ETHUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.5\",\"leverage\":10,\"reduceOnly\":true}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "179"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_8\",\"accountId\":\"acct_2\",\"clientOrderId\":\"cli-8\",\"symbol\":\"ETHUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.5\",\"price\":null,\"triggerPrice\":null,\"leverage\":10,\"reduceOnly\":true,\"closePosition\":false,\"status\":\"REJECTED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":\"REDUCE_ONLY_NO_POSITION: nothing to reduce\",\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},\"fills\":[],\"duplicate\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_2\",\"clientOrderId\":\"cli-9\",\"symbol\":\"ETHUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.5\",\"leverage\":10,\"trailingStop\":{\"kind\":\"SPREAD\",\"callback\":\"15\",\"activationPrice\":\"3197\"}}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "235"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_9\",\"accountId\":\"acct_2\",\"clientOrderId\":\"cli-9\",\"symbol\":\"ETHUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.5\",\"price\":null,\"triggerPrice\":null,\"leverage\":10,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.5\",\"avgFillPrice\":\"3231.46\",\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":{\"kind\":\"SPREAD\",\"callback\":\"15\",\"activationPrice\":\"3197\"},\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},\"fills\":[{\"id\":\"fill_3\",\"orderId\":\"ord_9\",\"accountId\":\"acct_2\",\"symbol\":\"ETHUSDT\",\"side\":\"SELL\",\"quantity\":\"0.5\",\"price\":\"3231.46\",\"fee\":\"0.807865\",\"realizedPnl\":\"0\",\"liquidity\":\"TAKER\",\"ts\":1767571680000}],\"duplicate\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_3\",\"clientOrderId\":\"live-1\",\"symbol\":\"DOGEUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"100\",\"leverage\":5}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "161"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_10\",\"accountId\":\"acct_3\",\"clientOrderId\":\"live-1\",\"symbol\":\"DOGEUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"100\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"REJECTED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":\"NO_MARKET_DATA: no quote for DOGEUSDT\",\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":\"<wall-clock>\",\"updatedAt\":\"<wall-clock>\"},\"fills\":[],\"duplicate\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-10\",\"symbol\":\"DOGEUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "162"
+   },
+   "status": 400,
+   "response": "{\"error\":\"DOGEUSDT has no replay data. Use a Live OKX account.\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-11\",\"symbol\":\"XRPUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "161"
+   },
+   "status": 400,
+   "response": "{\"error\":\"XRPUSDT is not an added pair. Add it in Settings first.\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_nope\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "128"
+   },
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"HOLD\",\"type\":\"MARKET\",\"quantity\":\"-1\",\"leverage\":0,\"extra\":1}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "169"
+   },
+   "status": 400,
+   "response": "{\"error\":\"side: Invalid option: expected one of \\\"BUY\\\"|\\\"SELL\\\"; quantity: expected a positive decimal string; leverage: Too small: expected number to be >=1; input: Unrecognized key: \\\"extra\\\"\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_1\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "57"
+   },
+   "status": 400,
+   "response": "{\"error\":\"clientOrderId: Invalid input: expected string, received undefined; symbol: Invalid input: expected string, received undefined; side: Invalid option: expected one of \\\"BUY\\\"|\\\"SELL\\\"; type: Invalid option: expected one of \\\"MARKET\\\"|\\\"LIMIT\\\"; quantity: Invalid input: expected string, received undefined; leverage: Invalid input: expected number, received undefined\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"input: Invalid input: expected object, received undefined\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/orders",
+   "body": "{\"accountId\":\"acct_1\",\"clientOrderId\":\"\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5,\"price\":\"1.\",\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.01\"}}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "218"
+   },
+   "status": 400,
+   "response": "{\"error\":\"clientOrderId: Too small: expected string to have >=1 characters; price: expected a positive decimal string; trailingStop.activationPrice: Invalid input: expected string, received undefined\"}"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/orders/ord_2",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "{\"ok\":true}"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/orders/ord_2",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"Order ord_2 is CANCELED\"}"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/orders/ord_1",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"Order ord_1 is FILLED\"}"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/orders/ord_nope",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 404,
+   "response": "{\"error\":\"Unknown order\"}"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/orders/ord_nope",
+   "body": "{",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "1"
+   },
+   "status": 400,
+   "response": "{\"error\":\"Body is not valid JSON but content-type is set to 'application/json'\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/replay",
+   "body": "{\"steps\":40}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "12"
+   },
+   "status": 200,
+   "response": "{\"loaded\":true,\"playing\":false,\"speed\":1,\"now\":1767574080000,\"startTime\":1767571260000,\"endTime\":1767615600000,\"atEnd\":false,\"progress\":0.06359945872801083}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/positions",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"pos_1\",\"accountId\":\"acct_1\",\"symbol\":\"BTCUSDT\",\"side\":\"LONG\",\"quantity\":\"0.01\",\"entryPrice\":\"63517.7\",\"leverage\":5,\"margin\":\"127.0354\",\"liquidationPrice\":\"51131.7485\",\"status\":\"OPEN\",\"realizedPnl\":\"0\",\"feesPaid\":\"0.3175885\",\"fundingPaid\":\"0\",\"maxQuantity\":\"0.01\",\"exitPrice\":null,\"lastFundingTime\":1767571200000,\"openedAt\":1767571680000,\"closedAt\":null,\"markPrice\":\"63705.3\",\"unrealizedPnl\":\"1.876\",\"stopLoss\":\"61603\",\"takeProfit\":\"65414\",\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.02\",\"activationPrice\":null,\"extreme\":\"63705.3\",\"triggerPrice\":\"62431.1\"},\"externalProtection\":[]},{\"id\":\"pos_2\",\"accountId\":\"acct_1\",\"symbol\":\"SOLUSDT\",\"side\":\"SHORT\",\"quantity\":\"2\",\"entryPrice\":\"122.69\",\"leverage\":5,\"margin\":\"49.076\",\"liquidationPrice\":\"146.61455\",\"status\":\"OPEN\",\"realizedPnl\":\"0\",\"feesPaid\":\"0.12269\",\"fundingPaid\":\"0\",\"maxQuantity\":\"2\",\"exitPrice\":null,\"lastFundingTime\":1767571200000,\"openedAt\":1767571680000,\"closedAt\":null,\"markPrice\":\"122.89\",\"unrealizedPnl\":\"-0.4\",\"stopLoss\":null,\"takeProfit\":null,\"trailingStop\":null,\"externalProtection\":[]}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_2/positions",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"pos_3\",\"accountId\":\"acct_2\",\"symbol\":\"ETHUSDT\",\"side\":\"SHORT\",\"quantity\":\"0.5\",\"entryPrice\":\"3231.46\",\"leverage\":10,\"margin\":\"161.573\",\"liquidationPrice\":\"3538.4487\",\"status\":\"OPEN\",\"realizedPnl\":\"0\",\"feesPaid\":\"0.807865\",\"fundingPaid\":\"0\",\"maxQuantity\":\"0.5\",\"exitPrice\":null,\"lastFundingTime\":1767571200000,\"openedAt\":1767571680000,\"closedAt\":null,\"markPrice\":\"3245.84\",\"unrealizedPnl\":\"-7.19\",\"stopLoss\":null,\"takeProfit\":null,\"trailingStop\":{\"kind\":\"SPREAD\",\"callback\":\"15\",\"activationPrice\":\"3197\",\"extreme\":null,\"triggerPrice\":null},\"externalProtection\":[]}]"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/positions/acct_1/BTCUSDT/protection",
+   "body": "{\"stopLoss\":\"60968\",\"takeProfit\":null}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "38"
+   },
+   "status": 200,
+   "response": "{\"ok\":true,\"pending\":false,\"before\":{\"stopLoss\":\"61603\",\"takeProfit\":\"65414\",\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.02\",\"activationPrice\":null}},\"after\":{\"stopLoss\":\"60968\",\"takeProfit\":null,\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.02\",\"activationPrice\":null}}}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/positions",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"pos_1\",\"accountId\":\"acct_1\",\"symbol\":\"BTCUSDT\",\"side\":\"LONG\",\"quantity\":\"0.01\",\"entryPrice\":\"63517.7\",\"leverage\":5,\"margin\":\"127.0354\",\"liquidationPrice\":\"51131.7485\",\"status\":\"OPEN\",\"realizedPnl\":\"0\",\"feesPaid\":\"0.3175885\",\"fundingPaid\":\"0\",\"maxQuantity\":\"0.01\",\"exitPrice\":null,\"lastFundingTime\":1767571200000,\"openedAt\":1767571680000,\"closedAt\":null,\"markPrice\":\"63705.3\",\"unrealizedPnl\":\"1.876\",\"stopLoss\":\"60968\",\"takeProfit\":null,\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.02\",\"activationPrice\":null,\"extreme\":\"63705.3\",\"triggerPrice\":\"62431.1\"},\"externalProtection\":[]},{\"id\":\"pos_2\",\"accountId\":\"acct_1\",\"symbol\":\"SOLUSDT\",\"side\":\"SHORT\",\"quantity\":\"2\",\"entryPrice\":\"122.69\",\"leverage\":5,\"margin\":\"49.076\",\"liquidationPrice\":\"146.61455\",\"status\":\"OPEN\",\"realizedPnl\":\"0\",\"feesPaid\":\"0.12269\",\"fundingPaid\":\"0\",\"maxQuantity\":\"2\",\"exitPrice\":null,\"lastFundingTime\":1767571200000,\"openedAt\":1767571680000,\"closedAt\":null,\"markPrice\":\"122.89\",\"unrealizedPnl\":\"-0.4\",\"stopLoss\":null,\"takeProfit\":null,\"trailingStop\":null,\"externalProtection\":[]}]"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/positions/acct_1/BTCUSDT/protection",
+   "body": "{\"stopLoss\":null,\"takeProfit\":\"66685\",\"trailingStop\":null}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "58"
+   },
+   "status": 200,
+   "response": "{\"ok\":true,\"pending\":false,\"before\":{\"stopLoss\":\"60968\",\"takeProfit\":null,\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.02\",\"activationPrice\":null}},\"after\":{\"stopLoss\":null,\"takeProfit\":\"66685\",\"trailingStop\":null}}"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/positions/acct_1/BTCUSDT/protection",
+   "body": "{\"stopLoss\":null,\"takeProfit\":null,\"trailingStop\":{\"kind\":\"SPREAD\",\"callback\":\"100\",\"activationPrice\":\"76211\"}}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "111"
+   },
+   "status": 200,
+   "response": "{\"ok\":true,\"pending\":false,\"before\":{\"stopLoss\":null,\"takeProfit\":\"66685\",\"trailingStop\":null},\"after\":{\"stopLoss\":null,\"takeProfit\":null,\"trailingStop\":{\"kind\":\"SPREAD\",\"callback\":\"100\",\"activationPrice\":\"76211\"}}}"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/positions/acct_1/BTCUSDT/protection",
+   "body": "{\"stopLoss\":\"95264\",\"takeProfit\":null}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "38"
+   },
+   "status": 400,
+   "response": "{\"error\":\"INVALID_PROTECTION: stop 95264 is on the wrong side of 63705.3 for LONG\"}"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/positions/acct_1/ETHUSDT/protection",
+   "body": "{\"stopLoss\":null,\"takeProfit\":null}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "35"
+   },
+   "status": 400,
+   "response": "{\"error\":\"No open ETHUSDT position\"}"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/positions/acct_1/btc/protection",
+   "body": "{\"stopLoss\":null,\"takeProfit\":null}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "35"
+   },
+   "status": 400,
+   "response": "{\"error\":\"input: expected a pair like DOGEUSDT\"}"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/positions/acct_nope/BTCUSDT/protection",
+   "body": "{\"stopLoss\":null,\"takeProfit\":null}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "35"
+   },
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/positions/acct_1/BTCUSDT/protection",
+   "body": "{}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "2"
+   },
+   "status": 400,
+   "response": "{\"error\":\"stopLoss: Invalid input: expected string, received undefined; takeProfit: Invalid input: expected string, received undefined\"}"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/positions/acct_nope/btc/protection",
+   "body": "{\"stopLoss\":\"1\",\"takeProfit\":2,\"trailingStop\":{\"kind\":\"X\"}}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "59"
+   },
+   "status": 400,
+   "response": "{\"error\":\"takeProfit: Invalid input: expected string, received number; trailingStop.kind: Invalid option: expected one of \\\"RATIO\\\"|\\\"SPREAD\\\"; trailingStop.callback: Invalid input: expected string, received undefined; trailingStop.activationPrice: Invalid input: expected string, received undefined\"}"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/positions/acct_1/BTCUSDT/protection",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"input: Invalid input: expected object, received undefined\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/positions/acct_1/BTCUSDT/close",
+   "body": "{\"fraction\":0.5,\"clientOrderId\":\"close-1\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "42"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_11\",\"accountId\":\"acct_1\",\"clientOrderId\":\"close-1\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.005\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":true,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.005\",\"avgFillPrice\":\"63695.7\",\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767574080000,\"updatedAt\":1767574080000},\"fills\":[{\"id\":\"fill_4\",\"orderId\":\"ord_11\",\"accountId\":\"acct_1\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"quantity\":\"0.005\",\"price\":\"63695.7\",\"fee\":\"0.15923925\",\"realizedPnl\":\"0.89\",\"liquidity\":\"TAKER\",\"ts\":1767574080000}],\"duplicate\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/positions/acct_1/BTCUSDT/close",
+   "body": "{\"fraction\":0.5,\"clientOrderId\":\"close-1\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "42"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_11\",\"accountId\":\"acct_1\",\"clientOrderId\":\"close-1\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.005\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":true,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.005\",\"avgFillPrice\":\"63695.7\",\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767574080000,\"updatedAt\":1767574080000},\"fills\":[{\"id\":\"fill_4\",\"orderId\":\"ord_11\",\"accountId\":\"acct_1\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"quantity\":\"0.005\",\"price\":\"63695.7\",\"fee\":\"0.15923925\",\"realizedPnl\":\"0.89\",\"liquidity\":\"TAKER\",\"ts\":1767574080000}],\"duplicate\":true}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/positions/acct_1/BTCUSDT/close",
+   "body": "{\"fraction\":1,\"clientOrderId\":\"close-2\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "40"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_12\",\"accountId\":\"acct_1\",\"clientOrderId\":\"close-2\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.005\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":true,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.005\",\"avgFillPrice\":\"63695.7\",\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767574080000,\"updatedAt\":1767574080000},\"fills\":[{\"id\":\"fill_5\",\"orderId\":\"ord_12\",\"accountId\":\"acct_1\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"quantity\":\"0.005\",\"price\":\"63695.7\",\"fee\":\"0.15923925\",\"realizedPnl\":\"0.89\",\"liquidity\":\"TAKER\",\"ts\":1767574080000}],\"duplicate\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/positions/acct_1/BTCUSDT/close",
+   "body": "{\"fraction\":1,\"clientOrderId\":\"close-3\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "40"
+   },
+   "status": 400,
+   "response": "{\"error\":\"No open BTCUSDT position\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/positions/acct_1/BTCUSDT/close",
+   "body": "{\"fraction\":0,\"clientOrderId\":\"\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "33"
+   },
+   "status": 400,
+   "response": "{\"error\":\"fraction: Too small: expected number to be >0; clientOrderId: Too small: expected string to have >=1 characters\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/positions/acct_1/BTCUSDT/close",
+   "body": "{\"fraction\":1.5,\"clientOrderId\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "164"
+   },
+   "status": 400,
+   "response": "{\"error\":\"fraction: Too big: expected number to be <=1; clientOrderId: Too big: expected string to have <=128 characters\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/positions/acct_1/BTCUSDT/close",
+   "body": "{\"fraction\":\"1\",\"clientOrderId\":\"c\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "36"
+   },
+   "status": 400,
+   "response": "{\"error\":\"fraction: Invalid input: expected number, received string\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/positions/acct_1/BTC/close",
+   "body": "{\"fraction\":1,\"clientOrderId\":\"c\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "34"
+   },
+   "status": 400,
+   "response": "{\"error\":\"input: expected a pair like DOGEUSDT\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/positions/acct_nope/BTCUSDT/close",
+   "body": "{\"fraction\":1,\"clientOrderId\":\"c\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "34"
+   },
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/positions/acct_1/BTCUSDT/close",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"input: Invalid input: expected object, received undefined\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/positions/acct_2/ETHUSDT/close",
+   "body": "{\"fraction\":0.25,\"clientOrderId\":\"close-4\"}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "43"
+   },
+   "status": 200,
+   "response": "{\"order\":{\"id\":\"ord_13\",\"accountId\":\"acct_2\",\"clientOrderId\":\"close-4\",\"symbol\":\"ETHUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.125\",\"price\":null,\"triggerPrice\":null,\"leverage\":10,\"reduceOnly\":true,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.125\",\"avgFillPrice\":\"3246.33\",\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767574080000,\"updatedAt\":1767574080000},\"fills\":[{\"id\":\"fill_6\",\"orderId\":\"ord_13\",\"accountId\":\"acct_2\",\"symbol\":\"ETHUSDT\",\"side\":\"BUY\",\"quantity\":\"0.125\",\"price\":\"3246.33\",\"fee\":\"0.20289562\",\"realizedPnl\":\"-1.85875\",\"liquidity\":\"TAKER\",\"ts\":1767574080000}],\"duplicate\":false}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/replay",
+   "body": "{\"steps\":30}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "12"
+   },
+   "status": 200,
+   "response": "{\"loaded\":true,\"playing\":false,\"speed\":1,\"now\":1767575880000,\"startTime\":1767571260000,\"endTime\":1767615600000,\"atEnd\":false,\"progress\":0.10419485791610285}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/closed-positions",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"pos_1\",\"accountId\":\"acct_1\",\"symbol\":\"BTCUSDT\",\"side\":\"LONG\",\"quantity\":\"0\",\"entryPrice\":\"63517.7\",\"leverage\":5,\"margin\":\"0\",\"liquidationPrice\":\"51131.7485\",\"status\":\"CLOSED\",\"realizedPnl\":\"1.78\",\"feesPaid\":\"0.636067\",\"fundingPaid\":\"0\",\"maxQuantity\":\"0.01\",\"exitPrice\":\"63695.7\",\"lastFundingTime\":1767571200000,\"openedAt\":1767571680000,\"closedAt\":1767574080000}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/orders",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"ord_12\",\"accountId\":\"acct_1\",\"clientOrderId\":\"close-2\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.005\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":true,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.005\",\"avgFillPrice\":\"63695.7\",\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767574080000,\"updatedAt\":1767574080000},{\"id\":\"ord_11\",\"accountId\":\"acct_1\",\"clientOrderId\":\"close-1\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.005\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":true,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.005\",\"avgFillPrice\":\"63695.7\",\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767574080000,\"updatedAt\":1767574080000},{\"id\":\"ord_14\",\"accountId\":\"acct_1\",\"clientOrderId\":\"protect_1\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"TRAILING_STOP_MARKET\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":true,\"closePosition\":true,\"status\":\"CANCELED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":\"SPREAD\",\"trailingCallback\":\"100\",\"trailingActivationPrice\":\"76211\",\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":\"Position closed\",\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767574080000,\"updatedAt\":1767574080000},{\"id\":\"ord_15\",\"accountId\":\"acct_1\",\"clientOrderId\":\"protect_2\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"TAKE_PROFIT_MARKET\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":\"66685\",\"leverage\":5,\"reduceOnly\":true,\"closePosition\":true,\"status\":\"CANCELED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767574080000,\"updatedAt\":1767574080000},{\"id\":\"ord_16\",\"accountId\":\"acct_1\",\"clientOrderId\":\"protect_3\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"TRAILING_STOP_MARKET\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":true,\"closePosition\":true,\"status\":\"CANCELED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":\"RATIO\",\"trailingCallback\":\"0.02\",\"trailingActivationPrice\":null,\"trailingExtreme\":\"63705.3\",\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767574080000,\"updatedAt\":1767574080000},{\"id\":\"ord_17\",\"accountId\":\"acct_1\",\"clientOrderId\":\"protect_4\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"STOP_MARKET\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":\"60968\",\"leverage\":5,\"reduceOnly\":true,\"closePosition\":true,\"status\":\"CANCELED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767574080000,\"updatedAt\":1767574080000},{\"id\":\"ord_7\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-7\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.00001\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"REJECTED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":\"INVALID_QUANTITY: minimum is 0.0001\",\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},{\"id\":\"ord_6\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-6\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"REJECTED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":\"69860\",\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":\"INVALID_PROTECTION: stop 69860 is on the wrong side of 63511.3 for LONG\",\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},{\"id\":\"ord_5\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-5\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"REJECTED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":\"INVALID_PRICE: limit orders need a price\",\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},{\"id\":\"ord_4\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-4\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"1000\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"REJECTED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":\"INSUFFICIENT_MARGIN: short by 13129940.73 USDT after fee\",\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},{\"id\":\"ord_3\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-3\",\"symbol\":\"SOLUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"2\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"2\",\"avgFillPrice\":\"122.69\",\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},{\"id\":\"ord_2\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-2\",\"symbol\":\"ETHUSDT\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"quantity\":\"0.1\",\"price\":\"2906\",\"triggerPrice\":null,\"leverage\":3,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"CANCELED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":\"2583\",\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},{\"id\":\"ord_18\",\"accountId\":\"acct_1\",\"clientOrderId\":\"protect_5\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"TRAILING_STOP_MARKET\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":true,\"closePosition\":true,\"status\":\"CANCELED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":\"RATIO\",\"trailingCallback\":\"0.02\",\"trailingActivationPrice\":null,\"trailingExtreme\":\"63705.3\",\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767574080000},{\"id\":\"ord_19\",\"accountId\":\"acct_1\",\"clientOrderId\":\"protect_6\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"TAKE_PROFIT_MARKET\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":\"65414\",\"leverage\":5,\"reduceOnly\":true,\"closePosition\":true,\"status\":\"CANCELED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767574080000},{\"id\":\"ord_20\",\"accountId\":\"acct_1\",\"clientOrderId\":\"protect_7\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"STOP_MARKET\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":\"61603\",\"leverage\":5,\"reduceOnly\":true,\"closePosition\":true,\"status\":\"CANCELED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767574080000},{\"id\":\"ord_1\",\"accountId\":\"acct_1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.01\",\"avgFillPrice\":\"63517.7\",\"reservedMargin\":\"0\",\"attachedStopLoss\":\"61603\",\"attachedTakeProfit\":\"65414\",\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.02\",\"activationPrice\":null},\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/fills",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"fill_5\",\"orderId\":\"ord_12\",\"accountId\":\"acct_1\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"quantity\":\"0.005\",\"price\":\"63695.7\",\"fee\":\"0.15923925\",\"realizedPnl\":\"0.89\",\"liquidity\":\"TAKER\",\"ts\":1767574080000},{\"id\":\"fill_4\",\"orderId\":\"ord_11\",\"accountId\":\"acct_1\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"quantity\":\"0.005\",\"price\":\"63695.7\",\"fee\":\"0.15923925\",\"realizedPnl\":\"0.89\",\"liquidity\":\"TAKER\",\"ts\":1767574080000},{\"id\":\"fill_2\",\"orderId\":\"ord_3\",\"accountId\":\"acct_1\",\"symbol\":\"SOLUSDT\",\"side\":\"SELL\",\"quantity\":\"2\",\"price\":\"122.69\",\"fee\":\"0.12269\",\"realizedPnl\":\"0\",\"liquidity\":\"TAKER\",\"ts\":1767571680000},{\"id\":\"fill_1\",\"orderId\":\"ord_1\",\"accountId\":\"acct_1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"quantity\":\"0.01\",\"price\":\"63517.7\",\"fee\":\"0.3175885\",\"realizedPnl\":\"0\",\"liquidity\":\"TAKER\",\"ts\":1767571680000}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/ledger",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"seq\":15,\"id\":\"evt_1\",\"accountId\":\"acct_1\",\"type\":\"TRADE_FEE\",\"amount\":\"-0.15923925\",\"marginDelta\":\"0\",\"walletAfter\":\"10001.021243\",\"symbol\":\"BTCUSDT\",\"orderId\":\"ord_12\",\"fillId\":\"fill_5\",\"positionId\":null,\"memo\":\"TAKER fee at 0.0005\",\"ts\":1767574080000},{\"seq\":14,\"id\":\"evt_2\",\"accountId\":\"acct_1\",\"type\":\"MARGIN_RELEASE\",\"amount\":\"0\",\"marginDelta\":\"-63.5177\",\"walletAfter\":\"10001.18048225\",\"symbol\":\"BTCUSDT\",\"orderId\":\"ord_12\",\"fillId\":\"fill_5\",\"positionId\":\"pos_1\",\"memo\":\"Margin released\",\"ts\":1767574080000},{\"seq\":13,\"id\":\"evt_3\",\"accountId\":\"acct_1\",\"type\":\"REALIZED_PNL\",\"amount\":\"0.89\",\"marginDelta\":\"0\",\"walletAfter\":\"10001.18048225\",\"symbol\":\"BTCUSDT\",\"orderId\":\"ord_12\",\"fillId\":\"fill_5\",\"positionId\":\"pos_1\",\"memo\":\"Closed 0.005 @ 63695.7\",\"ts\":1767574080000},{\"seq\":12,\"id\":\"evt_4\",\"accountId\":\"acct_1\",\"type\":\"TRADE_FEE\",\"amount\":\"-0.15923925\",\"marginDelta\":\"0\",\"walletAfter\":\"10000.29048225\",\"symbol\":\"BTCUSDT\",\"orderId\":\"ord_11\",\"fillId\":\"fill_4\",\"positionId\":\"pos_1\",\"memo\":\"TAKER fee at 0.0005\",\"ts\":1767574080000},{\"seq\":11,\"id\":\"evt_5\",\"accountId\":\"acct_1\",\"type\":\"MARGIN_RELEASE\",\"amount\":\"0\",\"marginDelta\":\"-63.5177\",\"walletAfter\":\"10000.4497215\",\"symbol\":\"BTCUSDT\",\"orderId\":\"ord_11\",\"fillId\":\"fill_4\",\"positionId\":\"pos_1\",\"memo\":\"Margin released\",\"ts\":1767574080000},{\"seq\":10,\"id\":\"evt_6\",\"accountId\":\"acct_1\",\"type\":\"REALIZED_PNL\",\"amount\":\"0.89\",\"marginDelta\":\"0\",\"walletAfter\":\"10000.4497215\",\"symbol\":\"BTCUSDT\",\"orderId\":\"ord_11\",\"fillId\":\"fill_4\",\"positionId\":\"pos_1\",\"memo\":\"Closed 0.005 @ 63695.7\",\"ts\":1767574080000},{\"seq\":7,\"id\":\"evt_7\",\"accountId\":\"acct_1\",\"type\":\"TRADE_FEE\",\"amount\":\"-0.12269\",\"marginDelta\":\"0\",\"walletAfter\":\"9999.5597215\",\"symbol\":\"SOLUSDT\",\"orderId\":\"ord_3\",\"fillId\":\"fill_2\",\"positionId\":\"pos_2\",\"memo\":\"TAKER fee at 0.0005\",\"ts\":1767571680000},{\"seq\":6,\"id\":\"evt_8\",\"accountId\":\"acct_1\",\"type\":\"MARGIN_LOCK\",\"amount\":\"0\",\"marginDelta\":\"49.076\",\"walletAfter\":\"9999.6824115\",\"symbol\":\"SOLUSDT\",\"orderId\":\"ord_3\",\"fillId\":\"fill_2\",\"positionId\":\"pos_2\",\"memo\":\"Isolated margin at 5x\",\"ts\":1767571680000},{\"seq\":5,\"id\":\"evt_9\",\"accountId\":\"acct_1\",\"type\":\"TRADE_FEE\",\"amount\":\"-0.3175885\",\"marginDelta\":\"0\",\"walletAfter\":\"9999.6824115\",\"symbol\":\"BTCUSDT\",\"orderId\":\"ord_1\",\"fillId\":\"fill_1\",\"positionId\":\"pos_1\",\"memo\":\"TAKER fee at 0.0005\",\"ts\":1767571680000},{\"seq\":4,\"id\":\"evt_10\",\"accountId\":\"acct_1\",\"type\":\"MARGIN_LOCK\",\"amount\":\"0\",\"marginDelta\":\"127.0354\",\"walletAfter\":\"10000\",\"symbol\":\"BTCUSDT\",\"orderId\":\"ord_1\",\"fillId\":\"fill_1\",\"positionId\":\"pos_1\",\"memo\":\"Isolated margin at 5x\",\"ts\":1767571680000},{\"seq\":1,\"id\":\"evt_11\",\"accountId\":\"acct_1\",\"type\":\"DEPOSIT\",\"amount\":\"10000\",\"marginDelta\":\"0\",\"walletAfter\":\"10000\",\"symbol\":null,\"orderId\":null,\"fillId\":null,\"positionId\":null,\"memo\":\"Initial virtual balance\",\"ts\":1767571260000}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/equity",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"accountId\":\"acct_1\",\"ts\":1767571260000,\"equity\":\"10000\",\"wallet\":\"10000\",\"unrealized\":\"0\"},{\"accountId\":\"acct_1\",\"ts\":1767572160000,\"equity\":\"9999.2557215\",\"wallet\":\"9999.5597215\",\"unrealized\":\"-0.304\"},{\"accountId\":\"acct_1\",\"ts\":1767573060000,\"equity\":\"9999.8397215\",\"wallet\":\"9999.5597215\",\"unrealized\":\"0.28\"},{\"accountId\":\"acct_1\",\"ts\":1767573960000,\"equity\":\"10000.2657215\",\"wallet\":\"9999.5597215\",\"unrealized\":\"0.706\"},{\"accountId\":\"acct_1\",\"ts\":1767574860000,\"equity\":\"10000.341243\",\"wallet\":\"10001.021243\",\"unrealized\":\"-0.68\"},{\"accountId\":\"acct_1\",\"ts\":1767575760000,\"equity\":\"10000.361243\",\"wallet\":\"10001.021243\",\"unrealized\":\"-0.66\"}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/audit",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "{\"consistent\":true,\"issues\":[]}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_2/closed-positions",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_2/orders",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"ord_13\",\"accountId\":\"acct_2\",\"clientOrderId\":\"close-4\",\"symbol\":\"ETHUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.125\",\"price\":null,\"triggerPrice\":null,\"leverage\":10,\"reduceOnly\":true,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.125\",\"avgFillPrice\":\"3246.33\",\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767574080000,\"updatedAt\":1767574080000},{\"id\":\"ord_21\",\"accountId\":\"acct_2\",\"clientOrderId\":\"protect_8\",\"symbol\":\"ETHUSDT\",\"side\":\"BUY\",\"type\":\"TRAILING_STOP_MARKET\",\"quantity\":\"0.5\",\"price\":null,\"triggerPrice\":null,\"leverage\":10,\"reduceOnly\":true,\"closePosition\":true,\"status\":\"OPEN\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":\"SPREAD\",\"trailingCallback\":\"15\",\"trailingActivationPrice\":\"3197\",\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},{\"id\":\"ord_9\",\"accountId\":\"acct_2\",\"clientOrderId\":\"cli-9\",\"symbol\":\"ETHUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.5\",\"price\":null,\"triggerPrice\":null,\"leverage\":10,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.5\",\"avgFillPrice\":\"3231.46\",\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":{\"kind\":\"SPREAD\",\"callback\":\"15\",\"activationPrice\":\"3197\"},\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000},{\"id\":\"ord_8\",\"accountId\":\"acct_2\",\"clientOrderId\":\"cli-8\",\"symbol\":\"ETHUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.5\",\"price\":null,\"triggerPrice\":null,\"leverage\":10,\"reduceOnly\":true,\"closePosition\":false,\"status\":\"REJECTED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":\"REDUCE_ONLY_NO_POSITION: nothing to reduce\",\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767571680000,\"updatedAt\":1767571680000}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_2/fills",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"fill_6\",\"orderId\":\"ord_13\",\"accountId\":\"acct_2\",\"symbol\":\"ETHUSDT\",\"side\":\"BUY\",\"quantity\":\"0.125\",\"price\":\"3246.33\",\"fee\":\"0.20289562\",\"realizedPnl\":\"-1.85875\",\"liquidity\":\"TAKER\",\"ts\":1767574080000},{\"id\":\"fill_3\",\"orderId\":\"ord_9\",\"accountId\":\"acct_2\",\"symbol\":\"ETHUSDT\",\"side\":\"SELL\",\"quantity\":\"0.5\",\"price\":\"3231.46\",\"fee\":\"0.807865\",\"realizedPnl\":\"0\",\"liquidity\":\"TAKER\",\"ts\":1767571680000}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_2/ledger",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"seq\":18,\"id\":\"evt_12\",\"accountId\":\"acct_2\",\"type\":\"TRADE_FEE\",\"amount\":\"-0.20289562\",\"marginDelta\":\"0\",\"walletAfter\":\"2497.63048938\",\"symbol\":\"ETHUSDT\",\"orderId\":\"ord_13\",\"fillId\":\"fill_6\",\"positionId\":\"pos_3\",\"memo\":\"TAKER fee at 0.0005\",\"ts\":1767574080000},{\"seq\":17,\"id\":\"evt_13\",\"accountId\":\"acct_2\",\"type\":\"MARGIN_RELEASE\",\"amount\":\"0\",\"marginDelta\":\"-40.39325\",\"walletAfter\":\"2497.833385\",\"symbol\":\"ETHUSDT\",\"orderId\":\"ord_13\",\"fillId\":\"fill_6\",\"positionId\":\"pos_3\",\"memo\":\"Margin released\",\"ts\":1767574080000},{\"seq\":16,\"id\":\"evt_14\",\"accountId\":\"acct_2\",\"type\":\"REALIZED_PNL\",\"amount\":\"-1.85875\",\"marginDelta\":\"0\",\"walletAfter\":\"2497.833385\",\"symbol\":\"ETHUSDT\",\"orderId\":\"ord_13\",\"fillId\":\"fill_6\",\"positionId\":\"pos_3\",\"memo\":\"Closed 0.125 @ 3246.33\",\"ts\":1767574080000},{\"seq\":9,\"id\":\"evt_15\",\"accountId\":\"acct_2\",\"type\":\"TRADE_FEE\",\"amount\":\"-0.807865\",\"marginDelta\":\"0\",\"walletAfter\":\"2499.692135\",\"symbol\":\"ETHUSDT\",\"orderId\":\"ord_9\",\"fillId\":\"fill_3\",\"positionId\":\"pos_3\",\"memo\":\"TAKER fee at 0.0005\",\"ts\":1767571680000},{\"seq\":8,\"id\":\"evt_16\",\"accountId\":\"acct_2\",\"type\":\"MARGIN_LOCK\",\"amount\":\"0\",\"marginDelta\":\"161.573\",\"walletAfter\":\"2500.5\",\"symbol\":\"ETHUSDT\",\"orderId\":\"ord_9\",\"fillId\":\"fill_3\",\"positionId\":\"pos_3\",\"memo\":\"Isolated margin at 10x\",\"ts\":1767571680000},{\"seq\":2,\"id\":\"evt_17\",\"accountId\":\"acct_2\",\"type\":\"DEPOSIT\",\"amount\":\"2500.5\",\"marginDelta\":\"0\",\"walletAfter\":\"2500.5\",\"symbol\":null,\"orderId\":null,\"fillId\":null,\"positionId\":null,\"memo\":\"Initial virtual balance\",\"ts\":1767571320000}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_2/equity",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"accountId\":\"acct_2\",\"ts\":1767571320000,\"equity\":\"2500.5\",\"wallet\":\"2500.5\",\"unrealized\":\"0\"},{\"accountId\":\"acct_2\",\"ts\":1767572160000,\"equity\":\"2500.477135\",\"wallet\":\"2499.692135\",\"unrealized\":\"0.785\"},{\"accountId\":\"acct_2\",\"ts\":1767573060000,\"equity\":\"2498.372135\",\"wallet\":\"2499.692135\",\"unrealized\":\"-1.32\"},{\"accountId\":\"acct_2\",\"ts\":1767573960000,\"equity\":\"2490.917135\",\"wallet\":\"2499.692135\",\"unrealized\":\"-8.775\"},{\"accountId\":\"acct_2\",\"ts\":1767574860000,\"equity\":\"2490.06673938\",\"wallet\":\"2497.63048938\",\"unrealized\":\"-7.56375\"},{\"accountId\":\"acct_2\",\"ts\":1767575760000,\"equity\":\"2489.00173938\",\"wallet\":\"2497.63048938\",\"unrealized\":\"-8.62875\"}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_2/audit",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "{\"consistent\":true,\"issues\":[]}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/orders?limit=2",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"ord_12\",\"accountId\":\"acct_1\",\"clientOrderId\":\"close-2\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.005\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":true,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.005\",\"avgFillPrice\":\"63695.7\",\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767574080000,\"updatedAt\":1767574080000},{\"id\":\"ord_11\",\"accountId\":\"acct_1\",\"clientOrderId\":\"close-1\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.005\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":true,\"closePosition\":false,\"status\":\"FILLED\",\"filledQuantity\":\"0.005\",\"avgFillPrice\":\"63695.7\",\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":null,\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":1767574080000,\"updatedAt\":1767574080000}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/fills?limit=1",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"fill_5\",\"orderId\":\"ord_12\",\"accountId\":\"acct_1\",\"symbol\":\"BTCUSDT\",\"side\":\"SELL\",\"quantity\":\"0.005\",\"price\":\"63695.7\",\"fee\":\"0.15923925\",\"realizedPnl\":\"0.89\",\"liquidity\":\"TAKER\",\"ts\":1767574080000}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/ledger?limit=3",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"seq\":15,\"id\":\"evt_1\",\"accountId\":\"acct_1\",\"type\":\"TRADE_FEE\",\"amount\":\"-0.15923925\",\"marginDelta\":\"0\",\"walletAfter\":\"10001.021243\",\"symbol\":\"BTCUSDT\",\"orderId\":\"ord_12\",\"fillId\":\"fill_5\",\"positionId\":null,\"memo\":\"TAKER fee at 0.0005\",\"ts\":1767574080000},{\"seq\":14,\"id\":\"evt_2\",\"accountId\":\"acct_1\",\"type\":\"MARGIN_RELEASE\",\"amount\":\"0\",\"marginDelta\":\"-63.5177\",\"walletAfter\":\"10001.18048225\",\"symbol\":\"BTCUSDT\",\"orderId\":\"ord_12\",\"fillId\":\"fill_5\",\"positionId\":\"pos_1\",\"memo\":\"Margin released\",\"ts\":1767574080000},{\"seq\":13,\"id\":\"evt_3\",\"accountId\":\"acct_1\",\"type\":\"REALIZED_PNL\",\"amount\":\"0.89\",\"marginDelta\":\"0\",\"walletAfter\":\"10001.18048225\",\"symbol\":\"BTCUSDT\",\"orderId\":\"ord_12\",\"fillId\":\"fill_5\",\"positionId\":\"pos_1\",\"memo\":\"Closed 0.005 @ 63695.7\",\"ts\":1767574080000}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/equity?limit=2",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"accountId\":\"acct_1\",\"ts\":1767574860000,\"equity\":\"10000.341243\",\"wallet\":\"10001.021243\",\"unrealized\":\"-0.68\"},{\"accountId\":\"acct_1\",\"ts\":1767575760000,\"equity\":\"10000.361243\",\"wallet\":\"10001.021243\",\"unrealized\":\"-0.66\"}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/closed-positions?limit=1&other=x",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"pos_1\",\"accountId\":\"acct_1\",\"symbol\":\"BTCUSDT\",\"side\":\"LONG\",\"quantity\":\"0\",\"entryPrice\":\"63517.7\",\"leverage\":5,\"margin\":\"0\",\"liquidationPrice\":\"51131.7485\",\"status\":\"CLOSED\",\"realizedPnl\":\"1.78\",\"feesPaid\":\"0.636067\",\"fundingPaid\":\"0\",\"maxQuantity\":\"0.01\",\"exitPrice\":\"63695.7\",\"lastFundingTime\":1767571200000,\"openedAt\":1767571680000,\"closedAt\":1767574080000}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/orders?limit=0",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"limit: Too small: expected number to be >=1\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/fills?limit=2001",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"limit: Too big: expected number to be <=2000\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/ledger?limit=abc",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"limit: Invalid input: expected number, received NaN\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/equity?limit=",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"limit: Too small: expected number to be >=1\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_1/orders?limit=2&limit=3",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 400,
+   "response": "{\"error\":\"limit: Invalid input: expected number, received NaN\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_3/orders",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"ord_10\",\"accountId\":\"acct_3\",\"clientOrderId\":\"live-1\",\"symbol\":\"DOGEUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"100\",\"price\":null,\"triggerPrice\":null,\"leverage\":5,\"reduceOnly\":false,\"closePosition\":false,\"status\":\"REJECTED\",\"filledQuantity\":\"0\",\"avgFillPrice\":null,\"reservedMargin\":\"0\",\"attachedStopLoss\":null,\"attachedTakeProfit\":null,\"trailingKind\":null,\"trailingCallback\":null,\"trailingActivationPrice\":null,\"trailingExtreme\":null,\"attachedTrailingStop\":null,\"rejectReason\":\"NO_MARKET_DATA: no quote for DOGEUSDT\",\"exchangeOrderId\":null,\"agentId\":null,\"decisionId\":null,\"createdAt\":\"<wall-clock>\",\"updatedAt\":\"<wall-clock>\"}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_3/positions",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_3/audit",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "{\"consistent\":true,\"issues\":[]}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_nope/positions",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_nope/closed-positions",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_nope/orders",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_nope/fills",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_nope/ledger",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_nope/equity",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_nope/audit",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_nope/orders?limit=0",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts/acct_2/reset",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "{\"id\":\"acct_2\",\"name\":\"Second\",\"source\":\"REPLAY\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"2500.5\",\"walletBalance\":\"2500.5\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":1767571320000,\"balance\":{\"accountId\":\"acct_2\",\"initialBalance\":\"2500.5\",\"walletBalance\":\"2500.5\",\"availableBalance\":\"2500.5\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"2500.5\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_2/orders",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_2/ledger",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"seq\":19,\"id\":\"evt_18\",\"accountId\":\"acct_2\",\"type\":\"DEPOSIT\",\"amount\":\"2500.5\",\"marginDelta\":\"0\",\"walletAfter\":\"2500.5\",\"symbol\":null,\"orderId\":null,\"fillId\":null,\"positionId\":null,\"memo\":\"Initial virtual balance\",\"ts\":1767575880000}]"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts/acct_2/reset",
+   "body": "{",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "1"
+   },
+   "status": 400,
+   "response": "{\"error\":\"Body is not valid JSON but content-type is set to 'application/json'\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts/acct_2/reset",
+   "body": "x",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/xml",
+    "content-length": "1"
+   },
+   "status": 415,
+   "response": "{\"error\":\"Unsupported Media Type\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/accounts/acct_nope/reset",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/accounts/acct_2",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "{\"ok\":true}"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/accounts/acct_2",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts/acct_2/orders",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 404,
+   "response": "{\"error\":\"Unknown account\"}"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/accounts/acct_3",
+   "body": "x",
+   "repeat": null,
+   "headers": {
+    "content-type": "text/csv",
+    "content-length": "1"
+   },
+   "status": 415,
+   "response": "{\"error\":\"Unsupported Media Type\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/replay",
+   "body": "{\"steps\":1440}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "14"
+   },
+   "status": 200,
+   "response": "{\"loaded\":true,\"playing\":false,\"speed\":1,\"now\":1767615600000,\"startTime\":1767571260000,\"endTime\":1767615600000,\"atEnd\":true,\"progress\":1}"
+  },
+  {
+   "method": "POST",
+   "path": "/api/replay",
+   "body": "{\"steps\":1}",
+   "repeat": null,
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "11"
+   },
+   "status": 200,
+   "response": "{\"loaded\":true,\"playing\":false,\"speed\":1,\"now\":1767615600000,\"startTime\":1767571260000,\"endTime\":1767615600000,\"atEnd\":true,\"progress\":1}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/accounts",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"id\":\"acct_1\",\"name\":\"Main\",\"source\":\"REPLAY\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"10000\",\"walletBalance\":\"10001.10826892\",\"usedMargin\":\"49.076\",\"realizedPnl\":\"1.78\",\"feesPaid\":\"0.758757\",\"fundingPaid\":\"-0.08702592\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":1767571260000,\"balance\":{\"accountId\":\"acct_1\",\"initialBalance\":\"10000\",\"walletBalance\":\"10001.10826892\",\"availableBalance\":\"9952.03226892\",\"usedMargin\":\"49.076\",\"orderMargin\":\"0\",\"equity\":\"9996.32826892\",\"realizedPnl\":\"1.78\",\"unrealizedPnl\":\"-4.78\",\"feesPaid\":\"0.758757\",\"fundingPaid\":\"-0.08702592\"}},{\"id\":\"acct_3\",\"name\":\"Live paper\",\"source\":\"LIVE\",\"venue\":\"PAPER\",\"exchangeUid\":null,\"liveLimits\":null,\"isDemo\":false,\"initialBalance\":\"1000\",\"walletBalance\":\"1000\",\"usedMargin\":\"0\",\"realizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\",\"config\":{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"},\"createdAt\":\"<wall-clock>\",\"balance\":{\"accountId\":\"acct_3\",\"initialBalance\":\"1000\",\"walletBalance\":\"1000\",\"availableBalance\":\"1000\",\"usedMargin\":\"0\",\"orderMargin\":\"0\",\"equity\":\"1000\",\"realizedPnl\":\"0\",\"unrealizedPnl\":\"0\",\"feesPaid\":\"0\",\"fundingPaid\":\"0\"}}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/market/quotes?source=REPLAY",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"source\":\"REPLAY\",\"symbol\":\"BTCUSDT\",\"bid\":\"66764.4\",\"ask\":\"66771.0\",\"last\":\"66767.7\",\"mark\":\"66767.7\",\"markEstimated\":false,\"fundingRate\":\"0.000421\",\"nextFundingTime\":1767628800000,\"ts\":1767615600000},{\"source\":\"REPLAY\",\"symbol\":\"ETHUSDT\",\"bid\":\"3376.96\",\"ask\":\"3377.30\",\"last\":\"3377.13\",\"mark\":\"3377.13\",\"markEstimated\":false,\"fundingRate\":\"0.000337\",\"nextFundingTime\":1767628800000,\"ts\":1767615600000},{\"source\":\"REPLAY\",\"symbol\":\"SOLUSDT\",\"bid\":\"125.07\",\"ask\":\"125.09\",\"last\":\"125.08\",\"mark\":\"125.08\",\"markEstimated\":false,\"fundingRate\":\"0.000126\",\"nextFundingTime\":1767628800000,\"ts\":1767615600000}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/instruments",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "[{\"symbol\":\"BTCUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"BTC\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"0.0001\",\"minQuantity\":\"0.0001\",\"priceTick\":\"0.1\",\"maxLeverage\":100,\"maintenanceMarginRate\":\"0.005\",\"fundingIntervalHours\":8,\"venueContractValue\":\"0.01\",\"venueLotSize\":\"0.01\"},{\"symbol\":\"ETHUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"ETH\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"0.001\",\"minQuantity\":\"0.001\",\"priceTick\":\"0.01\",\"maxLeverage\":100,\"maintenanceMarginRate\":\"0.005\",\"fundingIntervalHours\":8,\"venueContractValue\":\"0.1\",\"venueLotSize\":\"0.01\"},{\"symbol\":\"SOLUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"SOL\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"0.01\",\"minQuantity\":\"0.01\",\"priceTick\":\"0.01\",\"maxLeverage\":100,\"maintenanceMarginRate\":\"0.005\",\"fundingIntervalHours\":8,\"venueContractValue\":\"1\",\"venueLotSize\":\"0.01\"},{\"symbol\":\"DOGEUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"DOGE\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"1\",\"minQuantity\":\"1\",\"priceTick\":\"0.00001\",\"maxLeverage\":50,\"maintenanceMarginRate\":\"0.01\",\"fundingIntervalHours\":8,\"venueContractValue\":\"1000\",\"venueLotSize\":\"0.01\"}]"
+  },
+  {
+   "method": "GET",
+   "path": "/api/state",
+   "body": null,
+   "repeat": null,
+   "headers": {},
+   "status": 200,
+   "response": "{\"demoActive\":false,\"vault\":\"OFF\",\"replay\":{\"loaded\":true,\"playing\":false,\"speed\":1,\"now\":1767615600000,\"startTime\":1767571260000,\"endTime\":1767615600000,\"atEnd\":true,\"progress\":1},\"feeds\":[{\"source\":\"REPLAY\",\"provider\":\"Synthetic replay\",\"state\":\"OFFLINE_REPLAY\",\"lastMessageAt\":1767615600000},{\"source\":\"LIVE\",\"provider\":\"OKX public\",\"state\":\"DISCONNECTED\",\"lastMessageAt\":null}],\"instruments\":{\"BTCUSDT\":{\"symbol\":\"BTCUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"BTC\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"0.0001\",\"minQuantity\":\"0.0001\",\"priceTick\":\"0.1\",\"maxLeverage\":100,\"maintenanceMarginRate\":\"0.005\",\"fundingIntervalHours\":8,\"venueContractValue\":\"0.01\",\"venueLotSize\":\"0.01\"},\"ETHUSDT\":{\"symbol\":\"ETHUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"ETH\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"0.001\",\"minQuantity\":\"0.001\",\"priceTick\":\"0.01\",\"maxLeverage\":100,\"maintenanceMarginRate\":\"0.005\",\"fundingIntervalHours\":8,\"venueContractValue\":\"0.1\",\"venueLotSize\":\"0.01\"},\"SOLUSDT\":{\"symbol\":\"SOLUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"SOL\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"0.01\",\"minQuantity\":\"0.01\",\"priceTick\":\"0.01\",\"maxLeverage\":100,\"maintenanceMarginRate\":\"0.005\",\"fundingIntervalHours\":8,\"venueContractValue\":\"1\",\"venueLotSize\":\"0.01\"},\"DOGEUSDT\":{\"symbol\":\"DOGEUSDT\",\"marketType\":\"CRYPTO_PERP\",\"baseCurrency\":\"DOGE\",\"quoteCurrency\":\"USDT\",\"settlementCurrency\":\"USDT\",\"contractSize\":\"1\",\"quantityStep\":\"1\",\"minQuantity\":\"1\",\"priceTick\":\"0.00001\",\"maxLeverage\":50,\"maintenanceMarginRate\":\"0.01\",\"fundingIntervalHours\":8,\"venueContractValue\":\"1000\",\"venueLotSize\":\"0.01\"}}}"
+  }
+ ]
+}

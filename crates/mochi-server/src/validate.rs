@@ -1020,6 +1020,31 @@ fn is_js_decimal_literal(text: &str) -> bool {
 /// - `text/plain`: the body as a string, which a schema then refuses as "received string".
 /// - Anything else, or a malformed content-type: 415.
 pub fn read_body(headers: &HeaderMap, bytes: &[u8]) -> Result<Option<Value>, ApiError> {
+    match body_kind(headers)? {
+        BodyKind::None => Ok(None),
+        BodyKind::Json => parse_json(bytes).map(Some),
+        BodyKind::Text => Ok(Some(Value::String(
+            String::from_utf8_lossy(bytes).into_owned(),
+        ))),
+    }
+}
+
+/// The 415 Fastify answers before it reads any of a body it has no parser for. The guard calls
+/// this before the size limit, because Fastify refuses an unsupported type ahead of a body that
+/// is too large.
+pub fn check_media_type(headers: &HeaderMap) -> Result<(), ApiError> {
+    body_kind(headers).map(|_| ())
+}
+
+/// Which of Fastify's parsers a request's headers select.
+enum BodyKind {
+    /// No body at all.
+    None,
+    Json,
+    Text,
+}
+
+fn body_kind(headers: &HeaderMap) -> Result<BodyKind, ApiError> {
     let unsupported = || {
         ApiError::new(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
@@ -1031,16 +1056,14 @@ pub fn read_body(headers: &HeaderMap, bytes: &[u8]) -> Result<Option<Value>, Api
             .get(CONTENT_LENGTH)
             .is_none_or(|length| length.as_bytes() == b"0");
         return if no_length && !headers.contains_key(TRANSFER_ENCODING) {
-            Ok(None)
+            Ok(BodyKind::None)
         } else {
             Err(unsupported())
         };
     };
     match media_type(content_type.as_bytes()).as_deref() {
-        Some("application/json") => parse_json(bytes).map(Some),
-        Some("text/plain") => Ok(Some(Value::String(
-            String::from_utf8_lossy(bytes).into_owned(),
-        ))),
+        Some("application/json") => Ok(BodyKind::Json),
+        Some("text/plain") => Ok(BodyKind::Text),
         _ => Err(unsupported()),
     }
 }

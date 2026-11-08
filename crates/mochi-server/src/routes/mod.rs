@@ -1,6 +1,12 @@
 //! HTTP routes. Each answers exactly as the same route in `apps/server/src/app.ts` does.
 
+pub mod accounts;
 pub mod events;
+pub mod instruments;
+pub mod market;
+pub mod orders;
+pub mod replay;
+pub mod state;
 
 use axum::extract::State;
 use axum::http::HeaderMap;
@@ -17,6 +23,12 @@ pub fn router() -> Router<AppState> {
         .route("/api/session", get(session))
         .route("/api/health", get(health))
         .route("/api/events", get(events::events))
+        .merge(state::router())
+        .merge(market::router())
+        .merge(instruments::router())
+        .merge(accounts::router())
+        .merge(orders::router())
+        .merge(replay::router())
 }
 
 /// Hands out the token without asking for one. The guard has already refused a foreign Host or

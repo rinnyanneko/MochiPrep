@@ -13,7 +13,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::header::{AUTHORIZATION, CONTENT_LENGTH, HOST, ORIGIN};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, Method};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::Router;
@@ -21,6 +21,7 @@ use http_body_util::{BodyExt, LengthLimitError, Limited};
 use subtle::ConstantTimeEq;
 
 use crate::error::ApiError;
+use crate::validate;
 use crate::AppState;
 
 /// Fastify's `bodyLimit: 256 * 1024`.
@@ -150,12 +151,20 @@ fn url_host(origin: &str) -> Option<String> {
     })
 }
 
-/// Reads the whole body, refusing it past [`BODY_LIMIT`] with Fastify's 413 JSON.
+/// Reads the whole body as Fastify would before a route runs, so routes then see a body that is
+/// already in memory and small (axum's own, larger, plain-text limit never triggers).
 ///
-/// Routes then see a body that is already in memory and small, so axum's own (larger, plain
-/// text) default limit never triggers. An empty body with no content-type passes untouched.
+/// - GET and HEAD: Fastify never reads their body, so it is dropped unread and never refused.
+/// - Otherwise a content-type Fastify has no parser for is 415 before the size is looked at,
+///   then a body past [`BODY_LIMIT`] is Fastify's 413 JSON.
+///
+/// An empty body with no content-type passes untouched.
 async fn limit_body(request: Request) -> Result<Request, ApiError> {
     let (parts, body) = request.into_parts();
+    if parts.method == Method::GET || parts.method == Method::HEAD {
+        return Ok(Request::from_parts(parts, Body::empty()));
+    }
+    validate::check_media_type(&parts.headers)?;
     // Refuse a declared oversize body before reading any of it.
     let declared = parts
         .headers
