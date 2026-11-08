@@ -105,3 +105,32 @@ test('an agent in suggestion mode waits for the user, then the suggestion become
   await expect(page.getByTestId('signals-card')).toBeHidden();
   await expect(page.getByTestId('position-row')).toHaveCount(1);
 });
+
+test('a 1% trailing stop set in the protection dialog shows its trigger price in the position row', async ({ page }) => {
+  await page.goto('/');
+  // Earlier tests may have left Demo Mode on, in the same throwaway backend.
+  const demo = page.getByTestId('try-demo');
+  await expect(demo.or(page.getByTestId('total-equity'))).toBeVisible();
+  if (await demo.isVisible()) await demo.click();
+  await page.getByRole('button', { name: 'Trading', exact: true }).click();
+  await page.getByLabel('Paper account').selectOption({ label: 'Demo terminal' });
+  await page.getByRole('button', { name: 'Review long' }).click();
+  await page.getByRole('button', { name: 'Place order' }).click();
+  await expect(page.getByTestId('position-row')).toHaveCount(1);
+  await expect(page.getByTestId('trailing-trigger')).toHaveCount(0);
+
+  await page.getByRole('button', { name: /^Edit stop and target for/ }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Percent' }).click();
+  await dialog.getByLabel('Trailing callback').fill('1');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toHaveCount(0);
+
+  // A long's trigger sits below the last price: 1% under the highest price seen.
+  const trigger = page.getByTestId('trailing-trigger');
+  await expect(trigger).toContainText(/Trail [\d,]+\.\d+/);
+  const mark = usdt(await page.getByTestId('position-row').locator("td").nth(4).textContent());
+  const triggerPrice = usdt(await trigger.textContent());
+  expect(triggerPrice).toBeLessThan(mark);
+  expect(triggerPrice).toBeGreaterThan(mark * 0.97);
+});

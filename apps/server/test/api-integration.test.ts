@@ -111,6 +111,21 @@ describe('API decision-to-position integration', () => {
     expect(runtime.engine.protectionOfSync(account.id, 'BTCUSDT')).toEqual({ stopLoss, takeProfit: null, trailingStop: null });
   });
 
+  it('api: protection route sets a trailing stop on a paper position', async () => {
+    const account = runtime.engine.createAccount({ name: 'set-trail', source: 'REPLAY' });
+    runtime.engine.placeOrderSync({
+      accountId: account.id, clientOrderId: 'open', symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET', quantity: '0.01', leverage: 3,
+    });
+    const trailingStop = { kind: 'RATIO' as const, callback: '0.01', activationPrice: null };
+    const response = await app.inject({
+      method: 'PUT', url: `/api/positions/${account.id}/BTCUSDT/protection`, headers: headers(),
+      payload: { stopLoss: null, takeProfit: null, trailingStop },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: true, pending: false, after: { trailingStop } });
+    expect(runtime.engine.positionViews(account.id)[0]!.trailingStop).toMatchObject(trailingStop);
+  });
+
   it('accepts an SL-only edit on a position whose trail has activated past its activation price', async () => {
     const account = runtime.engine.createAccount({ name: 'activated', source: 'REPLAY' });
     const opened = runtime.engine.placeOrderSync({

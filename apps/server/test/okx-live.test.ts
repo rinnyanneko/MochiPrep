@@ -620,6 +620,26 @@ describe('OKX execution', () => {
       expect(await engine().protectionOf(accountId, 'BTCUSDT')).toEqual(stop('74000'));
     });
 
+    it('api: protection route on an OKX account goes through the armed gate', async () => {
+      const { app, token } = buildApp(runtime, { host: '127.0.0.1', port: 8787, dataDir: '.', allowedOrigins: ['http://localhost:8787'] });
+      const put = (payload: Record<string, unknown>) =>
+        app.inject({
+          method: 'PUT', url: `/api/positions/${accountId}/BTCUSDT/protection`,
+          headers: { host: 'localhost:8787', authorization: `Bearer ${token}` }, payload,
+        });
+      runtime.disarm();
+      const refused = await put({ stopLoss: '73000', takeProfit: null });
+      expect(refused.statusCode).toBe(400);
+      expect(refused.json().error).toContain('NOT_ARMED: this change increases risk');
+      expect(okx.calls.filter((c) => c.startsWith('POST'))).toEqual([]);
+
+      const tightened = await put({ stopLoss: '74500', takeProfit: null });
+      expect(tightened.statusCode).toBe(200);
+      expect(tightened.json()).toMatchObject({ ok: true, pending: false, after: stop('74500') });
+      expect(okx.algoPlaced).toHaveLength(1);
+      await app.close();
+    });
+
     it('a loosened stop is placed once armed', async () => {
       await engine().setProtection(accountId, 'BTCUSDT', stop('73000'), meta());
       expect(await engine().protectionOf(accountId, 'BTCUSDT')).toEqual(stop('73000'));

@@ -25,6 +25,10 @@ An agent cycle snapshots a fresh quote and closed candles, builds indicators and
 
 AI output is untrusted data throughout this path. It cannot select another account, bypass sizing, change configured limits, or directly call the engine.
 
+## Protection
+
+`Protection` is `{ stopLoss, takeProfit, trailingStop }`, the whole protective state of a position. `ExecutionEngine.setProtection` replaces it in one call and returns what was in force before and after, plus `pending` when an exchange has not yet confirmed. The paper engine applies it in one store transaction and holds the trailing extreme on the order row. The OKX engine places every changed leg as an algo order before cancelling any, and applies the armed rule from `classifyProtectionChange`. A `PROTECT` decision from an agent and the position dialog's `PUT /api/positions/:accountId/:symbol/protection` both end here; for an agent, only `AgentRunner` does that, after Zod and the risk engine. An absent `trailingStop` keeps the current one and `null` removes it. Orders the owner placed on OKX are exposed read-only as `externalProtection`.
+
 ## Execution modes
 
 In `AUTO`, an approved decision goes straight to the engine. In `SIGNAL`, the cycle stops at outcome `SIGNAL` with an expiry on the feed's clock. `executeSignal` trusts only the idea: it re-runs the risk engine on current data, which also resizes the order. A new suggestion from the same agent replaces the old one, and Stop All clears them all. Replay stops at each suggestion, or it would expire before anyone could read it.

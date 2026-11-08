@@ -44,6 +44,35 @@ An agent reading news on a real account takes third-party text as input. Anyone 
 
 Closing is always allowed while connected, even when disarmed, so you can never be locked out of an exit.
 
+## Trailing stops and protection changes
+
+A position's protection is its stop loss, take-profit and an optional trailing stop. On OKX each leg is an algo order: stop loss and take-profit are `conditional` and the trailing stop is `move_order_stop`, all reduce-only. You can change them from the position's pencil button, and an agent can with a `PROTECT` decision (only with the trailing-stop switch on, for the trailing part). Both take the same path.
+
+**Placed before cancelled.** Every changed leg is placed first, and old or removed algos are cancelled only after OKX accepted all the new ones, so the position is never left without a stop. Two stops may briefly coexist. If a placement is refused, nothing is cancelled and the old protection stays.
+
+**Arming.** A change that can only lower risk works while disarmed, like an exit. These need the account armed (OKX Demo accounts always are):
+
+- Moving the stop loss away from the price (down for a long, up for a short), or removing it.
+- Adding, moving or removing a take-profit.
+- Removing the trailing stop, widening its callback, or changing its kind or activation price.
+
+Adding a stop loss or a trailing stop where there was none, moving the stop loss toward the price, and narrowing a trailing callback of the same kind and activation price do not. A refused change says `NOT_ARMED: this change increases risk`. Other refusals are `PROTECTION_PENDING` (an earlier change is still awaiting OKX), `EXCHANGE_NOT_SYNCED`, `NO_MARKET_DATA` and `MARKET_DATA_STALE`.
+
+**External orders.** Stops and targets you place in the OKX app are shown on the position as External and are read-only. MochiPrep never cancels or edits them, and they are not counted as its own protection.
+
+**Awaiting confirmation.** If OKX does not answer a placement, the order is never resent. The dialog says "Sent to OKX, awaiting confirmation", the old protection stays in force, and the next sync looks the order up by its client ID. Further changes are refused until it is resolved.
+
+**Cleanup.** If a position disappears from OKX, MochiPrep's own leftover algos are cancelled only after the position has been missing for two syncs at least 10 seconds apart, so one bad read cannot remove a stop. A cancel that fails shows as `ours, cancel pending` on the position and is retried.
+
+**Not verified on OKX Demo yet.** Live trailing stops and protection changes have not been verified on OKX Demo, and they are untested with real money. Treat all of this as experimental until you have tried it on a Demo account. These behaviours are UNCONFIRMED, each with what MochiPrep does meanwhile:
+
+1. **Callback range.** The `callbackRatio` range OKX accepts is not confirmed. MochiPrep limits it to 0.001 to 0.3 (0.1% to 30%) and refuses anything else before sending.
+2. **Activation direction.** Which side of the price `activePx` may sit on is not confirmed. MochiPrep assumes at or above the price for a long and at or below it for a short, and in practice requires the activation price to be beyond the current price in that direction, refusing the rest before sending.
+3. **Separate attached orders.** Whether a stop loss, take-profit and trailing stop can be attached to an entry as separate `attachAlgoOrds` elements is not confirmed. MochiPrep sends one element per leg. If OKX refuses, an entry with protection fails and nothing is placed.
+4. **Cancelling trailing stops.** Whether `cancel-algos` cancels a `move_order_stop` is not confirmed. A failed cancel shows as `ours, cancel pending` and is retried on every sync.
+5. **Algos when a position closes.** What OKX does with reduce-only algos once the position closes is not confirmed. MochiPrep cancels its own after the cleanup wait above, and does not touch External ones.
+6. **Which price trailing tracks.** Whether OKX trails the last, mark or index price is not confirmed. On OKX, MochiPrep shows the trigger price OKX reports and no extreme of its own.
+
 ## Trading pairs
 
 Pairs added in **Settings** trade on OKX like the built-in ones. Orders go out in contracts, and contract sizes vary widely: a BTC contract is 0.01 BTC, a PEPE contract is 10,000,000 PEPE. So one contract may be larger than a small order, and the minimum size differs per pair.
@@ -59,7 +88,7 @@ With a master password set, you can tick **Save encrypted with my master passwor
 ## Limits
 
 - Balances and positions come from OKX and refresh every 5 seconds. MochiPrep keeps no ledger for exchange accounts.
-- Stops can't be edited after entry from MochiPrep. Use OKX.
+- Protection can be changed from MochiPrep (see Trailing stops and protection changes), but anything you place on OKX yourself is shown as External and never touched.
 - A stop or take-profit that fills on OKX shows up as a position change, not as a fill in MochiPrep's history, so it has no marker on the chart.
 - Daily loss is measured from the first equity snapshot of the UTC day, and it includes deposits and withdrawals made that day.
 - Order state is polled, not streamed.
