@@ -563,6 +563,12 @@ describe('OKX execution', () => {
     const protectionRows = () => runtime.store.listOrders(accountId, 100).filter((o) => o.closePosition);
     const view = async () => (await engine().getPositions(accountId)).find((p) => p.symbol === 'BTCUSDT')!;
     const backdate = () => db.prepare('UPDATE orders SET created_at=? WHERE close_position=1').run(Date.now() - 61_000);
+    /** Moves the engine's clock (it reads Date.now through the runtime) forward. */
+    const advance = (ms: number) => {
+      const at = Date.now() + ms;
+      vi.spyOn(Date, 'now').mockReturnValue(at);
+    };
+    afterEach(() => vi.restoreAllMocks());
 
     beforeEach(async () => {
       accountId = (await connect()).id;
@@ -706,33 +712,49 @@ describe('OKX execution', () => {
 
       await engine().setProtection(accountId, 'BTCUSDT', stop('74500'), meta());
       await engine().closePosition(accountId, 'BTCUSDT', 1, crypto.randomUUID());
-      await engine().sync(); // the second sync without the position cancels our rows
+      advance(10_000);
+      await engine().sync(); // a second miss, 10s after the first, cancels our rows
       expect(okx.canceledAlgoIds).toContain(protectionRows().find((o) => o.rejectReason === 'Position closed')!.exchangeOrderId);
       expect(okx.canceledAlgoIds).not.toContain(app.algoId);
       expect(okx.algos.get('fromtheapp1')!.state).toBe('live');
     });
 
-    it('sync cancels our protection left on a closed position, once it is missing on two syncs in a row', async () => {
+    it('two misses 1 ms apart cancel nothing', async () => {
       const [row] = protectionRows();
-      okx.position = null; // closed on OKX, outside MochiPrep
+      okx.position = null; // closed on OKX, outside MochiPrep, or a position list lagging a fill
       await engine().sync();
-      // One sync without the position could be the position list lagging behind a fill.
+      advance(1);
+      await engine().sync();
       expect(okx.canceledAlgoIds).toEqual([]);
       expect(runtime.store.getOrder(row!.id)!.status).toBe('OPEN');
+    });
+
+    it('sync cancels our protection left on a closed position after two misses at least 10s apart', async () => {
+      const [row] = protectionRows();
+      okx.position = null;
+      await engine().sync();
+      advance(10_000);
       await engine().sync();
       expect(okx.canceledAlgoIds).toEqual([row!.exchangeOrderId]);
       expect(runtime.store.getOrder(row!.id)).toMatchObject({ status: 'CANCELED', rejectReason: 'Position closed' });
     });
 
-    it('a position seen again between syncs resets the count', async () => {
+    it('a miss, a sighting, then a miss restarts the clock', async () => {
       const position = okx.position;
       okx.position = null;
       await engine().sync();
+      advance(30_000);
       okx.position = position;
       await engine().sync();
+      // The first miss was 30s ago, but the sighting in between restarted the clock.
       okx.position = null;
       await engine().sync();
+      advance(9_000);
+      await engine().sync();
       expect(okx.canceledAlgoIds).toEqual([]);
+      advance(1_000);
+      await engine().sync();
+      expect(okx.canceledAlgoIds).toHaveLength(1);
     });
 
     it('swapping the stop for a trailing stop cancels nothing when the trailing stop is refused', async () => {
@@ -749,7 +771,26 @@ describe('OKX execution', () => {
       expect(await engine().protectionOf(accountId, 'BTCUSDT')).toEqual(stop('74000'));
     });
 
-    it('swapping the stop for a trailing stop cancels nothing when the outcome is unknown', async () => {
+    it('swapping the stop for a trailing stop cancels nothing while the outcome is unknown', async () => {
+      await connect('OKX_LIVE', { ...DEFAULT_LIVE_LIMITS, requireStopLoss: false });
+      runtime.arm(accountId, ARM_PHRASE);
+      const [old] = protectionRows();
+      okx.calls = [];
+      okx.loseNextAlgoResponse = true;
+      okx.algoLookupDown = true;
+      const trailingStop = { kind: 'RATIO' as const, callback: '0.01', activationPrice: null };
+      const result = await engine().setProtection(accountId, 'BTCUSDT', { stopLoss: null, takeProfit: null, trailingStop }, meta());
+      expect(result).toMatchObject({ after: stop('74000'), pending: true });
+      okx.algoLookupDown = false;
+      await engine().sync();
+      expect(okx.calls).not.toContain('POST /api/v5/trade/cancel-algos');
+      expect(okx.algos.get(toAlgoClOrdId(old!.id))!.state).toBe('live');
+      // The removal was never carried out, so the stop is still shown as in force beside the trail.
+      expect(await engine().protectionOf(accountId, 'BTCUSDT')).toEqual({ stopLoss: '74000', takeProfit: null, trailingStop });
+      expect(okx.algoPlaced).toHaveLength(1);
+    });
+
+    it('an unknown outcome that the follow-up sync confirms completes the change, without a second place', async () => {
       await connect('OKX_LIVE', { ...DEFAULT_LIVE_LIMITS, requireStopLoss: false });
       runtime.arm(accountId, ARM_PHRASE);
       const [old] = protectionRows();
@@ -757,13 +798,13 @@ describe('OKX execution', () => {
       okx.loseNextAlgoResponse = true;
       const trailingStop = { kind: 'RATIO' as const, callback: '0.01', activationPrice: null };
       const result = await engine().setProtection(accountId, 'BTCUSDT', { stopLoss: null, takeProfit: null, trailingStop }, meta());
-      expect(result.pending).toBe(true);
-      await engine().sync();
-      expect(okx.calls).not.toContain('POST /api/v5/trade/cancel-algos');
-      expect(okx.algos.get(toAlgoClOrdId(old!.id))!.state).toBe('live');
-      // The removal was never carried out, so the stop is still shown as in force beside the trail.
-      expect(await engine().protectionOf(accountId, 'BTCUSDT')).toEqual({ stopLoss: '74000', takeProfit: null, trailingStop });
+      expect(result).toEqual({ before: stop('74000'), after: { stopLoss: null, takeProfit: null, trailingStop }, pending: false });
       expect(okx.algoPlaced).toHaveLength(1);
+      // The stop is removed only after OKX listed the trailing stop as live.
+      const confirmed = okx.calls.indexOf('GET /api/v5/trade/orders-algo-pending');
+      expect(okx.calls.indexOf('POST /api/v5/trade/cancel-algos')).toBeGreaterThan(confirmed);
+      expect(okx.canceledAlgoIds).toEqual([old!.exchangeOrderId]);
+      expect(runtime.store.getOrder(old!.id)).toMatchObject({ status: 'CANCELED', rejectReason: 'Removed' });
     });
 
     it('a change refused part-way reports what is in force, including the leg already placed', async () => {

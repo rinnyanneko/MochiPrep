@@ -51,6 +51,8 @@ const NEVER_ARRIVED_AFTER_MS = 60_000;
 const EQUITY_EVERY_MS = 60_000;
 /** How far back sync looks for our own algo ids. Older ones read as external, which is the safe side. */
 const RECENT_ORDERS = 500;
+/** How long a position must stay missing before our protection on it is cancelled. */
+const POSITION_MISSING_MS = 10_000;
 const ALGO_TYPES = ['conditional', 'oco', 'move_order_stop'] as const;
 /** Algo states that can still trigger. Anything else, including states OKX may add later, cannot. */
 const ALIVE_STATES = new Set(['live', 'partially_effective']);
@@ -150,8 +152,8 @@ export class OkxExecutionEngine implements ExecutionEngine {
   private protection = new Map<SymbolId, SymbolProtection>();
   /** The last failed algo cancel, until a sync finishes with every cancel accepted. */
   private cancelError: string | null = null;
-  /** Consecutive syncs, per instId, that found our protection but no position. */
-  private missingPosition = new Map<string, number>();
+  /** Per instId: consecutive syncs that found our protection but no position, and the first such sync. */
+  private missingPosition = new Map<string, { count: number; since: number }>();
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly deps: OkxEngineDeps) {
@@ -266,16 +268,21 @@ export class OkxExecutionEngine implements ExecutionEngine {
           await this.sync().catch(() => undefined);
           throw new ProtectionChangeError((error as Error).message, this.effectiveOf(symbol));
         }
-        // Unknown outcome: never placed again. Sync resolves it by algoClOrdId; the old algos stay.
+        // Unknown outcome: never placed again. A sync looks it up by algoClOrdId; if OKX shows it
+        // live, the placement is known to have succeeded and the change carries on.
         row.rejectReason = `Awaiting confirmation: ${error.message}`;
         store.saveOrder(row);
         await this.sync().catch(() => undefined);
+        const resolved = store.getOrder(row.id);
+        if (resolved?.status === 'OPEN' && resolved.exchangeOrderId) continue;
+        // Still unknown: the old algos stay until sync resolves it.
         return { before, after: this.effectiveOf(symbol), pending: true };
       }
     }
     for (const leg of changed) {
-      const row = old[leg];
-      if (row) await this.cancelRows([row], legValue(target, leg) === null ? REMOVED : REPLACED);
+      // A sync above may already have retired a superseded row; it is not cancelled twice.
+      const row = old[leg] && store.getOrder(old[leg].id);
+      if (row && row.status === 'OPEN') await this.cancelRows([row], legValue(target, leg) === null ? REMOVED : REPLACED);
     }
 
     await this.sync().catch(() => undefined);
@@ -702,7 +709,7 @@ export class OkxExecutionEngine implements ExecutionEngine {
    * Matches pending algos to our protection rows by algoClOrdId. OKX is the truth: a row counts only
    * once its algo is seen live, and an algo we did not place is reported as external and never touched.
    * Per (symbol, leg) the newest live row is in force and older ones are cancelled; rows on a symbol
-   * whose position is missing on two syncs in a row are cancelled. An algo still pending after a
+   * whose position is missing on two syncs in a row, over at least 10s, are cancelled. An algo still pending after a
    * cancel attempt stays on the view, marked, and the cancel is retried each sync.
    */
   private async reconcileProtection(algos: OkxAlgo[], held: Set<string>): Promise<Map<SymbolId, SymbolProtection>> {
@@ -758,16 +765,22 @@ export class OkxExecutionEngine implements ExecutionEngine {
     }
 
     // Compared by instId, which every row maps to, so a symbol missing from the registry still
-    // counts as held. A position must be missing on two syncs in a row before its rows are
-    // cancelled, in case the position list lags behind a fill.
+    // counts as held. A position must be missing on two syncs in a row, and for at least
+    // POSITION_MISSING_MS since the first miss, before its rows are cancelled: syncs can be
+    // milliseconds apart, and the position list may lag behind a fill.
     const isHeld = (row: Order) => held.has(toInstId(row.symbol));
-    const missing = new Map<string, number>();
+    const missing = new Map<string, { count: number; since: number }>();
     for (const row of [...[...alive.values()].map((a) => a.row), ...strays.map((s) => s.row)]) {
       const instId = toInstId(row.symbol);
-      if (!held.has(instId)) missing.set(instId, (this.missingPosition.get(instId) ?? 0) + 1);
+      if (held.has(instId) || missing.has(instId)) continue;
+      const prior = this.missingPosition.get(instId);
+      missing.set(instId, { count: (prior?.count ?? 0) + 1, since: prior?.since ?? at });
     }
     this.missingPosition = missing;
-    const positionGone = (row: Order) => (missing.get(toInstId(row.symbol)) ?? 0) >= 2;
+    const positionGone = (row: Order) => {
+      const miss = missing.get(toInstId(row.symbol));
+      return !!miss && miss.count >= 2 && at - miss.since >= POSITION_MISSING_MS;
+    };
 
     const cancel: { row: Order; algo: OkxAlgo; reason: string | null }[] = [];
     // A closed row whose algo is still live: cancel it again, unless it is the only stop for that leg.
