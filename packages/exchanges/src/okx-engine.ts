@@ -117,6 +117,11 @@ export interface LiveStore {
   saveOrder(order: Order): void;
   getOrder(id: string): Order | undefined;
   getOrderByClientId(accountId: string, clientOrderId: string): Order | undefined;
+  /**
+   * The account's OPEN orders, oldest first: by creation time, ties broken by insertion order.
+   * Protection reconciliation relies on this to pick the newest algo of a leg, so an
+   * implementation must not return them in any other order.
+   */
   listOpenOrders(accountId: string): Order[];
   listOrders(accountId: string, limit: number): Order[];
   insertFill(fill: Fill): void;
@@ -783,6 +788,8 @@ export class OkxExecutionEngine implements ExecutionEngine {
 
     const cancel: { row: Order; algo: OkxAlgo; reason: string | null }[] = [];
     const groups = new Map<string, Order[]>();
+    // Depends on listOpenOrders returning rows oldest first (its contract): a later rank is a newer row,
+    // and the last row of a group is the one that stays in force.
     const rank = new Map(open.map((row, i) => [row.id, i]));
     for (const { row, algo } of [...alive.values()].sort((a, b) => rank.get(a.row.id)! - rank.get(b.row.id)!)) {
       if (otherSide(row)) {

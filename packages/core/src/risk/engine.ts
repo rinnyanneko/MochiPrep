@@ -17,6 +17,7 @@ import type {
 import { d, floorToStep, min, str, type Dec } from '../decimal';
 import { getInstrument } from '../instruments';
 import { linearPerp } from '../trading/perp';
+import { sameTrailing } from '../trading/protection';
 import { validateTrailing } from '../trading/trailing';
 
 export interface RiskInput {
@@ -36,8 +37,9 @@ export interface RiskInput {
   allowTrailingStop: boolean;
   /**
    * The current protection of this symbol's open position, or null without one. PROTECT states
-   * the full target, and a kept trailing stop was validated when it was set; only the current stop
-   * loss is read, to tell a looser stop (budget applies) from a kept or tighter one.
+   * the full target, and a kept trailing stop was validated when it was set, so restating it
+   * unchanged skips the trailing rule; the current stop loss is read to tell a looser stop (budget
+   * applies) from a kept or tighter one.
    */
   protection: Protection | null;
 }
@@ -263,7 +265,11 @@ function protect(
       `target ${decision.takeProfit} vs last ${last.toFixed()} for ${side}`,
     );
   }
-  if (decision.trailingStop) checkTrailing(check, side, last, decision.trailingStop, input.symbol);
+  // Restating the trailing stop already in force is not a new one: its activation price may be
+  // behind the last price by now, which validateTrailing would refuse. Only a changed spec is checked.
+  if (decision.trailingStop && !sameTrailing(trailingSpec(decision.trailingStop), input.protection?.trailingStop ?? null)) {
+    checkTrailing(check, side, last, decision.trailingStop, input.symbol);
+  }
 
   if (decision.stopLoss !== null) {
     const stop = d(decision.stopLoss);

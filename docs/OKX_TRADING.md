@@ -46,7 +46,10 @@ Closing is always allowed while connected, even when disarmed, so you can never 
 
 ## Trailing stops and protection changes
 
-A position's protection is its stop loss, take-profit and an optional trailing stop. On OKX each leg is an algo order: stop loss and take-profit are `conditional` and the trailing stop is `move_order_stop`, all reduce-only. You can change them from the position's pencil button, and an agent can with a `PROTECT` decision (only with the trailing-stop switch on, for the trailing part). Both take the same path.
+A position's protection is its stop loss, take-profit and an optional trailing stop. On OKX each leg is an algo order: stop loss and take-profit are `conditional` and the trailing stop is `move_order_stop`, all reduce-only. You can change them from the position's pencil button, and an agent can with a `PROTECT` decision (only with the trailing-stop switch on, for the trailing part). Both end in the same `setProtection` call, but they are not checked the same way:
+
+- **Agent `PROTECT` decisions** first go through the risk engine: the stops must be on the correct side of the last price, a stop must trigger before liquidation when OKX reports it, and a new or looser stop must fit the per-trade risk budget (see Risk budget below). A trailing stop is validated by the engine only when it differs from the one in force. Only then does `setProtection` run.
+- **Manual changes from the protection dialog** do not pass through the risk engine, so there is no per-trade risk budget and no stop-before-liquidation check. They get only the validation inside `setProtection`: the side checks on stop loss and take-profit, the trailing stop limits for a changed trailing stop, the account's required-stop-loss and market-data freshness limits, and the arming gate below (a change that increases risk needs the account armed).
 
 **Placed before cancelled.** Every changed leg is placed first, and old or removed algos are cancelled only after OKX accepted all the new ones, so the position is never left without a stop. Two stops may briefly coexist. If a placement is refused, the legs OKX accepted before the refusal stay in force and replace their old algos; nothing else is cancelled. The outcome is `ORDER_REJECTED`, showing the protection now in force.
 

@@ -22160,6 +22160,934 @@
  {
   "input": {
    "decision": {
+    "symbol": "BTCUSDT",
+    "action": "PROTECT",
+    "orderType": "MARKET",
+    "entryPrice": null,
+    "stopLoss": 95,
+    "takeProfit": 130,
+    "reason": "test",
+    "confidence": 0.8,
+    "expiresAt": null,
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": 0.01,
+     "activationPrice": 105
+    }
+   },
+   "symbol": "BTCUSDT",
+   "settings": {
+    "maxLeverage": 3,
+    "maxRiskPerTradePct": 0.5,
+    "maxDailyLossPct": 2,
+    "maxOpenPositions": 2,
+    "requireStopLoss": true,
+    "maxQuoteAgeSec": 30,
+    "maxNotional": 100000
+   },
+   "quote": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "bid": "109",
+    "ask": "111",
+    "last": "110",
+    "mark": "110",
+    "markEstimated": false,
+    "fundingRate": "0.001",
+    "nextFundingTime": null,
+    "ts": 1000
+   },
+   "now": 1000,
+   "balance": {
+    "accountId": "a",
+    "initialBalance": "10000",
+    "walletBalance": "10000",
+    "availableBalance": "10000",
+    "usedMargin": "0",
+    "orderMargin": "0",
+    "equity": "10000",
+    "realizedPnl": "0",
+    "unrealizedPnl": "0",
+    "feesPaid": "0",
+    "fundingPaid": "0"
+   },
+   "openPositions": [
+    {
+     "id": "p-BTCUSDT",
+     "accountId": "a",
+     "symbol": "BTCUSDT",
+     "side": "LONG",
+     "quantity": "1",
+     "entryPrice": "100",
+     "leverage": 3,
+     "margin": "33.33",
+     "liquidationPrice": "70",
+     "status": "OPEN",
+     "realizedPnl": "0",
+     "feesPaid": "0",
+     "fundingPaid": "0",
+     "maxQuantity": "1",
+     "exitPrice": null,
+     "lastFundingTime": 0,
+     "openedAt": 0,
+     "closedAt": null
+    }
+   ],
+   "dailyPnl": "0",
+   "dayStartEquity": "10000",
+   "fees": {
+    "takerFeeRate": "0.0005",
+    "makerFeeRate": "0.0002",
+    "slippageBps": "1",
+    "impactBpsPerMillion": "5"
+   },
+   "allowTrailingStop": true,
+   "protection": {
+    "stopLoss": "95",
+    "takeProfit": "130",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.01",
+     "activationPrice": "105"
+    }
+   }
+  },
+  "output": {
+   "approved": true,
+   "checks": [
+    {
+     "id": "symbol",
+     "label": "Symbol allowed",
+     "passed": true,
+     "detail": "BTCUSDT matches the agent"
+    },
+    {
+     "id": "trailing-allowed",
+     "label": "Trailing stops allowed",
+     "passed": true,
+     "detail": "trailing stops are on for this agent"
+    },
+    {
+     "id": "expiry",
+     "label": "Decision not expired",
+     "passed": true,
+     "detail": "no expiry given"
+    },
+    {
+     "id": "has-position",
+     "label": "Position to protect",
+     "passed": true,
+     "detail": "LONG 1"
+    },
+    {
+     "id": "freshness",
+     "label": "Market data fresh",
+     "passed": true,
+     "detail": "quote age 0.0s, limit 30s"
+    },
+    {
+     "id": "stop-loss",
+     "label": "Stop loss valid",
+     "passed": true,
+     "detail": "stop 95 vs last 110 for LONG"
+    },
+    {
+     "id": "take-profit",
+     "label": "Take profit valid",
+     "passed": true,
+     "detail": "target 130 vs last 110 for LONG"
+    },
+    {
+     "id": "stop-before-liq",
+     "label": "Stop triggers before liquidation",
+     "passed": true,
+     "detail": "stop 95, liquidation 70.00"
+    }
+   ],
+   "rejectionReasons": [],
+   "sized": null
+  }
+ },
+ {
+  "input": {
+   "decision": {
+    "symbol": "BTCUSDT",
+    "action": "PROTECT",
+    "orderType": "MARKET",
+    "entryPrice": null,
+    "stopLoss": 95,
+    "takeProfit": 130,
+    "reason": "test",
+    "confidence": 0.8,
+    "expiresAt": null,
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": 0.02,
+     "activationPrice": 105
+    }
+   },
+   "symbol": "BTCUSDT",
+   "settings": {
+    "maxLeverage": 3,
+    "maxRiskPerTradePct": 0.5,
+    "maxDailyLossPct": 2,
+    "maxOpenPositions": 2,
+    "requireStopLoss": true,
+    "maxQuoteAgeSec": 30,
+    "maxNotional": 100000
+   },
+   "quote": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "bid": "109",
+    "ask": "111",
+    "last": "110",
+    "mark": "110",
+    "markEstimated": false,
+    "fundingRate": "0.001",
+    "nextFundingTime": null,
+    "ts": 1000
+   },
+   "now": 1000,
+   "balance": {
+    "accountId": "a",
+    "initialBalance": "10000",
+    "walletBalance": "10000",
+    "availableBalance": "10000",
+    "usedMargin": "0",
+    "orderMargin": "0",
+    "equity": "10000",
+    "realizedPnl": "0",
+    "unrealizedPnl": "0",
+    "feesPaid": "0",
+    "fundingPaid": "0"
+   },
+   "openPositions": [
+    {
+     "id": "p-BTCUSDT",
+     "accountId": "a",
+     "symbol": "BTCUSDT",
+     "side": "LONG",
+     "quantity": "1",
+     "entryPrice": "100",
+     "leverage": 3,
+     "margin": "33.33",
+     "liquidationPrice": "70",
+     "status": "OPEN",
+     "realizedPnl": "0",
+     "feesPaid": "0",
+     "fundingPaid": "0",
+     "maxQuantity": "1",
+     "exitPrice": null,
+     "lastFundingTime": 0,
+     "openedAt": 0,
+     "closedAt": null
+    }
+   ],
+   "dailyPnl": "0",
+   "dayStartEquity": "10000",
+   "fees": {
+    "takerFeeRate": "0.0005",
+    "makerFeeRate": "0.0002",
+    "slippageBps": "1",
+    "impactBpsPerMillion": "5"
+   },
+   "allowTrailingStop": true,
+   "protection": {
+    "stopLoss": "95",
+    "takeProfit": "130",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.01",
+     "activationPrice": "105"
+    }
+   }
+  },
+  "output": {
+   "approved": false,
+   "checks": [
+    {
+     "id": "symbol",
+     "label": "Symbol allowed",
+     "passed": true,
+     "detail": "BTCUSDT matches the agent"
+    },
+    {
+     "id": "trailing-allowed",
+     "label": "Trailing stops allowed",
+     "passed": true,
+     "detail": "trailing stops are on for this agent"
+    },
+    {
+     "id": "expiry",
+     "label": "Decision not expired",
+     "passed": true,
+     "detail": "no expiry given"
+    },
+    {
+     "id": "has-position",
+     "label": "Position to protect",
+     "passed": true,
+     "detail": "LONG 1"
+    },
+    {
+     "id": "freshness",
+     "label": "Market data fresh",
+     "passed": true,
+     "detail": "quote age 0.0s, limit 30s"
+    },
+    {
+     "id": "stop-loss",
+     "label": "Stop loss valid",
+     "passed": true,
+     "detail": "stop 95 vs last 110 for LONG"
+    },
+    {
+     "id": "take-profit",
+     "label": "Take profit valid",
+     "passed": true,
+     "detail": "target 130 vs last 110 for LONG"
+    },
+    {
+     "id": "trailing-stop",
+     "label": "Trailing stop valid",
+     "passed": false,
+     "detail": "activation 105 is on the wrong side of 110 for LONG"
+    },
+    {
+     "id": "stop-before-liq",
+     "label": "Stop triggers before liquidation",
+     "passed": true,
+     "detail": "stop 95, liquidation 70.00"
+    }
+   ],
+   "rejectionReasons": [
+    "Trailing stop valid: activation 105 is on the wrong side of 110 for LONG"
+   ],
+   "sized": null
+  }
+ },
+ {
+  "input": {
+   "decision": {
+    "symbol": "BTCUSDT",
+    "action": "PROTECT",
+    "orderType": "MARKET",
+    "entryPrice": null,
+    "stopLoss": 95,
+    "takeProfit": 130,
+    "reason": "test",
+    "confidence": 0.8,
+    "expiresAt": null,
+    "trailingStop": {
+     "kind": "SPREAD",
+     "callback": 1.1,
+     "activationPrice": null
+    }
+   },
+   "symbol": "BTCUSDT",
+   "settings": {
+    "maxLeverage": 3,
+    "maxRiskPerTradePct": 0.5,
+    "maxDailyLossPct": 2,
+    "maxOpenPositions": 2,
+    "requireStopLoss": true,
+    "maxQuoteAgeSec": 30,
+    "maxNotional": 100000
+   },
+   "quote": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "bid": "109",
+    "ask": "111",
+    "last": "110",
+    "mark": "110",
+    "markEstimated": false,
+    "fundingRate": "0.001",
+    "nextFundingTime": null,
+    "ts": 1000
+   },
+   "now": 1000,
+   "balance": {
+    "accountId": "a",
+    "initialBalance": "10000",
+    "walletBalance": "10000",
+    "availableBalance": "10000",
+    "usedMargin": "0",
+    "orderMargin": "0",
+    "equity": "10000",
+    "realizedPnl": "0",
+    "unrealizedPnl": "0",
+    "feesPaid": "0",
+    "fundingPaid": "0"
+   },
+   "openPositions": [
+    {
+     "id": "p-BTCUSDT",
+     "accountId": "a",
+     "symbol": "BTCUSDT",
+     "side": "LONG",
+     "quantity": "1",
+     "entryPrice": "100",
+     "leverage": 3,
+     "margin": "33.33",
+     "liquidationPrice": "70",
+     "status": "OPEN",
+     "realizedPnl": "0",
+     "feesPaid": "0",
+     "fundingPaid": "0",
+     "maxQuantity": "1",
+     "exitPrice": null,
+     "lastFundingTime": 0,
+     "openedAt": 0,
+     "closedAt": null
+    }
+   ],
+   "dailyPnl": "0",
+   "dayStartEquity": "10000",
+   "fees": {
+    "takerFeeRate": "0.0005",
+    "makerFeeRate": "0.0002",
+    "slippageBps": "1",
+    "impactBpsPerMillion": "5"
+   },
+   "allowTrailingStop": true,
+   "protection": {
+    "stopLoss": "95",
+    "takeProfit": "130",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.01",
+     "activationPrice": "105"
+    }
+   }
+  },
+  "output": {
+   "approved": true,
+   "checks": [
+    {
+     "id": "symbol",
+     "label": "Symbol allowed",
+     "passed": true,
+     "detail": "BTCUSDT matches the agent"
+    },
+    {
+     "id": "trailing-allowed",
+     "label": "Trailing stops allowed",
+     "passed": true,
+     "detail": "trailing stops are on for this agent"
+    },
+    {
+     "id": "expiry",
+     "label": "Decision not expired",
+     "passed": true,
+     "detail": "no expiry given"
+    },
+    {
+     "id": "has-position",
+     "label": "Position to protect",
+     "passed": true,
+     "detail": "LONG 1"
+    },
+    {
+     "id": "freshness",
+     "label": "Market data fresh",
+     "passed": true,
+     "detail": "quote age 0.0s, limit 30s"
+    },
+    {
+     "id": "stop-loss",
+     "label": "Stop loss valid",
+     "passed": true,
+     "detail": "stop 95 vs last 110 for LONG"
+    },
+    {
+     "id": "take-profit",
+     "label": "Take profit valid",
+     "passed": true,
+     "detail": "target 130 vs last 110 for LONG"
+    },
+    {
+     "id": "trailing-stop",
+     "label": "Trailing stop valid",
+     "passed": true,
+     "detail": "SPREAD 1.1, no activation price for LONG"
+    },
+    {
+     "id": "stop-before-liq",
+     "label": "Stop triggers before liquidation",
+     "passed": true,
+     "detail": "stop 95, liquidation 70.00"
+    }
+   ],
+   "rejectionReasons": [],
+   "sized": null
+  }
+ },
+ {
+  "input": {
+   "decision": {
+    "symbol": "BTCUSDT",
+    "action": "PROTECT",
+    "orderType": "MARKET",
+    "entryPrice": null,
+    "stopLoss": 110,
+    "takeProfit": 80,
+    "reason": "test",
+    "confidence": 0.8,
+    "expiresAt": null,
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": 0.01,
+     "activationPrice": 95
+    }
+   },
+   "symbol": "BTCUSDT",
+   "settings": {
+    "maxLeverage": 3,
+    "maxRiskPerTradePct": 0.5,
+    "maxDailyLossPct": 2,
+    "maxOpenPositions": 2,
+    "requireStopLoss": true,
+    "maxQuoteAgeSec": 30,
+    "maxNotional": 100000
+   },
+   "quote": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "bid": "89",
+    "ask": "91",
+    "last": "90",
+    "mark": "90",
+    "markEstimated": false,
+    "fundingRate": "0.001",
+    "nextFundingTime": null,
+    "ts": 1000
+   },
+   "now": 1000,
+   "balance": {
+    "accountId": "a",
+    "initialBalance": "10000",
+    "walletBalance": "10000",
+    "availableBalance": "10000",
+    "usedMargin": "0",
+    "orderMargin": "0",
+    "equity": "10000",
+    "realizedPnl": "0",
+    "unrealizedPnl": "0",
+    "feesPaid": "0",
+    "fundingPaid": "0"
+   },
+   "openPositions": [
+    {
+     "id": "p-BTCUSDT",
+     "accountId": "a",
+     "symbol": "BTCUSDT",
+     "side": "SHORT",
+     "quantity": "1",
+     "entryPrice": "100",
+     "leverage": 3,
+     "margin": "33.33",
+     "liquidationPrice": "130",
+     "status": "OPEN",
+     "realizedPnl": "0",
+     "feesPaid": "0",
+     "fundingPaid": "0",
+     "maxQuantity": "1",
+     "exitPrice": null,
+     "lastFundingTime": 0,
+     "openedAt": 0,
+     "closedAt": null
+    }
+   ],
+   "dailyPnl": "0",
+   "dayStartEquity": "10000",
+   "fees": {
+    "takerFeeRate": "0.0005",
+    "makerFeeRate": "0.0002",
+    "slippageBps": "1",
+    "impactBpsPerMillion": "5"
+   },
+   "allowTrailingStop": true,
+   "protection": {
+    "stopLoss": "110",
+    "takeProfit": "80",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.01",
+     "activationPrice": "95"
+    }
+   }
+  },
+  "output": {
+   "approved": true,
+   "checks": [
+    {
+     "id": "symbol",
+     "label": "Symbol allowed",
+     "passed": true,
+     "detail": "BTCUSDT matches the agent"
+    },
+    {
+     "id": "trailing-allowed",
+     "label": "Trailing stops allowed",
+     "passed": true,
+     "detail": "trailing stops are on for this agent"
+    },
+    {
+     "id": "expiry",
+     "label": "Decision not expired",
+     "passed": true,
+     "detail": "no expiry given"
+    },
+    {
+     "id": "has-position",
+     "label": "Position to protect",
+     "passed": true,
+     "detail": "SHORT 1"
+    },
+    {
+     "id": "freshness",
+     "label": "Market data fresh",
+     "passed": true,
+     "detail": "quote age 0.0s, limit 30s"
+    },
+    {
+     "id": "stop-loss",
+     "label": "Stop loss valid",
+     "passed": true,
+     "detail": "stop 110 vs last 90 for SHORT"
+    },
+    {
+     "id": "take-profit",
+     "label": "Take profit valid",
+     "passed": true,
+     "detail": "target 80 vs last 90 for SHORT"
+    },
+    {
+     "id": "stop-before-liq",
+     "label": "Stop triggers before liquidation",
+     "passed": true,
+     "detail": "stop 110, liquidation 130.00"
+    }
+   ],
+   "rejectionReasons": [],
+   "sized": null
+  }
+ },
+ {
+  "input": {
+   "decision": {
+    "symbol": "BTCUSDT",
+    "action": "PROTECT",
+    "orderType": "MARKET",
+    "entryPrice": null,
+    "stopLoss": 110,
+    "takeProfit": 80,
+    "reason": "test",
+    "confidence": 0.8,
+    "expiresAt": null,
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": 0.02,
+     "activationPrice": 95
+    }
+   },
+   "symbol": "BTCUSDT",
+   "settings": {
+    "maxLeverage": 3,
+    "maxRiskPerTradePct": 0.5,
+    "maxDailyLossPct": 2,
+    "maxOpenPositions": 2,
+    "requireStopLoss": true,
+    "maxQuoteAgeSec": 30,
+    "maxNotional": 100000
+   },
+   "quote": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "bid": "89",
+    "ask": "91",
+    "last": "90",
+    "mark": "90",
+    "markEstimated": false,
+    "fundingRate": "0.001",
+    "nextFundingTime": null,
+    "ts": 1000
+   },
+   "now": 1000,
+   "balance": {
+    "accountId": "a",
+    "initialBalance": "10000",
+    "walletBalance": "10000",
+    "availableBalance": "10000",
+    "usedMargin": "0",
+    "orderMargin": "0",
+    "equity": "10000",
+    "realizedPnl": "0",
+    "unrealizedPnl": "0",
+    "feesPaid": "0",
+    "fundingPaid": "0"
+   },
+   "openPositions": [
+    {
+     "id": "p-BTCUSDT",
+     "accountId": "a",
+     "symbol": "BTCUSDT",
+     "side": "SHORT",
+     "quantity": "1",
+     "entryPrice": "100",
+     "leverage": 3,
+     "margin": "33.33",
+     "liquidationPrice": "130",
+     "status": "OPEN",
+     "realizedPnl": "0",
+     "feesPaid": "0",
+     "fundingPaid": "0",
+     "maxQuantity": "1",
+     "exitPrice": null,
+     "lastFundingTime": 0,
+     "openedAt": 0,
+     "closedAt": null
+    }
+   ],
+   "dailyPnl": "0",
+   "dayStartEquity": "10000",
+   "fees": {
+    "takerFeeRate": "0.0005",
+    "makerFeeRate": "0.0002",
+    "slippageBps": "1",
+    "impactBpsPerMillion": "5"
+   },
+   "allowTrailingStop": true,
+   "protection": {
+    "stopLoss": "110",
+    "takeProfit": "80",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.01",
+     "activationPrice": "95"
+    }
+   }
+  },
+  "output": {
+   "approved": false,
+   "checks": [
+    {
+     "id": "symbol",
+     "label": "Symbol allowed",
+     "passed": true,
+     "detail": "BTCUSDT matches the agent"
+    },
+    {
+     "id": "trailing-allowed",
+     "label": "Trailing stops allowed",
+     "passed": true,
+     "detail": "trailing stops are on for this agent"
+    },
+    {
+     "id": "expiry",
+     "label": "Decision not expired",
+     "passed": true,
+     "detail": "no expiry given"
+    },
+    {
+     "id": "has-position",
+     "label": "Position to protect",
+     "passed": true,
+     "detail": "SHORT 1"
+    },
+    {
+     "id": "freshness",
+     "label": "Market data fresh",
+     "passed": true,
+     "detail": "quote age 0.0s, limit 30s"
+    },
+    {
+     "id": "stop-loss",
+     "label": "Stop loss valid",
+     "passed": true,
+     "detail": "stop 110 vs last 90 for SHORT"
+    },
+    {
+     "id": "take-profit",
+     "label": "Take profit valid",
+     "passed": true,
+     "detail": "target 80 vs last 90 for SHORT"
+    },
+    {
+     "id": "trailing-stop",
+     "label": "Trailing stop valid",
+     "passed": false,
+     "detail": "activation 95 is on the wrong side of 90 for SHORT"
+    },
+    {
+     "id": "stop-before-liq",
+     "label": "Stop triggers before liquidation",
+     "passed": true,
+     "detail": "stop 110, liquidation 130.00"
+    }
+   ],
+   "rejectionReasons": [
+    "Trailing stop valid: activation 95 is on the wrong side of 90 for SHORT"
+   ],
+   "sized": null
+  }
+ },
+ {
+  "input": {
+   "decision": {
+    "symbol": "BTCUSDT",
+    "action": "PROTECT",
+    "orderType": "MARKET",
+    "entryPrice": null,
+    "stopLoss": 95,
+    "takeProfit": 130,
+    "reason": "test",
+    "confidence": 0.8,
+    "expiresAt": null,
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": 0.01,
+     "activationPrice": null
+    }
+   },
+   "symbol": "BTCUSDT",
+   "settings": {
+    "maxLeverage": 3,
+    "maxRiskPerTradePct": 0.5,
+    "maxDailyLossPct": 2,
+    "maxOpenPositions": 2,
+    "requireStopLoss": true,
+    "maxQuoteAgeSec": 30,
+    "maxNotional": 100000
+   },
+   "quote": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "bid": "109",
+    "ask": "111",
+    "last": "110",
+    "mark": "110",
+    "markEstimated": false,
+    "fundingRate": "0.001",
+    "nextFundingTime": null,
+    "ts": 1000
+   },
+   "now": 1000,
+   "balance": {
+    "accountId": "a",
+    "initialBalance": "10000",
+    "walletBalance": "10000",
+    "availableBalance": "10000",
+    "usedMargin": "0",
+    "orderMargin": "0",
+    "equity": "10000",
+    "realizedPnl": "0",
+    "unrealizedPnl": "0",
+    "feesPaid": "0",
+    "fundingPaid": "0"
+   },
+   "openPositions": [
+    {
+     "id": "p-BTCUSDT",
+     "accountId": "a",
+     "symbol": "BTCUSDT",
+     "side": "LONG",
+     "quantity": "1",
+     "entryPrice": "100",
+     "leverage": 3,
+     "margin": "33.33",
+     "liquidationPrice": "70",
+     "status": "OPEN",
+     "realizedPnl": "0",
+     "feesPaid": "0",
+     "fundingPaid": "0",
+     "maxQuantity": "1",
+     "exitPrice": null,
+     "lastFundingTime": 0,
+     "openedAt": 0,
+     "closedAt": null
+    }
+   ],
+   "dailyPnl": "0",
+   "dayStartEquity": "10000",
+   "fees": {
+    "takerFeeRate": "0.0005",
+    "makerFeeRate": "0.0002",
+    "slippageBps": "1",
+    "impactBpsPerMillion": "5"
+   },
+   "allowTrailingStop": true,
+   "protection": {
+    "stopLoss": "95",
+    "takeProfit": "130",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.010",
+     "activationPrice": null
+    }
+   }
+  },
+  "output": {
+   "approved": true,
+   "checks": [
+    {
+     "id": "symbol",
+     "label": "Symbol allowed",
+     "passed": true,
+     "detail": "BTCUSDT matches the agent"
+    },
+    {
+     "id": "trailing-allowed",
+     "label": "Trailing stops allowed",
+     "passed": true,
+     "detail": "trailing stops are on for this agent"
+    },
+    {
+     "id": "expiry",
+     "label": "Decision not expired",
+     "passed": true,
+     "detail": "no expiry given"
+    },
+    {
+     "id": "has-position",
+     "label": "Position to protect",
+     "passed": true,
+     "detail": "LONG 1"
+    },
+    {
+     "id": "freshness",
+     "label": "Market data fresh",
+     "passed": true,
+     "detail": "quote age 0.0s, limit 30s"
+    },
+    {
+     "id": "stop-loss",
+     "label": "Stop loss valid",
+     "passed": true,
+     "detail": "stop 95 vs last 110 for LONG"
+    },
+    {
+     "id": "take-profit",
+     "label": "Take profit valid",
+     "passed": true,
+     "detail": "target 130 vs last 110 for LONG"
+    },
+    {
+     "id": "stop-before-liq",
+     "label": "Stop triggers before liquidation",
+     "passed": true,
+     "detail": "stop 95, liquidation 70.00"
+    }
+   ],
+   "rejectionReasons": [],
+   "sized": null
+  }
+ },
+ {
+  "input": {
+   "decision": {
     "symbol": "ETHUSDT",
     "action": "LONG",
     "orderType": "LIMIT",

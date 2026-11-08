@@ -1422,6 +1422,34 @@ function riskFixture() {
     on({ decision: protectDec({ trailingStop: spread(30.01) }), openPositions: [held] }),
     on({ decision: protectDec({ stopLoss: 110, takeProfit: 80, trailingStop: ratio(0.01, 99.9) }), openPositions: [heldShort] }),
     on({ decision: protectDec({ stopLoss: null, trailingStop: ratio(0.0009) }), openPositions: [held] }),
+    // An activated trail restated unchanged is not validated again (its activation is behind the
+    // last price by now); changing it brings the activation rule back.
+    ...[
+      [ratio(0.01, 105), ratio(0.01, 105)],
+      [ratio(0.01, 105), ratio(0.02, 105)],
+      [ratio(0.01, 105), spread(1.1)],
+    ].map(([kept, restated]) => on({
+      decision: protectDec({ stopLoss: 95, takeProfit: 130, trailingStop: restated }),
+      openPositions: [held],
+      quote: { ...base, bid: '109', ask: '111', last: '110', mark: '110' },
+      protection: { stopLoss: '95', takeProfit: '130', trailingStop: { kind: kept!.kind, callback: String(kept!.callback), activationPrice: String(kept!.activationPrice) } },
+    })),
+    ...[
+      [ratio(0.01, 95), ratio(0.01, 95)],
+      [ratio(0.01, 95), ratio(0.02, 95)],
+    ].map(([kept, restated]) => on({
+      decision: protectDec({ stopLoss: 110, takeProfit: 80, trailingStop: restated }),
+      openPositions: [heldShort],
+      quote: { ...base, bid: '89', ask: '91', last: '90', mark: '90' },
+      protection: { stopLoss: '110', takeProfit: '80', trailingStop: { kind: kept!.kind, callback: String(kept!.callback), activationPrice: String(kept!.activationPrice) } },
+    })),
+    // Equal as decimals, not as text: 0.010 against 0.01, and a null activation against a null.
+    on({
+      decision: protectDec({ stopLoss: 95, takeProfit: 130, trailingStop: ratio(0.01) }),
+      openPositions: [held],
+      quote: { ...base, bid: '109', ask: '111', last: '110', mark: '110' },
+      protection: { stopLoss: '95', takeProfit: '130', trailingStop: { kind: 'RATIO', callback: '0.010', activationPrice: null } },
+    }),
   ];
 
   // Seeded sweep: random sides, prices, balances and settings so the 50-digit sizing is compared too.

@@ -23,7 +23,7 @@
 - Migration `apps/server/src/db/migrations/008_trailing_stop.sql` is the only new migration. Rust embeds it through `MIGRATIONS` in `crates/mochi-store/src/lib.rs`.
 - Trailing limits, shared by risk and engine validation: `TRAILING_LIMITS = { minRatio: '0.001', maxRatio: '0.3', maxSpreadFraction: '0.3' }` in `packages/shared/src/domain.ts`, mirrored as constants in `mochi-domain`.
 - `agents.allow_trailing_stop` defaults to `0`. Existing agents behave exactly as before.
-- Do not claim live trailing stops are verified. `docs/OKX_TRADING.md` lists the six UNCONFIRMED OKX behaviours from the spec.
+- Do not claim live trailing stops are verified. `docs/OKX_TRADING.md` lists the seven UNCONFIRMED OKX behaviours from the spec.
 - Every task runs `pnpm test`, `pnpm typecheck`, `cargo test --workspace`, `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets -- -D warnings` before committing. All must pass.
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - On Windows, a `LNK1104` link error is a transient file lock: retry the cargo command. It is not a failure.
@@ -351,7 +351,7 @@ Rust mirrors these in `crates/mochi-domain/src/accounting.rs` with serde camelCa
 - [ ] **Step 3:** Docs. `docs/OKX_TRADING.md` gets a "Trailing stops and protection changes" section covering:
   - the place-before-cancel order and the armed rule
   - external orders
-  - the six UNCONFIRMED items, each with the observed fallback
+  - the seven UNCONFIRMED items, each with the observed fallback
   - the statement that live trailing stops have not been verified on Demo yet
 
   `ARCHITECTURE.md` gets one paragraph on `Protection` and `PROTECT`.
@@ -364,7 +364,7 @@ Rust mirrors these in `crates/mochi-domain/src/accounting.rs` with serde camelCa
 
 - [ ] **Step 1:** Add rows to the carried-forward table:
   - **Plan 4:** port the runner `PROTECT` path, the SIGNAL snapshot rule and `buildSystemPrompt({ allowTrailingStop })`.
-  - **Plan 5:** port `classifyProtectionChange` (add a golden), the OKX algo client and engine protection (place-before-cancel, `algoClOrdId` matching, external orders, sync cleanup), and the result of the owner's Demo test of the six UNCONFIRMED behaviours.
+  - **Plan 5:** port `classifyProtectionChange` (add a golden), the OKX algo client and engine protection (place-before-cancel, `algoClOrdId` matching, external orders, sync cleanup), and the result of the owner's Demo test of the seven UNCONFIRMED behaviours.
 - [ ] **Step 2:** Run every command in Global Constraints plus `pnpm test:e2e`. Record the counts.
 - [ ] **Step 3:** Run the CodeRabbit CLI locally against `main`. It is installed in WSL. The worktree's `.git` file points at a Windows path, so clone the repository into WSL, check out this branch, run `coderabbit review --agent -t committed --base main`, and delete the clone afterwards. Verify each finding against the code, fix the valid ones, and rerun the checks.
 - [ ] **Step 4:** Commit. Do not push; the owner decides integration.

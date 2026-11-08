@@ -323,6 +323,14 @@ describe('PaperExecutionEngine with SQLite', () => {
     expect(store.getOrder(base.id)).toMatchObject({ trailingKind: null, trailingCallback: null, trailingActivationPrice: null, trailingExtreme: null, attachedTrailingStop: null });
   });
 
+  it('lists open orders oldest first, with equal creation times in insertion order', () => {
+    const base = engine.placeOrderSync(request({ clientOrderId: 'order-base' })).order;
+    const open = (id: string, createdAt: number) => ({ ...base, id, clientOrderId: id, status: 'OPEN' as const, createdAt });
+    // Inserted out of id order and out of time order: id sorting would give a, b, c, d, e.
+    for (const [id, createdAt] of [['c', 5], ['e', 9], ['a', 5], ['d', 5], ['b', 1]] as const) store.insertOrder(open(id, createdAt));
+    expect(store.listOpenOrders(accountId).map((o) => o.id)).toEqual(['b', 'c', 'a', 'd', 'e']);
+  });
+
   it('accepts a protection body without trailingStop and still rejects unknown keys', () => {
     expect(ProtectionSchema.parse({ stopLoss: '90', takeProfit: null })).toEqual({ stopLoss: '90', takeProfit: null });
     expect(ProtectionSchema.parse({ stopLoss: null, takeProfit: null, trailingStop: null }).trailingStop).toBeNull();

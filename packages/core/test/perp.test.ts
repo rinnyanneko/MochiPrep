@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ACCOUNT_CONFIG, DEFAULT_RISK_SETTINGS, type AccountBalance, type AiDecisionData, type Quote } from '@mochiprep/shared';
+import { DEFAULT_ACCOUNT_CONFIG, DEFAULT_RISK_SETTINGS, type AccountBalance, type AiDecisionData, type AiTrailingStop, type Quote } from '@mochiprep/shared';
 import { d, evaluateRisk, isMarketable, linearPerp, marketFillPrice } from '../src/index';
 
 const quote: Quote = {
@@ -167,6 +167,23 @@ describe('risk engine', () => {
     expect(shortAt(102)).toEqual([]);
     expect(shortAt(110)).toEqual([]);
     expect(shortAt(111)).toEqual(['protect-risk']);
+  });
+
+  it('PROTECT does not validate a trailing stop restated unchanged, but validates a changed one', () => {
+    // An activated trail: activation 105 is behind the last price 110, which a new trail would not be allowed.
+    const up = { ...quote, bid: '109', ask: '111', last: '110', mark: '110' };
+    const protection = { stopLoss: '95', takeProfit: '130', trailingStop: { kind: 'RATIO', callback: '0.010', activationPrice: '105' } };
+    const run = (trailingStop: AiTrailingStop) =>
+      evaluateRisk(riskInput({
+        allowTrailingStop: true, openPositions: [held], quote: up, protection,
+        decision: protect({ stopLoss: 95, takeProfit: 130, trailingStop }),
+      }));
+    const same = run({ kind: 'RATIO', callback: 0.01, activationPrice: 105 });
+    expect(same.approved).toBe(true);
+    expect(same.checks.some((c) => c.id === 'trailing-stop')).toBe(false);
+    const changed = run({ kind: 'RATIO', callback: 0.02, activationPrice: 105 });
+    expect(changed.approved).toBe(false);
+    expect(changed.checks.find((c) => c.id === 'trailing-stop')?.passed).toBe(false);
   });
 
   it('PROTECT skips stop-before-liq when the liquidation price is unknown', () => {

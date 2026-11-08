@@ -33,8 +33,9 @@ pub struct RiskInput {
     /// The agent's switch: when off, any `trailingStop` in the decision, null included, is refused.
     pub allow_trailing_stop: bool,
     /// The current protection of this symbol's open position, or None without one. PROTECT states
-    /// the full target, and a kept trailing stop was validated when it was set; only the current
-    /// stop loss is read, to tell a looser stop (budget applies) from a kept or tighter one.
+    /// the full target, and a kept trailing stop was validated when it was set, so restating it
+    /// unchanged skips the trailing rule; the current stop loss is read to tell a looser stop
+    /// (budget applies) from a kept or tighter one.
     pub protection: Option<Protection>,
 }
 
@@ -543,8 +544,21 @@ fn protect(
             ),
         );
     }
+    // Restating the trailing stop already in force is not a new one: its activation price may be
+    // behind the last price by now, which validate_trailing would refuse. Only a changed spec is
+    // checked.
     if let Some(Some(trailing)) = &decision.trailing_stop {
-        check_trailing(checks, side, &last, trailing, &input.symbol, instruments)?;
+        let kept = match input
+            .protection
+            .as_ref()
+            .and_then(|protection| protection.trailing_stop.as_ref())
+        {
+            Some(current) => same_trailing(&trailing_spec(trailing), current)?,
+            None => false,
+        };
+        if !kept {
+            check_trailing(checks, side, &last, trailing, &input.symbol, instruments)?;
+        }
     }
 
     if let Some(stop) = decision.stop_loss {
@@ -616,6 +630,18 @@ fn known_liquidation(price: &str) -> Result<Option<Dec>, Unevaluable> {
         None
     } else {
         Some(liquidation)
+    })
+}
+
+/// Same kind, callback and activation, compared as numbers so `0.01` equals `0.010`.
+fn same_trailing(a: &TrailingStopSpec, b: &TrailingStopSpec) -> Result<bool, DecError> {
+    if a.kind != b.kind || !Dec::parse(&a.callback)?.eq_value(&Dec::parse(&b.callback)?) {
+        return Ok(false);
+    }
+    Ok(match (&a.activation_price, &b.activation_price) {
+        (None, None) => true,
+        (Some(x), Some(y)) => Dec::parse(x)?.eq_value(&Dec::parse(y)?),
+        _ => false,
     })
 }
 

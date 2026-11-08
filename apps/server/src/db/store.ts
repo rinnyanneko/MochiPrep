@@ -265,6 +265,7 @@ export class SqliteStore implements PaperStore, AgentStore {
     const r = this.one('SELECT * FROM orders WHERE account_id=? AND client_order_id=?', accountId, clientOrderId);
     return r && toOrder(r);
   }
+  /** Oldest first: creation time, ties in insertion order (rowid). OkxExecutionEngine's reconciliation depends on it. */
   listOpenOrders(accountId: string) {
     return this.all("SELECT * FROM orders WHERE account_id=? AND status='OPEN' ORDER BY created_at, rowid", accountId).map(toOrder);
   }
