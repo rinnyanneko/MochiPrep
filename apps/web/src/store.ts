@@ -20,6 +20,7 @@ import type {
   VaultStatus,
 } from '@mochiprep/shared';
 import { api, forgetToken, getToken } from './lib/api';
+import { formatDateTime, parseColorFlip, parseTimeZone, type TimeZonePref } from './lib/display';
 
 export type Page = 'dashboard' | 'markets' | 'agents' | 'paper' | 'arena' | 'history' | 'settings';
 export type AccountView = PaperAccount & { balance: AccountBalance };
@@ -52,6 +53,9 @@ interface State {
   source: DataSource;
   accountId: string | null;
   theme: 'dark' | 'light';
+  timeZone: TimeZonePref;
+  /** Red for up and green for down, as many Asian markets show it. */
+  flipColors: boolean;
   toasts: Toast[];
   lastFillAt: number;
   lastAlertAt: number;
@@ -60,6 +64,8 @@ interface State {
   setSource(source: DataSource): void;
   setAccountId(id: string | null): void;
   toggleTheme(): void;
+  setTimeZone(zone: TimeZonePref): void;
+  setFlipColors(flip: boolean): void;
   toast(level: Toast['level'], message: string): void;
   dismissToast(id: number): void;
   refreshState(): Promise<void>;
@@ -67,13 +73,14 @@ interface State {
   connect(): void;
 }
 
-const remembered = (key: string, fallback: string) => {
+const recall = (key: string) => {
   try {
-    return localStorage.getItem(key) ?? fallback;
+    return localStorage.getItem(key);
   } catch {
-    return fallback;
+    return null;
   }
 };
+const remembered = (key: string, fallback: string) => recall(key) ?? fallback;
 const remember = (key: string, value: string) => {
   try {
     localStorage.setItem(key, value);
@@ -81,6 +88,17 @@ const remember = (key: string, value: string) => {
     /* Preferences are a convenience; private windows may refuse them. */
   }
 };
+
+const applyColors = (flip: boolean) => {
+  if (flip) document.documentElement.dataset.colors = 'flip';
+  else delete document.documentElement.dataset.colors;
+};
+
+/** Formats a timestamp in the chosen zone, and re-renders the caller when the choice changes. Every time shown goes through it. */
+export function useDateTime() {
+  const zone = useApp((s) => s.timeZone);
+  return useCallback((ts: number | null | undefined) => formatDateTime(ts, zone), [zone]);
+}
 
 let toastId = 0;
 const ALL_TOPICS: Topic[] = ['accounts', 'orders', 'positions', 'agents', 'decisions', 'providers', 'arena', 'exchange', 'instruments', 'vault'];
@@ -105,6 +123,8 @@ export const useApp = create<State>((set, get) => ({
   source: remembered('mochi.source', 'REPLAY') as DataSource,
   accountId: null,
   theme: remembered('mochi.theme', 'dark') as 'dark' | 'light',
+  timeZone: parseTimeZone(recall('mochi.timeZone')),
+  flipColors: parseColorFlip(recall('mochi.flipColors')),
   toasts: [],
   lastFillAt: 0,
   lastAlertAt: 0,
@@ -128,6 +148,15 @@ export const useApp = create<State>((set, get) => ({
     remember('mochi.theme', theme);
     document.documentElement.dataset.theme = theme;
     set({ theme });
+  },
+  setTimeZone(timeZone) {
+    remember('mochi.timeZone', timeZone);
+    set({ timeZone });
+  },
+  setFlipColors(flipColors) {
+    remember('mochi.flipColors', flipColors ? '1' : '0');
+    applyColors(flipColors);
+    set({ flipColors });
   },
   toast(level, message) {
     const id = ++toastId;
@@ -253,6 +282,7 @@ function reconnectStream() {
 
 async function boot() {
   document.documentElement.dataset.theme = useApp.getState().theme;
+  applyColors(useApp.getState().flipColors);
   useApp.getState().setSource(useApp.getState().source);
   await openStream();
   // A proxy can keep a dead stream looking open, so silence counts as a disconnect.

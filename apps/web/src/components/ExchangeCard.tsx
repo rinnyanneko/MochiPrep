@@ -2,9 +2,9 @@ import { Link2, ShieldAlert, ShieldOff, TriangleAlert, Unplug } from 'lucide-rea
 import { useState } from 'react';
 import { ARM_PHRASE, DEFAULT_LIVE_LIMITS, type ExchangeStatus, type RiskSettings } from '@mochiprep/shared';
 import { api } from '@/lib/api';
-import { dateTime } from '@/lib/format';
+
 import { DYOR_NOTICE } from '@/lib/notices';
-import { attempt, useApp } from '@/store';
+import { attempt, useApp, useDateTime } from '@/store';
 import { VenueBadge } from './trading';
 import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Select } from './ui';
 
@@ -114,6 +114,7 @@ function ArmDialog({ status, onClose }: { status: ExchangeStatus; onClose(): voi
 }
 
 function StatusRow({ status, onReconnect, onArm }: { status: ExchangeStatus; onReconnect(): void; onArm(): void }) {
+  const dateTime = useDateTime();
   const real = status.venue === 'OKX_LIVE';
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 py-3" data-testid="exchange-row">

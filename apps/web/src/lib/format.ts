@@ -36,15 +36,9 @@ export function qty(v: Num): string {
   return n.toLocaleString('en-US', { maximumFractionDigits: 6 });
 }
 
-/** UTC, because replay time and funding boundaries are UTC. */
-export function dateTime(ts: number | null | undefined): string {
-  if (!ts) return '–';
-  return `${new Date(ts).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
-}
-
 export const shortId = (id: string | null | undefined) => (id ? id.replace(/^[a-z]+_/, '').slice(0, 8) : '–');
 
 export const pnlClass = (v: Num) => {
   const n = toNumber(v);
-  return n > 0 ? 'text-up' : n < 0 ? 'text-down' : 'text-ink-2';
+  return n > 0 ? 'text-rise' : n < 0 ? 'text-fall' : 'text-ink-2';
 };

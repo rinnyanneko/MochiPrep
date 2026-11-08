@@ -6,6 +6,7 @@ import {
   CrosshairMode,
   HistogramSeries,
   LineSeries,
+  TickMarkType,
   type AutoscaleInfo,
   type IChartApi,
   type IPriceLine,
@@ -16,6 +17,7 @@ import {
 } from 'lightweight-charts';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ema, macd, rsi, TIMEFRAME_MS, type Candle, type Fill, type Quote, type Series, type SymbolId, type Timeframe } from '@mochiprep/shared';
+import { chartTickLabel, formatDateTime, type TickKind, type TimeZonePref } from '@/lib/display';
 import { money, pnlClass, price as formatPrice, priceDigits, qty, signedMoney } from '@/lib/format';
 import type { ChartTone, PriceLineSpec, TradeMarker, TradeSummary } from '@/lib/trade-overlay';
 import { cn } from '@/lib/utils';
@@ -24,10 +26,19 @@ import { useApp } from '@/store';
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const seconds = (ms: number) => Math.floor(ms / 1000) as UTCTimestamp;
 
-function baseOptions() {
+const TICK_KINDS: Record<TickMarkType, TickKind> = {
+  [TickMarkType.Year]: 'year',
+  [TickMarkType.Month]: 'month',
+  [TickMarkType.DayOfMonth]: 'day',
+  [TickMarkType.Time]: 'time',
+  [TickMarkType.TimeWithSeconds]: 'seconds',
+};
+
+/** Chart data stays in UTC seconds; only the labels follow the chosen zone. */
+function baseOptions(zone: TimeZonePref) {
   return {
     autoSize: true,
-    localization: { locale: 'en-US' },
+    localization: { locale: 'en-US', timeFormatter: (time: Time) => formatDateTime((time as number) * 1000, zone) },
     layout: {
       background: { type: ColorType.Solid, color: 'transparent' },
       textColor: css('--ink-3'),
@@ -39,7 +50,12 @@ function baseOptions() {
     },
     grid: { vertLines: { visible: false }, horzLines: { color: css('--line') } },
     rightPriceScale: { borderVisible: false },
-    timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false },
+    timeScale: {
+      borderVisible: false,
+      timeVisible: true,
+      secondsVisible: false,
+      tickMarkFormatter: (time: Time, type: TickMarkType) => chartTickLabel((time as number) * 1000, TICK_KINDS[type], zone),
+    },
     crosshair: { mode: CrosshairMode.Normal },
   };
 }
@@ -48,8 +64,9 @@ const line = (series: Series, candles: Candle[]) =>
   series.flatMap((value, i) => (value === null ? [] : [{ time: seconds(candles[i]!.time), value }]));
 
 const toneColors = (): Record<ChartTone, string> => ({
-  up: css('--up'),
-  down: css('--down'),
+  rise: css('--rise'),
+  fall: css('--fall'),
+  danger: css('--down'),
   neutral: css('--ink-3'),
   warn: css('--warn'),
   info: css('--info'),
@@ -58,12 +75,24 @@ const toneColors = (): Record<ChartTone, string> => ({
 const LABEL_HEIGHT = 18;
 const LABEL_GAP = 2;
 const LABEL_TONES: Record<ChartTone, string> = {
-  up: 'bg-up-soft text-up',
-  down: 'bg-down-soft text-down',
+  rise: 'bg-rise-soft text-rise',
+  fall: 'bg-fall-soft text-fall',
+  danger: 'bg-down-soft text-down',
   neutral: 'bg-surface-3 text-ink-2',
   warn: 'bg-warn-soft text-warn',
   info: 'bg-info-soft text-info',
 };
+
+/**
+ * Charts read colors once from CSS and labels once at creation, so a change of theme, color flip
+ * or zone rebuilds them. The key names everything that does.
+ */
+function useLook() {
+  const theme = useApp((s) => s.theme);
+  const flip = useApp((s) => s.flipColors);
+  const zone = useApp((s) => s.timeZone);
+  return { zone, key: `${theme}|${flip}|${zone}` };
+}
 
 const NO_MARKERS: TradeMarker[] = [];
 const NO_NOTES = new Map<number, Fill[]>();
@@ -94,15 +123,15 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
   linesRef.current = priceLines;
   const labelNodes = useRef(new Map<string, HTMLSpanElement>());
   const [hovered, setHovered] = useState<Fill[] | null>(null);
-  const theme = useApp((s) => s.theme);
+  const look = useLook();
   const digits = priceDigits(symbol);
 
   useEffect(() => {
-    const options = baseOptions();
+    const options = baseOptions(look.zone);
     const instance = createChart(host.current!, { ...options, timeScale: { ...options.timeScale, barSpacing: 9 } });
     chart.current = instance;
-    const up = css('--up');
-    const down = css('--down');
+    const up = css('--rise');
+    const down = css('--fall');
     const format = { type: 'price', precision: digits, minMove: 10 ** -digits } as const;
     const s: Record<string, ISeriesApi<any>> = {};
     s.candles = instance.addSeries(CandlestickSeries, {
@@ -155,13 +184,13 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
       markerPlugin.current = null;
       drawnLines.current.clear();
     };
-  }, [theme, showIndicators, digits]);
+  }, [look.key, showIndicators, digits]);
 
   useEffect(() => {
     const s = series.current;
     if (!s.candles || candles.length === 0) return;
-    const up = css('--up');
-    const down = css('--down');
+    const up = css('--rise');
+    const down = css('--fall');
     s.candles.setData(candles.map((c) => ({ time: seconds(c.time), open: c.open, high: c.high, low: c.low, close: c.close })));
     s.volume!.setData(
       candles.map((c) => ({ time: seconds(c.time), value: c.volume, color: `${c.close >= c.open ? up : down}55` })),
@@ -181,7 +210,7 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
       );
     }
     lastBar.current = { ...candles[candles.length - 1]! };
-  }, [candles, theme, showIndicators, digits]);
+  }, [candles, look.key, showIndicators, digits]);
 
   useEffect(() => {
     const target = series.current.candles;
@@ -204,7 +233,7 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
     }
     // Lines are not chart data, so the price scale must be told to refit around them.
     chart.current?.priceScale('right').applyOptions({ autoScale: true });
-  }, [priceLines, theme, digits, symbol, showIndicators]);
+  }, [priceLines, look.key, digits, symbol, showIndicators]);
 
   // The price scale refits without any event, so labels follow it frame by frame.
   useEffect(() => {
@@ -250,7 +279,7 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
           text: m.text,
         })),
     );
-  }, [markers, candles, theme, digits, showIndicators]);
+  }, [markers, candles, look.key, digits, showIndicators]);
 
   useEffect(() => {
     const bar = lastBar.current;
@@ -287,7 +316,7 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
         <div className="pointer-events-none absolute top-2 left-2 z-10 rounded-xl border border-line bg-surface-2 px-3 py-2 text-xs" data-testid="chart-trade-tip">
           {hovered.map((fill) => (
             <div key={fill.id} className="num flex gap-3 whitespace-nowrap">
-              <span className={cn('font-semibold', fill.side === 'BUY' ? 'text-up' : 'text-down')}>{fill.liquidity === 'LIQUIDATION' ? 'Liquidated' : fill.side}</span>
+              <span className={cn('font-semibold', fill.side === 'BUY' ? 'text-rise' : 'text-fall')}>{fill.liquidity === 'LIQUIDATION' ? 'Liquidated' : fill.side}</span>
               <span>{qty(fill.quantity)} @ {formatPrice(fill.price, symbol)}</span>
               <span className="text-ink-3">fee {money(fill.fee, 4)}</span>
               {Number(fill.realizedPnl) !== 0 && <span className={pnlClass(fill.realizedPnl)}>{signedMoney(fill.realizedPnl)}</span>}
@@ -323,12 +352,12 @@ export function EquityChart({ series, baseline }: { series: EquitySeries[]; base
   const chart = useRef<IChartApi | null>(null);
   const handles = useRef(new Map<string, ISeriesApi<'Line'>>());
   const fitted = useRef(false);
-  const theme = useApp((s) => s.theme);
+  const look = useLook();
   const [hover, setHover] = useState<{ time: number; values: Record<string, number> } | null>(null);
   const key = series.map((s) => s.id).join('|');
 
   useEffect(() => {
-    const instance = createChart(host.current!, baseOptions());
+    const instance = createChart(host.current!, baseOptions(look.zone));
     chart.current = instance;
     const map = new Map<string, ISeriesApi<'Line'>>();
     series.forEach((s, i) => {
@@ -358,7 +387,7 @@ export function EquityChart({ series, baseline }: { series: EquitySeries[]; base
     });
     return () => instance.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, theme, baseline]);
+  }, [key, look.key, baseline]);
 
   useEffect(() => {
     for (const s of series) {

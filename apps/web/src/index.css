@@ -61,6 +61,24 @@
   --series-6: #d2603f;
 }
 
+/*
+ * Market direction (price, PnL, long/short) has its own tokens, so the Asian convention of red for
+ * up can swap them without turning warnings and errors green. --up and --down stay the status colors.
+ */
+:root {
+  --rise: var(--up);
+  --rise-soft: var(--up-soft);
+  --fall: var(--down);
+  --fall-soft: var(--down-soft);
+}
+
+:root[data-colors='flip'] {
+  --rise: var(--down);
+  --rise-soft: var(--down-soft);
+  --fall: var(--up);
+  --fall-soft: var(--up-soft);
+}
+
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);
@@ -77,6 +95,10 @@
   --color-up-soft: var(--up-soft);
   --color-down: var(--down);
   --color-down-soft: var(--down-soft);
+  --color-rise: var(--rise);
+  --color-rise-soft: var(--rise-soft);
+  --color-fall: var(--fall);
+  --color-fall-soft: var(--fall-soft);
   --color-warn: var(--warn);
   --color-warn-soft: var(--warn-soft);
   --color-info: var(--info);

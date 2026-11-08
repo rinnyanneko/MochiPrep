@@ -29,8 +29,8 @@ describe('barTimeOf', () => {
 describe('buildMarkers', () => {
   it('puts buys under the bar and sells over it, labelled by side', () => {
     const [buy, sell] = buildMarkers([fill({ id: '1' }), fill({ id: '2', side: 'SELL', ts: MIN15 + 120_000 })], 'BTCUSDT', '15m');
-    expect(buy).toMatchObject({ text: 'B', tone: 'up', shape: 'arrowUp', position: 'belowBar', barTime: MIN15 });
-    expect(sell).toMatchObject({ text: 'S', tone: 'down', shape: 'arrowDown', position: 'aboveBar' });
+    expect(buy).toMatchObject({ text: 'B', tone: 'rise', shape: 'arrowUp', position: 'belowBar', barTime: MIN15 });
+    expect(sell).toMatchObject({ text: 'S', tone: 'fall', shape: 'arrowDown', position: 'aboveBar' });
   });
 
   it('shows realized PnL on a closing fill, profit or loss', () => {
@@ -45,7 +45,7 @@ describe('buildMarkers', () => {
 
   it('marks a liquidation distinctly', () => {
     const [marker] = buildMarkers([fill({ side: 'SELL', liquidity: 'LIQUIDATION', realizedPnl: '-50' })], 'BTCUSDT', '15m');
-    expect(marker).toMatchObject({ text: 'Liq −50.00', tone: 'down', shape: 'circle' });
+    expect(marker).toMatchObject({ text: 'Liq −50.00', tone: 'danger', shape: 'circle' });
   });
 
   it('keeps only the pair on screen and sorts by time, as the chart requires', () => {
@@ -84,16 +84,16 @@ describe('openPnl', () => {
 describe('buildPriceLines', () => {
   it('draws entry with live PnL, TP, SL and liquidation', () => {
     expect(buildPriceLines([position()], [], 'BTCUSDT', 110)).toEqual([
-      { id: 'entry', price: 100, label: 'LONG 2  +20.00 (+40.00%)', tone: 'up' },
-      { id: 'tp', price: 120, label: 'TP', tone: 'up' },
-      { id: 'sl', price: 90, label: 'SL', tone: 'down' },
+      { id: 'entry', price: 100, label: 'LONG 2  +20.00 (+40.00%)', tone: 'rise' },
+      { id: 'tp', price: 120, label: 'TP', tone: 'rise' },
+      { id: 'sl', price: 90, label: 'SL', tone: 'fall' },
       { id: 'liq', price: 76, label: 'Liq', tone: 'warn' },
     ]);
   });
 
   it('turns the entry line red on a loss', () => {
     const [entry] = buildPriceLines([position()], [], 'BTCUSDT', 90);
-    expect(entry).toMatchObject({ label: 'LONG 2  −20.00 (−40.00%)', tone: 'down' });
+    expect(entry).toMatchObject({ label: 'LONG 2  −20.00 (−40.00%)', tone: 'fall' });
   });
 
   it('keeps the same line id as PnL moves, so the line updates in place', () => {
@@ -132,8 +132,8 @@ describe('buildSignalLines', () => {
   it('draws the suggested entry, stop and target', () => {
     expect(buildSignalLines([signal()], 'BTCUSDT')).toEqual([
       { id: 'signal:s1:entry', price: 100, label: 'Suggested LONG', tone: 'info' },
-      { id: 'signal:s1:tp', price: 110, label: 'Suggested TP', tone: 'up' },
-      { id: 'signal:s1:sl', price: 95, label: 'Suggested SL', tone: 'down' },
+      { id: 'signal:s1:tp', price: 110, label: 'Suggested TP', tone: 'rise' },
+      { id: 'signal:s1:sl', price: 95, label: 'Suggested SL', tone: 'fall' },
     ]);
   });
 

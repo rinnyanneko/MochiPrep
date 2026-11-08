@@ -2,12 +2,14 @@ import { KeyRound, Pencil, Plug, Plus, RotateCcw, ShieldCheck, Trash2, X } from 
 import { ExchangeCard } from '@/components/ExchangeCard';
 import { NewsSourcesCard } from '@/components/NewsPanel';
 import { PairsCard } from '@/components/PairsCard';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ProviderKind, ProviderView } from '@mochiprep/shared';
 import { PageTitle } from '@/components/Shell';
 import { VaultCard } from '@/components/VaultCard';
 import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Select, Textarea } from '@/components/ui';
 import { api } from '@/lib/api';
+import { formatDateTime, listTimeZones, resolveTimeZone } from '@/lib/display';
+import { pct } from '@/lib/format';
 import { attempt, useApp } from '@/store';
 
 const KINDS: { value: Exclude<ProviderKind, 'MOCK'>; label: string; baseUrl: string; model: string }[] = [
@@ -144,6 +146,43 @@ function ProviderRow({ provider, onEdit }: { provider: ProviderView; onEdit(): v
   );
 }
 
+function DisplayCard() {
+  const timeZone = useApp((s) => s.timeZone);
+  const flipColors = useApp((s) => s.flipColors);
+  const setTimeZone = useApp((s) => s.setTimeZone);
+  const setFlipColors = useApp((s) => s.setFlipColors);
+  const zones = useMemo(() => listTimeZones().filter((zone) => zone !== 'UTC'), []);
+  const now = Date.now();
+
+  return (
+    <Card data-testid="display-card">
+      <CardHeader title="Display" description="Saved in this browser only. Stored data and the API keep UTC timestamps; this changes how they are shown." />
+      <div className="grid gap-4 px-5 pb-4 sm:grid-cols-2">
+        <Field label="Time zone" hint={`Times show as ISO 8601 with the offset, for example ${formatDateTime(now, timeZone)}.`}>
+          <Select value={timeZone} onChange={(e) => setTimeZone(e.target.value)} data-testid="time-zone">
+            <option value="local">Browser local ({resolveTimeZone('local')})</option>
+            <option value="UTC">UTC</option>
+            <optgroup label="All time zones">
+              {zones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
+            </optgroup>
+          </Select>
+        </Field>
+        <div>
+          <span className="mb-1 block text-xs font-semibold text-ink-2">Up and down colors</span>
+          <label className="flex h-9 items-center gap-2 text-[13px]">
+            <input type="checkbox" className="accent-[var(--accent)]" checked={flipColors} onChange={(e) => setFlipColors(e.target.checked)} data-testid="flip-colors" />
+            Red for up, green for down
+          </label>
+          <span className="mt-1 block text-[11px] text-ink-3">
+            Applies to prices, PnL, long and short, and charts:{' '}
+            <span className="num font-semibold text-rise">{pct(1.25)}</span> <span className="num font-semibold text-fall">{pct(-1.25)}</span>. Warnings and errors stay red.
+          </span>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export function SettingsPage() {
   const providers = useApp((s) => s.providers);
   const demoActive = useApp((s) => s.demoActive);
@@ -176,6 +215,8 @@ export function SettingsPage() {
             They are never sent to the browser.
           </p>
         </Card>
+
+        <DisplayCard />
 
         <VaultCard />
 

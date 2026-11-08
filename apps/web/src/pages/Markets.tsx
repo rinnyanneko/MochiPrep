@@ -7,8 +7,8 @@ import { useTradeOverlay } from '@/components/useTradeOverlay';
 import { FeedBadge, PageTitle } from '@/components/Shell';
 import { Badge, Card, Segmented, Select, Stat } from '@/components/ui';
 import { api } from '@/lib/api';
-import { dateTime, pct, pnlClass, price } from '@/lib/format';
-import { useApp, useQuery, useSymbols } from '@/store';
+import { pct, pnlClass, price } from '@/lib/format';
+import { useApp, useDateTime, useQuery, useSymbols } from '@/store';
 import { useEffect } from 'react';
 
 export function useCandles(symbol: SymbolId, timeframe: Timeframe, limit = 400) {
@@ -26,6 +26,7 @@ export function useCandles(symbol: SymbolId, timeframe: Timeframe, limit = 400) 
 }
 
 export function MarketsPage() {
+  const dateTime = useDateTime();
   const source = useApp((s) => s.source);
   const symbols = useSymbols();
   const [picked, setSymbol] = useState<SymbolId>('BTCUSDT');
