@@ -307,6 +307,7 @@ export class AgentRunner {
   private async protect(agent: Agent, decision: AiDecisionData, record: DecisionRecord, engine: ExecutionEngine) {
     const target = targetProtection(decision, record.protectionBefore!);
     let pending: boolean;
+    let unchanged: boolean;
     try {
       const result = await engine.setProtection(agent.accountId, agent.symbol, target, {
         clientOrderId: `protect:${record.id}`,
@@ -316,12 +317,15 @@ export class AgentRunner {
       record.protectionBefore = result.before;
       record.protectionAfter = result.after;
       pending = result.pending;
+      unchanged = sameProtection(result.before, result.after);
     } catch (error) {
       // Refused part-way: legs already placed stay, so History shows what is in force now.
       if (error instanceof ProtectionChangeError) record.protectionAfter = error.after;
       return settle(record, 'ORDER_REJECTED', redactSecrets((error as Error).message, this.deps.secrets()));
     }
     if (pending) return settle(record, 'ORDER_PLACED', 'Protection change sent to OKX, awaiting confirmation');
+    // The engine aligns prices to the tick, so a target that differed only off the tick changes nothing.
+    if (unchanged) return settle(record, 'HOLD', 'Protection already as requested');
     return settle(record, 'EXECUTED', 'Protection updated');
   }
 

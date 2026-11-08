@@ -189,6 +189,21 @@ describe('AgentRunner integration', () => {
       expect(runtime.store.listOrders(accountId(), 50)).toHaveLength(before);
     });
 
+    it('PROTECT that the engine finds already in force is a HOLD, not an update', async () => {
+      // The engine aligned the model's price to the tick and found nothing to change.
+      const stop = String(Math.round(last() * 0.95));
+      open({ stopLoss: stop });
+      reply({ stopLoss: Number(stop) + 0.04 });
+      runtime.engine.setProtection = async () => ({
+        before: { stopLoss: stop, takeProfit: null, trailingStop: null },
+        after: { stopLoss: `${stop}.0`, takeProfit: null, trailingStop: null },
+        pending: false,
+      });
+      const record = (await runtime.runner.runCycle(agentId, 'RUN_ONCE'))!;
+      expect(record).toMatchObject({ outcome: 'HOLD', outcomeDetail: 'Protection already as requested' });
+      expect(record.protectionAfter).toEqual({ stopLoss: `${stop}.0`, takeProfit: null, trailingStop: null });
+    });
+
     it('records a thrown protection change as rejected, with secrets redacted', async () => {
       open({ stopLoss: String(Math.round(last() * 0.95)) });
       reply({ stopLoss: Math.round(last() * 0.98) });
