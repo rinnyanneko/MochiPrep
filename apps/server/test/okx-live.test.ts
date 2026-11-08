@@ -680,6 +680,24 @@ describe('OKX execution', () => {
       expect(await engine().protectionOf(accountId, 'BTCUSDT')).toEqual(stop('74000'));
     });
 
+    it('an accepted change whose confirming sync fails is pending, never "nothing changed"', async () => {
+      const e = engine();
+      vi.spyOn(e, 'sync').mockRejectedValue(new Error('sync down'));
+      const result = await e.setProtection(accountId, 'BTCUSDT', stop('74500'), meta());
+      expect(okx.algoPlaced).toHaveLength(1);
+      expect(result).toMatchObject({ before: stop('74000'), pending: true });
+    });
+
+    it('a part-way refusal whose sync fails says the protection in force is unconfirmed', async () => {
+      const e = engine();
+      vi.spyOn(e, 'sync').mockRejectedValue(new Error('sync down'));
+      okx.rejectNextAlgo = { sCode: '51000', sMsg: 'Parameter slTriggerPx error' };
+      const error = await e.setProtection(accountId, 'BTCUSDT', stop('74500'), meta()).catch((x) => x);
+      expect(error).toBeInstanceOf(ProtectionChangeError);
+      expect(error.message).toMatch(/51000.*current protection not yet confirmed from OKX/);
+      expect(error.after).toEqual(stop('74000'));
+    });
+
     it('an unknown outcome placing a replacement keeps the old stop and is resolved by sync without a second place', async () => {
       const [old] = protectionRows();
       okx.loseNextAlgoResponse = true;

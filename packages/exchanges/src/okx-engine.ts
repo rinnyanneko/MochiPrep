@@ -269,8 +269,10 @@ export class OkxExecutionEngine implements ExecutionEngine {
           row.updatedAt = this.deps.now();
           store.saveOrder(row);
           // Legs placed before this one stay; sync retires the algos they superseded.
-          await this.sync().catch(() => undefined);
-          throw new ProtectionChangeError((error as Error).message, this.effectiveOf(symbol));
+          const confirmed = await this.sync().then(() => true, () => false);
+          // Without the sync, `after` is the last view, which may lack legs OKX already accepted.
+          const note = confirmed ? '' : '; current protection not yet confirmed from OKX';
+          throw new ProtectionChangeError(`${(error as Error).message}${note}`, this.effectiveOf(symbol));
         }
         // Unknown outcome: never placed again. A sync looks it up by algoClOrdId; if OKX shows it
         // live, the placement is known to have succeeded and the change carries on.
@@ -289,8 +291,10 @@ export class OkxExecutionEngine implements ExecutionEngine {
       if (row && row.status === 'OPEN') await this.cancelRows([row], legValue(target, leg) === null ? REMOVED : REPLACED);
     }
 
-    await this.sync().catch(() => undefined);
-    return { before, after: this.effectiveOf(symbol), pending: false };
+    const confirmed = await this.sync().then(() => true, () => false);
+    // Every placement was accepted; if the view could not be refreshed, `after` may still be the old
+    // protection, which must not read as "nothing changed".
+    return { before, after: this.effectiveOf(symbol), pending: !confirmed };
   }
 
   /** The gate for protection changes. A change that only lowers risk needs no arming, like an exit. */
