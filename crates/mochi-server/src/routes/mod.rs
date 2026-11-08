@@ -1,5 +1,7 @@
 //! HTTP routes. Each answers exactly as the same route in `apps/server/src/app.ts` does.
 
+pub mod events;
+
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::routing::get;
@@ -14,6 +16,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/session", get(session))
         .route("/api/health", get(health))
+        .route("/api/events", get(events::events))
 }
 
 /// Hands out the token without asking for one. The guard has already refused a foreign Host or

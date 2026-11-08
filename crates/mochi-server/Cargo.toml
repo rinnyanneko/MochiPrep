@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 axum = { workspace = true }
+# Streams for the SSE body; axum's own Sse is built on the same crate.
+futures-util = "0.3"
 http-body-util = { workspace = true }
 mochi-core = { path = "../mochi-core" }
 mochi-domain = { path = "../mochi-domain" }
@@ -27,8 +29,7 @@ url = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-futures-util = "0.3"
 tempfile = { workspace = true }
-# Paused time for the replay clock tests.
-tokio = { workspace = true, features = ["test-util"] }
+# Paused time for the timing tests; socket reads and writes for the SSE shutdown test.
+tokio = { workspace = true, features = ["test-util", "io-util"] }
 tower = { workspace = true }

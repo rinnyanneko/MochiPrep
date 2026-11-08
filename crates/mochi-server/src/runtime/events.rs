@@ -1,6 +1,7 @@
 //! Fan-out of `ServerEvent`s to every subscriber (the SSE streams), with invalidations
 //! coalesced as Node's `invalidate` does (runtime.ts:210-218).
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use mochi_domain::{Quote, ServerEvent, Topic};
@@ -9,6 +10,9 @@ use tokio::time::Instant;
 
 /// Node's INVALIDATE_MS: topics marked dirty within this window go out as one event.
 pub const INVALIDATE_MS: u64 = 200;
+
+/// Node's QUOTE_BROADCAST_MS: the least time between two live quotes sent for one symbol.
+pub const QUOTE_BROADCAST_MS: u64 = 250;
 
 /// Events buffered per subscriber. A subscriber that falls this far behind loses the oldest
 /// ones (`RecvError::Lagged`) instead of holding up the runtime; the SSE route decides what a
@@ -21,6 +25,8 @@ pub struct EventHub {
     dirty: Vec<Topic>,
     /// When the pending invalidate goes out; `None` when nothing is pending.
     flush_at: Option<Instant>,
+    /// When each symbol's last live quote went out.
+    quote_sent_at: HashMap<String, Instant>,
 }
 
 impl EventHub {
@@ -30,6 +36,7 @@ impl EventHub {
             sender,
             dirty: Vec::new(),
             flush_at: None,
+            quote_sent_at: HashMap::new(),
         }
     }
 
@@ -43,10 +50,19 @@ impl EventHub {
         let _ = self.sender.send(event);
     }
 
-    /// A live quote for subscribers; the engine has already seen it. Not throttled yet: Node
-    /// sends at most one per symbol every 250 ms, and that throttle belongs here, in the one
-    /// place every client's quotes come from.
-    pub fn emit_live_quote(&self, quote: Quote) {
+    /// A live quote for subscribers; the engine has already seen it. At most one per symbol
+    /// every 250 ms goes out, as in Node: OKX sends tickers far faster than a screen needs.
+    /// Throttled here, before the fan-out, so every client sees the same quotes. The first
+    /// quote for a symbol always goes out (Node's `?? 0`).
+    pub fn emit_live_quote(&mut self, quote: Quote) {
+        let now = Instant::now();
+        let throttle = Duration::from_millis(QUOTE_BROADCAST_MS);
+        if let Some(sent_at) = self.quote_sent_at.get(&quote.symbol) {
+            if now - *sent_at < throttle {
+                return;
+            }
+        }
+        self.quote_sent_at.insert(quote.symbol.clone(), now);
         self.emit(ServerEvent::Quote { quote });
     }
 

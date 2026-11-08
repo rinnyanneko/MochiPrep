@@ -219,13 +219,12 @@ async fn token_is_64_hex_chars_and_fresh_per_state() {
 #[tokio::test]
 async fn events_accepts_query_token_but_header_wins() {
     let state = state();
-    // /api/events is not routed until Task 5, so a passed guard shows as the JSON 404.
-    let passed = StatusCode::NOT_FOUND;
-
+    // A passed guard opens the stream. Only the status is read: the body never ends.
     let request = get(&format!("/api/events?token={}", state.token))
         .body(Body::empty())
         .unwrap();
-    assert_eq!(send(app(state.clone()), request).await.0, passed);
+    let response = app(state.clone()).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 
     // A wrong header beats a right query token.
     let request = get(&format!("/api/events?token={}", state.token))

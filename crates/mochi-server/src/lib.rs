@@ -27,6 +27,8 @@ pub struct AppState {
     pub token: String,
     pub config: Arc<Config>,
     pub runtime: RuntimeHandle,
+    /// The open `/api/events` streams, ended together on shutdown.
+    pub streams: routes::events::SseStreams,
 }
 
 impl AppState {
@@ -35,6 +37,7 @@ impl AppState {
             token: new_token(),
             config,
             runtime,
+            streams: routes::events::SseStreams::default(),
         }
     }
 }

@@ -29,6 +29,7 @@ async fn main() -> ExitCode {
         }
     };
     let state = AppState::new(config.clone(), runtime.clone());
+    let streams = state.streams.clone();
 
     // Loopback only, never 0.0.0.0: the token is the only other thing between the network and
     // trading keys.
@@ -46,7 +47,12 @@ async fn main() -> ExitCode {
     );
 
     let served = axum::serve(listener, app(state))
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            // Open event streams never finish on their own, and graceful shutdown waits for
+            // every response to finish.
+            streams.close_all();
+        })
         .await;
     // Pauses the replay and closes the database, as Node's shutdown does.
     runtime.shutdown().await;
