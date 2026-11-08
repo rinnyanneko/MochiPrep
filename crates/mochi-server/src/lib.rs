@@ -1,0 +1,66 @@
+//! The Rust HTTP backend: the same API as `apps/server` (Fastify), so the web app cannot tell
+//! which one it talks to. Node remains the default backend while this port is in progress.
+
+pub mod auth;
+pub mod config;
+pub mod error;
+pub mod routes;
+
+use std::fmt;
+use std::sync::Arc;
+
+use axum::Router;
+use rand::rngs::OsRng;
+use rand::RngCore;
+
+pub use config::{load_config, Config};
+pub use error::ApiError;
+
+/// Stand-in for the runtime handle that Task 4 builds; routes take it from the state already.
+/// Not a unit struct, so callers already write `RuntimeHandle::default()` as they will later.
+#[derive(Clone, Default)]
+pub struct RuntimeHandle {
+    _placeholder: (),
+}
+
+/// Shared by every request.
+#[derive(Clone)]
+pub struct AppState {
+    /// The session token: 32 random bytes as hex, new on every start and never stored, so a
+    /// page can only use it after fetching it from an allowed origin in this process's lifetime.
+    pub token: String,
+    pub config: Arc<Config>,
+    pub runtime: RuntimeHandle,
+}
+
+impl AppState {
+    pub fn new(config: Arc<Config>, runtime: RuntimeHandle) -> Self {
+        Self {
+            token: new_token(),
+            config,
+            runtime,
+        }
+    }
+}
+
+// Hand-written so the token can never reach a log line through `{:?}`.
+impl fmt::Debug for AppState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AppState")
+            .field("token", &"<redacted>")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Node's `randomBytes(32).toString('hex')`.
+fn new_token() -> String {
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// The whole app: every route behind the guard.
+pub fn app(state: AppState) -> Router {
+    auth::protect(routes::router(), state)
+}

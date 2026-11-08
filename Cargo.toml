@@ -18,3 +18,12 @@ sha2 = "0.10"
 tempfile = "3"
 num-bigint = "0.4"
 num-traits = "0.2"
+# HTTP server (crates/mochi-server).
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "net"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+rand = "0.8"
+subtle = "2"
+tracing = "0.1"
+url = "2"
