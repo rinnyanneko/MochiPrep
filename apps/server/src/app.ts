@@ -33,15 +33,22 @@ import { REPO_ROOT, type ServerConfig } from './config';
 import { MOCK_PROVIDER_ID, type Runtime } from './runtime';
 import { WrongPasswordError } from './vault';
 
-const CandleQuery = z.object({
+// Exported for the golden fixtures, which prove the Rust port validates queries the same way.
+export const CandleQuery = z.object({
   source: z.enum(['REPLAY', 'LIVE']),
   symbol: SymbolSchema,
   timeframe: z.enum(TIMEFRAMES),
   limit: z.coerce.number().int().min(1).max(1000).default(300),
 });
-const SourceQuery = z.object({ source: z.enum(['REPLAY', 'LIVE']) });
-const LimitQuery = z.object({ limit: z.coerce.number().int().min(1).max(2000).default(200) });
-const DecisionQuery = LimitQuery.extend({ agentId: z.string().optional() });
+export const SourceQuery = z.object({ source: z.enum(['REPLAY', 'LIVE']) });
+export const LimitQuery = z.object({ limit: z.coerce.number().int().min(1).max(2000).default(200) });
+export const DecisionQuery = LimitQuery.extend({ agentId: z.string().optional() });
+export const NewsQuery = z.object({ symbol: SymbolSchema });
+
+/** The 400 text for a failed parse. The web app shows it verbatim, so its wording is the API. */
+export function formatZodError(error: ZodError): string {
+  return error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; ');
+}
 
 type IdParams = { id: string };
 type PositionParams = { accountId: string; symbol: string };
@@ -81,8 +88,7 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
 
   app.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) => {
     if (error instanceof ZodError) {
-      const message = error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; ');
-      return reply.code(400).send({ error: message });
+      return reply.code(400).send({ error: formatZodError(error) });
     }
     // Not 401: the browser client reads 401 as an expired session token and retries.
     if (error instanceof WrongPasswordError) return reply.code(403).send({ error: error.message });
@@ -140,7 +146,7 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
 
   // ---- news -----------------------------------------------------------------------------
   app.get('/api/news', async (request) => {
-    const { symbol } = z.object({ symbol: SymbolSchema }).parse(request.query);
+    const { symbol } = NewsQuery.parse(request.query);
     return runtime.newsFor(symbol, 12);
   });
   app.get('/api/news/sources', async () => runtime.newsSources());

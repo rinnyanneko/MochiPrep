@@ -12,7 +12,9 @@ license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["float_roundtrip", "raw_value"] }
+# preserve_order: objects keep their key order, as in JS. Request validation names unknown keys in
+# the order the client sent them, and Node writes JSON objects in insertion order.
+serde_json = { version = "1", features = ["float_roundtrip", "raw_value", "preserve_order"] }
 thiserror = "2"
 sha2 = "0.10"
 tempfile = "3"
