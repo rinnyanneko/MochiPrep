@@ -353,6 +353,43 @@ async fn backoff_caps_at_30s() {
     feed.stop();
 }
 
+/// A feed whose every dial is refused, so it sits in backoff and REST polls every 5 s.
+async fn refused_feed_in_backoff(t0: Instant) -> (OkxPublicFeed, Arc<FakeOkx>) {
+    let (fake, _sockets) = FakeOkx::new(okx_rest());
+    fake.refuse.store(true, Ordering::SeqCst);
+    let feed = OkxPublicFeed::with_transport(REST, WS, fake.clone());
+    feed.start();
+    // Dials at 0, 1 and 3 s; at 5.5 s the next one (7 s) is pending and one poll timer tick
+    // (5 s) has fired.
+    sleep_until_secs(t0, 5.5).await;
+    assert_eq!(secs(t0, &fake.dial_times()), [0.0, 1.0, 3.0]);
+    assert_eq!(ticker_gets(&fake, t0), [0.0, 5.0]);
+    (feed, fake)
+}
+
+#[tokio::test(start_paused = true)]
+async fn stop_during_backoff_dials_and_polls_no_more() {
+    let t0 = Instant::now();
+    let (feed, fake) = refused_feed_in_backoff(t0).await;
+    feed.stop();
+    sleep_until_secs(t0, 65.5).await;
+    assert_eq!(fake.dial_times().len(), 3);
+    // Two polls of three requests for each of the three built-in pairs.
+    assert_eq!(fake.gets.lock().unwrap().len(), 18);
+    assert_eq!(feed.status().state, FeedState::Disconnected);
+}
+
+#[tokio::test(start_paused = true)]
+async fn dropping_the_feed_dials_and_polls_no_more() {
+    let t0 = Instant::now();
+    let (feed, fake) = refused_feed_in_backoff(t0).await;
+    drop(feed);
+    sleep_until_secs(t0, 65.5).await;
+    assert_eq!(fake.dial_times().len(), 3);
+    // Two polls of three requests for each of the three built-in pairs.
+    assert_eq!(fake.gets.lock().unwrap().len(), 18);
+}
+
 #[tokio::test(start_paused = true)]
 async fn rest_poll_only_while_not_connected() {
     let t0 = Instant::now();

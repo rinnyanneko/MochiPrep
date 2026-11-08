@@ -556,7 +556,12 @@ impl OkxPublicFeed {
 
 impl Drop for OkxPublicFeed {
     fn drop(&mut self) {
-        for task in lock(&self.shared.state).tasks.drain(..) {
+        let mut state = lock(&self.shared.state);
+        // The tasks hold their own `Arc<Shared>`; clearing `running` stops one that is past
+        // its last await when the abort lands.
+        state.running = false;
+        state.outbox = None;
+        for task in state.tasks.drain(..) {
             task.abort();
         }
     }
@@ -729,7 +734,13 @@ async fn run_poll_timer(shared: Arc<Shared>) {
     timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         timer.tick().await;
-        if lock(&shared.state).connection != FeedState::Connected {
+        let state = lock(&shared.state);
+        // As in `run_connection`: a tick that raced `stop()` must not poll.
+        if !state.running {
+            return;
+        }
+        if state.connection != FeedState::Connected {
+            drop(state);
             tokio::spawn(poll_rest(shared.clone()));
         }
     }
@@ -757,7 +768,13 @@ async fn run_connection(shared: Arc<Shared>) {
             delay
         };
         sleep(delay).await;
-        set_connection(&mut lock(&shared.state), FeedState::Connecting, None);
+        let mut state = lock(&shared.state);
+        // `stop()` aborts this task, but on a multi-thread runtime it can land while the task is
+        // already past the sleep; checking under the lock means a stopped feed never redials.
+        if !state.running {
+            return;
+        }
+        set_connection(&mut state, FeedState::Connecting, None);
     }
 }
 
@@ -782,6 +799,11 @@ async fn serve_socket(shared: &Shared, mut socket: Socket) -> String {
         // Under one lock: a pair tracked from here on is subscribed through the outbox, and
         // every pair tracked before is in this first subscribe.
         let mut state = lock(&shared.state);
+        // A socket that finished opening after `stop()` must not mark the feed CONNECTED or
+        // take the outbox; dropping it here closes it.
+        if !state.running {
+            return "Feed stopped".to_string();
+        }
         state.attempts = 0;
         note_message(&mut state);
         let args: Vec<Value> = state.symbols.iter().flat_map(|s| channels(s)).collect();
