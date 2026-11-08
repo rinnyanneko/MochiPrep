@@ -2,7 +2,6 @@ import { CircleCheck, CircleX, Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import type {
   AccountVenue,
-  AiTrailingStop,
   DecisionOutcome,
   DecisionRecord,
   Fill,
@@ -15,7 +14,7 @@ import type {
 } from '@mochiprep/shared';
 import { api } from '@/lib/api';
 import { money, pct, pnlClass, price, qty, shortId, signedMoney } from '@/lib/format';
-import { externalBadgeLabel } from '@/lib/protection';
+import { externalBadgeLabel, trailingText } from '@/lib/protection';
 import { cn } from '@/lib/utils';
 import { attempt, useApp, useDateTime, useSourceAccounts } from '@/store';
 import { Badge, Button, Dialog, Field, Input, Segmented, Select, Table, type Tone } from './ui';
@@ -352,10 +351,6 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
     <span className="num min-w-0 text-right break-words">{children}</span>
   </div>
 );
-
-// Display only: the ratio is shown as a percent, trimmed so 0.015 reads 1.5% rather than 1.5000000000000002%.
-const trailingText = (t: TrailingStopSpec | AiTrailingStop | null) =>
-  !t ? 'none' : `${t.kind === 'RATIO' ? `${Number((Number(t.callback) * 100).toPrecision(10))}%` : `${t.callback} USDT`} callback${t.activationPrice === null ? '' : `, from ${t.activationPrice}`}`;
 
 const protectionText = (p: Protection) => `SL ${p.stopLoss ?? '–'} · TP ${p.takeProfit ?? '–'} · trailing ${trailingText(p.trailingStop)}`;
 

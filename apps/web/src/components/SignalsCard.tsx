@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { DecisionRecord } from '@mochiprep/shared';
 import { api } from '@/lib/api';
 import { money, price, qty } from '@/lib/format';
+import { trailingText } from '@/lib/protection';
 import { attempt, useApp, useDateTime, useSourceSignals } from '@/store';
 import { actionTone, VenueBadge } from './trading';
 import { Badge, Button, Card, CardHeader, Dialog } from './ui';
@@ -39,7 +40,7 @@ function SignalRow({ signal, onExecute }: { signal: DecisionRecord; onExecute():
         <div className="num mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-ink-2">
           <span>New SL {ai.stopLoss === null ? 'none' : price(ai.stopLoss, signal.symbol)}</span>
           <span>New TP {ai.takeProfit === null ? 'none' : price(ai.takeProfit, signal.symbol)}</span>
-          {ai.trailingStop !== undefined && <span>Trailing {ai.trailingStop === null ? 'removed' : 'changed'}</span>}
+          {ai.trailingStop !== undefined && <span>Trailing {ai.trailingStop === null ? 'removed' : trailingText(ai.trailingStop)}</span>}
         </div>
       )}
       <p className="mt-1 line-clamp-2 text-xs text-ink-3">{ai.reason.replace(/^\[DEMO[^\]]*\]\s*/, '')}</p>
