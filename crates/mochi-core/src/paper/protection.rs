@@ -7,7 +7,9 @@ use mochi_domain::{
 
 use super::engine::PaperExecutionEngine;
 use super::store::PaperStore;
-use super::types::*;
+use super::types::{
+    closing_side, dec, given, same_trailing, trailing_spec_of, EngineError, EngineEvent,
+};
 
 impl<S: PaperStore> PaperExecutionEngine<S> {
     /// Cancels every protection order on the position and creates the requested ones. `last` is

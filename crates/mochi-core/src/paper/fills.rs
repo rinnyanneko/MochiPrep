@@ -9,10 +9,14 @@ use mochi_domain::{
 
 use super::engine::PaperExecutionEngine;
 use super::store::PaperStore;
-use super::types::*;
+use super::types::{
+    attached_protection, dec, given, liquidity_text, math_error, money, reject, side_of, zero,
+    Attempt, EngineError, EngineEvent, Posting,
+};
 use crate::perp;
 
 impl<S: PaperStore> PaperExecutionEngine<S> {
+    /// Applies one fill to the position and ledger. Must run inside a transaction: it can still
     /// reject after writing, and only a rollback undoes those writes. `last` is the last price of
     /// the quote the fill came from; a trailing stop attached on fill starts there.
     // One more argument than clippy likes; each is a distinct input of the TS function.

@@ -1,5 +1,5 @@
-//! The paper execution engine's order path: accounts, placing, cancelling and closing orders,
-//! protection orders, and fills with their ledger postings. A port of
+//! The paper execution engine's order path: accounts, placing, cancelling and closing orders.
+//! Protection orders live in `protection.rs`, fills and their ledger postings in `fills.rs`. A port of
 //! `packages/core/src/paper/engine.ts`; `docs/PAPER_ENGINE.md` has the rules.
 //!
 //! The rows written, the events emitted, the ids drawn and every message must match the Node
