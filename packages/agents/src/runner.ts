@@ -1,4 +1,4 @@
-import { d, evaluateRisk, type ExecutionEngine } from '@mochiprep/core';
+import { d, evaluateRisk, ProtectionChangeError, type ExecutionEngine } from '@mochiprep/core';
 import { ProviderError, redactSecrets, type AiProvider, type MarketContext } from '@mochiprep/ai-providers';
 import type { MarketDataProvider } from '@mochiprep/market-data';
 import {
@@ -306,17 +306,22 @@ export class AgentRunner {
   /** Applies an approved PROTECT, merged onto the snapshot it was judged against. */
   private async protect(agent: Agent, decision: AiDecisionData, record: DecisionRecord, engine: ExecutionEngine) {
     const target = targetProtection(decision, record.protectionBefore!);
+    let pending: boolean;
     try {
-      const { before, after } = await engine.setProtection(agent.accountId, agent.symbol, target, {
+      const result = await engine.setProtection(agent.accountId, agent.symbol, target, {
         clientOrderId: `protect:${record.id}`,
         agentId: agent.id,
         decisionId: record.id,
       });
-      record.protectionBefore = before;
-      record.protectionAfter = after;
+      record.protectionBefore = result.before;
+      record.protectionAfter = result.after;
+      pending = result.pending;
     } catch (error) {
+      // Refused part-way: legs already placed stay, so History shows what is in force now.
+      if (error instanceof ProtectionChangeError) record.protectionAfter = error.after;
       return settle(record, 'ORDER_REJECTED', redactSecrets((error as Error).message, this.deps.secrets()));
     }
+    if (pending) return settle(record, 'ORDER_PLACED', 'Protection change sent to OKX, awaiting confirmation');
     return settle(record, 'EXECUTED', 'Protection updated');
   }
 

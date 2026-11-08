@@ -4,6 +4,7 @@ import {
   floorToStep,
   getInstrument,
   min,
+  ProtectionChangeError,
   roundToStep,
   sameTrailing,
   validateTrailing,
@@ -48,8 +49,6 @@ import {
 const MAX_SNAPSHOT_AGE_MS = 30_000;
 const NEVER_ARRIVED_AFTER_MS = 60_000;
 const EQUITY_EVERY_MS = 60_000;
-/** A fresh protection row is not cancelled for lack of a position: the position list may lag the fill. */
-const POSITION_GRACE_MS = 10_000;
 /** How far back sync looks for our own algo ids. Older ones read as external, which is the safe side. */
 const RECENT_ORDERS = 500;
 const ALGO_TYPES = ['conditional', 'oco', 'move_order_stop'] as const;
@@ -149,6 +148,10 @@ export class OkxExecutionEngine implements ExecutionEngine {
   private lastEquityAt = 0;
   private syncError: string | null = null;
   private protection = new Map<SymbolId, SymbolProtection>();
+  /** The last failed algo cancel, until a sync finishes with every cancel accepted. */
+  private cancelError: string | null = null;
+  /** Consecutive syncs, per instId, that found our protection but no position. */
+  private missingPosition = new Map<string, number>();
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly deps: OkxEngineDeps) {
@@ -159,7 +162,7 @@ export class OkxExecutionEngine implements ExecutionEngine {
     return this.lastSyncAt;
   }
   get error() {
-    return this.syncError;
+    return this.syncError ?? this.cancelError;
   }
   get healthy() {
     return this.syncError === null && this.lastSyncAt !== null && this.deps.now() - this.lastSyncAt <= MAX_SNAPSHOT_AGE_MS;
@@ -222,10 +225,10 @@ export class OkxExecutionEngine implements ExecutionEngine {
   }
 
   /**
-   * Each changed leg is placed as a new algo first, and the old one is cancelled only once OKX has
-   * accepted the new one, so the position is never left without a stop. Two reduce-only algos may
-   * briefly coexist; sync keeps the newest. A refused or unanswered placement stops here and keeps
-   * the old algo.
+   * Every changed leg is placed as a new algo first, and old or removed algos are cancelled only once
+   * OKX has accepted all of them, so the position is never left without a stop. Two reduce-only algos
+   * may briefly coexist; sync keeps the newest. A refused or unanswered placement stops here and
+   * cancels nothing.
    */
   private async applyProtection(
     accountId: string,
@@ -241,37 +244,42 @@ export class OkxExecutionEngine implements ExecutionEngine {
     const refusal = this.protectionRefusal(position, before, target);
     if (refusal) throw new Error(refusal);
 
-    for (const leg of LEGS) {
-      if (sameLeg(leg, before, target)) continue;
-      const old = this.protection.get(symbol)?.rows[leg];
-      if (legValue(target, leg) !== null) {
-        const row = this.protectionRow(this.newId('ord'), { ...position, accountId, ...meta }, leg, target);
-        // Written before anything is sent, so an unanswered request can be looked up by algoClOrdId.
-        store.insertOrder(row);
-        try {
-          row.exchangeOrderId = await client.placeAlgo(this.algoBody(row));
+    const changed = LEGS.filter((leg) => !sameLeg(leg, before, target));
+    const old = this.protection.get(symbol)?.rows ?? {};
+    // Every placement first. Nothing is cancelled unless all of them were accepted, so swapping a
+    // stop for a trailing stop can never leave the position with neither.
+    for (const leg of changed.filter((l) => legValue(target, l) !== null)) {
+      const row = this.protectionRow(this.newId('ord'), { ...position, accountId, ...meta }, leg, target);
+      // Written before anything is sent, so an unanswered request can be looked up by algoClOrdId.
+      store.insertOrder(row);
+      try {
+        row.exchangeOrderId = await client.placeAlgo(this.algoBody(row));
+        row.updatedAt = this.deps.now();
+        store.saveOrder(row);
+      } catch (error) {
+        if (!(error instanceof OkxUnknownOutcome)) {
+          row.status = 'REJECTED';
+          row.rejectReason = (error as Error).message;
           row.updatedAt = this.deps.now();
           store.saveOrder(row);
-        } catch (error) {
-          if (!(error instanceof OkxUnknownOutcome)) {
-            row.status = 'REJECTED';
-            row.rejectReason = (error as Error).message;
-            row.updatedAt = this.deps.now();
-            store.saveOrder(row);
-            await this.sync().catch(() => undefined);
-            throw error;
-          }
-          // Unknown outcome: never placed again. Sync resolves it by algoClOrdId; the old algo stays.
-          row.rejectReason = `Awaiting confirmation: ${error.message}`;
-          store.saveOrder(row);
-          break;
+          // Legs placed before this one stay; sync retires the algos they superseded.
+          await this.sync().catch(() => undefined);
+          throw new ProtectionChangeError((error as Error).message, this.effectiveOf(symbol));
         }
+        // Unknown outcome: never placed again. Sync resolves it by algoClOrdId; the old algos stay.
+        row.rejectReason = `Awaiting confirmation: ${error.message}`;
+        store.saveOrder(row);
+        await this.sync().catch(() => undefined);
+        return { before, after: this.effectiveOf(symbol), pending: true };
       }
-      if (old) await this.cancelRows([old], legValue(target, leg) === null ? REMOVED : REPLACED);
+    }
+    for (const leg of changed) {
+      const row = old[leg];
+      if (row) await this.cancelRows([row], legValue(target, leg) === null ? REMOVED : REPLACED);
     }
 
     await this.sync().catch(() => undefined);
-    return { before, after: this.effectiveOf(symbol) };
+    return { before, after: this.effectiveOf(symbol), pending: false };
   }
 
   /** The gate for protection changes. A change that only lowers risk needs no arming, like an exit. */
@@ -387,12 +395,17 @@ export class OkxExecutionEngine implements ExecutionEngine {
    * either way: the next sync sees whether each algo is still pending and cancels it again if so.
    * `reason` null keeps a row's existing reason.
    */
-  private async cancelRows(rows: Order[], reason: string | null) {
+  private async cancelRows(rows: Order[], reason: string | null): Promise<string | null> {
     const { client, store, now } = this.deps;
     const sent = rows.filter((row) => row.exchangeOrderId);
+    let failure: string | null = null;
     for (let i = 0; i < sent.length; i += 10) {
       const batch = sent.slice(i, i + 10).map((row) => ({ instId: toInstId(row.symbol), algoId: row.exchangeOrderId! }));
-      await client.cancelAlgos(batch).catch(() => undefined);
+      try {
+        await client.cancelAlgos(batch);
+      } catch (error) {
+        failure = `Could not cancel an OKX algo order: ${(error as Error).message}`;
+      }
     }
     for (const row of rows) {
       if (row.status === 'OPEN') row.status = 'CANCELED';
@@ -400,6 +413,10 @@ export class OkxExecutionEngine implements ExecutionEngine {
       row.updatedAt = now();
       store.saveOrder(row);
     }
+    // Shown with the account status (redacted there). It does not make the account unhealthy:
+    // the algo is only an extra reduce-only order, and sync keeps retrying the cancel.
+    if (failure) this.cancelError = failure;
+    return failure;
   }
 
   placeOrder(request: OrderRequest): Promise<OrderResult> {
@@ -659,7 +676,7 @@ export class OkxExecutionEngine implements ExecutionEngine {
         ...ALGO_TYPES.map((type) => client.getPendingAlgos(type)),
       ]);
       const open = remote.filter((p) => Number(p.pos) !== 0);
-      const held = new Set(open.map((p) => fromInstId(p.instId)).filter((s): s is SymbolId => s !== undefined));
+      const held = new Set(open.map((p) => p.instId));
       this.protection = await this.reconcileProtection(pending.flat(), held);
       this.positions = open.flatMap((p) => this.toView(p));
       this.balance = this.toBalance(usdt);
@@ -685,9 +702,10 @@ export class OkxExecutionEngine implements ExecutionEngine {
    * Matches pending algos to our protection rows by algoClOrdId. OKX is the truth: a row counts only
    * once its algo is seen live, and an algo we did not place is reported as external and never touched.
    * Per (symbol, leg) the newest live row is in force and older ones are cancelled; rows on a symbol
-   * with no position are cancelled.
+   * whose position is missing on two syncs in a row are cancelled. An algo still pending after a
+   * cancel attempt stays on the view, marked, and the cancel is retried each sync.
    */
-  private async reconcileProtection(algos: OkxAlgo[], held: Set<SymbolId>): Promise<Map<SymbolId, SymbolProtection>> {
+  private async reconcileProtection(algos: OkxAlgo[], held: Set<string>): Promise<Map<SymbolId, SymbolProtection>> {
     const { store, accountId, now } = this.deps;
     const at = now();
     const open = store.listOpenOrders(accountId).filter((o) => legOf(o));
@@ -739,36 +757,60 @@ export class OkxExecutionEngine implements ExecutionEngine {
       groups.set(key, [...(groups.get(key) ?? []), row]);
     }
 
-    const cancel: { row: Order; reason: string | null }[] = [];
+    // Compared by instId, which every row maps to, so a symbol missing from the registry still
+    // counts as held. A position must be missing on two syncs in a row before its rows are
+    // cancelled, in case the position list lags behind a fill.
+    const isHeld = (row: Order) => held.has(toInstId(row.symbol));
+    const missing = new Map<string, number>();
+    for (const row of [...[...alive.values()].map((a) => a.row), ...strays.map((s) => s.row)]) {
+      const instId = toInstId(row.symbol);
+      if (!held.has(instId)) missing.set(instId, (this.missingPosition.get(instId) ?? 0) + 1);
+    }
+    this.missingPosition = missing;
+    const positionGone = (row: Order) => (missing.get(toInstId(row.symbol)) ?? 0) >= 2;
+
+    const cancel: { row: Order; algo: OkxAlgo; reason: string | null }[] = [];
     // A closed row whose algo is still live: cancel it again, unless it is the only stop for that leg.
     for (const { row, algo } of strays) {
       row.exchangeOrderId = algo.algoId;
       const key = `${row.symbol}:${legOf(row)}`;
-      if (!held.has(row.symbol) || row.rejectReason === REMOVED || groups.has(key)) {
-        cancel.push({ row, reason: null });
+      if (!isHeld(row)) {
+        if (positionGone(row)) cancel.push({ row, algo, reason: null });
+      } else if (row.rejectReason === REMOVED || groups.has(key)) {
+        cancel.push({ row, algo, reason: null });
       } else {
         row.status = 'OPEN';
-        confirm(row, algo);
+        row.rejectReason = null;
+        row.updatedAt = at;
+        store.saveOrder(row);
+        alive.set(row.id, { row, algo });
         groups.set(key, [row]);
       }
     }
 
     for (const rows of groups.values()) {
-      const { symbol } = rows[0]!;
-      if (!held.has(symbol)) {
-        for (const row of rows) if (at - row.createdAt >= POSITION_GRACE_MS) cancel.push({ row, reason: 'Position closed' });
+      const first = rows[0]!;
+      if (!isHeld(first)) {
+        if (positionGone(first)) for (const row of rows) cancel.push({ row, algo: alive.get(row.id)!.algo, reason: 'Position closed' });
         continue;
       }
       const effective = rows.at(-1)!;
-      for (const row of rows.slice(0, -1)) cancel.push({ row, reason: REPLACED });
+      for (const row of rows.slice(0, -1)) cancel.push({ row, algo: alive.get(row.id)!.algo, reason: REPLACED });
       const leg = legOf(effective)!;
-      entry(symbol).rows[leg] = effective;
-      if (leg === 'trail') entry(symbol).trailTrigger = num(alive.get(effective.id)!.algo.moveTriggerPx);
+      entry(effective.symbol).rows[leg] = effective;
+      if (leg === 'trail') entry(effective.symbol).trailTrigger = num(alive.get(effective.id)!.algo.moveTriggerPx);
     }
 
-    for (const reason of new Set(cancel.map((c) => c.reason))) {
-      await this.cancelRows(cancel.filter((c) => c.reason === reason).map((c) => c.row), reason);
+    // Still live on OKX as of this sync, so still shown, marked, until a later sync no longer lists it.
+    for (const { row, algo } of cancel) {
+      if (!isHeld(row)) continue;
+      entry(row.symbol).external.push(...externalOf(algo).map((e) => ({ ...e, detail: `ours, cancel pending: ${e.detail}` })));
     }
+    let failure: string | null = null;
+    for (const reason of new Set(cancel.map((c) => c.reason))) {
+      failure = (await this.cancelRows(cancel.filter((c) => c.reason === reason).map((c) => c.row), reason)) ?? failure;
+    }
+    this.cancelError = failure;
     return result;
   }
 

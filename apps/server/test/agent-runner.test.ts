@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
 import { ProviderError, type AiProvider } from '@mochiprep/ai-providers';
+import { ProtectionChangeError } from '@mochiprep/core';
 import { DEFAULT_RISK_SETTINGS, type ProviderConfig } from '@mochiprep/shared';
 import { openDatabase } from '../src/db/database';
 import { Runtime } from '../src/runtime';
@@ -196,6 +197,28 @@ describe('AgentRunner integration', () => {
       expect(record.outcome).toBe('ORDER_REJECTED');
       expect(record.outcomeDetail).toContain('refused');
       expect(record.outcomeDetail).not.toContain('custom-secret-agent-key');
+    });
+
+    it('records an unanswered protection change as placed and awaiting confirmation', async () => {
+      const loose = String(Math.round(last() * 0.95));
+      open({ stopLoss: loose });
+      reply({ stopLoss: Math.round(last() * 0.98) });
+      const held = { stopLoss: loose, takeProfit: null, trailingStop: null };
+      runtime.engine.setProtection = async () => ({ before: held, after: held, pending: true });
+      const record = (await runtime.runner.runCycle(agentId, 'RUN_ONCE'))!;
+      expect(record).toMatchObject({ outcome: 'ORDER_PLACED', outcomeDetail: 'Protection change sent to OKX, awaiting confirmation' });
+      expect(record.protectionAfter).toEqual(held);
+    });
+
+    it('records a change refused part-way with the protection actually in force', async () => {
+      open({ stopLoss: String(Math.round(last() * 0.95)) });
+      const tight = String(Math.round(last() * 0.98));
+      reply({ stopLoss: Number(tight) });
+      const inForce = { stopLoss: tight, takeProfit: null, trailingStop: null };
+      runtime.engine.setProtection = async () => { throw new ProtectionChangeError('OKX 51000: Parameter error', inForce); };
+      const record = (await runtime.runner.runCycle(agentId, 'RUN_ONCE'))!;
+      expect(record).toMatchObject({ outcome: 'ORDER_REJECTED', outcomeDetail: 'OKX 51000: Parameter error' });
+      expect(record.protectionAfter).toEqual(inForce);
     });
 
     it('LONG with a trailing stop attaches it on fill', async () => {

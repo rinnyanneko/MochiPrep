@@ -3,7 +3,17 @@ import type { AccountBalance, Order, OrderRequest, OrderResult, PositionView, Pr
 /** The protection of a position just before and just after a change. */
 export interface ProtectionResult {
   before: Protection;
+  /** What is actually in force now. While `pending`, the old legs are still in force. */
   after: Protection;
+  /** An exchange did not answer a placement; it is resolved by lookup, never resent. */
+  pending: boolean;
+}
+
+/** A protection change refused part-way. `after` is what is in force, including legs already placed. */
+export class ProtectionChangeError extends Error {
+  constructor(message: string, readonly after: Protection) {
+    super(message);
+  }
 }
 
 /** The seam agents and the UI trade through. Paper and live implement the same contract. */

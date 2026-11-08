@@ -254,7 +254,8 @@ export class PaperExecutionEngine implements ExecutionEngine {
       this.replaceProtection(position, protection, quote.last, now);
     });
     this.flush();
-    return { before, after: this.protectionOfSync(accountId, symbol) };
+    // A simulated change is applied in one transaction, so it is never pending.
+    return { before, after: this.protectionOfSync(accountId, symbol), pending: false };
   }
 
   /** The stop-loss, take-profit and trailing stop resting for a symbol; null legs are not set. */
