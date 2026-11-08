@@ -201,6 +201,10 @@ export class OkxClient {
 
   /** Returns the algoId. A missing row is unknown: never resend, look it up by algoClOrdId. */
   async placeAlgo(body: AlgoOrderBody) {
+    // Caught here rather than by OKX, so an engine mistake never becomes a signed real-money request.
+    if (body.ordType === 'move_order_stop' && (body.callbackRatio === undefined) === (body.callbackSpread === undefined)) {
+      throw new Error('A trailing stop needs exactly one of callbackRatio or callbackSpread');
+    }
     const [row] = await this.request<Row>('POST', '/api/v5/trade/order-algo', body);
     if (!row) throw new OkxUnknownOutcome('OKX acknowledged the algo order without a result row');
     if (row.sCode !== '0') throw new OkxRejection(row.sCode ?? 'algo', row.sMsg ?? 'Algo order refused');
@@ -215,7 +219,8 @@ export class OkxClient {
     if (bad) throw new OkxRejection(bad.sCode ?? 'algo', bad.sMsg ?? 'Algo cancel refused');
   }
 
-  getPendingAlgos(ordType: AlgoOrdType) {
+  /** `oco` is read only: MochiPrep never places one, but the OKX app does for a TP/SL pair. */
+  getPendingAlgos(ordType: AlgoOrdType | 'oco') {
     return this.request<OkxAlgo>('GET', `/api/v5/trade/orders-algo-pending?ordType=${ordType}&instType=SWAP`);
   }
 

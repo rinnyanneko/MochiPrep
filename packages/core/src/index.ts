@@ -3,6 +3,7 @@ export * from './trading/perp';
 export * from './trading/fill-model';
 export * from './trading/trailing';
 export * from './trading/execution';
+export * from './trading/protection';
 export * from './risk/engine';
 export * from './paper/store';
 export * from './paper/engine';

@@ -65,6 +65,15 @@ describe('algo orders', () => {
     expect(headers['OK-ACCESS-SIGN']).toBe(expected);
   });
 
+  it.each([
+    ['neither callback', { callbackRatio: undefined }],
+    ['both callbacks', { callbackSpread: '50' }],
+  ])('placeAlgo refuses a trailing stop with %s before sending anything', async (_label, patch) => {
+    const { calls, client } = fake(ok([{ algoId: 'A1', sCode: '0', sMsg: '' }]));
+    await expect(client.placeAlgo({ ...trailing, ...patch })).rejects.toThrow(/exactly one of callbackRatio or callbackSpread/);
+    expect(calls).toHaveLength(0);
+  });
+
   it('placeAlgo maps an sCode rejection', async () => {
     const { client } = fake(ok([{ algoId: '', sCode: '51000', sMsg: 'Parameter error' }]));
     await expect(client.placeAlgo(trailing)).rejects.toMatchObject({ code: '51000' });
