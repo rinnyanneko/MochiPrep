@@ -18,7 +18,7 @@ import {
   type Topic,
 } from '@mochiprep/shared';
 import { parseDecision } from './parse';
-import { buildUserPrompt, SYSTEM_PROMPT } from './prompt';
+import { buildUserPrompt, buildSystemPrompt } from './prompt';
 
 export const MAX_CONSECUTIVE_ERRORS = 3;
 const MIN_CANDLES = 30;
@@ -408,7 +408,7 @@ export class AgentRunner {
       record.isMock = config.kind === 'MOCK';
       const response = await provider.complete({
         model: agent.model,
-        system: SYSTEM_PROMPT,
+        system: buildSystemPrompt({ allowTrailingStop: agent.allowTrailingStop }),
         user: buildUserPrompt(context),
         context,
       });

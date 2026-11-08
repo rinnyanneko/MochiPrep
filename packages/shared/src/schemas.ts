@@ -10,7 +10,7 @@ const positive = z.number().finite().positive();
 export const AiDecisionSchema = z
   .strictObject({
     symbol: z.string().min(1).max(32),
-    action: z.enum(['LONG', 'SHORT', 'CLOSE', 'HOLD']),
+    action: z.enum(['LONG', 'SHORT', 'CLOSE', 'HOLD', 'PROTECT']),
     orderType: z.enum(['MARKET', 'LIMIT']),
     entryPrice: positive.nullable(),
     stopLoss: positive.nullable(),
@@ -18,6 +18,11 @@ export const AiDecisionSchema = z
     reason: z.string().min(1).max(4000),
     confidence: z.number().min(0).max(1),
     expiresAt: z.iso.datetime({ offset: true }).nullable(),
+    // optional keeps the key absent when the model omits it: absent means unchanged, null means remove.
+    trailingStop: z
+      .strictObject({ kind: z.enum(['RATIO', 'SPREAD']), callback: positive, activationPrice: positive.nullable() })
+      .nullable()
+      .optional(),
   })
   .superRefine((value, ctx) => {
     if (value.orderType === 'LIMIT' && value.entryPrice === null && (value.action === 'LONG' || value.action === 'SHORT')) {

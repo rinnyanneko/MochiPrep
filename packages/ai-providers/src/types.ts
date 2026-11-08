@@ -1,7 +1,7 @@
 import type {
   AccountBalance,
   Candle,
-  Position,
+  PositionView,
   ProviderKind,
   Quote,
   RiskSettings,
@@ -21,7 +21,7 @@ export interface MarketContext {
   candles: Candle[];
   indicators: IndicatorSnapshot;
   quote: Quote;
-  position: Position | null;
+  position: PositionView | null;
   balance: AccountBalance;
   risk: RiskSettings;
   strategy: string;
