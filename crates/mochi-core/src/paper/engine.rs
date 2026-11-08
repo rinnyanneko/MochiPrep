@@ -304,6 +304,21 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             .ok_or_else(|| EngineError::Invalid(format!("Unknown instrument {symbol}")))
     }
 
+    /// The funding interval in ms. A zero interval would never advance the funding clock, so
+    /// `apply_funding` would loop forever holding the write lock. TypeScript only ever sees the
+    /// hardcoded 8 hours, but `instruments_mut` lets any spec in here.
+    pub(super) fn funding_interval_ms(
+        instrument: &InstrumentSpecification,
+    ) -> Result<i64, EngineError> {
+        if instrument.funding_interval_hours == 0 {
+            return Err(EngineError::Invalid(format!(
+                "Instrument {} has no funding interval",
+                instrument.symbol
+            )));
+        }
+        Ok(i64::from(instrument.funding_interval_hours) * 3_600_000)
+    }
+
     pub(super) fn require_account(&self, id: &str) -> Result<PaperAccount, EngineError> {
         self.store
             .get_account(id)?
@@ -900,7 +915,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
                     p
                 }
                 None => {
-                    let interval = i64::from(instrument.funding_interval_hours) * 3_600_000;
+                    let interval = Self::funding_interval_ms(instrument)?;
                     let mut p = Position {
                         id: self.next_id("pos"),
                         account_id: account.id.clone(),

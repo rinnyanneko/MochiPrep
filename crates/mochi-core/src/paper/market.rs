@@ -41,7 +41,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
     /// as they do in TypeScript.
     pub fn on_quote(&mut self, quote: &Quote) -> Result<(), EngineError> {
         let instrument = self.instrument(&quote.symbol)?;
-        let interval = i64::from(instrument.funding_interval_hours) * 3_600_000;
+        let interval = Self::funding_interval_ms(instrument)?;
 
         for position in self
             .store
