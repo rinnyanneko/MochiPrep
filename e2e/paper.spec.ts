@@ -33,10 +33,15 @@ test('a replay paper account trades end to end: order, trailing stop, close, led
 
   const trigger = page.getByTestId('trailing-trigger');
   await expect(trigger).toContainText(/Trail [\d,]+\.\d+/);
-  const mark = usdt(await page.getByTestId('position-row').locator('td').nth(4).textContent());
-  const triggerPrice = usdt(await trigger.textContent());
-  expect(triggerPrice).toBeLessThan(mark);
-  expect(triggerPrice).toBeGreaterThan(mark * 0.97);
+  // A 1% callback trails the long's best mark, so the trigger sits near mark x 0.99. The replay
+  // may move between the two reads (and the peak can sit above the mark), so allow 0.2% of the
+  // mark and re-read both until they agree.
+  await expect(async () => {
+    const mark = usdt(await page.getByTestId('position-row').locator('td').nth(4).textContent());
+    const triggerPrice = usdt(await trigger.textContent());
+    expect(triggerPrice).toBeLessThan(mark);
+    expect(Math.abs(triggerPrice - mark * 0.99)).toBeLessThanOrEqual(mark * 0.002);
+  }).toPass({ timeout: 10_000 });
 
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.getByTestId('position-row')).toHaveCount(0);

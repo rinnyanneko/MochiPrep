@@ -498,6 +498,13 @@ async fn only_files_of_the_build_are_served() {
         "/assets/",
         "/assets/../index.html",
         "/assets/..%2Findex.html",
+        // Paths are looked up in the embedded build undecoded and never joined onto a disk
+        // directory: encoded dots and drive letters name no file, and a backslash is refused.
+        "/%2e%2e/x",
+        "/assets/%2e%2e/index.html",
+        r"/assets\..\index.html",
+        "/assets%5C..%5Cindex.html",
+        "/C:/Windows/win.ini",
         "//index.html",
         "/API/health",
         "//api/health",
