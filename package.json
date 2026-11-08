@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:rust": "cargo build --release -p mochi-server && node e2e/run-rust.mjs",
     "typecheck": "pnpm -r --parallel typecheck",
     "golden": "pnpm --filter @mochiprep/server golden"
   },
