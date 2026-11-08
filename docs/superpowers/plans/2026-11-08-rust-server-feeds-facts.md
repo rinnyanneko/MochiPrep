@@ -1,6 +1,6 @@
 # Plan 3 facts: porting HTTP server / SSE / auth / static / OKX public data / news / instruments / demo / replay to Rust
 
-Worktree root = C:\Users\rinny\Documents\GitHub\MochiPrep\.claude\worktrees\db-password-encryption-d6b0ca (all paths below relative to it). HEAD ed51a60.
+Root = the repository root (all paths below relative to it). HEAD ed51a60.
 No crate in crates/ depends on axum/tokio/reqwest yet (crates/*/Cargo.toml: not found).
 Needs-legend: A = agents (AgentRunner / agents+decisions tables), P = AI provider rows/keys, V = vault runtime state, X = OKX private trading session, S = SQLite tables (settings/instruments) the Rust store does not wrap yet.
 Existing Rust backend design spec: docs/superpowers/specs/2026-11-07-rust-backend-desktop-design.md (28: API/SSE must be fully compatible, no React changes; 111-119 API areas + security; 147-148 axum/tokio, static assets embedded in binary; 158 default fixed port 8787).

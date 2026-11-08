@@ -67,7 +67,7 @@ const BODY_CASES: Record<string, unknown[]> = {
     { name: '', source: 'REPLAY' },
     { name: 'x'.repeat(60), source: 'REPLAY' },
     { name: 'x'.repeat(61), source: 'REPLAY' },
-    // Length counts UTF-16 units: 30 emoji are 60 units, 31 are 62.
+    // Zod v4 counts code points, not UTF-16 units: 31 emoji (62 units) still pass max(60).
     { name: '😀'.repeat(30), source: 'REPLAY' },
     { name: '😀'.repeat(31), source: 'REPLAY' },
     // JS trim also removes no-break and ideographic spaces and the BOM.
