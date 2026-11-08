@@ -3,11 +3,13 @@
 mod engine;
 mod market;
 mod store;
+mod trailing;
 mod views;
 
 pub use engine::{
     AccountConfigOverrides, Clock, CreateAccountArgs, EngineError, EngineEvent, EventSink,
-    IdSource, PaperEngineDeps, PaperExecutionEngine, QuoteLookup,
+    IdSource, PaperEngineDeps, PaperExecutionEngine, ProtectionResult, QuoteLookup,
 };
 pub use store::{PaperStore, StoreFailure};
+pub use trailing::{advance_extreme, trailing_trigger, validate_trailing};
 pub use views::DailyRisk;

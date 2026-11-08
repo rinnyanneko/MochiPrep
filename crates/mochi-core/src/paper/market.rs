@@ -11,10 +11,11 @@ use mochi_domain::{
 };
 
 use super::engine::{
-    closing_side, dec, math_error, money, zero, Attempt, EngineError, EngineEvent,
-    PaperExecutionEngine, Posting,
+    closing_side, dec, math_error, money, trailing_spec_of, zero, Attempt, EngineError,
+    EngineEvent, PaperExecutionEngine, Posting,
 };
 use super::store::PaperStore;
+use super::trailing::{advance_extreme, trailing_trigger};
 use crate::{fill_model, perp};
 
 /// `d(value!)` on an optional string. decimal.js throws exactly this for `null`.
@@ -22,20 +23,22 @@ fn required(value: &Option<String>) -> Result<Dec, EngineError> {
     dec(value.as_deref().unwrap_or("null"))
 }
 
-/// Stops first, then targets, then limits: the pessimistic order `onQuote` evaluates them in.
+/// Stops first, then trailing stops, then targets, then limits: the pessimistic order `onQuote`
+/// evaluates them in.
 fn rank(order_type: OrderType) -> u8 {
     match order_type {
-        OrderType::StopMarket | OrderType::TrailingStopMarket => 0,
-        OrderType::TakeProfitMarket => 1,
-        OrderType::Limit => 2,
-        OrderType::Market => 3,
+        OrderType::StopMarket => 0,
+        OrderType::TrailingStopMarket => 1,
+        OrderType::TakeProfitMarket => 2,
+        OrderType::Limit => 3,
+        OrderType::Market => 4,
     }
 }
 
 impl<S: PaperStore> PaperExecutionEngine<S> {
     /// Advances the simulation by one observed quote. Order of evaluation is fixed and
-    /// pessimistic: funding, liquidation, stop-loss, take-profit, resting limits. Gaps between
-    /// quotes are never interpolated, so a stop fills at the first quote past it.
+    /// pessimistic: funding, liquidation, stop-loss, trailing stop, take-profit, resting limits.
+    /// Gaps between quotes are never interpolated, so a stop fills at the first quote past it.
     ///
     /// On an error, events already queued by committed steps stay queued until the next flush,
     /// as they do in TypeScript.
@@ -260,7 +263,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
                 &quantity,
                 &limit,
                 Liquidity::Maker,
-                quote.ts,
+                quote,
             );
         }
 
@@ -269,13 +272,46 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             return Ok(());
         };
         let is_long = position.side == PositionSide::Long;
-        let trigger = required(&order.trigger_price)?;
         let last = dec(&quote.last)?;
         let triggered = match order.order_type {
-            OrderType::StopMarket => fill_model::is_stop_triggered(is_long, &trigger, &last),
-            // TS's ternary sends everything that is not a stop to the take-profit test; LIMIT
-            // returned above, and a MARKET order never rests.
-            _ => fill_model::is_take_profit_triggered(is_long, &trigger, &last),
+            OrderType::TrailingStopMarket => {
+                // The extreme moves first, with this quote's last, and is saved on its own so
+                // that a restart resumes from it; only then is the trigger it implies compared
+                // with last.
+                let spec = trailing_spec_of(&order)?;
+                let extreme = advance_extreme(
+                    position.side,
+                    &spec,
+                    order.trailing_extreme.as_deref(),
+                    &last,
+                )
+                .map_err(|e| math_error("the trailing extreme", e))?;
+                if extreme != order.trailing_extreme {
+                    order.trailing_extreme = extreme.clone();
+                    // One row and no wallet or margin change, so it needs no store transaction.
+                    self.store.save_order(&order)?;
+                }
+                match extreme {
+                    None => false,
+                    Some(extreme) => {
+                        let tick = dec(&instrument.price_tick)?;
+                        let trigger =
+                            trailing_trigger(position.side, &spec, &dec(&extreme)?, &tick)
+                                .map_err(|e| math_error("the trailing trigger", e))?;
+                        fill_model::is_stop_triggered(is_long, &trigger, &last)
+                    }
+                }
+            }
+            OrderType::StopMarket => {
+                let trigger = required(&order.trigger_price)?;
+                fill_model::is_stop_triggered(is_long, &trigger, &last)
+            }
+            // TS's ternary sends everything else to the take-profit test; LIMIT returned above,
+            // and a MARKET order never rests.
+            _ => {
+                let trigger = required(&order.trigger_price)?;
+                fill_model::is_take_profit_triggered(is_long, &trigger, &last)
+            }
         };
         if !triggered {
             return Ok(());
@@ -295,7 +331,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             &quantity,
             &price,
             Liquidity::Taker,
-            quote.ts,
+            quote,
         )
     }
 
@@ -308,13 +344,22 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
         quantity: &Dec,
         price: &Dec,
         liquidity: Liquidity,
-        ts: i64,
+        quote: &Quote,
     ) -> Result<(), EngineError> {
+        let ts = quote.ts;
         let outcome = self.store.transaction(|| -> Result<(), Attempt> {
             order.reserved_margin = "0".to_string();
             order.quantity = quantity.to_fixed();
             self.store.save_order(&order)?;
-            self.fill_order(account, &mut order, quantity, price, liquidity, ts)?;
+            self.fill_order(
+                account,
+                &mut order,
+                quantity,
+                price,
+                liquidity,
+                &quote.last,
+                ts,
+            )?;
             Ok(())
         });
         let Err(failure) = outcome else {

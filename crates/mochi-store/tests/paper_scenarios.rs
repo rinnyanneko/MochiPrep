@@ -1,6 +1,6 @@
-//! Replays `crates/golden/paper-scenarios.json` (written by `apps/server/golden/paper-scenarios.ts`
-//! against the Node engine) through the Rust paper engine, and compares every op's result, error,
-//! events and raw rows.
+//! Replays `crates/golden/paper-scenarios.json` and `paper-trailing-scenarios.json` (written by
+//! `apps/server/golden/paper-scenarios.ts` against the Node engine) through the Rust paper engine,
+//! and compares every op's result, error, events and raw rows.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,7 +11,7 @@ use mochi_core::paper::{
     CreateAccountArgs, EngineEvent, PaperEngineDeps, PaperExecutionEngine, PaperStore,
 };
 use mochi_domain::registry::Instruments;
-use mochi_domain::{DataSource, OrderRequest, Quote};
+use mochi_domain::{DataSource, OrderRequest, Protection, Quote};
 use mochi_store::{open_in_memory, SqlitePaperStore};
 use rusqlite::types::Value as SqlValue;
 use serde_json::{json, Value};
@@ -25,11 +25,8 @@ const TABLES: [&str; 6] = [
     "equity_history",
 ];
 
-fn golden() -> Vec<Value> {
-    let path = format!(
-        "{}/../golden/paper-scenarios.json",
-        env!("CARGO_MANIFEST_DIR")
-    );
+fn golden(file: &str) -> Vec<Value> {
+    let path = format!("{}/../golden/{file}", env!("CARGO_MANIFEST_DIR"));
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
@@ -214,23 +211,23 @@ impl Harness {
                     &text("clientOrderId"),
                 )
                 .map(|r| to_json(&r)),
+            // TS records no result for this op; later reads and rows show the change.
             "setProtection" => engine
                 .set_protection(
                     &text("accountId"),
                     &text("symbol"),
-                    op["protection"]["stopLoss"].as_str(),
-                    op["protection"]["takeProfit"].as_str(),
+                    &parse::<Protection>(&op["protection"]),
                 )
-                .map(|()| None),
+                .map(|_| None),
             other => panic!("op {other} is not ported yet"),
         };
         outcome.map_err(|e| e.to_string())
     }
 }
 
-#[test]
-fn scenarios_match_typescript() {
-    let scenarios = golden();
+/// Replays every scenario in a fixture file, panicking at the first difference.
+fn replay(file: &str) {
+    let scenarios = golden(file);
     assert!(!scenarios.is_empty());
     for scenario in &scenarios {
         let name = scenario["name"].as_str().unwrap();
@@ -278,4 +275,14 @@ fn scenarios_match_typescript() {
             panic!("{name}: {diff}");
         }
     }
+}
+
+#[test]
+fn scenarios_match_typescript() {
+    replay("paper-scenarios.json");
+}
+
+#[test]
+fn trailing_scenarios_match_typescript() {
+    replay("paper-trailing-scenarios.json");
 }
