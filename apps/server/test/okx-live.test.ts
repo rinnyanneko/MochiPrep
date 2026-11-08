@@ -882,6 +882,65 @@ describe('OKX execution', () => {
       const exit = await engine().closePosition(accountId, 'BTCUSDT', 1, crypto.randomUUID());
       expect(exit.order.status).toBe('FILLED');
     });
+
+    it('refuses to reopen while the previous position\'s protection is being cleaned up', async () => {
+      const [old] = protectionRows();
+      await engine().closePosition(accountId, 'BTCUSDT', 1, crypto.randomUUID());
+      const placed = okx.placed.length;
+      const early = await engine().placeOrder(order(accountId));
+      expect(early.order).toMatchObject({ status: 'REJECTED', rejectReason: 'PROTECTION_PENDING: protection from the previous position is still being cleaned up' });
+      expect(okx.placed).toHaveLength(placed);
+
+      // The cleanup cancel fails: the algo is still live, so reopening is still refused.
+      okx.cancelFails = true;
+      await engine().sync();
+      advance(10_000);
+      await engine().sync();
+      expect(runtime.store.getOrder(old!.id)).toMatchObject({ status: 'CANCELED', rejectReason: 'Position closed' });
+      expect((await engine().placeOrder(order(accountId))).order.rejectReason).toMatch(/^PROTECTION_PENDING/);
+
+      // Reopened in the OKX app, same side: the old algo is never re-adopted, and is cancelled again.
+      okx.position = { instId: 'BTC-USDT-SWAP', pos: '0.1', avgPx: String(PRICE), markPx: String(PRICE), upl: '0', lever: '3', liqPx: '50000', margin: '10', mgnMode: 'isolated' };
+      await engine().sync();
+      expect(await engine().protectionOf(accountId, 'BTCUSDT')).toEqual({ stopLoss: null, takeProfit: null, trailingStop: null });
+      okx.position = null;
+
+      okx.cancelFails = false;
+      await engine().sync();
+      advance(20_000);
+      await engine().sync();
+      expect(okx.algos.get(toAlgoClOrdId(old!.id))!.state).toBe('canceled');
+      await engine().sync();
+      const reopened = await engine().placeOrder(order(accountId, { stopLoss: String(PRICE - 500) }));
+      expect(reopened.order.status).toBe('FILLED');
+      expect(await engine().protectionOf(accountId, 'BTCUSDT')).toEqual(stop('74500'));
+    });
+
+    it('a position on the other side never shows the old algos as in force, and they are cancelled', async () => {
+      const [old] = protectionRows();
+      await engine().closePosition(accountId, 'BTCUSDT', 1, crypto.randomUUID());
+      okx.cancelFails = true;
+      // A short opened in the OKX app within the cleanup window: the old SELL stop does not close it.
+      okx.position = { instId: 'BTC-USDT-SWAP', pos: '-0.1', avgPx: String(PRICE), markPx: String(PRICE), upl: '0', lever: '3', liqPx: '90000', margin: '10', mgnMode: 'isolated' };
+      await engine().sync();
+      expect(await engine().protectionOf(accountId, 'BTCUSDT')).toEqual({ stopLoss: null, takeProfit: null, trailingStop: null });
+      expect(runtime.store.getOrder(old!.id)).toMatchObject({ status: 'CANCELED', rejectReason: 'Position closed' });
+      expect((await view()).stopLoss).toBeNull();
+      expect((await view()).externalProtection).toEqual([
+        { kind: 'STOP_LOSS', triggerPrice: '74000', detail: 'ours, cancel pending: SL trigger 74000' },
+      ]);
+      // Still live after the failed cancel: retried, never re-adopted.
+      const attempts = okx.calls.filter((c) => c === 'POST /api/v5/trade/cancel-algos').length;
+      await engine().sync();
+      expect(okx.calls.filter((c) => c === 'POST /api/v5/trade/cancel-algos').length).toBe(attempts + 1);
+      expect(await engine().protectionOf(accountId, 'BTCUSDT')).toEqual({ stopLoss: null, takeProfit: null, trailingStop: null });
+
+      // Exits are unaffected, even disarmed.
+      runtime.disarm();
+      const exit = await engine().closePosition(accountId, 'BTCUSDT', 1, crypto.randomUUID());
+      expect(exit.order.status).toBe('FILLED');
+      expect(exit.order.side).toBe('BUY');
+    });
   });
 
   it('entry with a trailing stop sends it in attachAlgoOrds with attachAlgoClOrdId', async () => {

@@ -58,6 +58,7 @@ const ALGO_TYPES = ['conditional', 'oco', 'move_order_stop'] as const;
 const ALIVE_STATES = new Set(['live', 'partially_effective']);
 const REPLACED = 'Replaced';
 const REMOVED = 'Removed';
+const POSITION_CLOSED = 'Position closed';
 
 type Leg = 'sl' | 'tp' | 'trail';
 const LEGS: Leg[] = ['sl', 'tp', 'trail'];
@@ -154,6 +155,8 @@ export class OkxExecutionEngine implements ExecutionEngine {
   private cancelError: string | null = null;
   /** Per instId: consecutive syncs that found our protection but no position, and the first such sync. */
   private missingPosition = new Map<string, { count: number; since: number }>();
+  /** instIds where the last sync saw our algos live with no position: leftovers still being cancelled. */
+  private leftovers = new Set<string>();
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly deps: OkxEngineDeps) {
@@ -575,6 +578,11 @@ export class OkxExecutionEngine implements ExecutionEngine {
 
     if (order.leverage > limits.maxLeverage) return `LIMIT_LEVERAGE: ${order.leverage}x exceeds ${limits.maxLeverage}x`;
     if (position) return `LIMIT_EXISTING_POSITION: already ${position.side} ${order.symbol}`;
+    // The previous position's algos would otherwise count as the new one's protection, or close it.
+    const leftover =
+      this.leftovers.has(toInstId(order.symbol)) ||
+      this.deps.store.listOpenOrders(order.accountId).some((o) => o.symbol === order.symbol && legOf(o));
+    if (leftover) return 'PROTECTION_PENDING: protection from the previous position is still being cleaned up';
     if (this.positions.length >= limits.maxOpenPositions) return `LIMIT_POSITIONS: ${this.positions.length} open, limit ${limits.maxOpenPositions}`;
 
     const reference = d(order.type === 'LIMIT' ? order.price! : order.side === 'BUY' ? quote.ask : quote.bid);
@@ -683,7 +691,7 @@ export class OkxExecutionEngine implements ExecutionEngine {
         ...ALGO_TYPES.map((type) => client.getPendingAlgos(type)),
       ]);
       const open = remote.filter((p) => Number(p.pos) !== 0);
-      const held = new Set(open.map((p) => p.instId));
+      const held = new Map<string, PositionSide>(open.map((p) => [p.instId, Number(p.pos) > 0 ? 'LONG' : 'SHORT']));
       this.protection = await this.reconcileProtection(pending.flat(), held);
       this.positions = open.flatMap((p) => this.toView(p));
       this.balance = this.toBalance(usdt);
@@ -711,8 +719,10 @@ export class OkxExecutionEngine implements ExecutionEngine {
    * Per (symbol, leg) the newest live row is in force and older ones are cancelled; rows on a symbol
    * whose position is missing on two syncs in a row, over at least 10s, are cancelled. An algo still pending after a
    * cancel attempt stays on the view, marked, and the cancel is retried each sync.
+   * A row belongs to the held position only if its side closes it (SELL a long, BUY a short): after a
+   * quick re-entry on the other side, the previous position's algos are cancelled, never put in force.
    */
-  private async reconcileProtection(algos: OkxAlgo[], held: Set<string>): Promise<Map<SymbolId, SymbolProtection>> {
+  private async reconcileProtection(algos: OkxAlgo[], held: Map<string, PositionSide>): Promise<Map<SymbolId, SymbolProtection>> {
     const { store, accountId, now } = this.deps;
     const at = now();
     const open = store.listOpenOrders(accountId).filter((o) => legOf(o));
@@ -757,18 +767,30 @@ export class OkxExecutionEngine implements ExecutionEngine {
       else if (at - row.createdAt >= NEVER_ARRIVED_AFTER_MS) this.closeRow(row, 'OKX has no record of this algo');
     }
 
+    // Compared by instId, which every row maps to, so a symbol missing from the registry still
+    // counts as held.
+    const isHeld = (row: Order) => held.has(toInstId(row.symbol));
+    const closesHeld = (row: Order) => {
+      const side = held.get(toInstId(row.symbol));
+      return side !== undefined && (side === 'LONG') === (row.side === 'SELL');
+    };
+    const otherSide = (row: Order) => isHeld(row) && !closesHeld(row);
+
+    const cancel: { row: Order; algo: OkxAlgo; reason: string | null }[] = [];
     const groups = new Map<string, Order[]>();
     const rank = new Map(open.map((row, i) => [row.id, i]));
-    for (const { row } of [...alive.values()].sort((a, b) => rank.get(a.row.id)! - rank.get(b.row.id)!)) {
+    for (const { row, algo } of [...alive.values()].sort((a, b) => rank.get(a.row.id)! - rank.get(b.row.id)!)) {
+      if (otherSide(row)) {
+        cancel.push({ row, algo, reason: POSITION_CLOSED });
+        continue;
+      }
       const key = `${row.symbol}:${legOf(row)}`;
       groups.set(key, [...(groups.get(key) ?? []), row]);
     }
 
-    // Compared by instId, which every row maps to, so a symbol missing from the registry still
-    // counts as held. A position must be missing on two syncs in a row, and for at least
-    // POSITION_MISSING_MS since the first miss, before its rows are cancelled: syncs can be
-    // milliseconds apart, and the position list may lag behind a fill.
-    const isHeld = (row: Order) => held.has(toInstId(row.symbol));
+    // A position must be missing on two syncs in a row, and for at least POSITION_MISSING_MS since
+    // the first miss, before its rows are cancelled: syncs can be milliseconds apart, and the
+    // position list may lag behind a fill.
     const missing = new Map<string, { count: number; since: number }>();
     for (const row of [...[...alive.values()].map((a) => a.row), ...strays.map((s) => s.row)]) {
       const instId = toInstId(row.symbol);
@@ -777,19 +799,20 @@ export class OkxExecutionEngine implements ExecutionEngine {
       missing.set(instId, { count: (prior?.count ?? 0) + 1, since: prior?.since ?? at });
     }
     this.missingPosition = missing;
+    this.leftovers = new Set(missing.keys());
     const positionGone = (row: Order) => {
       const miss = missing.get(toInstId(row.symbol));
       return !!miss && miss.count >= 2 && at - miss.since >= POSITION_MISSING_MS;
     };
 
-    const cancel: { row: Order; algo: OkxAlgo; reason: string | null }[] = [];
     // A closed row whose algo is still live: cancel it again, unless it is the only stop for that leg.
+    // A row closed with its position, or one for the other side, never protects a later position.
     for (const { row, algo } of strays) {
       row.exchangeOrderId = algo.algoId;
       const key = `${row.symbol}:${legOf(row)}`;
       if (!isHeld(row)) {
         if (positionGone(row)) cancel.push({ row, algo, reason: null });
-      } else if (row.rejectReason === REMOVED || groups.has(key)) {
+      } else if (row.rejectReason === REMOVED || row.rejectReason === POSITION_CLOSED || otherSide(row) || groups.has(key)) {
         cancel.push({ row, algo, reason: null });
       } else {
         row.status = 'OPEN';
@@ -804,7 +827,7 @@ export class OkxExecutionEngine implements ExecutionEngine {
     for (const rows of groups.values()) {
       const first = rows[0]!;
       if (!isHeld(first)) {
-        if (positionGone(first)) for (const row of rows) cancel.push({ row, algo: alive.get(row.id)!.algo, reason: 'Position closed' });
+        if (positionGone(first)) for (const row of rows) cancel.push({ row, algo: alive.get(row.id)!.algo, reason: POSITION_CLOSED });
         continue;
       }
       const effective = rows.at(-1)!;
