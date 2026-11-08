@@ -65,6 +65,8 @@ import { newsFixture } from './news.js';
 const ROUND_CASES = [
   0.5, 1.5, 2.5, -0.5, -1.5, -2.5, 2.4999999999999996, 0.49999999999999994, -0.49999999999999994,
   1e15 + 0.5, 0, 7.000000000000001,
+  // Math.round gives -0 for -0.5 <= x < 0; the third fixture column records that, since JSON can't.
+  -0.4, -0.6,
 ];
 const FIXED_CASES: Array<[number, number]> = [
   [0.125, 2], [0.375, 2], [-0.125, 2], [1.005, 2], [2.5, 0], [-2.5, 0], [68000, 1], [1e-7, 6],
@@ -72,6 +74,12 @@ const FIXED_CASES: Array<[number, number]> = [
   [-1e-7, 6], [12345.6789, 0],
   // Carry paths: rounding up must carry through a run of 9s.
   [0.5, 0], [9.5, 0], [99.5, 0], [9.875, 2], [1.5, 20],
+];
+
+// toFixed inputs JSON can't carry as numbers (NaN, ±Infinity) or that toFixed hands to ToString
+// (|x| >= 1e21). The fixture stores the input as String(x).
+const FIXED_SPECIAL_CASES: Array<[number, number]> = [
+  [NaN, 2], [Infinity, 2], [-Infinity, 0], [1e21, 2], [-1.5e21, 2],
 ];
 
 const JS_NUMBER_CASES = [
@@ -1514,8 +1522,9 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     'instruments.json': DEFAULT_SYMBOLS.map((s) => INSTRUMENTS[s]),
     'jsnumber.json': JS_NUMBER_CASES.map((x) => [noNegativeZero(x), JSON.stringify(x)]),
     'jsnum.json': {
-      round: ROUND_CASES.map((x) => [noNegativeZero(x), noNegativeZero(Math.round(x))]),
+      round: ROUND_CASES.map((x) => [noNegativeZero(x), noNegativeZero(Math.round(x)), Object.is(Math.round(x), -0)]),
       toFixed: FIXED_CASES.map(([x, d]) => [noNegativeZero(x), d, x.toFixed(d)]),
+      toFixedSpecial: FIXED_SPECIAL_CASES.map(([x, d]) => [String(x), d, x.toFixed(d)]),
     },
     'accounting-types.json': accountingTypesFixture(),
     'decimal.json': decimalFixture(),
