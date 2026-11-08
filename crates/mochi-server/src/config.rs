@@ -13,9 +13,10 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// Exact `Origin` values a browser may send. Their URL hosts also form the Host allowlist.
     pub allowed_origins: Vec<String>,
-    /// `MOCHIPREP_OFFLINE=1`: no connection to OKX at all, so e2e and local runs can stay off the
-    /// network. Live quotes, live candles and adding pairs are then unavailable. Node has no
-    /// such switch; it always connects.
+    /// `MOCHIPREP_OFFLINE=1`: no connection to OKX and no news feeds, so e2e and local runs can
+    /// stay off the network. Live quotes, live candles, adding pairs and headlines are then
+    /// unavailable (`/api/news` names every enabled feed as unreadable). Node has no such
+    /// switch; it always connects.
     pub offline: bool,
 }
 

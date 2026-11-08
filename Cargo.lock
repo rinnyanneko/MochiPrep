@@ -934,6 +934,7 @@ dependencies = [
  "futures-util",
  "mochi-decimal",
  "mochi-domain",
+ "regex",
  "reqwest",
  "rustls",
  "serde",

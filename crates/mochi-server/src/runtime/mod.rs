@@ -9,6 +9,7 @@
 
 pub mod events;
 pub mod live_feed;
+pub mod news;
 pub mod redact;
 pub mod replay_clock;
 
@@ -41,6 +42,7 @@ use tokio::time::{interval_at, sleep_until, Instant, MissedTickBehavior};
 use crate::error::ApiError;
 use events::EventHub;
 pub use live_feed::{LiveFeed, OfflineFeed};
+pub use news::{NewsService, OfflineNews};
 use redact::redact_secrets;
 pub use replay_clock::ReplayClock;
 use replay_clock::DEFAULT_SPEED;
@@ -72,10 +74,13 @@ pub struct RuntimeOptions {
     pub live_quotes: Option<mpsc::Receiver<Quote>>,
     /// The live feed's connection changes, each sent to the web app as a `feed` event.
     pub live_statuses: Option<mpsc::UnboundedReceiver<FeedStatus>>,
+    /// Headlines for `/api/news`, fetched outside the runtime task.
+    pub news: NewsService,
 }
 
 impl RuntimeOptions {
-    /// The full tape and no live connection.
+    /// The full tape and no network at all: no live connection, and news feeds that never
+    /// connect.
     pub fn new(db: Connection) -> Self {
         RuntimeOptions {
             db,
@@ -83,10 +88,12 @@ impl RuntimeOptions {
             live: Arc::new(OfflineFeed),
             live_quotes: None,
             live_statuses: None,
+            news: NewsService::with_transport(Arc::new(OfflineNews), Arc::new(unix_ms)),
         }
     }
 
-    /// The real OKX public feed, its quotes and status changes wired to the runtime.
+    /// The real OKX public feed, its quotes and status changes wired to the runtime, and the
+    /// real news feeds.
     pub fn with_live_feed(db: Connection, feed: OkxPublicFeed) -> Self {
         let live_quotes = Some(feed.quotes());
         let live_statuses = Some(feed.statuses());
@@ -96,6 +103,7 @@ impl RuntimeOptions {
             live: Arc::new(feed),
             live_quotes,
             live_statuses,
+            news: NewsService::new(),
         }
     }
 }
@@ -142,7 +150,12 @@ impl RuntimeHandle {
             quotes: options.live_quotes,
             statuses: options.live_statuses,
         };
-        let runtime = Runtime::open(options.db, options.replay_minutes, options.live)?;
+        let runtime = Runtime::open(
+            options.db,
+            options.replay_minutes,
+            options.live,
+            options.news,
+        )?;
         let events = runtime.events.sender();
         let (commands, inbox) = mpsc::channel(COMMAND_QUEUE);
         // After the added pairs are tracked, so the first subscribe covers them (Node's
@@ -243,6 +256,7 @@ pub struct Runtime {
     /// Only the runtime task locks it, so it is never contended.
     replay: Arc<Mutex<ReplayMarketData>>,
     live: Arc<dyn LiveFeed>,
+    news: NewsService,
     /// Built-ins first, then added pairs in the order registered: the key order of Node's
     /// global INSTRUMENTS object, which `/api/state` sends. The engine keeps its own copy,
     /// updated alongside this one in `register_instrument` and `unregister_instrument`.
@@ -277,6 +291,7 @@ impl Runtime {
         db: Connection,
         replay_minutes: Option<usize>,
         live: Arc<dyn LiveFeed>,
+        news: NewsService,
     ) -> Result<Self, StartError> {
         let replay = Arc::new(Mutex::new(ReplayMarketData::new(replay_minutes)?));
         let engine_events: Arc<Mutex<Vec<EngineEvent>>> = Arc::default();
@@ -310,6 +325,7 @@ impl Runtime {
             engine,
             replay,
             live,
+            news,
             instruments: default_instruments(),
             clock: ReplayClock::new(DEFAULT_SPEED),
             events: EventHub::new(),

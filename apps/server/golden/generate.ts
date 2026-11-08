@@ -60,6 +60,7 @@ import { paperScenariosFixture, paperTrailingScenariosFixture } from './paper-sc
 import { apiScriptFixture } from './api-script.js';
 import { validationFixture } from './validation.js';
 import { okxPublicFixture } from './okx-public.js';
+import { newsFixture } from './news.js';
 
 const ROUND_CASES = [
   0.5, 1.5, 2.5, -0.5, -1.5, -2.5, 2.4999999999999996, 0.49999999999999994, -0.49999999999999994,
@@ -1530,6 +1531,7 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     'vault.json': await vaultFixture(),
     'validation.json': await validationFixture(),
     'okx-public.json': await okxPublicFixture(),
+    'news.json': newsFixture(),
     // Last: it registers a pair in the module-global INSTRUMENTS while it runs.
     'api-script.json': await apiScriptFixture(),
   };

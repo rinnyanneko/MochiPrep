@@ -60,7 +60,7 @@ async fn main() -> ExitCode {
         config.data_dir.display()
     );
     if config.offline {
-        println!("MOCHIPREP_OFFLINE=1: not connecting to OKX market data");
+        println!("MOCHIPREP_OFFLINE=1: not connecting to OKX market data or news feeds");
     }
 
     let (signalled, on_signal) = oneshot::channel::<()>();

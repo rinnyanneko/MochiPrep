@@ -5,6 +5,7 @@ pub mod events;
 pub mod instruments;
 pub mod later;
 pub mod market;
+pub mod news;
 pub mod orders;
 pub mod replay;
 pub mod state;
@@ -27,6 +28,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/events", get(events::events))
         .merge(state::router())
         .merge(market::router())
+        .merge(news::router())
         .merge(instruments::router())
         .merge(accounts::router())
         .merge(orders::router())
