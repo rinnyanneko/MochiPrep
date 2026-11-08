@@ -30,6 +30,9 @@ export const toInstId = (symbol: SymbolId) => `${symbol.replace(/USDT$/, '')}-US
 /** clOrdId allows only 32 alphanumerics. Hashing keeps it deterministic for any local key. */
 export const toClOrdId = (clientOrderId: string) => createHash('sha256').update(clientOrderId).digest('hex').slice(0, 32);
 
+/** Distinct hash input from toClOrdId so an order and its algo can never share an id. */
+export const toAlgoClOrdId = (localOrderId: string) => createHash('sha256').update(`algo:${localOrderId}`).digest('hex').slice(0, 32);
+
 export function sign(secretKey: string, timestamp: string, method: string, requestPath: string, body: string) {
   return createHmac('sha256', secretKey).update(`${timestamp}${method}${requestPath}${body}`).digest('base64');
 }
@@ -56,6 +59,54 @@ export interface OkxPosition {
   mgnMode: string;
 }
 
+export type AlgoOrdType = 'conditional' | 'move_order_stop';
+
+export interface AlgoOrderBody {
+  instId: string;
+  tdMode: 'isolated';
+  side: 'buy' | 'sell';
+  ordType: AlgoOrdType;
+  algoClOrdId: string;
+  sz: string;
+  reduceOnly: true;
+  posSide?: string;
+  slTriggerPx?: string;
+  slOrdPx?: '-1';
+  tpTriggerPx?: string;
+  tpOrdPx?: '-1';
+  /** Exactly one of callbackRatio / callbackSpread for move_order_stop. */
+  callbackRatio?: string;
+  callbackSpread?: string;
+  activePx?: string;
+}
+
+export interface OkxAlgo {
+  algoId: string;
+  algoClOrdId: string;
+  instId: string;
+  ordType: string;
+  state: string;
+  side: string;
+  sz: string;
+  slTriggerPx?: string;
+  tpTriggerPx?: string;
+  callbackRatio?: string;
+  callbackSpread?: string;
+  activePx?: string;
+  moveTriggerPx?: string;
+}
+
+export interface AttachAlgoOrd {
+  attachAlgoClOrdId?: string;
+  slTriggerPx?: string;
+  slOrdPx?: string;
+  tpTriggerPx?: string;
+  tpOrdPx?: string;
+  callbackRatio?: string;
+  callbackSpread?: string;
+  activePx?: string;
+}
+
 export interface PlaceOrderBody {
   instId: string;
   tdMode: 'isolated';
@@ -65,7 +116,7 @@ export interface PlaceOrderBody {
   clOrdId: string;
   px?: string;
   reduceOnly?: boolean;
-  attachAlgoOrds?: Record<string, string>[];
+  attachAlgoOrds?: AttachAlgoOrd[];
 }
 
 type Row = Record<string, string>;
@@ -146,6 +197,35 @@ export class OkxClient {
     if (!row) throw new OkxUnknownOutcome('OKX acknowledged the order without a result row');
     if (row.sCode !== '0') throw new OkxRejection(row.sCode ?? 'order', row.sMsg ?? 'Order refused');
     return row.ordId ?? '';
+  }
+
+  /** Returns the algoId. A missing row is unknown: never resend, look it up by algoClOrdId. */
+  async placeAlgo(body: AlgoOrderBody) {
+    const [row] = await this.request<Row>('POST', '/api/v5/trade/order-algo', body);
+    if (!row) throw new OkxUnknownOutcome('OKX acknowledged the algo order without a result row');
+    if (row.sCode !== '0') throw new OkxRejection(row.sCode ?? 'algo', row.sMsg ?? 'Algo order refused');
+    return row.algoId ?? '';
+  }
+
+  async cancelAlgos(items: { instId: string; algoId: string }[]) {
+    if (items.length > 10) throw new Error('OKX cancels at most 10 algo orders per call');
+    if (items.length === 0) return;
+    const rows = await this.request<Row>('POST', '/api/v5/trade/cancel-algos', items);
+    const bad = rows.find((row) => row.sCode !== undefined && row.sCode !== '0');
+    if (bad) throw new OkxRejection(bad.sCode ?? 'algo', bad.sMsg ?? 'Algo cancel refused');
+  }
+
+  getPendingAlgos(ordType: AlgoOrdType) {
+    return this.request<OkxAlgo>('GET', `/api/v5/trade/orders-algo-pending?ordType=${ordType}&instType=SWAP`);
+  }
+
+  /**
+   * Null only on an empty answer. The not-found code is unconfirmed, so every rejection is rethrown:
+   * an unknown answer must never be read as "the algo is absent".
+   */
+  async getAlgo(algoClOrdId: string): Promise<OkxAlgo | null> {
+    const [algo] = await this.request<OkxAlgo>('GET', `/api/v5/trade/order-algo?algoClOrdId=${algoClOrdId}`);
+    return algo ?? null;
   }
 
   async cancelOrder(instId: string, clOrdId: string) {
