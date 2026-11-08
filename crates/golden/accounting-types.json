@@ -1410,6 +1410,17 @@
    },
    {
     "symbol": "BTCUSDT",
+    "action": "PROTECT",
+    "orderType": "LIMIT",
+    "entryPrice": 67000.5,
+    "stopLoss": 65000,
+    "takeProfit": 70000,
+    "reason": "Breakout above resistance",
+    "confidence": 0.72,
+    "expiresAt": "2026-01-01T00:00:00.000Z"
+   },
+   {
+    "symbol": "BTCUSDT",
     "action": "LONG",
     "orderType": "MARKET",
     "entryPrice": 67000.5,
@@ -1429,6 +1440,50 @@
     "reason": "Breakout above resistance",
     "confidence": 0.72,
     "expiresAt": "2026-01-01T00:00:00.000Z"
+   },
+   {
+    "symbol": "BTCUSDT",
+    "action": "LONG",
+    "orderType": "LIMIT",
+    "entryPrice": 67000.5,
+    "stopLoss": 65000,
+    "takeProfit": 70000,
+    "reason": "Breakout above resistance",
+    "confidence": 0.72,
+    "expiresAt": "2026-01-01T00:00:00.000Z",
+    "trailingStop": null
+   },
+   {
+    "symbol": "BTCUSDT",
+    "action": "LONG",
+    "orderType": "LIMIT",
+    "entryPrice": 67000.5,
+    "stopLoss": 65000,
+    "takeProfit": 70000,
+    "reason": "Breakout above resistance",
+    "confidence": 0.72,
+    "expiresAt": "2026-01-01T00:00:00.000Z",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": 0.015,
+     "activationPrice": null
+    }
+   },
+   {
+    "symbol": "ETHUSDT",
+    "action": "PROTECT",
+    "orderType": "MARKET",
+    "entryPrice": null,
+    "stopLoss": null,
+    "takeProfit": null,
+    "reason": "",
+    "confidence": 1,
+    "expiresAt": null,
+    "trailingStop": {
+     "kind": "SPREAD",
+     "callback": 150.5,
+     "activationPrice": 68000
+    }
    }
   ],
   "riskCheck": [

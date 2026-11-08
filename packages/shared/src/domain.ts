@@ -494,9 +494,17 @@ export type DecisionOutcome =
   | 'AI_ERROR'
   | 'DATA_ERROR';
 
+/** A trailing stop as the model writes it: numbers, converted to decimal strings before use. */
+export interface AiTrailingStop {
+  kind: TrailingKind;
+  callback: number;
+  activationPrice: number | null;
+}
+
 export interface AiDecisionData {
   symbol: string;
-  action: 'LONG' | 'SHORT' | 'CLOSE' | 'HOLD';
+  /** PROTECT sets the full protection of the open position: a value sets a leg, null removes it. */
+  action: 'LONG' | 'SHORT' | 'CLOSE' | 'HOLD' | 'PROTECT';
   orderType: 'MARKET' | 'LIMIT';
   entryPrice: number | null;
   stopLoss: number | null;
@@ -504,6 +512,8 @@ export interface AiDecisionData {
   reason: string;
   confidence: number;
   expiresAt: string | null;
+  /** Absent keeps the current trailing stop (or none); null removes it. */
+  trailingStop?: AiTrailingStop | null;
 }
 
 export interface DecisionRecord {

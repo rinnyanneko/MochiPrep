@@ -6,11 +6,13 @@ use mochi_decimal::{Dec, DecError};
 use mochi_domain::jsnum::{js_number_string, js_to_fixed};
 use mochi_domain::registry::Instruments;
 use mochi_domain::{
-    AccountBalance, AiAction, AiDecisionData, EntryOrderType, PaperAccountConfig, Position,
-    PositionSide, Quote, RiskCheck, RiskResult, RiskSettings, SizedTrade,
+    AccountBalance, AiAction, AiDecisionData, AiTrailingStop, EntryOrderType, PaperAccountConfig,
+    Position, PositionSide, Protection, Quote, RiskCheck, RiskResult, RiskSettings, SizedTrade,
+    TrailingKind, TrailingStopSpec,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::paper::validate_trailing;
 use crate::{perp, CoreError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +30,11 @@ pub struct RiskInput {
     pub daily_pnl: String,
     pub day_start_equity: String,
     pub fees: PaperAccountConfig,
+    /// The agent's switch: when off, any `trailingStop` in the decision, null included, is refused.
+    pub allow_trailing_stop: bool,
+    /// The current protection of this symbol's open position, or None without one. No check reads
+    /// it: PROTECT states the full target, and a kept trailing stop was validated when it was set.
+    pub protection: Option<Protection>,
 }
 
 /// Keeps a little available balance free for the entry fee and adverse slippage.
@@ -124,6 +131,30 @@ fn run_checks(
         },
     );
 
+    // Before HOLD returns, so a HOLD that carries a trailing stop is still checked.
+    if decision.trailing_stop.is_some() {
+        checks.check(
+            "trailing-allowed",
+            "Trailing stops allowed",
+            input.allow_trailing_stop,
+            if input.allow_trailing_stop {
+                "trailing stops are on for this agent".to_string()
+            } else {
+                "trailing stops are off for this agent".to_string()
+            },
+        );
+    }
+    if matches!(decision.action, AiAction::Hold | AiAction::Close)
+        && matches!(decision.trailing_stop, Some(Some(_)))
+    {
+        checks.check(
+            "trailing-stop",
+            "Trailing stop valid",
+            false,
+            "only LONG, SHORT and PROTECT take a trailing stop".to_string(),
+        );
+    }
+
     if decision.action == AiAction::Hold {
         return Ok(None);
     }
@@ -157,23 +188,13 @@ fn run_checks(
         );
         return Ok(None);
     }
+    if decision.action == AiAction::Protect {
+        protect(input, existing, instruments, checks)?;
+        return Ok(None);
+    }
 
     let quote = input.quote.as_ref();
-    // No quote is an infinite age, which never satisfies the limit.
-    let quote_age_sec = quote.map_or(f64::INFINITY, |q| (input.now - q.ts) as f64 / 1000.0);
-    let fresh = checks.check(
-        "freshness",
-        "Market data fresh",
-        quote_age_sec <= settings.max_quote_age_sec,
-        match quote {
-            Some(_) => format!(
-                "quote age {}s, limit {}s",
-                js_to_fixed(quote_age_sec, 1),
-                js_number_string(settings.max_quote_age_sec)
-            ),
-            None => "no quote available".to_string(),
-        },
-    );
+    let fresh = check_freshness(input, checks);
 
     let day_base = Dec::parse(&input.day_start_equity)?;
     let loss_limit = day_base
@@ -279,6 +300,17 @@ fn run_checks(
                 side_text(side)
             ),
         );
+    }
+
+    if let Some(Some(trailing)) = &decision.trailing_stop {
+        check_trailing(
+            checks,
+            side,
+            &reference,
+            trailing,
+            &input.symbol,
+            instruments,
+        )?;
     }
 
     if checks.any_failed() {
@@ -411,6 +443,191 @@ fn run_checks(
         reference_price: reference.to_fixed(),
         estimated_liquidation_price: liquidation.to_fixed(),
     }))
+}
+
+fn check_freshness(input: &RiskInput, checks: &mut Checks) -> bool {
+    let quote = input.quote.as_ref();
+    // No quote is an infinite age, which never satisfies the limit.
+    let quote_age_sec = quote.map_or(f64::INFINITY, |q| (input.now - q.ts) as f64 / 1000.0);
+    checks.check(
+        "freshness",
+        "Market data fresh",
+        quote_age_sec <= input.settings.max_quote_age_sec,
+        match quote {
+            Some(_) => format!(
+                "quote age {}s, limit {}s",
+                js_to_fixed(quote_age_sec, 1),
+                js_number_string(input.settings.max_quote_age_sec)
+            ),
+            None => "no quote available".to_string(),
+        },
+    )
+}
+
+/// PROTECT changes the stops of an open position and nothing else: no sizing, no leverage. The
+/// decision is the full target, so a null stop loss means removing it. Checks are measured from
+/// the last price, the price the position would be closed at if a stop fired now.
+fn protect(
+    input: &RiskInput,
+    existing: Option<&Position>,
+    instruments: &Instruments,
+    checks: &mut Checks,
+) -> Result<(), Unevaluable> {
+    let decision = &input.decision;
+    let settings = &input.settings;
+    checks.check(
+        "has-position",
+        "Position to protect",
+        existing.is_some(),
+        match existing {
+            Some(p) => format!("{} {}", side_text(p.side), p.quantity),
+            None => format!("no open {} position", input.symbol),
+        },
+    );
+    let Some(existing) = existing else {
+        return Ok(());
+    };
+
+    let fresh = check_freshness(input, checks);
+    let quote = match &input.quote {
+        Some(q) if fresh => q,
+        _ => return Ok(()),
+    };
+
+    let side = existing.side;
+    let last = Dec::parse(&quote.last)?;
+    match decision.stop_loss {
+        None => {
+            checks.check(
+                "stop-loss",
+                "Stop loss present",
+                !settings.require_stop_loss,
+                if settings.require_stop_loss {
+                    "open positions must keep a stop loss".to_string()
+                } else {
+                    "not required by settings".to_string()
+                },
+            );
+        }
+        Some(stop) => {
+            checks.check(
+                "stop-loss",
+                "Stop loss valid",
+                stop_on_correct_side(side, &last, stop),
+                format!(
+                    "stop {} vs last {} for {}",
+                    js_number_string(stop),
+                    last.to_fixed(),
+                    side_text(side)
+                ),
+            );
+        }
+    }
+    if let Some(target) = decision.take_profit {
+        let tp = number(target);
+        let valid = if side == PositionSide::Long {
+            tp.gt(&last)
+        } else {
+            tp.lt(&last)
+        };
+        checks.check(
+            "take-profit",
+            "Take profit valid",
+            valid,
+            format!(
+                "target {} vs last {} for {}",
+                js_number_string(target),
+                last.to_fixed(),
+                side_text(side)
+            ),
+        );
+    }
+    if let Some(Some(trailing)) = &decision.trailing_stop {
+        check_trailing(checks, side, &last, trailing, &input.symbol, instruments)?;
+    }
+
+    if let Some(stop) = decision.stop_loss {
+        let stop_dec = number(stop);
+        let liquidation = Dec::parse(&existing.liquidation_price)?;
+        let before_liq = if side == PositionSide::Long {
+            stop_dec.gt(&liquidation)
+        } else {
+            stop_dec.lt(&liquidation)
+        };
+        checks.check(
+            "stop-before-liq",
+            "Stop triggers before liquidation",
+            before_liq,
+            format!(
+                "stop {}, liquidation {}",
+                js_number_string(stop),
+                liquidation.to_fixed_dp(2)
+            ),
+        );
+        // The loss if the new stop fired from here, on the size already held.
+        let risk = Dec::parse(&existing.quantity)?.mul(&abs(last.sub(&stop_dec)));
+        let budget = Dec::parse(&input.balance.equity)?
+            .mul(&number(settings.max_risk_per_trade_pct))
+            .div(&number(100.0))?;
+        checks.check(
+            "protect-risk",
+            "Risk per trade",
+            risk.lte(&budget),
+            format!(
+                "risk {} USDT, limit {} USDT",
+                risk.to_fixed_dp(2),
+                budget.to_fixed_dp(2)
+            ),
+        );
+    }
+    Ok(())
+}
+
+/// The model writes numbers; the trailing rule reads decimal strings, as the engine stores them.
+fn trailing_spec(ai: &AiTrailingStop) -> TrailingStopSpec {
+    TrailingStopSpec {
+        kind: ai.kind,
+        callback: number(ai.callback).to_fixed(),
+        activation_price: ai.activation_price.map(|price| number(price).to_fixed()),
+    }
+}
+
+fn check_trailing(
+    checks: &mut Checks,
+    side: PositionSide,
+    reference: &Dec,
+    ai: &AiTrailingStop,
+    symbol: &str,
+    instruments: &Instruments,
+) -> Result<(), Unevaluable> {
+    let spec = trailing_spec(ai);
+    let instrument = instruments
+        .get(symbol)
+        .ok_or_else(|| Unevaluable::Invalid(format!("Unknown instrument {symbol}")))?;
+    let tick = Dec::parse(&instrument.price_tick)?;
+    let refusal = validate_trailing(side, reference, &spec, &tick)?;
+    let passed = refusal.is_none();
+    let detail = refusal.unwrap_or_else(|| {
+        let activation = match &spec.activation_price {
+            Some(price) => format!("activation {price}"),
+            None => "no activation price".to_string(),
+        };
+        format!(
+            "{} {}, {activation} for {}",
+            kind_text(spec.kind),
+            spec.callback,
+            side_text(side)
+        )
+    });
+    checks.check("trailing-stop", "Trailing stop valid", passed, detail);
+    Ok(())
+}
+
+fn kind_text(kind: TrailingKind) -> &'static str {
+    match kind {
+        TrailingKind::Ratio => "RATIO",
+        TrailingKind::Spread => "SPREAD",
+    }
 }
 
 /// `d(number)` in TypeScript: a JS number converted through its shortest decimal text.

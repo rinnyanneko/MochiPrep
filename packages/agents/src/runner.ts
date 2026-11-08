@@ -252,6 +252,8 @@ export class AgentRunner {
       dailyPnl: daily.dailyPnl,
       dayStartEquity: daily.dayStartEquity,
       fees: account.config,
+      allowTrailingStop: agent.allowTrailingStop,
+      protection: null,
     });
   }
 

@@ -6,7 +6,7 @@
 //! open-ended (instruments come from OKX). Optional TS fields (`?`) are skipped when `None`;
 //! `X | null` fields serialize as `null`.
 
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::jsnum::js_number_raw;
 use crate::market::DataSource;
@@ -182,6 +182,8 @@ pub enum AiAction {
     Short,
     Close,
     Hold,
+    /// Sets the full protection of the open position: a value sets a leg, null removes it.
+    Protect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -469,6 +471,35 @@ pub struct AiDecisionData {
     #[serde(serialize_with = "serialize_js_number")]
     pub confidence: f64,
     pub expires_at: Option<String>,
+    /// The outer None is an absent key (keep the current trailing stop, or none); `Some(None)` is
+    /// an explicit null (remove it). The two mean different things, so both must round-trip.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present"
+    )]
+    pub trailing_stop: Option<Option<AiTrailingStop>>,
+}
+
+/// A trailing stop as the model writes it: numbers, converted to decimal strings before use.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTrailingStop {
+    pub kind: TrailingKind,
+    #[serde(serialize_with = "serialize_js_number")]
+    pub callback: f64,
+    #[serde(serialize_with = "serialize_js_number_or_null")]
+    pub activation_price: Option<f64>,
+}
+
+/// Called only when the key is present, so a JSON null becomes `Some(None)`; `default` covers
+/// the absent key.
+fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

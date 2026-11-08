@@ -33,6 +33,7 @@ import {
   TIMEFRAMES,
   type AccountBalance,
   type AiDecisionData,
+  type AiTrailingStop,
   type Candle,
   type EquityPoint,
   type Fill,
@@ -45,6 +46,7 @@ import {
   type Position,
   type PositionSide,
   type PositionView,
+  type Protection,
   type Quote,
   type RiskCheck,
   type RiskResult,
@@ -842,7 +844,7 @@ function accountingTypesFixture() {
   const positionStatuses: Position['status'][] = ['OPEN', 'CLOSED', 'LIQUIDATED'];
   const venues: PaperAccount['venue'][] = ['PAPER', 'OKX_DEMO', 'OKX_LIVE'];
   const sources: PaperAccount['source'][] = ['REPLAY', 'LIVE'];
-  const actions: AiDecisionData['action'][] = ['LONG', 'SHORT', 'CLOSE', 'HOLD'];
+  const actions: AiDecisionData['action'][] = ['LONG', 'SHORT', 'CLOSE', 'HOLD', 'PROTECT'];
   const entryTypes: AiDecisionData['orderType'][] = ['MARKET', 'LIMIT'];
   const ledgerTypes: LedgerEvent['type'][] = [
     'DEPOSIT', 'TRADE_FEE', 'REALIZED_PNL', 'FUNDING', 'LIQUIDATION_PENALTY', 'MARGIN_LOCK', 'MARGIN_RELEASE',
@@ -955,6 +957,10 @@ function accountingTypesFixture() {
         decisionMinimal,
         ...actions.map((action) => ({ ...decisionFull, action })),
         ...entryTypes.map((orderType) => ({ ...decisionFull, orderType })),
+        // Absent and null mean different things (keep versus remove), so both must round-trip.
+        { ...decisionFull, trailingStop: null },
+        { ...decisionFull, trailingStop: { kind: 'RATIO', callback: 0.015, activationPrice: null } },
+        { ...decisionMinimal, action: 'PROTECT', trailingStop: { kind: 'SPREAD', callback: 150.5, activationPrice: 68000 } },
       ],
       riskCheck: [check],
       riskResult: [riskResultFull, riskResultMinimal],
@@ -1226,10 +1232,18 @@ function riskFixture() {
   const make = (overrides: Record<string, unknown> = {}) => ({
     decision, symbol: 'BTCUSDT', settings: DEFAULT_RISK_SETTINGS, quote: base as Quote | null, now: 1_000,
     balance, openPositions: [] as Position[], dailyPnl: '0', dayStartEquity: '10000', fees: DEFAULT_ACCOUNT_CONFIG,
+    allowTrailingStop: false, protection: null as Protection | null,
     ...overrides,
   });
   const settings = (o: Partial<RiskSettings>): RiskSettings => ({ ...DEFAULT_RISK_SETTINGS, ...o });
   const dec = (o: Partial<AiDecisionData>): AiDecisionData => ({ ...decision, ...o });
+  const ratio = (callback: number, activationPrice: number | null = null): AiTrailingStop => ({ kind: 'RATIO', callback, activationPrice });
+  const spread = (callback: number, activationPrice: number | null = null): AiTrailingStop => ({ kind: 'SPREAD', callback, activationPrice });
+  const on = (overrides: Record<string, unknown>) => make({ allowTrailingStop: true, ...overrides });
+  const protectDec = (o: Partial<AiDecisionData>): AiDecisionData => dec({ action: 'PROTECT', stopLoss: 95, takeProfit: 120, ...o });
+  const held = position('BTCUSDT');
+  const heldShort: Position = { ...position('BTCUSDT', 'SHORT'), liquidationPrice: '130' };
+  const heldProtection: Protection = { stopLoss: '90', takeProfit: '120', trailingStop: { kind: 'RATIO', callback: '0.01', activationPrice: null } };
   const quoteFor = (symbol: string, bid: string, ask: string, ts = 1_000): Quote => ({ ...base, symbol, bid, ask, last: bid, mark: bid, ts });
 
   const inputs: Array<ReturnType<typeof make>> = [
@@ -1331,6 +1345,61 @@ function riskFixture() {
     make({ quote: quoteFor('BTCUSDT', '67234.5', '67234.6'), decision: dec({ stopLoss: 66000, takeProfit: 70000 }) }),
     make({ quote: quoteFor('BTCUSDT', '99', '101', 2_500) }),
     make({ quote: quoteFor('BTCUSDT', '99', '101', 29_999), now: 59_999 }),
+    // Trailing stops. The agent switch: absent passes either way; null and a value need it on.
+    ...[false, true].flatMap((allowTrailingStop) => [
+      make({ allowTrailingStop }),
+      make({ allowTrailingStop, decision: dec({ trailingStop: null }) }),
+      make({ allowTrailingStop, decision: dec({ trailingStop: ratio(0.01) }) }),
+      make({ allowTrailingStop, decision: protectDec({}), openPositions: [held], protection: heldProtection }),
+      make({ allowTrailingStop, decision: protectDec({ trailingStop: null }), openPositions: [held], protection: heldProtection }),
+      make({ allowTrailingStop, decision: protectDec({ trailingStop: ratio(0.02) }), openPositions: [held], protection: heldProtection }),
+      make({ allowTrailingStop, decision: dec({ action: 'HOLD', trailingStop: ratio(0.01) }) }),
+      make({ allowTrailingStop, decision: dec({ action: 'HOLD', trailingStop: null }) }),
+      make({ allowTrailingStop, decision: dec({ action: 'CLOSE', trailingStop: ratio(0.01) }), openPositions: [held] }),
+    ]),
+    // Ratio limits, and numbers the model writes that need exact decimal conversion.
+    ...[0.0009, 0.001, 0.3, 0.31, 1e-7, 0.1 + 0.2].map((callback) => on({ decision: dec({ trailingStop: ratio(callback) }) })),
+    // Spread limits: one BTC tick is 0.1, and 30% of the 101 ask is 30.3.
+    ...[0.05, 0.1, 30.3, 30.31].map((callback) => on({ decision: dec({ trailingStop: spread(callback) }) })),
+    on({ symbol: 'ETHUSDT', decision: dec({ symbol: 'ETHUSDT', stopLoss: 3400, takeProfit: 3700, trailingStop: spread(0.005) }), quote: quoteFor('ETHUSDT', '3499.9', '3500.1') }),
+    // Activation price on each side, long against the ask and short against the bid.
+    ...[100, 101, 101.1].map((activation) => on({ decision: dec({ trailingStop: ratio(0.01, activation) }) })),
+    ...[100, 99, 98.9].map((activation) => on({ decision: dec({ action: 'SHORT', stopLoss: 110, takeProfit: 80, trailingStop: ratio(0.01, activation) }) })),
+    on({ decision: dec({ orderType: 'LIMIT', entryPrice: 95, trailingStop: ratio(0.01, 95.5) }) }),
+    on({ decision: dec({ orderType: 'LIMIT', entryPrice: 95, trailingStop: spread(28.6) }) }),
+    // A trailing stop failing on its own skips sizing like any other failed check.
+    on({ decision: dec({ stopLoss: 102, trailingStop: ratio(0.5) }) }),
+    // PROTECT: needs the position, a fresh quote, and stops valid against the last price.
+    make({ decision: protectDec({}) }),
+    make({ decision: protectDec({}), openPositions: [position('ETHUSDT')] }),
+    make({ decision: protectDec({}), openPositions: [held], now: 40_000 }),
+    make({ decision: protectDec({}), openPositions: [held], quote: null }),
+    make({ decision: protectDec({ expiresAt: new Date(500).toISOString() }), openPositions: [held] }),
+    make({ decision: protectDec({ symbol: 'ETHUSDT' }), openPositions: [held] }),
+    make({ decision: protectDec({ stopLoss: null }), openPositions: [held] }),
+    make({ settings: settings({ requireStopLoss: false }), decision: protectDec({ stopLoss: null }), openPositions: [held] }),
+    make({ settings: settings({ requireStopLoss: false }), decision: protectDec({ stopLoss: null, takeProfit: null }), openPositions: [held] }),
+    make({ decision: protectDec({ stopLoss: 100 }), openPositions: [held] }),
+    make({ decision: protectDec({ stopLoss: 99.9 }), openPositions: [held] }),
+    make({ decision: protectDec({ takeProfit: 100 }), openPositions: [held] }),
+    make({ decision: protectDec({ takeProfit: null }), openPositions: [held] }),
+    // Loosening: 5 BTC at 100 with a 0.5% budget of 10000 allows a stop 10 away and no further.
+    make({ decision: protectDec({ stopLoss: 90 }), openPositions: [position('BTCUSDT', 'LONG', '5')] }),
+    make({ decision: protectDec({ stopLoss: 89.99 }), openPositions: [position('BTCUSDT', 'LONG', '5')] }),
+    make({ settings: settings({ maxRiskPerTradePct: 0 }), decision: protectDec({}), openPositions: [held] }),
+    // Past liquidation (70 for the long, 130 for the short).
+    make({ decision: protectDec({ stopLoss: 70 }), openPositions: [held] }),
+    make({ decision: protectDec({ stopLoss: 65 }), openPositions: [held] }),
+    make({ decision: protectDec({ stopLoss: 110, takeProfit: 80 }), openPositions: [heldShort] }),
+    make({ decision: protectDec({ stopLoss: 130, takeProfit: 80 }), openPositions: [heldShort] }),
+    make({ decision: protectDec({ stopLoss: 99, takeProfit: 80 }), openPositions: [heldShort] }),
+    make({ decision: protectDec({ stopLoss: 110, takeProfit: 101 }), openPositions: [heldShort] }),
+    // PROTECT trailing stops are measured from the last price, here 100.
+    on({ decision: protectDec({ trailingStop: ratio(0.01, 100) }), openPositions: [held] }),
+    on({ decision: protectDec({ trailingStop: ratio(0.01, 100.1) }), openPositions: [held] }),
+    on({ decision: protectDec({ trailingStop: spread(30.01) }), openPositions: [held] }),
+    on({ decision: protectDec({ stopLoss: 110, takeProfit: 80, trailingStop: ratio(0.01, 99.9) }), openPositions: [heldShort] }),
+    on({ decision: protectDec({ stopLoss: null, trailingStop: ratio(0.0009) }), openPositions: [held] }),
   ];
 
   // Seeded sweep: random sides, prices, balances and settings so the 50-digit sizing is compared too.

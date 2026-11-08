@@ -40,6 +40,7 @@ const decision: AiDecisionData = {
 const riskInput = (overrides: Record<string, unknown> = {}) => ({
   decision, symbol: 'BTCUSDT' as const, settings: DEFAULT_RISK_SETTINGS, quote, now: 1_000,
   balance, openPositions: [], dailyPnl: '0', dayStartEquity: '10000', fees: DEFAULT_ACCOUNT_CONFIG,
+  allowTrailingStop: false, protection: null,
   ...overrides,
 });
 
@@ -89,5 +90,51 @@ describe('risk engine', () => {
     }));
     expect(result.checks.find((c) => c.id === 'stop-before-liq')?.passed).toBe(false);
     expect(result.approved).toBe(false);
+  });
+  const held = {
+    id: 'p', accountId: 'a', symbol: 'BTCUSDT', side: 'LONG', quantity: '1', entryPrice: '100', leverage: 3,
+    margin: '33.33', liquidationPrice: '70', status: 'OPEN', realizedPnl: '0', feesPaid: '0', fundingPaid: '0',
+    maxQuantity: '1', exitPrice: null, lastFundingTime: 0, openedAt: 0, closedAt: null,
+  };
+  const protect = (o: Partial<AiDecisionData>): AiDecisionData => ({ ...decision, action: 'PROTECT', stopLoss: 95, ...o });
+  const failed = (overrides: Record<string, unknown>) =>
+    evaluateRisk(riskInput(overrides)).checks.filter((c) => !c.passed).map((c) => c.id);
+
+  it('with the switch off, keeps an absent trailing stop and refuses any value, null included', () => {
+    const base = { openPositions: [held] };
+    expect(failed({ ...base, decision: protect({}) })).toEqual([]);
+    expect(failed({ ...base, decision: protect({ trailingStop: null }) })).toEqual(['trailing-allowed']);
+    expect(failed({ ...base, decision: protect({ trailingStop: { kind: 'RATIO', callback: 0.01, activationPrice: null } }) }))
+      .toEqual(['trailing-allowed']);
+    expect(failed({ decision: { ...decision, trailingStop: null } })).toEqual(['trailing-allowed']);
+  });
+
+  it('refuses a trailing stop on HOLD and CLOSE', () => {
+    const trailingStop = { kind: 'RATIO' as const, callback: 0.01, activationPrice: null };
+    expect(failed({ allowTrailingStop: true, decision: { ...decision, action: 'HOLD', trailingStop } })).toEqual(['trailing-stop']);
+    expect(failed({ allowTrailingStop: true, openPositions: [held], decision: { ...decision, action: 'CLOSE', trailingStop } }))
+      .toEqual(['trailing-stop']);
+  });
+
+  it('validates trailing ratios against the shared limits', () => {
+    const ratio = (callback: number) => failed({ allowTrailingStop: true, decision: { ...decision, trailingStop: { kind: 'RATIO', callback, activationPrice: null } } });
+    expect(ratio(0.0009)).toEqual(['trailing-stop']);
+    expect(ratio(0.001)).toEqual([]);
+    expect(ratio(0.3)).toEqual([]);
+    expect(ratio(0.31)).toEqual(['trailing-stop']);
+  });
+
+  it('PROTECT approves without sizing and refuses a loosened stop beyond the risk budget', () => {
+    const ok = evaluateRisk(riskInput({ openPositions: [held], decision: protect({}) }));
+    expect(ok.approved).toBe(true);
+    expect(ok.sized).toBeNull();
+    // 5 BTC at a last of 100 with a 50 USDT budget allows a stop 10 away and no further.
+    const five = [{ ...held, quantity: '5' }];
+    expect(failed({ openPositions: five, decision: protect({ stopLoss: 90 }) })).toEqual([]);
+    expect(failed({ openPositions: five, decision: protect({ stopLoss: 89.99 }) })).toEqual(['protect-risk']);
+    expect(failed({ openPositions: [held], decision: protect({ stopLoss: 65 }) })).toEqual(['stop-before-liq']);
+    expect(failed({ openPositions: [held], decision: protect({ stopLoss: null }) })).toEqual(['stop-loss']);
+    expect(failed({ decision: protect({}) })).toEqual(['has-position']);
+    expect(failed({ openPositions: [held], now: 40_000, decision: protect({}) })).toEqual(['freshness']);
   });
 });
