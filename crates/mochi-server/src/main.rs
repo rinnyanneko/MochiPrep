@@ -7,6 +7,12 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    // Warnings and errors to stderr, like Fastify's `logger: { level: 'warn' }`. Every message
+    // the runtime logs has been through its secret redaction.
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_max_level(tracing::Level::WARN)
+        .init();
     let config = Arc::new(load_config());
     let db = match mochi_store::open_database(&config.db_path()) {
         Ok(db) => db,

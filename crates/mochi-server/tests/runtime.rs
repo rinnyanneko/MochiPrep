@@ -577,3 +577,117 @@ async fn a_tape_without_playable_bars_does_not_start() {
     let error = RuntimeHandle::start(options).err().unwrap();
     assert!(error.to_string().contains("needs more than"), "{error}");
 }
+
+#[tokio::test]
+async fn a_panicking_command_fails_alone_with_500() {
+    let rt = start(open_in_memory().unwrap(), None);
+    let error = rt
+        .call::<()>(|_| panic!("boom in a route"))
+        .await
+        .unwrap_err();
+    assert_eq!(error.status().as_u16(), 500);
+    assert_eq!(error.message(), "Internal Server Error");
+
+    // The task is still there: later work runs normally.
+    let state = rt.replay_state().await.unwrap();
+    assert!(!state.playing);
+    rt.step_replay(1).await.unwrap();
+    rt.shutdown().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_panic_mid_batch_does_not_block_later_ticks() {
+    let rt = start(open_in_memory().unwrap(), None);
+    let begin = rt.replay_state().await.unwrap().now.unwrap();
+    rt.set_playing(true).await.unwrap();
+    let error = rt
+        .call::<()>(|rt| {
+            rt.begin_batch_for_test();
+            panic!("boom mid batch")
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.status().as_u16(), 500);
+
+    // Without recovery the batch would stay "in flight" and the timer would earn nothing.
+    sleep(Duration::from_millis(150)).await;
+    let state = rt.replay_state().await.unwrap();
+    assert!(state.playing);
+    assert_eq!(state.now, Some(begin + 2 * MINUTE));
+    rt.shutdown().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_batch_stops_the_replay_with_a_toast() {
+    let rt = start(open_in_memory().unwrap(), None);
+    rt.call(|rt| {
+        rt.connection()
+            .execute_batch(
+                "CREATE TRIGGER no_cursor BEFORE INSERT ON settings WHEN NEW.key = 'replay.cursor' \
+                 BEGIN SELECT RAISE(ABORT, 'disk full'); END;",
+            )
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    let mut events = rt.subscribe();
+    rt.set_playing(true).await.unwrap();
+    sleep(Duration::from_millis(150)).await;
+
+    let state = rt.replay_state().await.unwrap();
+    assert!(!state.playing, "a failed batch pauses the tape");
+    let sent = drain(&mut events);
+    assert!(sent.contains(&ServerEvent::Toast {
+        level: ToastLevel::Error,
+        message: "Replay stopped: sqlite error: disk full".into(),
+    }));
+    assert!(sent
+        .iter()
+        .any(|e| matches!(e, ServerEvent::Replay { state } if !state.playing)));
+
+    // A manual step reports the same failure to its caller.
+    let error = rt.step_replay(1).await.unwrap_err();
+    assert_eq!(error.status().as_u16(), 400);
+    assert_eq!(error.message(), "sqlite error: disk full");
+    rt.shutdown().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn invalidate_with_no_topics_emits_nothing() {
+    let rt = start(open_in_memory().unwrap(), None);
+    let mut events = rt.subscribe();
+    rt.invalidate(&[]).await.unwrap();
+    // The armed timer fires at 200 ms with nothing to say; the first live tick is at 1 s.
+    assert!(timeout(Duration::from_millis(900), events.recv())
+        .await
+        .is_err());
+    rt.shutdown().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn set_playing_emits_on_change_and_set_speed_always() {
+    let rt = start(open_in_memory().unwrap(), None);
+    let mut events = rt.subscribe();
+    let replays = |sent: Vec<ServerEvent>| {
+        sent.into_iter()
+            .filter(|e| matches!(e, ServerEvent::Replay { .. }))
+            .count()
+    };
+
+    rt.set_playing(false).await.unwrap();
+    assert_eq!(replays(drain(&mut events)), 0, "already paused");
+    rt.set_playing(true).await.unwrap();
+    rt.set_playing(true).await.unwrap();
+    assert_eq!(replays(drain(&mut events)), 1, "a repeated play is silent");
+    rt.set_playing(false).await.unwrap();
+    drain(&mut events);
+
+    rt.set_speed(20).await.unwrap();
+    rt.set_speed(20).await.unwrap();
+    assert_eq!(
+        replays(drain(&mut events)),
+        2,
+        "speed always emits, even unchanged"
+    );
+    rt.shutdown().await;
+}

@@ -22,6 +22,7 @@ subtle = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "ansi"] }
 url = { workspace = true }
 uuid = { workspace = true }
 

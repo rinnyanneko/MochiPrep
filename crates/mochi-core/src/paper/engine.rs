@@ -82,6 +82,13 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
         self.queued.get_mut().clear();
     }
 
+    /// For an owner that caught a panic inside an engine call: that call's store transaction
+    /// rolled back as it unwound, so the events it queued describe nothing and must not go out
+    /// with the next commit.
+    pub fn discard_queued_events(&mut self) {
+        self.drop_queued();
+    }
+
     pub(super) fn instrument(&self, symbol: &str) -> Result<&InstrumentSpecification, EngineError> {
         self.instruments
             .get(symbol)

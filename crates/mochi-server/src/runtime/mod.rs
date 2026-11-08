@@ -13,6 +13,7 @@ pub mod redact;
 pub mod replay_clock;
 
 use std::fmt::Display;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -145,7 +146,15 @@ impl RuntimeHandle {
             let _ = reply.send(value);
         });
         self.commands.send(command).await.map_err(|_| stopped())?;
-        answer.await.map_err(|_| stopped())
+        // The reply is dropped unanswered either when the task stops (the channel closes) or
+        // when the work panicked, which the task survives: only the first is "shutting down".
+        answer.await.map_err(|_| {
+            if self.commands.is_closed() {
+                stopped()
+            } else {
+                internal_error()
+            }
+        })
     }
 
     pub async fn invalidate(&self, topics: &[Topic]) -> Result<(), ApiError> {
@@ -183,6 +192,11 @@ impl RuntimeHandle {
             let _ = finished.await;
         }
     }
+}
+
+/// A request whose work panicked. The panic itself is logged; the client learns nothing more.
+fn internal_error() -> ApiError {
+    ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error")
 }
 
 fn stopped() -> ApiError {
@@ -437,8 +451,9 @@ impl Runtime {
 
     fn on_replay_tick(&mut self) {
         if let Some(steps) = self.clock.on_tick() {
+            // A failure has already paused the tape with a toast; the log is for the owner.
             if let Err(error) = self.step_replay(steps) {
-                tracing::error!(message = %error.message(), "replay batch failed");
+                tracing::warn!(message = %error.message(), "replay batch failed");
             }
         }
     }
@@ -448,16 +463,16 @@ impl Runtime {
     fn do_steps(&mut self, steps: u32) -> Result<(), ApiError> {
         let mut quotes = Vec::new();
         if let Err(error) = self.advance(steps, &mut quotes) {
-            self.set_playing(false);
-            let message = format!("Replay stopped: {}", self.redact(&error.to_string()));
-            self.emit(ServerEvent::Toast {
-                level: ToastLevel::Error,
-                message,
-            });
+            self.stop_replay_with(&error.to_string());
         }
         let position = lock(&self.replay).position();
-        set_setting(self.connection(), "replay.cursor", &position)
-            .map_err(|e| self.api_error(e))?;
+        if let Err(error) = set_setting(self.connection(), "replay.cursor", &position) {
+            // Node would reject the timer's promise unseen; here the owner is told and the tape
+            // stops, rather than playing on with a cursor that a restart would lose.
+            let error = self.api_error(error);
+            self.stop_replay_with(error.message());
+            return Err(error);
+        }
         // One quote per symbol per batch, from its last step: the web app needs no more.
         for quote in quotes {
             self.emit(ServerEvent::Quote { quote });
@@ -496,6 +511,16 @@ impl Runtime {
         Ok(())
     }
 
+    /// Pauses the tape and says why: `Replay stopped: <message>`, secrets removed.
+    fn stop_replay_with(&mut self, message: &str) {
+        self.set_playing(false);
+        let message = format!("Replay stopped: {}", self.redact(message));
+        self.emit(ServerEvent::Toast {
+            level: ToastLevel::Error,
+            message,
+        });
+    }
+
     /// An equity point for every paper account on `source`.
     fn record_equity(&mut self, source: DataSource) -> Result<(), EngineError> {
         for account in self.engine.store().list_accounts()? {
@@ -516,7 +541,7 @@ impl Runtime {
         if let Err(error) = result {
             // Node lets this throw out of the WebSocket handler. Here the quote still goes out
             // for display, and the next quote tries again.
-            tracing::error!(message = %self.redact(&error.to_string()), "live quote failed in the paper engine");
+            tracing::warn!(message = %self.redact(&error.to_string()), "live quote failed in the paper engine");
         }
         self.events.emit_live_quote(quote);
     }
@@ -542,6 +567,27 @@ impl Runtime {
                 });
             }
         }
+    }
+
+    /// Puts the runtime back in a usable state after work panicked: the engine's queued events
+    /// belong to a rolled-back transaction, so they are discarded, and a batch cut short must
+    /// not leave the timer believing one is still running.
+    fn recover_from_panic(&mut self, panic: &(dyn std::any::Any + Send)) {
+        self.engine.discard_queued_events();
+        lock(&self.engine_events).clear();
+        self.clock.end_batch();
+        let text = match (panic.downcast_ref::<&str>(), panic.downcast_ref::<String>()) {
+            (Some(text), _) => text.to_string(),
+            (_, Some(text)) => text.clone(),
+            _ => "a panic without a message".to_string(),
+        };
+        tracing::error!(message = %self.redact(&text), "runtime work panicked; carrying on");
+    }
+
+    /// Starts a batch without ending it, so a test can panic in the middle of one.
+    #[doc(hidden)]
+    pub fn begin_batch_for_test(&mut self) {
+        self.clock.begin_batch();
     }
 
     // ---- engine events --------------------------------------------------------------------
@@ -614,14 +660,23 @@ async fn run(
             },
             _ = live_tick.tick() => Wake::LiveTick,
         };
-        match wake {
-            Wake::Command(command) => command(&mut runtime),
+        let work: Box<dyn FnOnce(&mut Runtime)> = match wake {
             Wake::HandlesDropped => break,
-            Wake::ReplayTick => runtime.on_replay_tick(),
-            Wake::FlushInvalidate => runtime.events.flush_invalidate(),
-            Wake::LiveQuote(quote) => runtime.on_live_quote(quote),
-            Wake::LiveFeedClosed => live_quotes = None,
-            Wake::LiveTick => runtime.live_tick(),
+            Wake::LiveFeedClosed => {
+                live_quotes = None;
+                continue;
+            }
+            Wake::Command(command) => command,
+            Wake::ReplayTick => Box::new(Runtime::on_replay_tick),
+            Wake::FlushInvalidate => Box::new(|runtime| runtime.events.flush_invalidate()),
+            Wake::LiveQuote(quote) => Box::new(move |runtime| runtime.on_live_quote(quote)),
+            Wake::LiveTick => Box::new(Runtime::live_tick),
+        };
+        // A panic fails only this piece of work, as a thrown error fails one request in Node;
+        // the task, and with it live paper trading, carries on. Unwind safety: the store rolls
+        // its transaction back while unwinding, and `recover_from_panic` clears the rest.
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| work(&mut runtime))) {
+            runtime.recover_from_panic(panic.as_ref());
         }
         if let Some(done) = runtime.stopping.take() {
             // Node's `stop()`: pause, and drop pending timers. Dropping the runtime closes the
