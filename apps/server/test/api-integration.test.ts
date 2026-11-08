@@ -111,6 +111,29 @@ describe('API decision-to-position integration', () => {
     expect(runtime.engine.protectionOfSync(account.id, 'BTCUSDT')).toEqual({ stopLoss, takeProfit: null, trailingStop: null });
   });
 
+  it('accepts an SL-only edit on a position whose trail has activated past its activation price', async () => {
+    const account = runtime.engine.createAccount({ name: 'activated', source: 'REPLAY' });
+    const opened = runtime.engine.placeOrderSync({
+      accountId: account.id, clientOrderId: 'open', symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET', quantity: '0.01', leverage: 3,
+      trailingStop: { kind: 'RATIO', callback: '0.01', activationPrice: null },
+    });
+    // Put the resting trail into the state it reaches after activating: an activation price that
+    // the market has since passed, and a tracked extreme. Validation refuses to create this directly.
+    const trail = runtime.engine.openOrders(account.id).find((o) => o.type === 'TRAILING_STOP_MARKET')!;
+    const activationPrice = d(opened.order.avgFillPrice!).mul('0.99').toDecimalPlaces(1).toFixed();
+    // saveOrder only writes mutable columns, so the activation price is set in SQL.
+    db.prepare('UPDATE orders SET trailing_activation_price=? WHERE id=?').run(activationPrice, trail.id);
+    const stopLoss = d(opened.order.avgFillPrice!).mul('0.9').toDecimalPlaces(1).toFixed();
+
+    const response = await app.inject({
+      method: 'PUT', url: `/api/positions/${account.id}/BTCUSDT/protection`, headers: headers(), payload: { stopLoss, takeProfit: null },
+    });
+    expect(response.statusCode).toBe(200);
+    const view = runtime.engine.positionViews(account.id)[0]!;
+    expect(view.stopLoss).toBe(stopLoss);
+    expect(view.trailingStop).toMatchObject({ activationPrice, extreme: trail.trailingExtreme });
+  });
+
   it('enforces host and token checks', async () => {
     expect((await app.inject({ method: 'GET', url: '/api/accounts', headers: { host: 'localhost:8787' } })).statusCode).toBe(401);
     expect((await app.inject({ method: 'GET', url: '/api/accounts', headers: { ...headers(), host: 'evil.invalid' } })).statusCode).toBe(403);

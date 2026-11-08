@@ -247,8 +247,8 @@ export class PaperExecutionEngine implements ExecutionEngine {
     if (!position) throw new Error(`No open ${symbol} position`);
     const quote = this.deps.getQuote(account.source, symbol);
     if (!quote) throw new Error('No market data');
-    this.validateProtection(position.side, d(quote.last), protection, getInstrument(symbol).priceTick);
     const before = this.protectionOfSync(accountId, symbol);
+    this.validateProtection(position.side, d(quote.last), protection, getInstrument(symbol).priceTick, before.trailingStop);
     const now = this.deps.now(account.source);
     this.store.transaction(() => {
       this.replaceProtection(position, protection, quote.last, now);
@@ -343,7 +343,9 @@ export class PaperExecutionEngine implements ExecutionEngine {
 
     const reference = request.type === 'LIMIT' ? d(order.price!) : d(request.side === 'BUY' ? quote.ask : quote.bid);
     if (!order.reduceOnly) {
-      this.validateProtection(sideOf(order), reference, attachedProtection(order), instrument.priceTick);
+      // Adding to a position keeps its trailing stop when the entry restates it; a flip does not.
+      const kept = position?.side === sideOf(order) ? this.protectionOfSync(account.id, request.symbol).trailingStop : null;
+      this.validateProtection(sideOf(order), reference, attachedProtection(order), instrument.priceTick, kept);
     }
 
     const crosses = request.type === 'MARKET' || isMarketable(request.side, order.price!, quote);
@@ -373,7 +375,12 @@ export class PaperExecutionEngine implements ExecutionEngine {
     return { order, fills: [fill], duplicate: false };
   }
 
-  private validateProtection(side: PositionSide, reference: Dec, protection: Protection, tick: string) {
+  /**
+   * `kept` is the trailing stop already resting on the position. Restating it unchanged skips its
+   * checks: it was validated when created, and an activated one would otherwise fail forever
+   * because its activation price is no longer ahead of the market.
+   */
+  private validateProtection(side: PositionSide, reference: Dec, protection: Protection, tick: string, kept: TrailingStopSpec | null = null) {
     const { stopLoss, takeProfit, trailingStop } = protection;
     if (stopLoss) {
       const ok = side === 'LONG' ? d(stopLoss).lt(reference) : d(stopLoss).gt(reference);
@@ -383,7 +390,7 @@ export class PaperExecutionEngine implements ExecutionEngine {
       const ok = side === 'LONG' ? d(takeProfit).gt(reference) : d(takeProfit).lt(reference);
       if (!ok) throw new OrderRejection('INVALID_PROTECTION', `target ${takeProfit} is on the wrong side of ${reference.toFixed()} for ${side}`);
     }
-    if (trailingStop) {
+    if (trailingStop && !(kept && sameTrailing(kept, trailingStop))) {
       const refused = validateTrailing(side, reference, trailingStop, d(tick));
       if (refused) throw new OrderRejection('INVALID_PROTECTION', refused);
     }
@@ -811,6 +818,7 @@ export class PaperExecutionEngine implements ExecutionEngine {
       const extreme = advanceExtreme(position.side, spec, order.trailingExtreme, d(quote.last));
       if (extreme !== order.trailingExtreme) {
         order.trailingExtreme = extreme;
+        // One row and no wallet or margin change, so it needs no store transaction.
         this.store.saveOrder(order);
       }
       triggered = extreme !== null

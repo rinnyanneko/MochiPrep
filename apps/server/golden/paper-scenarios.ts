@@ -576,6 +576,22 @@ export const TRAILING_SCENARIOS: Scenario[] = [
     read('positions'),
     read('openOrders'),
   ]),
+  trailingScenario('trailing-activated-restated', [
+    placeSol({ clientOrderId: 'open', stopLoss: '95', trailingStop: ratio('0.02', '105') }),
+    solFeed(T + 1, '105'),
+    solFeed(T + 2, '108'),
+    sol(T + 3, '107'),
+    // Only the stop-loss changes. The activation price (105) is now behind the market, yet the
+    // restated trail is the one already resting, so it is kept with its extreme (108).
+    protectSol('97', null, ratio('0.02', '105')),
+    read('positions'),
+    // An add-on entry restating the same trail is accepted too and keeps the extreme.
+    placeSol({ clientOrderId: 'add', stopLoss: '97', trailingStop: ratio('0.02', '105') }),
+    read('positions'),
+    // A changed trail is checked in full: an activation below a long's last is refused.
+    protectSol('97', null, ratio('0.03', '105')),
+    read('positions'),
+  ]),
   trailingScenario('trailing-attached-to-limit-entry', [
     placeSol({ clientOrderId: 'rest', type: 'LIMIT', price: '95', stopLoss: '90', trailingStop: ratio('0.01') }),
     read('openOrders'),
