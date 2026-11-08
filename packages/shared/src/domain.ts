@@ -544,6 +544,10 @@ export interface DecisionRecord {
   signalExpiresAt: number | null;
   orderId: string | null;
   fillIds: string[];
+  /** PROTECT only: the protection the decision saw, which an accepted suggestion must still match. */
+  protectionBefore?: Protection;
+  /** PROTECT only: the protection in force after the change was made. */
+  protectionAfter?: Protection;
   latencyMs: number | null;
   inputTokens: number | null;
   outputTokens: number | null;

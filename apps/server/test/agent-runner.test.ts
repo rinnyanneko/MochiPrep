@@ -131,4 +131,82 @@ describe('AgentRunner integration', () => {
     const stored = runtime.store.listDecisions({ agentId, limit: 10 })[0]!;
     expect(stored.rawResponse).toBe(record!.rawResponse);
   });
+
+  describe('PROTECT and trailing stops', () => {
+    const trailing = { kind: 'RATIO' as const, callback: '0.02', activationPrice: null };
+    const accountId = () => runtime.store.getAgent(agentId)!.accountId;
+    const last = () => Number(runtime.replay.getQuote('BTCUSDT')!.last);
+    const open = (extra: { stopLoss?: string; trailingStop?: typeof trailing } = {}) =>
+      runtime.engine.placeOrderSync({
+        accountId: accountId(), clientOrderId: 'open', symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET', quantity: '0.01', leverage: 3, ...extra,
+      });
+    const reply = (decision: object) => {
+      complete = async () => ({ text: JSON.stringify({ ...JSON.parse(hold), action: 'PROTECT', ...decision }), inputTokens: null, outputTokens: null });
+    };
+
+    it('PROTECT tightens the stop in AUTO and records before and after', async () => {
+      const loose = String(Math.round(last() * 0.95));
+      const tight = Math.round(last() * 0.98);
+      open({ stopLoss: loose });
+      reply({ stopLoss: tight });
+      const record = (await runtime.runner.runCycle(agentId, 'RUN_ONCE'))!;
+      expect(record).toMatchObject({ outcome: 'EXECUTED', outcomeDetail: 'Protection updated' });
+      expect(record.protectionBefore).toEqual({ stopLoss: loose, takeProfit: null, trailingStop: null });
+      expect(record.protectionAfter).toEqual({ stopLoss: String(tight), takeProfit: null, trailingStop: null });
+      expect(runtime.engine.protectionOfSync(accountId(), 'BTCUSDT').stopLoss).toBe(String(tight));
+      expect(runtime.store.getDecision(record.id)!.protectionAfter).toEqual(record.protectionAfter);
+    });
+
+    it('PROTECT without trailingStop keeps an existing trailing stop when the switch is off', async () => {
+      open({ stopLoss: String(Math.round(last() * 0.95)), trailingStop: trailing });
+      const tight = Math.round(last() * 0.98);
+      reply({ stopLoss: tight });
+      const record = (await runtime.runner.runCycle(agentId, 'RUN_ONCE'))!;
+      expect(record.outcome).toBe('EXECUTED');
+      expect(record.risk!.checks.map((c) => c.id)).not.toContain('trailing-allowed');
+      expect(record.protectionAfter).toEqual({ stopLoss: String(tight), takeProfit: null, trailingStop: trailing });
+      expect(runtime.engine.protectionOfSync(accountId(), 'BTCUSDT').trailingStop).toEqual(trailing);
+    });
+
+    it('PROTECT with trailingStop null is risk rejected when the switch is off', async () => {
+      const stop = String(Math.round(last() * 0.95));
+      open({ stopLoss: stop, trailingStop: trailing });
+      reply({ stopLoss: Number(stop), trailingStop: null });
+      const record = (await runtime.runner.runCycle(agentId, 'RUN_ONCE'))!;
+      expect(record.outcome).toBe('RISK_REJECTED');
+      expect(record.outcomeDetail).toContain('Trailing stops allowed');
+      expect(runtime.engine.protectionOfSync(accountId(), 'BTCUSDT')).toEqual({ stopLoss: stop, takeProfit: null, trailingStop: trailing });
+    });
+
+    it('PROTECT asking for the current protection changes nothing', async () => {
+      const stop = String(Math.round(last() * 0.95));
+      open({ stopLoss: stop });
+      reply({ stopLoss: Number(stop) });
+      const before = runtime.store.listOrders(accountId(), 50).length;
+      const record = (await runtime.runner.runCycle(agentId, 'RUN_ONCE'))!;
+      expect(record).toMatchObject({ outcome: 'HOLD', outcomeDetail: 'Protection already as requested' });
+      expect(runtime.store.listOrders(accountId(), 50)).toHaveLength(before);
+    });
+
+    it('records a thrown protection change as rejected, with secrets redacted', async () => {
+      open({ stopLoss: String(Math.round(last() * 0.95)) });
+      reply({ stopLoss: Math.round(last() * 0.98) });
+      runtime.engine.setProtection = async () => { throw new Error('refused custom-secret-agent-key'); };
+      const record = (await runtime.runner.runCycle(agentId, 'RUN_ONCE'))!;
+      expect(record.outcome).toBe('ORDER_REJECTED');
+      expect(record.outcomeDetail).toContain('refused');
+      expect(record.outcomeDetail).not.toContain('custom-secret-agent-key');
+    });
+
+    it('LONG with a trailing stop attaches it on fill', async () => {
+      runtime.store.saveAgent({ ...runtime.store.getAgent(agentId)!, allowTrailingStop: true });
+      complete = async () => ({
+        text: JSON.stringify({ ...JSON.parse(long), stopLoss: Math.round(last() * 0.97), takeProfit: null, trailingStop: { kind: 'RATIO', callback: 0.02, activationPrice: null } }),
+        inputTokens: null, outputTokens: null,
+      });
+      const record = (await runtime.runner.runCycle(agentId, 'RUN_ONCE'))!;
+      expect(record.outcome).toBe('EXECUTED');
+      expect(runtime.engine.protectionOfSync(accountId(), 'BTCUSDT').trailingStop).toEqual(trailing);
+    });
+  });
 });

@@ -40,6 +40,7 @@ type Form = {
   intervalSec: number;
   executionMode: ExecutionMode;
   useNews: boolean;
+  allowTrailingStop: boolean;
 };
 
 function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void }) {
@@ -60,6 +61,7 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
       intervalSec: 900,
       executionMode: 'SIGNAL',
       useNews: source === 'LIVE',
+      allowTrailingStop: false,
     },
   );
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
@@ -75,7 +77,7 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
         accountId = created.id;
       }
       const body = { ...form, accountId };
-      const fields = { name: body.name, providerId: body.providerId, model: body.model, symbol: body.symbol, timeframe: body.timeframe, strategy: body.strategy, accountId, risk: body.risk, intervalSec: body.intervalSec, executionMode: body.executionMode, useNews: body.useNews };
+      const fields = { name: body.name, providerId: body.providerId, model: body.model, symbol: body.symbol, timeframe: body.timeframe, strategy: body.strategy, accountId, risk: body.risk, intervalSec: body.intervalSec, executionMode: body.executionMode, useNews: body.useNews, allowTrailingStop: body.allowTrailingStop };
       return agent ? api.put(`/agents/${agent.id}`, fields) : api.post('/agents', fields);
     });
     if (done) {
@@ -168,6 +170,13 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
       <label className="mt-3 flex items-center gap-2 text-xs text-ink-2">
         <input type="checkbox" checked={form.risk.requireStopLoss} onChange={(e) => setRisk({ requireStopLoss: e.target.checked })} className="accent-[var(--accent)]" />
         Require a stop loss on new positions
+      </label>
+      <label className="mt-2 flex items-start gap-2 text-xs text-ink-2">
+        <input type="checkbox" checked={form.allowTrailingStop} onChange={(e) => set({ allowTrailingStop: e.target.checked })} className="mt-0.5 accent-[var(--accent)]" />
+        <span>
+          Allow trailing stops
+          <span className="block text-[11px] text-ink-3">Off: this agent cannot set, change or remove trailing stops.</span>
+        </span>
       </label>
       {selectedAccount?.venue === 'OKX_LIVE' && form.executionMode === 'AUTO' && (
         <p className="mt-3 rounded-xl bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">

@@ -21,7 +21,7 @@ function SignalRow({ signal, onExecute }: { signal: DecisionRecord; onExecute():
         {venue !== 'PAPER' && <VenueBadge venue={venue} />}
         {signal.isMock && <Badge tone="info">Mock AI</Badge>}
         <span className="ml-auto flex gap-1.5">
-          <Button size="sm" variant="primary" onClick={onExecute}><Check /> {ai.action === 'CLOSE' ? 'Close position' : 'Place order'}</Button>
+          <Button size="sm" variant="primary" onClick={onExecute}><Check /> {ai.action === 'CLOSE' ? 'Close position' : ai.action === 'PROTECT' ? 'Update protection' : 'Place order'}</Button>
           <Button size="sm" variant="ghost" onClick={() => attempt(() => api.post(`/signals/${signal.id}/dismiss`))}><X /> Dismiss</Button>
         </span>
       </div>
@@ -33,6 +33,13 @@ function SignalRow({ signal, onExecute }: { signal: DecisionRecord; onExecute():
           <span>Size {qty(sized.quantity)}</span>
           <span>Notional {money(sized.notional)}</span>
           <span>Risk {money(sized.riskAmount)}</span>
+        </div>
+      )}
+      {ai.action === 'PROTECT' && (
+        <div className="num mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-ink-2">
+          <span>New SL {ai.stopLoss === null ? 'none' : price(ai.stopLoss, signal.symbol)}</span>
+          <span>New TP {ai.takeProfit === null ? 'none' : price(ai.takeProfit, signal.symbol)}</span>
+          {ai.trailingStop !== undefined && <span>Trailing {ai.trailingStop === null ? 'removed' : 'changed'}</span>}
         </div>
       )}
       <p className="mt-1 line-clamp-2 text-xs text-ink-3">{ai.reason.replace(/^\[DEMO[^\]]*\]\s*/, '')}</p>

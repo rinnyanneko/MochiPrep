@@ -2,6 +2,7 @@ import { CircleCheck, CircleX, Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import type {
   AccountVenue,
+  AiTrailingStop,
   DecisionOutcome,
   DecisionRecord,
   Fill,
@@ -9,6 +10,8 @@ import type {
   Order,
   Position,
   PositionView,
+  Protection,
+  TrailingStopSpec,
 } from '@mochiprep/shared';
 import { api } from '@/lib/api';
 import { money, pct, pnlClass, price, qty, shortId, signedMoney } from '@/lib/format';
@@ -267,6 +270,12 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
   </div>
 );
 
+// Display only: the ratio is shown as a percent, trimmed so 0.015 reads 1.5% rather than 1.5000000000000002%.
+const trailingText = (t: TrailingStopSpec | AiTrailingStop | null) =>
+  !t ? 'none' : `${t.kind === 'RATIO' ? `${Number((Number(t.callback) * 100).toPrecision(10))}%` : `${t.callback} USDT`} callback${t.activationPrice === null ? '' : `, from ${t.activationPrice}`}`;
+
+const protectionText = (p: Protection) => `SL ${p.stopLoss ?? '–'} · TP ${p.takeProfit ?? '–'} · trailing ${trailingText(p.trailingStop)}`;
+
 export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
   const dateTime = useDateTime();
   const [showRaw, setShowRaw] = useState(false);
@@ -299,6 +308,7 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
           <div className="mt-2">
             <Row label="Order">{ai.orderType}{ai.entryPrice ? ` @ ${ai.entryPrice}` : ''}</Row>
             <Row label="Stop / Target">{ai.stopLoss ?? '–'} / {ai.takeProfit ?? '–'}</Row>
+            {ai.trailingStop !== undefined && <Row label="Trailing stop">{ai.trailingStop === null ? 'Remove' : trailingText(ai.trailingStop)}</Row>}
             <Row label="Confidence (uncalibrated)">{(ai.confidence * 100).toFixed(0)}%</Row>
           </div>
         </section>
@@ -347,6 +357,8 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
       <section>
         <h3 className="mb-1 text-xs font-semibold text-ink-2">Execution</h3>
         <Row label="Result">{d.outcomeDetail ?? 'No order placed'}</Row>
+        {d.protectionBefore && <Row label="Protection before">{protectionText(d.protectionBefore)}</Row>}
+        {d.protectionAfter && <Row label="Protection after">{protectionText(d.protectionAfter)}</Row>}
         <Row label="Order ID">{shortId(d.orderId)}</Row>
         <Row label="Fill IDs">{d.fillIds.length ? d.fillIds.map(shortId).join(', ') : '–'}</Row>
         <Row label="Latency">{d.latencyMs === null ? '–' : `${d.latencyMs} ms`}</Row>
