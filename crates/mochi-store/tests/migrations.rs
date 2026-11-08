@@ -177,6 +177,35 @@ fn scrub_empties_the_wal() {
     assert_eq!(std::fs::metadata(&wal).unwrap().len(), 0);
 }
 
+#[test]
+fn scrub_reports_a_blocked_checkpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db.sqlite");
+    let conn = open_database(&path).unwrap();
+    // No waiting: the test wants the busy answer, not a five-second retry.
+    conn.busy_timeout(std::time::Duration::ZERO).unwrap();
+    let insert = |id: &str| {
+        conn.execute(
+            "INSERT INTO providers (id, name, kind, default_model, created_at) \
+             VALUES (?1, 'P', 'mock', 'm', 1)",
+            [id],
+        )
+        .unwrap();
+    };
+    insert("p1");
+    // A reader holding a snapshot pins the WAL, so it cannot be truncated.
+    let reader = Connection::open(&path).unwrap();
+    reader.execute_batch("BEGIN").unwrap();
+    let _: i64 = reader
+        .query_row("SELECT COUNT(*) FROM providers", [], |r| r.get(0))
+        .unwrap();
+    insert("p2");
+    assert!(matches!(scrub(&conn), Err(StoreError::CheckpointBlocked)));
+    reader.execute_batch("COMMIT").unwrap();
+    scrub(&conn).unwrap();
+    assert_eq!(std::fs::metadata(wal_path(&path)).unwrap().len(), 0);
+}
+
 fn wal_path(path: &Path) -> std::path::PathBuf {
     let mut s = path.as_os_str().to_owned();
     s.push("-wal");

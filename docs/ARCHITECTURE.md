@@ -39,7 +39,7 @@ Replay is a seeded, bundled minute tape with a warm-up region. Its clock advance
 
 ## Persistence and recovery
 
-SQLite stores accounts, orders, positions, fills, ledger events, agents, decisions, and replay cursor. Financial mutations use one synchronous store transaction, avoiding an `await` boundary inside accounting. On restart, durable paper state and replay position are recovered, agents are forced to paused/not-running, AI provider keys are reloaded from SQLite, and OKX credentials are absent because they never reach disk, so exchange accounts come back disconnected and disarmed.
+SQLite stores accounts, orders, positions, fills, ledger events, agents, decisions, and replay cursor. Financial mutations use one synchronous store transaction, avoiding an `await` boundary inside accounting. On restart, durable paper state and replay position are recovered, agents are forced to paused/not-running, and exchange accounts come back disconnected and disarmed. Without a master password, AI provider keys are reloaded from SQLite and OKX credentials are absent, because they never reach disk. With one, sealed AI keys and any OKX credentials the owner chose to save stay unavailable until unlock; unlocking reconnects saved OKX accounts through the full connect checks, and a real account must still be armed again before it can trade.
 
 ## Rust backend (in progress)
 

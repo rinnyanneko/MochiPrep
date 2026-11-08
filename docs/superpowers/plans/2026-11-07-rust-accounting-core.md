@@ -309,5 +309,6 @@ Real findings that nothing in Plan 2 builds on. The plan named for each must pic
 | 4 | Risk `now - quote.ts` should use `checked_sub`. Reject non-finite `RiskInput` numbers up front, mapped to `input`. The zero-ask unit test should reach the /0 path. Comment `expiresAt ""` |
 | 4 | Decide the recorded outcome label when the risk engine returns `input` (TS throws, so the runner records an error) |
 | 4 | `AiDecisionData` goes through the JS number serializers when stored |
+| 5 | Rust `scrub` now returns `CheckpointBlocked` when a reader stops the WAL truncation (CodeRabbit). Node's `store.scrub()` still ignores the busy flag. Decide how `enableVault`/sealing reacts (retry, report) and make Node and Rust agree |
 | 3/5 | Exotic JS numbers in `live_limits`/config, covered when live limits become editable |
 | any | Cleanup: `sub_exact` duplication, `zero()` re-parse, `side_text`/`status_text`/`liquidity_text` duplication, `queued` mutated from `market.rs`, `DAY_MS`, `first_difference` on arrays, `last_funding_time` comment, `query_one` |
