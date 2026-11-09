@@ -62,15 +62,56 @@ impl Mulberry32 {
 
 /// One-minute bars stored column-wise, like the TypeScript `Float64Array`s.
 /// Times are implicit, `TAPE_START + i * 60_000`, since the tape has no gaps.
+///
+/// The columns are private and only grow together through `push`, so they always have one
+/// length and `candle(i)` can index all five.
 pub struct Tape {
-    pub open: Vec<f64>,
-    pub high: Vec<f64>,
-    pub low: Vec<f64>,
-    pub close: Vec<f64>,
-    pub volume: Vec<f64>,
+    open: Vec<f64>,
+    high: Vec<f64>,
+    low: Vec<f64>,
+    close: Vec<f64>,
+    volume: Vec<f64>,
 }
 
 impl Tape {
+    fn with_capacity(minutes: usize) -> Self {
+        Tape {
+            open: Vec::with_capacity(minutes),
+            high: Vec::with_capacity(minutes),
+            low: Vec::with_capacity(minutes),
+            close: Vec::with_capacity(minutes),
+            volume: Vec::with_capacity(minutes),
+        }
+    }
+
+    fn push(&mut self, open: f64, high: f64, low: f64, close: f64, volume: f64) {
+        self.open.push(open);
+        self.high.push(high);
+        self.low.push(low);
+        self.close.push(close);
+        self.volume.push(volume);
+    }
+
+    pub fn open(&self) -> &[f64] {
+        &self.open
+    }
+
+    pub fn high(&self) -> &[f64] {
+        &self.high
+    }
+
+    pub fn low(&self) -> &[f64] {
+        &self.low
+    }
+
+    pub fn close(&self) -> &[f64] {
+        &self.close
+    }
+
+    pub fn volume(&self) -> &[f64] {
+        &self.volume
+    }
+
     pub fn len(&self) -> usize {
         self.open.len()
     }
@@ -114,13 +155,7 @@ pub fn generate_tape(symbol: &str, minutes: usize) -> Option<Tape> {
     };
     let mut rng = Mulberry32 { a: seed };
 
-    let mut tape = Tape {
-        open: Vec::with_capacity(minutes),
-        high: Vec::with_capacity(minutes),
-        low: Vec::with_capacity(minutes),
-        close: Vec::with_capacity(minutes),
-        volume: Vec::with_capacity(minutes),
-    };
+    let mut tape = Tape::with_capacity(minutes);
     let mut price = start_price;
     let mut drift = 0.0_f64;
     let mut vol = 0.0005_f64;
@@ -152,11 +187,11 @@ pub fn generate_tape(symbol: &str, minutes: usize) -> Option<Tape> {
         }
         let volume =
             base_volume * (0.6 + rng.next()) * (1.0 + ((price - open).abs() / open) * 900.0);
-        tape.open.push(round_tick(open));
-        tape.high.push(round_tick(high));
-        tape.low.push(round_tick(low));
-        tape.close.push(round_tick(price));
-        tape.volume.push(
+        tape.push(
+            round_tick(open),
+            round_tick(high),
+            round_tick(low),
+            round_tick(price),
             js_to_fixed(volume, 3)
                 .parse()
                 .expect("toFixed output is a number"),

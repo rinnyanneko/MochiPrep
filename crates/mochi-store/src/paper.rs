@@ -3,7 +3,7 @@
 
 use std::cell::Cell;
 
-use mochi_core::paper::{PaperStore, StoreFailure};
+use mochi_core::paper::{PaperStore, StoreFailure, StoreFailureKind};
 use mochi_domain::{
     DataSource, EquityPoint, Fill, LedgerEvent, Order, PaperAccount, Position, RiskSettings,
 };
@@ -120,11 +120,16 @@ impl Drop for OpenTransaction<'_> {
 }
 
 fn failure(e: rusqlite::Error) -> StoreFailure {
-    StoreFailure(e.to_string())
+    let kind = match e.sqlite_error_code() {
+        Some(rusqlite::ErrorCode::DatabaseBusy) => StoreFailureKind::Busy,
+        Some(rusqlite::ErrorCode::DatabaseLocked) => StoreFailureKind::Locked,
+        _ => StoreFailureKind::Other,
+    };
+    StoreFailure::new(kind, e.to_string())
 }
 
 fn json_failure(e: serde_json::Error) -> StoreFailure {
-    StoreFailure(e.to_string())
+    StoreFailure::new(StoreFailureKind::Other, e.to_string())
 }
 
 /// The text TS stores for an enum: its serde name, e.g. `STOP_MARKET`.

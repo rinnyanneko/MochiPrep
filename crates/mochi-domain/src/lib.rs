@@ -6,6 +6,7 @@ mod instruments;
 pub mod jsnum;
 mod market;
 pub mod registry;
+mod server;
 
 pub use accounting::{
     default_account_config, default_live_limits, default_risk_settings, AccountBalance,
@@ -20,3 +21,7 @@ pub use instruments::{
     default_instrument, default_instruments, InstrumentSpecification, DEFAULT_SYMBOLS,
 };
 pub use market::{Candle, DataSource, Quote, Timeframe};
+pub use server::{
+    FeedState, FeedStatus, NewsItem, NewsSource, ReplayState, ServerEvent, ToastLevel, Topic,
+    VaultStatus,
+};

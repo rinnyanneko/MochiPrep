@@ -1,14 +1,42 @@
 //! Persistence the paper engine needs. Synchronous on purpose: every financial change happens
-//! inside one `transaction`, with no await point where another fill could interleave. The
-//! methods mirror `packages/core/src/paper/store.ts` one for one.
+//! inside one `transaction`, with no await point where another fill could interleave. The engine
+//! wraps even its single-row writes in one, so a store can rely on every write being in a
+//! transaction. The methods mirror `packages/core/src/paper/store.ts` one for one.
 
 use mochi_domain::{DataSource, EquityPoint, Fill, LedgerEvent, Order, PaperAccount, Position};
 
-/// A storage error. Only the message survives, since the engine's reaction is the same whatever
-/// the cause: roll back and report.
+/// A storage error. The engine's reaction is the same whatever the cause (roll back and report),
+/// but its owner may retry when another connection held the database, so that kind is kept.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{0}")]
-pub struct StoreFailure(pub String);
+#[error("{message}")]
+pub struct StoreFailure {
+    pub kind: StoreFailureKind,
+    pub message: String,
+}
+
+/// The SQLite result codes a caller can act on. Everything else is `Other`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoreFailureKind {
+    /// SQLITE_BUSY: another connection holds the lock. The same call can succeed later.
+    Busy,
+    /// SQLITE_LOCKED: a conflict inside this connection, such as a table locked by a statement
+    /// still running.
+    Locked,
+    Other,
+}
+
+impl StoreFailure {
+    pub fn new(kind: StoreFailureKind, message: impl Into<String>) -> Self {
+        StoreFailure {
+            kind,
+            message: message.into(),
+        }
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.kind == StoreFailureKind::Busy
+    }
+}
 
 pub trait PaperStore {
     /// Runs `f` atomically; an `Err` rolls back everything `f` wrote. Nested calls use a

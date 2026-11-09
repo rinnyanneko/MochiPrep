@@ -295,23 +295,23 @@ interface Scenario { name: string; snapshot: 'every' | 'end'; ops: Op[] }
 
 ## Carried forward from Plan 2 reviews
 
-Real findings that nothing in Plan 2 builds on. The plan named for each must pick it up.
+Real findings that nothing in Plan 2 builds on. The plan named for each must pick it up. Rows marked done say where; the rows after the Plan 2 ones were added by Plan 3 (Rust server and feeds).
 
 | Plan | Item |
 |---|---|
-| 3 | Split `engine.rs` into impl-block modules (`types.rs` for events, errors, deps and helpers; `fills.rs` for `fill_order`, posting and `refresh_liquidation`; `protection.rs` for replace/cancel protection and `close_order`) as a pure move in Plan 3's first commit, verified by the unchanged scenario suite |
-| 3 | TS `onQuote` applies no quote-age check. The 60 000 ms rule for quote-driven fills rests on the Runtime/feed and must stay identical |
-| 3 | Settle `on_quote` event semantics on error (flush per committed step, drop on rollback), consistent with `set_protection` |
-| 3 | All writes go through `PaperStore::transaction` or a shared depth. `SqlitePaperStore::connection()` must not be used to `BEGIN` |
-| 3 | Keep the rusqlite error kind in `StoreFailure` (BUSY/retry detection) |
-| 3 | `Dec::parse` deliberately rejects `0x…`/Infinity/NaN and caps exponents. Document this where untrusted strings first reach `Dec`, and accept leading-zero exponents |
-| 3 | `OrderRequest` explicit-null inputs and byte-level API JSON goldens |
+| 3 (done: Plan 3 Task 1, `d40f2bb`, `d17713f`) | Split `engine.rs` into impl-block modules (`types.rs` for events, errors, deps and helpers; `fills.rs` for `fill_order`, posting and `refresh_liquidation`; `protection.rs` for replace/cancel protection and `close_order`) as a pure move in Plan 3's first commit, verified by the unchanged scenario suite |
+| 3 (done: Plan 3 Task 4, `361b3b5`; `paper_carried.rs::on_quote_has_no_quote_age_check`) | TS `onQuote` applies no quote-age check. The 60 000 ms rule for quote-driven fills rests on the Runtime/feed and must stay identical |
+| 3 (done: Plan 3 Task 4, `361b3b5`) | Settle `on_quote` event semantics on error (flush per committed step, drop on rollback), consistent with `set_protection` |
+| 3 (done: Plan 3 Task 4, `361b3b5`; `paper_carried.rs::every_engine_write_is_inside_a_transaction`) | All writes go through `PaperStore::transaction` or a shared depth. `SqlitePaperStore::connection()` must not be used to `BEGIN` |
+| 3 (done: Plan 3 Task 4, `361b3b5`; `StoreFailureKind`) | Keep the rusqlite error kind in `StoreFailure` (BUSY/retry detection) |
+| 3 (done: Plan 3 Task 6, `4f5ca49`; documented in `mochi-server/src/routes/orders.rs`) | `Dec::parse` deliberately rejects `0x…`/Infinity/NaN and caps exponents. Document this where untrusted strings first reach `Dec`, and accept leading-zero exponents |
+| 3 (done: Plan 3 Task 3, `716f787`, and Task 6, `4f5ca49`; `golden_validation.rs`, `api-script.json`) | `OrderRequest` explicit-null inputs and byte-level API JSON goldens |
 | 4 | Risk `now - quote.ts` should use `checked_sub`. Reject non-finite `RiskInput` numbers up front, mapped to `input`. The zero-ask unit test should reach the /0 path. Comment `expiresAt ""` |
 | 4 | Decide the recorded outcome label when the risk engine returns `input` (TS throws, so the runner records an error) |
 | 4 | `AiDecisionData` goes through the JS number serializers when stored |
 | 5 | Rust `scrub` now returns `CheckpointBlocked` when a reader stops the WAL truncation (CodeRabbit). Node's `store.scrub()` still ignores the busy flag. Decide how `enableVault`/sealing reacts (retry, report) and make Node and Rust agree |
-| 3/5 | Exotic JS numbers in `live_limits`/config, covered when live limits become editable |
-| 3/4 | Rust `ProtectionResult` lacks the new `pending` field (paper is always false; TS has it). Add it when the Rust runtime/runner exists |
+| 5 | Exotic JS numbers in `live_limits`/config, covered when live limits become editable (still open: Plan 3 only reads live limits; their writes answer 501) |
+| 3/4 (done: Plan 3 Task 6, `4f5ca49`) | Rust `ProtectionResult` lacks the new `pending` field (paper is always false; TS has it). Add it when the Rust runtime/runner exists |
 | 4 | Port the runner `PROTECT` path, the SIGNAL snapshot rule and `buildSystemPrompt({ allowTrailingStop })`. Also port `ProtectionChangeError` handling (partial apply becomes ORDER_REJECTED with `protectionAfter`) and the "awaiting confirmation" ORDER_PLACED outcome |
 | 5 | Port `classifyProtectionChange` (add a golden), the OKX algo client and engine protection (place-before-cancel, `algoClOrdId` matching, external orders, sync cleanup) |
 | 5 | OKX protection reconciliation rules: place all legs before cancelling any, `PROTECTION_PENDING` refusal, no-position cleanup only after at least 2 missed syncs and at least 10 s, stray "cancel pending" visibility and retry, the re-adopt rule, one `attachAlgoOrds` element per leg with `attachAlgoClOrdId`. Plus the result of the owner's Demo test of the seven UNCONFIRMED behaviours in `docs/OKX_TRADING.md` |
@@ -321,3 +321,11 @@ Real findings that nothing in Plan 2 builds on. The plan named for each must pic
 | server | `assertCanExecuteSignal` exempts `PROTECT` as well as `CLOSE` from the arm requirement; the OKX protection gate still refuses `NEEDS_ARMED` changes while disarmed |
 | 4 | Runner HOLD-on-no-change: after `setProtection`, when nothing is pending and `before` equals `after` (decimal comparison), record `HOLD` `Protection already as requested` instead of `EXECUTED` |
 | any | Cleanup: `sub_exact` duplication, `zero()` re-parse, `side_text`/`status_text`/`liquidity_text` duplication, `queued` mutated from `market.rs`, `DAY_MS`, `first_difference` on arrays, `last_funding_time` comment, `query_one`, split `risk::run_checks` (Sonar cognitive complexity 32 > 30; extract the sizing section, keeping check order and detail strings, which the risk golden pins) |
+| 4 | Pending-suggestion expiry: Node's runner tick expires SIGNAL suggestions. Until the Rust runner exists, Rust `GET /api/signals` can list a suggestion Node would already have expired |
+| 4 | Load provider keys and extra headers into the runtime's redaction secrets list, as Node does. Plan 3 leaves it empty because no Plan 3 path handles them |
+| 4 | Roadmap change: demo routes (`/api/demo/start`, `reset`, `exit`) answer 501 in Plan 3 because demo start creates agents. Port them with the agents, and make `e2e/demo.spec.ts` against the Rust server (`pnpm test:e2e:rust`) Plan 4's proof |
+| 4 | `PUT`/`DELETE /api/agents/stop-all` 404 body may differ from Node; 501 writes answer 501 even for unknown ids. Settle both when the agent routes are ported |
+| launcher | Neither backend handles Ctrl-Break on Windows (Node listens for SIGINT/SIGTERM; Rust for Ctrl-C/SIGTERM), so Ctrl-Break kills the process without closing the database. Whatever stops the server (the launcher, a service) must send Ctrl-C or SIGTERM, or both backends must learn another stop signal |
+| any | Public-feed handshake timeout (Plan 3 CodeRabbit finding): neither backend bounds the initial WebSocket dial/handshake. A hung handshake can leave the feed CONNECTING indefinitely, although REST polling continues. Add a bounded handshake and a stalled-handshake/redial test to both backends together; deferred from Plan 3 to preserve the agreed Node behaviour |
+| any | SECURITY, needs an owner decision: `validateFeedUrl` (Node) and its Rust port are text-only, so names that resolve to private IPs can pass the text-only private-host check (the trailing-root-dot bypass was fixed in PR #7), an SSRF gap in both backends by parity. Whoever owns news hardening should decide whether to resolve and check addresses (on every redirect hop), and change both backends together |
+| any | Plan 3 cleanup: `validate.rs` (~1,100 lines), `news.rs` (~1,590; the `Date.parse` port could be `js_date.rs`) and `okx_public.rs` (~860; transport could split) are large; `begin_batch_for_test` is `pub #[doc(hidden)]`; `AppState.web` is public; the e2e Rust binary path ignores `CARGO_TARGET_DIR` |

@@ -6,8 +6,24 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+futures-util = { workspace = true }
+mochi-decimal = { path = "../mochi-decimal" }
 mochi-domain = { path = "../mochi-domain" }
+regex = { workspace = true }
+reqwest = { workspace = true }
+rustls = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+url = { workspace = true }
+webpki-roots = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
+# A local OKX: REST routes served in-process or over loopback, and a WebSocket server.
+axum = { workspace = true }
+serde = { workspace = true }
 sha2 = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "io-util"] }
+tower = { workspace = true }

@@ -1,0 +1,2720 @@
+{
+ "bodies": [
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"Main\",\"source\":\"REPLAY\"}",
+   "status": 200,
+   "response": {
+    "name": "Main",
+    "source": "REPLAY",
+    "initialBalance": "10000"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"  Padded  \",\"source\":\"LIVE\",\"initialBalance\":\"2500.50\"}",
+   "status": 200,
+   "response": {
+    "name": "Padded",
+    "source": "LIVE",
+    "initialBalance": "2500.50"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"   \",\"source\":\"REPLAY\"}",
+   "status": 400,
+   "response": {
+    "error": "name: Too small: expected string to have >=1 characters"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"\",\"source\":\"REPLAY\"}",
+   "status": 400,
+   "response": {
+    "error": "name: Too small: expected string to have >=1 characters"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"source\":\"REPLAY\"}",
+   "status": 200,
+   "response": {
+    "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "source": "REPLAY",
+    "initialBalance": "10000"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"source\":\"REPLAY\"}",
+   "status": 400,
+   "response": {
+    "error": "name: Too big: expected string to have <=60 characters"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"source\":\"REPLAY\"}",
+   "status": 200,
+   "response": {
+    "name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+    "source": "REPLAY",
+    "initialBalance": "10000"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"source\":\"REPLAY\"}",
+   "status": 200,
+   "response": {
+    "name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+    "source": "REPLAY",
+    "initialBalance": "10000"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\" 　\ufeffMain\u2028\",\"source\":\"REPLAY\"}",
+   "status": 200,
+   "response": {
+    "name": "Main",
+    "source": "REPLAY",
+    "initialBalance": "10000"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"source\":\"REPLAY\"}",
+   "status": 400,
+   "response": {
+    "error": "name: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"Main\",\"source\":\"PAPER\"}",
+   "status": 400,
+   "response": {
+    "error": "source: Invalid option: expected one of \"REPLAY\"|\"LIVE\""
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"Main\",\"source\":\"REPLAY\",\"initialBalance\":null}",
+   "status": 400,
+   "response": {
+    "error": "initialBalance: Invalid input: expected string, received null"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"Main\",\"source\":\"REPLAY\",\"initialBalance\":10000}",
+   "status": 400,
+   "response": {
+    "error": "initialBalance: Invalid input: expected string, received number"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"Main\",\"source\":\"REPLAY\",\"initialBalance\":\"-5\"}",
+   "status": 400,
+   "response": {
+    "error": "initialBalance: expected a positive decimal string"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"Main\",\"source\":\"REPLAY\",\"initialBalance\":\"1.\"}",
+   "status": 400,
+   "response": {
+    "error": "initialBalance: expected a positive decimal string"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"Main\",\"source\":\"REPLAY\",\"initialBalance\":\"1111111111111111111111111111111111111111\"}",
+   "status": 200,
+   "response": {
+    "name": "Main",
+    "source": "REPLAY",
+    "initialBalance": "1111111111111111111111111111111111111111"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"Main\",\"source\":\"REPLAY\",\"initialBalance\":\"11111111111111111111111111111111111111111\"}",
+   "status": 400,
+   "response": {
+    "error": "initialBalance: Too big: expected string to have <=40 characters"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"Main\",\"source\":\"REPLAY\",\"initialBalance\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+   "status": 400,
+   "response": {
+    "error": "initialBalance: expected a positive decimal string; initialBalance: Too big: expected string to have <=40 characters"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":\"Main\",\"source\":\"REPLAY\",\"isDemo\":true}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"isDemo\""
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"zeta\":1,\"name\":\"Main\",\"alpha\":2,\"source\":\"REPLAY\",\"10\":3,\"2\":4}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized keys: \"2\", \"10\", \"zeta\", \"alpha\""
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":7,\"source\":null,\"initialBalance\":[]}",
+   "status": 400,
+   "response": {
+    "error": "name: Invalid input: expected string, received number; source: Invalid option: expected one of \"REPLAY\"|\"LIVE\"; initialBalance: Invalid input: expected string, received array"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],\"source\":\"REPLAY\",\"initialBalance\":[\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\",\"1\"]}",
+   "status": 400,
+   "response": {
+    "error": "name: Invalid input: expected string, received array; name: Too big: expected array to have <=60 items; initialBalance: Invalid input: expected string, received array; initialBalance: Too big: expected array to have <=40 items"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":[],\"source\":\"REPLAY\",\"initialBalance\":{\"length\":41}}",
+   "status": 400,
+   "response": {
+    "error": "name: Invalid input: expected string, received array; name: Too small: expected array to have >=1 items; initialBalance: Invalid input: expected string, received object; initialBalance: Too big: expected unknown to be <=40"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":{\"length\":\"x\"},\"source\":\"REPLAY\",\"initialBalance\":{\"length\":null}}",
+   "status": 400,
+   "response": {
+    "error": "name: Invalid input: expected string, received object; name: Too small: expected unknown to be >=1; name: Too big: expected unknown to be <=60; initialBalance: Invalid input: expected string, received object"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":{\"length\":[61]},\"source\":\"REPLAY\",\"initialBalance\":{\"length\":\"0x29\"}}",
+   "status": 400,
+   "response": {
+    "error": "name: Invalid input: expected string, received object; name: Too big: expected unknown to be <=60; initialBalance: Invalid input: expected string, received object; initialBalance: Too big: expected unknown to be <=40"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{\"name\":{\"length\":true},\"source\":\"REPLAY\",\"initialBalance\":{\"length\":[[40]]}}",
+   "status": 400,
+   "response": {
+    "error": "name: Invalid input: expected string, received object; initialBalance: Invalid input: expected string, received object"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "{}",
+   "status": 400,
+   "response": {
+    "error": "name: Invalid input: expected string, received undefined; source: Invalid option: expected one of \"REPLAY\"|\"LIVE\""
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "[]",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received array"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "null",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received null"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "\"Main\"",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received string"
+   }
+  },
+  {
+   "schema": "CreateAccount",
+   "body": "42",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received number"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "status": 200,
+   "response": {
+    "accountId": "acc-1",
+    "clientOrderId": "cli-1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "MARKET",
+    "quantity": "0.01",
+    "leverage": 5
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"quantity\":\"0.01\",\"leverage\":5,\"price\":\"68000.5\",\"reduceOnly\":false,\"stopLoss\":\"67000\",\"takeProfit\":\"70000\",\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.01\",\"activationPrice\":null}}",
+   "status": 200,
+   "response": {
+    "accountId": "acc-1",
+    "clientOrderId": "cli-1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "LIMIT",
+    "quantity": "0.01",
+    "price": "68000.5",
+    "leverage": 5,
+    "reduceOnly": false,
+    "stopLoss": "67000",
+    "takeProfit": "70000",
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.01",
+     "activationPrice": null
+    }
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5,\"price\":null,\"stopLoss\":null,\"takeProfit\":null,\"trailingStop\":null}",
+   "status": 200,
+   "response": {
+    "accountId": "acc-1",
+    "clientOrderId": "cli-1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "MARKET",
+    "quantity": "0.01",
+    "price": null,
+    "leverage": 5,
+    "stopLoss": null,
+    "takeProfit": null,
+    "trailingStop": null
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5,\"reduceOnly\":null}",
+   "status": 400,
+   "response": {
+    "error": "reduceOnly: Invalid input: expected boolean, received null"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5,\"trailingStop\":{\"kind\":\"SPREAD\",\"callback\":\"50\",\"activationPrice\":\"69000\"}}",
+   "status": 200,
+   "response": {
+    "accountId": "acc-1",
+    "clientOrderId": "cli-1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "MARKET",
+    "quantity": "0.01",
+    "leverage": 5,
+    "trailingStop": {
+     "kind": "SPREAD",
+     "callback": "50",
+     "activationPrice": "69000"
+    }
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5,\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.01\"}}",
+   "status": 400,
+   "response": {
+    "error": "trailingStop.activationPrice: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5,\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.01\",\"activationPrice\":null,\"extra\":1}}",
+   "status": 400,
+   "response": {
+    "error": "trailingStop: Unrecognized key: \"extra\""
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5,\"trailingStop\":{\"kind\":\"PERCENT\",\"callback\":\"x\",\"activationPrice\":5}}",
+   "status": 400,
+   "response": {
+    "error": "trailingStop.kind: Invalid option: expected one of \"RATIO\"|\"SPREAD\"; trailingStop.callback: expected a positive decimal string; trailingStop.activationPrice: Invalid input: expected string, received number"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5,\"trailingStop\":\"none\"}",
+   "status": 400,
+   "response": {
+    "error": "trailingStop: Invalid input: expected object, received string"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":0}",
+   "status": 400,
+   "response": {
+    "error": "leverage: Too small: expected number to be >=1"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":101}",
+   "status": 400,
+   "response": {
+    "error": "leverage: Too big: expected number to be <=100"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":1}",
+   "status": 200,
+   "response": {
+    "accountId": "acc-1",
+    "clientOrderId": "cli-1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "MARKET",
+    "quantity": "0.01",
+    "leverage": 1
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":100}",
+   "status": 200,
+   "response": {
+    "accountId": "acc-1",
+    "clientOrderId": "cli-1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "MARKET",
+    "quantity": "0.01",
+    "leverage": 100
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":2.5}",
+   "status": 400,
+   "response": {
+    "error": "leverage: Invalid input: expected int, received number"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":\"5\"}",
+   "status": 400,
+   "response": {
+    "error": "leverage: Invalid input: expected number, received string"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":10000000000000000}",
+   "status": 400,
+   "response": {
+    "error": "leverage: Too big: expected int to be <=9007199254740991; leverage: Too big: expected number to be <=100"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":0}",
+   "status": 400,
+   "response": {
+    "error": "leverage: Too small: expected number to be >=1"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5.0}",
+   "status": 200,
+   "response": {
+    "accountId": "acc-1",
+    "clientOrderId": "cli-1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "MARKET",
+    "quantity": "0.01",
+    "leverage": 5
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"1e5\",\"leverage\":5}",
+   "status": 400,
+   "response": {
+    "error": "quantity: expected a positive decimal string"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\".5\",\"leverage\":5}",
+   "status": 400,
+   "response": {
+    "error": "quantity: expected a positive decimal string"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\" 1\",\"leverage\":5}",
+   "status": 400,
+   "response": {
+    "error": "quantity: expected a positive decimal string"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"١٢\",\"leverage\":5}",
+   "status": 400,
+   "response": {
+    "error": "quantity: expected a positive decimal string"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"1\\n\",\"leverage\":5}",
+   "status": 400,
+   "response": {
+    "error": "quantity: expected a positive decimal string"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5,\"price\":\"11111111111111111111111111111111111111111\"}",
+   "status": 400,
+   "response": {
+    "error": "price: Too big: expected string to have <=40 characters"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"btcusdt\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"USDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"USDTUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "status": 200,
+   "response": {
+    "accountId": "acc-1",
+    "clientOrderId": "cli-1",
+    "symbol": "USDTUSDT",
+    "side": "BUY",
+    "type": "MARKET",
+    "quantity": "0.01",
+    "leverage": 5
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"AAAAAAAAAAAAAAAAAAAAAAAAUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "status": 200,
+   "response": {
+    "accountId": "acc-1",
+    "clientOrderId": "cli-1",
+    "symbol": "AAAAAAAAAAAAAAAAAAAAAAAAUSDT",
+    "side": "BUY",
+    "type": "MARKET",
+    "quantity": "0.01",
+    "leverage": 5
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"AAAAAAAAAAAAAAAAAAAAAAAAAUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTC-USDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "status": 400,
+   "response": {
+    "error": "clientOrderId: Too small: expected string to have >=1 characters"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "status": 200,
+   "response": {
+    "accountId": "acc-1",
+    "clientOrderId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "MARKET",
+    "quantity": "0.01",
+    "leverage": 5
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "status": 400,
+   "response": {
+    "error": "clientOrderId: Too big: expected string to have <=128 characters"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":[],\"clientOrderId\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"symbol\":[null,null,null],\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":{\"length\":50},\"leverage\":5,\"price\":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]}",
+   "status": 400,
+   "response": {
+    "error": "accountId: Invalid input: expected string, received array; accountId: Too small: expected array to have >=1 items; clientOrderId: Invalid input: expected string, received array; clientOrderId: Too big: expected array to have <=128 items; symbol: Invalid input: expected string, received array; quantity: Invalid input: expected string, received object; quantity: Too big: expected unknown to be <=40; price: Invalid input: expected string, received array; price: Too big: expected array to have <=40 items"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"buy\",\"type\":\"STOP_MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "status": 400,
+   "response": {
+    "error": "side: Invalid option: expected one of \"BUY\"|\"SELL\"; type: Invalid option: expected one of \"MARKET\"|\"LIMIT\""
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5,\"agentId\":\"agent-1\"}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"agentId\""
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5,\"agentId\":\"agent-1\",\"decisionId\":\"dec-1\"}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized keys: \"agentId\", \"decisionId\""
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"leverage\":5}",
+   "status": 400,
+   "response": {
+    "error": "quantity: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\"}",
+   "status": 400,
+   "response": {
+    "error": "accountId: Invalid input: expected string, received undefined; leverage: Invalid input: expected number, received undefined"
+   }
+  },
+  {
+   "schema": "PlaceOrder",
+   "body": "{\"accountId\":\"acc-1\",\"accountId\":\"acc-2\",\"clientOrderId\":\"cli-1\",\"symbol\":\"BTCUSDT\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.01\",\"leverage\":5}",
+   "status": 200,
+   "response": {
+    "accountId": "acc-2",
+    "clientOrderId": "cli-1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "MARKET",
+    "quantity": "0.01",
+    "leverage": 5
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{\"fraction\":0.5,\"clientOrderId\":\"close-1\"}",
+   "status": 200,
+   "response": {
+    "fraction": 0.5,
+    "clientOrderId": "close-1"
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{\"fraction\":1,\"clientOrderId\":\"close-1\"}",
+   "status": 200,
+   "response": {
+    "fraction": 1,
+    "clientOrderId": "close-1"
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{\"fraction\":0,\"clientOrderId\":\"close-1\"}",
+   "status": 400,
+   "response": {
+    "error": "fraction: Too small: expected number to be >0"
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{\"fraction\":1.0000001,\"clientOrderId\":\"close-1\"}",
+   "status": 400,
+   "response": {
+    "error": "fraction: Too big: expected number to be <=1"
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{\"fraction\":-0.5,\"clientOrderId\":\"close-1\"}",
+   "status": 400,
+   "response": {
+    "error": "fraction: Too small: expected number to be >0"
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{\"fraction\":1e-300,\"clientOrderId\":\"close-1\"}",
+   "status": 200,
+   "response": {
+    "fraction": 1e-300,
+    "clientOrderId": "close-1"
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{\"fraction\":\"0.5\",\"clientOrderId\":\"close-1\"}",
+   "status": 400,
+   "response": {
+    "error": "fraction: Invalid input: expected number, received string"
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{\"fraction\":null,\"clientOrderId\":\"close-1\"}",
+   "status": 400,
+   "response": {
+    "error": "fraction: Invalid input: expected number, received null"
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{\"fraction\":0.5}",
+   "status": 400,
+   "response": {
+    "error": "clientOrderId: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{\"fraction\":0.5,\"clientOrderId\":\"\"}",
+   "status": 400,
+   "response": {
+    "error": "clientOrderId: Too small: expected string to have >=1 characters"
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{\"fraction\":0.5,\"clientOrderId\":\"ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}",
+   "status": 400,
+   "response": {
+    "error": "clientOrderId: Too big: expected string to have <=128 characters"
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{\"fraction\":0.5,\"clientOrderId\":\"close-1\",\"symbol\":\"BTCUSDT\"}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"symbol\""
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{\"clientOrderId\":7}",
+   "status": 400,
+   "response": {
+    "error": "fraction: Invalid input: expected number, received undefined; clientOrderId: Invalid input: expected string, received number"
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "{}",
+   "status": 400,
+   "response": {
+    "error": "fraction: Invalid input: expected number, received undefined; clientOrderId: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "ClosePosition",
+   "body": "[0.5]",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received array"
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"stopLoss\":\"67000\",\"takeProfit\":\"70000\"}",
+   "status": 200,
+   "response": {
+    "stopLoss": "67000",
+    "takeProfit": "70000"
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"stopLoss\":null,\"takeProfit\":null}",
+   "status": 200,
+   "response": {
+    "stopLoss": null,
+    "takeProfit": null
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"stopLoss\":null,\"takeProfit\":null,\"trailingStop\":null}",
+   "status": 200,
+   "response": {
+    "stopLoss": null,
+    "takeProfit": null,
+    "trailingStop": null
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"stopLoss\":null,\"takeProfit\":null,\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":\"0.01\",\"activationPrice\":null}}",
+   "status": 200,
+   "response": {
+    "stopLoss": null,
+    "takeProfit": null,
+    "trailingStop": {
+     "kind": "RATIO",
+     "callback": "0.01",
+     "activationPrice": null
+    }
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"stopLoss\":\"67000\",\"takeProfit\":null,\"trailingStop\":{\"kind\":\"SPREAD\",\"callback\":\"25.5\",\"activationPrice\":\"69000\"}}",
+   "status": 200,
+   "response": {
+    "stopLoss": "67000",
+    "takeProfit": null,
+    "trailingStop": {
+     "kind": "SPREAD",
+     "callback": "25.5",
+     "activationPrice": "69000"
+    }
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"takeProfit\":null}",
+   "status": 400,
+   "response": {
+    "error": "stopLoss: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"stopLoss\":null}",
+   "status": 400,
+   "response": {
+    "error": "takeProfit: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{}",
+   "status": 400,
+   "response": {
+    "error": "stopLoss: Invalid input: expected string, received undefined; takeProfit: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"stopLoss\":67000,\"takeProfit\":\"70000\"}",
+   "status": 400,
+   "response": {
+    "error": "stopLoss: Invalid input: expected string, received number"
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"stopLoss\":\"-1\",\"takeProfit\":\"11111111111111111111111111111111111111111\"}",
+   "status": 400,
+   "response": {
+    "error": "stopLoss: expected a positive decimal string; takeProfit: Too big: expected string to have <=40 characters"
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"stopLoss\":null,\"takeProfit\":null,\"trailingStop\":{}}",
+   "status": 400,
+   "response": {
+    "error": "trailingStop.kind: Invalid option: expected one of \"RATIO\"|\"SPREAD\"; trailingStop.callback: Invalid input: expected string, received undefined; trailingStop.activationPrice: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"stopLoss\":null,\"takeProfit\":null,\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":null,\"activationPrice\":null}}",
+   "status": 400,
+   "response": {
+    "error": "trailingStop.callback: Invalid input: expected string, received null"
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"stopLoss\":null,\"takeProfit\":null,\"trailingStop\":[]}",
+   "status": 400,
+   "response": {
+    "error": "trailingStop: Invalid input: expected object, received array"
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"stopLoss\":null,\"takeProfit\":null,\"pending\":true}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"pending\""
+   }
+  },
+  {
+   "schema": "Protection",
+   "body": "{\"stopLoss\":null,\"takeProfit\":null,\"b\":1,\"a\":2}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized keys: \"b\", \"a\""
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "{\"symbol\":\"DOGEUSDT\"}",
+   "status": 200,
+   "response": {
+    "symbol": "DOGEUSDT"
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "{\"symbol\":\"1000PEPEUSDT\"}",
+   "status": 200,
+   "response": {
+    "symbol": "1000PEPEUSDT"
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "{\"symbol\":\"dogeusdt\"}",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "{\"symbol\":\"DOGEUSDC\"}",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "{\"symbol\":\"DOGE-USDT-SWAP\"}",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "{\"symbol\":\"\"}",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "{\"symbol\":\"DOGEUSDT \"}",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "{\"symbol\":\"ZZZZZZZZZZZZZZZZZZZZZZZZUSDT\"}",
+   "status": 200,
+   "response": {
+    "symbol": "ZZZZZZZZZZZZZZZZZZZZZZZZUSDT"
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "{\"symbol\":\"ZZZZZZZZZZZZZZZZZZZZZZZZZUSDT\"}",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "{\"symbol\":null}",
+   "status": 400,
+   "response": {
+    "error": "symbol: Invalid input: expected string, received null"
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "{\"symbol\":[\"DOGEUSDT\"]}",
+   "status": 400,
+   "response": {
+    "error": "symbol: Invalid input: expected string, received array"
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "{\"symbol\":\"DOGEUSDT\",\"venue\":\"OKX\"}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"venue\""
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "{}",
+   "status": 400,
+   "response": {
+    "error": "symbol: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "\"DOGEUSDT\"",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received string"
+   }
+  },
+  {
+   "schema": "AddInstrument",
+   "body": "true",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received boolean"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"CoinDesk\",\"url\":\"https://www.coindesk.com/arc/outboundfeeds/rss/\"}",
+   "status": 200,
+   "response": {
+    "name": "CoinDesk",
+    "url": "https://www.coindesk.com/arc/outboundfeeds/rss/"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"  Padded  \",\"url\":\"  https://example.com/feed.xml  \"}",
+   "status": 200,
+   "response": {
+    "name": "Padded",
+    "url": "https://example.com/feed.xml"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"Tabs\",\"url\":\"https://exa\\tmple.com/fe\\ned\"}",
+   "status": 200,
+   "response": {
+    "name": "Tabs",
+    "url": "https://example.com/feed"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"Plain\",\"url\":\"http://example.com\"}",
+   "status": 200,
+   "response": {
+    "name": "Plain",
+    "url": "http://example.com"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"Mail\",\"url\":\"mailto:someone@example.com\"}",
+   "status": 200,
+   "response": {
+    "name": "Mail",
+    "url": "mailto:someone@example.com"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"Odd\",\"url\":\"http:example.com\"}",
+   "status": 200,
+   "response": {
+    "name": "Odd",
+    "url": "http:example.com"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"Rel\",\"url\":\"/feed.xml\"}",
+   "status": 400,
+   "response": {
+    "error": "url: Invalid URL"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"Words\",\"url\":\"not a url\"}",
+   "status": 400,
+   "response": {
+    "error": "url: Invalid URL"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"Empty\",\"url\":\"\"}",
+   "status": 400,
+   "response": {
+    "error": "url: Invalid URL"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"Long\",\"url\":\"https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+   "status": 200,
+   "response": {
+    "name": "Long",
+    "url": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"TooLong\",\"url\":\"https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+   "status": 400,
+   "response": {
+    "error": "url: Too big: expected string to have <=300 characters"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"Both\",\"url\":\"not a url aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+   "status": 400,
+   "response": {
+    "error": "url: Invalid URL; url: Too big: expected string to have <=300 characters"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"url\":\"https://example.com\"}",
+   "status": 200,
+   "response": {
+    "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "url": "https://example.com"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"url\":\"https://example.com\"}",
+   "status": 400,
+   "response": {
+    "error": "name: Too big: expected string to have <=40 characters"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\" \",\"url\":\"https://example.com\"}",
+   "status": 400,
+   "response": {
+    "error": "name: Too small: expected string to have >=1 characters"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"IPv6\",\"url\":\"http://[::1]:8080/feed\"}",
+   "status": 200,
+   "response": {
+    "name": "IPv6",
+    "url": "http://[::1]:8080/feed"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"BadPort\",\"url\":\"http://example.com:99999/\"}",
+   "status": 400,
+   "response": {
+    "error": "url: Invalid URL"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"url\":\"https://example.com\"}",
+   "status": 400,
+   "response": {
+    "error": "name: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":\"Extra\",\"url\":\"https://example.com\",\"enabled\":true}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"enabled\""
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":null,\"url\":5}",
+   "status": 400,
+   "response": {
+    "error": "name: Invalid input: expected string, received null; url: Invalid input: expected string, received number"
+   }
+  },
+  {
+   "schema": "NewsSourceInput",
+   "body": "{\"name\":{\"length\":0},\"url\":[\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\",\"a\"]}",
+   "status": 400,
+   "response": {
+    "error": "name: Invalid input: expected string, received object; name: Too small: expected unknown to be >=1; url: Invalid input: expected string, received array; url: Too big: expected array to have <=300 items"
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "{\"enabled\":true}",
+   "status": 200,
+   "response": {
+    "enabled": true
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "{\"enabled\":false}",
+   "status": 200,
+   "response": {
+    "enabled": false
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "{\"enabled\":\"true\"}",
+   "status": 400,
+   "response": {
+    "error": "enabled: Invalid input: expected boolean, received string"
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "{\"enabled\":1}",
+   "status": 400,
+   "response": {
+    "error": "enabled: Invalid input: expected boolean, received number"
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "{\"enabled\":null}",
+   "status": 400,
+   "response": {
+    "error": "enabled: Invalid input: expected boolean, received null"
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "{}",
+   "status": 400,
+   "response": {
+    "error": "enabled: Invalid input: expected boolean, received undefined"
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "{\"enabled\":true,\"id\":\"news_1\"}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"id\""
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "{\"enabled\":[]}",
+   "status": 400,
+   "response": {
+    "error": "enabled: Invalid input: expected boolean, received array"
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "{\"enabled\":{}}",
+   "status": 400,
+   "response": {
+    "error": "enabled: Invalid input: expected boolean, received object"
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "null",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received null"
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "[]",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received array"
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "\"enabled\"",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received string"
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "0",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received number"
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "false",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received boolean"
+   }
+  },
+  {
+   "schema": "NewsSourceToggle",
+   "body": "{\"Enabled\":true}",
+   "status": 400,
+   "response": {
+    "error": "enabled: Invalid input: expected boolean, received undefined; input: Unrecognized key: \"Enabled\""
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{}",
+   "status": 200,
+   "response": {}
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"playing\":true}",
+   "status": 200,
+   "response": {
+    "playing": true
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"playing\":false,\"speed\":20,\"steps\":5}",
+   "status": 200,
+   "response": {
+    "playing": false,
+    "speed": 20,
+    "steps": 5
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"speed\":1}",
+   "status": 200,
+   "response": {
+    "speed": 1
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"speed\":600}",
+   "status": 200,
+   "response": {
+    "speed": 600
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"speed\":0}",
+   "status": 400,
+   "response": {
+    "error": "speed: Too small: expected number to be >=1"
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"speed\":601}",
+   "status": 400,
+   "response": {
+    "error": "speed: Too big: expected number to be <=600"
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"speed\":2.5}",
+   "status": 400,
+   "response": {
+    "error": "speed: Invalid input: expected int, received number"
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"speed\":null}",
+   "status": 400,
+   "response": {
+    "error": "speed: Invalid input: expected number, received null"
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"steps\":1440}",
+   "status": 200,
+   "response": {
+    "steps": 1440
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"steps\":1441}",
+   "status": 400,
+   "response": {
+    "error": "steps: Too big: expected number to be <=1440"
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"steps\":0}",
+   "status": 400,
+   "response": {
+    "error": "steps: Too small: expected number to be >=1"
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"steps\":\"5\"}",
+   "status": 400,
+   "response": {
+    "error": "steps: Invalid input: expected number, received string"
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"playing\":\"yes\"}",
+   "status": 400,
+   "response": {
+    "error": "playing: Invalid input: expected boolean, received string"
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"playing\":null,\"speed\":null,\"steps\":null}",
+   "status": 400,
+   "response": {
+    "error": "playing: Invalid input: expected boolean, received null; speed: Invalid input: expected number, received null; steps: Invalid input: expected number, received null"
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"playing\":true,\"reset\":true}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"reset\""
+   }
+  },
+  {
+   "schema": "ReplayControl",
+   "body": "{\"speed\":1e+300,\"steps\":-1e+300}",
+   "status": 400,
+   "response": {
+    "error": "speed: Too big: expected int to be <=9007199254740991; speed: Too big: expected number to be <=600; steps: Too small: expected int to be >=-9007199254740991; steps: Too small: expected number to be >=1"
+   }
+  }
+ ],
+ "parser": [
+  {
+   "method": "POST",
+   "route": "none",
+   "headers": {},
+   "status": 200,
+   "response": {
+    "ok": true
+   }
+  },
+  {
+   "method": "POST",
+   "route": "none",
+   "headers": {
+    "content-length": "0"
+   },
+   "status": 200,
+   "response": {
+    "ok": true
+   }
+  },
+  {
+   "method": "POST",
+   "route": "ReplayControl",
+   "headers": {},
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received undefined"
+   }
+  },
+  {
+   "method": "PUT",
+   "route": "NewsSourceToggle",
+   "headers": {},
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received undefined"
+   }
+  },
+  {
+   "method": "DELETE",
+   "route": "none",
+   "headers": {},
+   "status": 200,
+   "response": {
+    "ok": true
+   }
+  },
+  {
+   "method": "POST",
+   "route": "none",
+   "headers": {
+    "content-type": "application/json"
+   },
+   "body": "",
+   "status": 400,
+   "response": {
+    "error": "Body cannot be empty when content-type is set to 'application/json'"
+   }
+  },
+  {
+   "method": "DELETE",
+   "route": "none",
+   "headers": {
+    "content-type": "application/json"
+   },
+   "body": "",
+   "status": 400,
+   "response": {
+    "error": "Body cannot be empty when content-type is set to 'application/json'"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json"
+   },
+   "body": "",
+   "status": 400,
+   "response": {
+    "error": "Body cannot be empty when content-type is set to 'application/json'"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "11"
+   },
+   "body": "{\"enabled\":",
+   "status": 400,
+   "response": {
+    "error": "Body is not valid JSON but content-type is set to 'application/json'"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "3"
+   },
+   "body": "   ",
+   "status": 400,
+   "response": {
+    "error": "Body is not valid JSON but content-type is set to 'application/json'"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "16"
+   },
+   "body": "{'enabled':true}",
+   "status": 400,
+   "response": {
+    "error": "Body is not valid JSON but content-type is set to 'application/json'"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "17"
+   },
+   "body": "{\"enabled\":true,}",
+   "status": 400,
+   "response": {
+    "error": "Body is not valid JSON but content-type is set to 'application/json'"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "18"
+   },
+   "body": "{\"enabled\":true} x",
+   "status": 400,
+   "response": {
+    "error": "Body is not valid JSON but content-type is set to 'application/json'"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "21"
+   },
+   "body": " \r\n\t{\"enabled\":true}\n",
+   "status": 200,
+   "response": {
+    "enabled": true
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "19"
+   },
+   "body": "\ufeff{\"enabled\":true}",
+   "status": 200,
+   "response": {
+    "enabled": true
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "4"
+   },
+   "body": "null",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received null"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "6"
+   },
+   "body": "\"text\"",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received string"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "6"
+   },
+   "body": "[true]",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received array"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "36"
+   },
+   "body": "{\"enabled\":true,\"__proto__\":{\"x\":1}}",
+   "status": 400,
+   "response": {
+    "error": "Body is not valid JSON but content-type is set to 'application/json'"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "35"
+   },
+   "body": "{\"enabled\":true,\"\\u005f_proto__\":1}",
+   "status": 400,
+   "response": {
+    "error": "Body is not valid JSON but content-type is set to 'application/json'"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "26"
+   },
+   "body": "{\"a\":[{\"__proto__\":null}]}",
+   "status": 400,
+   "response": {
+    "error": "Body is not valid JSON but content-type is set to 'application/json'"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "47"
+   },
+   "body": "{\"enabled\":true,\"constructor\":{\"prototype\":{}}}",
+   "status": 400,
+   "response": {
+    "error": "Body is not valid JSON but content-type is set to 'application/json'"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "43"
+   },
+   "body": "{\"enabled\":true,\"constructor\":{\"name\":\"x\"}}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"constructor\""
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "34"
+   },
+   "body": "{\"enabled\":true,\"constructor\":[1]}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"constructor\""
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "40"
+   },
+   "body": "{\"enabled\":true,\"note\":\"\\\"__proto__\\\":\"}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"note\""
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 200,
+   "response": {
+    "enabled": true
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "Application/JSON",
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 200,
+   "response": {
+    "enabled": true
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json;charset=\"utf-8\"",
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 200,
+   "response": {
+    "enabled": true
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json ; x=é",
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 200,
+   "response": {
+    "enabled": true
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json/x",
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 415,
+   "response": {
+    "error": "Unsupported Media Type"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/jsonx",
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 415,
+   "response": {
+    "error": "Unsupported Media Type"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/vnd.api+json",
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 415,
+   "response": {
+    "error": "Unsupported Media Type"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/x-www-form-urlencoded",
+    "content-length": "12"
+   },
+   "body": "enabled=true",
+   "status": 415,
+   "response": {
+    "error": "Unsupported Media Type"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "multipart/form-data; boundary=x",
+    "content-length": "5"
+   },
+   "body": "--x--",
+   "status": 415,
+   "response": {
+    "error": "Unsupported Media Type"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "none",
+   "headers": {
+    "content-type": "application/xml",
+    "content-length": "4"
+   },
+   "body": "<a/>",
+   "status": 415,
+   "response": {
+    "error": "Unsupported Media Type"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "none",
+   "headers": {
+    "content-type": "application/xml"
+   },
+   "body": "",
+   "status": 415,
+   "response": {
+    "error": "Unsupported Media Type"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "json",
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 415,
+   "response": {
+    "error": "Unsupported Media Type"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "",
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 415,
+   "response": {
+    "error": "Unsupported Media Type"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "; charset=utf-8",
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 415,
+   "response": {
+    "error": "Unsupported Media Type"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "text/plain",
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received string"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "text/plain; charset=utf-8"
+   },
+   "body": "",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received string"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "none",
+   "headers": {
+    "content-type": "text/plain",
+    "content-length": "5"
+   },
+   "body": "hello",
+   "status": 200,
+   "response": {
+    "ok": true
+   }
+  },
+  {
+   "method": "POST",
+   "route": "none",
+   "headers": {
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 415,
+   "response": {
+    "error": "Unsupported Media Type"
+   }
+  },
+  {
+   "method": "POST",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 415,
+   "response": {
+    "error": "Unsupported Media Type"
+   }
+  },
+  {
+   "method": "PUT",
+   "route": "NewsSourceToggle",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "16"
+   },
+   "body": "{\"enabled\":true}",
+   "status": 200,
+   "response": {
+    "enabled": true
+   }
+  },
+  {
+   "method": "DELETE",
+   "route": "none",
+   "headers": {
+    "content-type": "application/json",
+    "content-length": "7"
+   },
+   "body": "{\"x\":1}",
+   "status": 200,
+   "response": {
+    "ok": true
+   }
+  },
+  {
+   "method": "DELETE",
+   "route": "none",
+   "headers": {
+    "content-type": "text/csv",
+    "content-length": "3"
+   },
+   "body": "a,b",
+   "status": 415,
+   "response": {
+    "error": "Unsupported Media Type"
+   }
+  }
+ ],
+ "queries": [
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m",
+   "status": 200,
+   "response": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "timeframe": "1m",
+    "limit": 300
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=LIVE&symbol=ETHUSDT&timeframe=4h&limit=5",
+   "status": 200,
+   "response": {
+    "source": "LIVE",
+    "symbol": "ETHUSDT",
+    "timeframe": "4h",
+    "limit": 5
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=0",
+   "status": 400,
+   "response": {
+    "error": "limit: Too small: expected number to be >=1"
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=1",
+   "status": 200,
+   "response": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "timeframe": "1m",
+    "limit": 1
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=1000",
+   "status": 200,
+   "response": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "timeframe": "1m",
+    "limit": 1000
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=1001",
+   "status": 400,
+   "response": {
+    "error": "limit: Too big: expected number to be <=1000"
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=5.5",
+   "status": 400,
+   "response": {
+    "error": "limit: Invalid input: expected int, received number"
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=abc",
+   "status": 400,
+   "response": {
+    "error": "limit: Invalid input: expected number, received NaN"
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=",
+   "status": 400,
+   "response": {
+    "error": "limit: Too small: expected number to be >=1"
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=%205%20",
+   "status": 200,
+   "response": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "timeframe": "1m",
+    "limit": 5
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=0x10",
+   "status": 200,
+   "response": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "timeframe": "1m",
+    "limit": 16
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=1e2",
+   "status": 200,
+   "response": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "timeframe": "1m",
+    "limit": 100
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=Infinity",
+   "status": 400,
+   "response": {
+    "error": "limit: Invalid input: expected number, received Infinity"
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=1e400",
+   "status": 400,
+   "response": {
+    "error": "limit: Invalid input: expected number, received Infinity"
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=1e16",
+   "status": 400,
+   "response": {
+    "error": "limit: Too big: expected int to be <=9007199254740991; limit: Too big: expected number to be <=1000"
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=5&limit=6",
+   "status": 400,
+   "response": {
+    "error": "limit: Invalid input: expected number, received NaN"
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=+7",
+   "status": 200,
+   "response": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "timeframe": "1m",
+    "limit": 7
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&limit=%2B7",
+   "status": 200,
+   "response": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "timeframe": "1m",
+    "limit": 7
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=2m",
+   "status": 400,
+   "response": {
+    "error": "timeframe: Invalid option: expected one of \"1m\"|\"5m\"|\"15m\"|\"1h\"|\"4h\""
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=replay&symbol=btcusdt&timeframe=1m",
+   "status": 400,
+   "response": {
+    "error": "source: Invalid option: expected one of \"REPLAY\"|\"LIVE\"; symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "symbol=BTCUSDT",
+   "status": 400,
+   "response": {
+    "error": "source: Invalid option: expected one of \"REPLAY\"|\"LIVE\"; timeframe: Invalid option: expected one of \"1m\"|\"5m\"|\"15m\"|\"1h\"|\"4h\""
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "",
+   "status": 400,
+   "response": {
+    "error": "source: Invalid option: expected one of \"REPLAY\"|\"LIVE\"; symbol: Invalid input: expected string, received undefined; timeframe: Invalid option: expected one of \"1m\"|\"5m\"|\"15m\"|\"1h\"|\"4h\""
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTCUSDT&timeframe=1m&extra=1",
+   "status": 200,
+   "response": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "timeframe": "1m",
+    "limit": 300
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&source=LIVE&symbol=BTCUSDT&timeframe=1m",
+   "status": 400,
+   "response": {
+    "error": "source: Invalid option: expected one of \"REPLAY\"|\"LIVE\""
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=BTC%55SDT&timeframe=1m",
+   "status": 200,
+   "response": {
+    "source": "REPLAY",
+    "symbol": "BTCUSDT",
+    "timeframe": "1m",
+    "limit": 300
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=%E2%82%ACUSDT&timeframe=1m",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=%ZZUSDT&timeframe=1m",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "CandleQuery",
+   "query": "source=REPLAY&symbol=%C3USDT&timeframe=1m",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "SourceQuery",
+   "query": "source=REPLAY",
+   "status": 200,
+   "response": {
+    "source": "REPLAY"
+   }
+  },
+  {
+   "schema": "SourceQuery",
+   "query": "source=LIVE",
+   "status": 200,
+   "response": {
+    "source": "LIVE"
+   }
+  },
+  {
+   "schema": "SourceQuery",
+   "query": "source=",
+   "status": 400,
+   "response": {
+    "error": "source: Invalid option: expected one of \"REPLAY\"|\"LIVE\""
+   }
+  },
+  {
+   "schema": "SourceQuery",
+   "query": "source",
+   "status": 400,
+   "response": {
+    "error": "source: Invalid option: expected one of \"REPLAY\"|\"LIVE\""
+   }
+  },
+  {
+   "schema": "SourceQuery",
+   "query": "",
+   "status": 400,
+   "response": {
+    "error": "source: Invalid option: expected one of \"REPLAY\"|\"LIVE\""
+   }
+  },
+  {
+   "schema": "SourceQuery",
+   "query": "source=PAPER",
+   "status": 400,
+   "response": {
+    "error": "source: Invalid option: expected one of \"REPLAY\"|\"LIVE\""
+   }
+  },
+  {
+   "schema": "SourceQuery",
+   "query": "source=LIVE&x=1",
+   "status": 200,
+   "response": {
+    "source": "LIVE"
+   }
+  },
+  {
+   "schema": "SourceQuery",
+   "query": "Source=LIVE",
+   "status": 400,
+   "response": {
+    "error": "source: Invalid option: expected one of \"REPLAY\"|\"LIVE\""
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "",
+   "status": 200,
+   "response": {
+    "limit": 200
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=5",
+   "status": 200,
+   "response": {
+    "limit": 5
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=5.5",
+   "status": 400,
+   "response": {
+    "error": "limit: Invalid input: expected int, received number"
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=abc",
+   "status": 400,
+   "response": {
+    "error": "limit: Invalid input: expected number, received NaN"
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=0",
+   "status": 400,
+   "response": {
+    "error": "limit: Too small: expected number to be >=1"
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=1",
+   "status": 200,
+   "response": {
+    "limit": 1
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=2000",
+   "status": 200,
+   "response": {
+    "limit": 2000
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=2001",
+   "status": 400,
+   "response": {
+    "error": "limit: Too big: expected number to be <=2000"
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=-0",
+   "status": 400,
+   "response": {
+    "error": "limit: Too small: expected number to be >=1"
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=0b11",
+   "status": 200,
+   "response": {
+    "limit": 3
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=0o17",
+   "status": 200,
+   "response": {
+    "limit": 15
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=.5e1",
+   "status": 200,
+   "response": {
+    "limit": 5
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=1.",
+   "status": 200,
+   "response": {
+    "limit": 1
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=1_000",
+   "status": 400,
+   "response": {
+    "error": "limit: Invalid input: expected number, received NaN"
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=%09%0A12%0D",
+   "status": 200,
+   "response": {
+    "limit": 12
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit",
+   "status": 400,
+   "response": {
+    "error": "limit: Too small: expected number to be >=1"
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=5&limit=",
+   "status": 400,
+   "response": {
+    "error": "limit: Invalid input: expected number, received NaN"
+   }
+  },
+  {
+   "schema": "LimitQuery",
+   "query": "limit=3&other=x",
+   "status": 200,
+   "response": {
+    "limit": 3
+   }
+  },
+  {
+   "schema": "DecisionQuery",
+   "query": "",
+   "status": 200,
+   "response": {
+    "limit": 200
+   }
+  },
+  {
+   "schema": "DecisionQuery",
+   "query": "limit=10",
+   "status": 200,
+   "response": {
+    "limit": 10
+   }
+  },
+  {
+   "schema": "DecisionQuery",
+   "query": "agentId=agent-1",
+   "status": 200,
+   "response": {
+    "limit": 200,
+    "agentId": "agent-1"
+   }
+  },
+  {
+   "schema": "DecisionQuery",
+   "query": "agentId=",
+   "status": 200,
+   "response": {
+    "limit": 200,
+    "agentId": ""
+   }
+  },
+  {
+   "schema": "DecisionQuery",
+   "query": "agentId=a&agentId=b",
+   "status": 400,
+   "response": {
+    "error": "agentId: Invalid input: expected string, received array"
+   }
+  },
+  {
+   "schema": "DecisionQuery",
+   "query": "agentId=a+b%20c&limit=20",
+   "status": 200,
+   "response": {
+    "limit": 20,
+    "agentId": "a b c"
+   }
+  },
+  {
+   "schema": "DecisionQuery",
+   "query": "limit=0&agentId=x",
+   "status": 400,
+   "response": {
+    "error": "limit: Too small: expected number to be >=1"
+   }
+  },
+  {
+   "schema": "NewsQuery",
+   "query": "symbol=BTCUSDT",
+   "status": 200,
+   "response": {
+    "symbol": "BTCUSDT"
+   }
+  },
+  {
+   "schema": "NewsQuery",
+   "query": "symbol=btcusdt",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "NewsQuery",
+   "query": "",
+   "status": 400,
+   "response": {
+    "error": "symbol: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "NewsQuery",
+   "query": "symbol=",
+   "status": 400,
+   "response": {
+    "error": "symbol: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "schema": "NewsQuery",
+   "query": "symbol=BTCUSDT&symbol=ETHUSDT",
+   "status": 400,
+   "response": {
+    "error": "symbol: Invalid input: expected string, received array"
+   }
+  },
+  {
+   "schema": "NewsQuery",
+   "query": "symbol=DOGE%55SDT",
+   "status": 200,
+   "response": {
+    "symbol": "DOGEUSDT"
+   }
+  }
+ ],
+ "symbols": [
+  {
+   "param": "BTCUSDT",
+   "status": 200,
+   "response": {
+    "symbol": "BTCUSDT"
+   }
+  },
+  {
+   "param": "1000PEPEUSDT",
+   "status": 200,
+   "response": {
+    "symbol": "1000PEPEUSDT"
+   }
+  },
+  {
+   "param": "btcusdt",
+   "status": 400,
+   "response": {
+    "error": "input: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "param": "BTC USDT",
+   "status": 400,
+   "response": {
+    "error": "input: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "param": "BTCUSDC",
+   "status": 400,
+   "response": {
+    "error": "input: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "param": "USDT",
+   "status": 400,
+   "response": {
+    "error": "input: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "param": "AAAAAAAAAAAAAAAAAAAAAAAAAUSDT",
+   "status": 400,
+   "response": {
+    "error": "input: expected a pair like DOGEUSDT"
+   }
+  },
+  {
+   "param": "ÉUSDT",
+   "status": 400,
+   "response": {
+    "error": "input: expected a pair like DOGEUSDT"
+   }
+  }
+ ],
+ "events": [
+  "{\"type\":\"heartbeat\"}",
+  "{\"type\":\"quote\",\"quote\":{\"source\":\"LIVE\",\"symbol\":\"BTCUSDT\",\"bid\":\"68000.1\",\"ask\":\"68000.2\",\"last\":\"68000.1\",\"mark\":\"68000.15\",\"markEstimated\":false,\"fundingRate\":\"0.0001\",\"nextFundingTime\":1767254400000,\"ts\":1767225600123}}",
+  "{\"type\":\"quote\",\"quote\":{\"source\":\"REPLAY\",\"symbol\":\"ETHUSDT\",\"bid\":\"3500\",\"ask\":\"3500.5\",\"last\":\"3500.2\",\"mark\":\"3500.25\",\"markEstimated\":true,\"fundingRate\":null,\"nextFundingTime\":null,\"ts\":1767225600000}}",
+  "{\"type\":\"feed\",\"status\":{\"source\":\"REPLAY\",\"provider\":\"Deterministic replay\",\"state\":\"OFFLINE_REPLAY\",\"lastMessageAt\":1767571200000}}",
+  "{\"type\":\"feed\",\"status\":{\"source\":\"LIVE\",\"provider\":\"OKX public\",\"state\":\"DEGRADED\",\"lastMessageAt\":null,\"detail\":\"WebSocket silent; polling REST\"}}",
+  "{\"type\":\"feed\",\"status\":{\"source\":\"LIVE\",\"provider\":\"OKX public\",\"state\":\"CONNECTED\",\"lastMessageAt\":1767225600999}}",
+  "{\"type\":\"feed\",\"status\":{\"source\":\"LIVE\",\"provider\":\"OKX public\",\"state\":\"CONNECTING\",\"lastMessageAt\":null}}",
+  "{\"type\":\"feed\",\"status\":{\"source\":\"LIVE\",\"provider\":\"OKX public\",\"state\":\"DISCONNECTED\",\"lastMessageAt\":5,\"detail\":\"closed\"}}",
+  "{\"type\":\"replay\",\"state\":{\"loaded\":true,\"playing\":false,\"speed\":20,\"now\":1767571200000,\"startTime\":1767571200000,\"endTime\":1768780740000,\"atEnd\":false,\"progress\":0}}",
+  "{\"type\":\"replay\",\"state\":{\"loaded\":true,\"playing\":true,\"speed\":600,\"now\":1768000000000,\"startTime\":1767571200000,\"endTime\":1768780740000,\"atEnd\":false,\"progress\":0.3545149395638011}}",
+  "{\"type\":\"replay\",\"state\":{\"loaded\":true,\"playing\":false,\"speed\":1,\"now\":1768780740000,\"startTime\":1767571200000,\"endTime\":1768780740000,\"atEnd\":true,\"progress\":1}}",
+  "{\"type\":\"invalidate\",\"topics\":[\"accounts\",\"orders\",\"positions\",\"agents\",\"decisions\",\"providers\",\"arena\",\"exchange\",\"instruments\",\"news\",\"vault\"]}",
+  "{\"type\":\"invalidate\",\"topics\":[]}",
+  "{\"type\":\"toast\",\"level\":\"info\",\"message\":\"Momentum suggests LONG BTCUSDT\"}",
+  "{\"type\":\"toast\",\"level\":\"warn\",\"message\":\"Quote is stale\"}",
+  "{\"type\":\"toast\",\"level\":\"error\",\"message\":\"Main: LONG BTCUSDT was liquidated (simulated) \\\"quoted\\\" é \\n\"}"
+ ]
+}

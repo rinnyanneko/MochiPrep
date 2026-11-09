@@ -243,7 +243,7 @@ fn delete_account_data_matches_node() {
 struct TestError(String);
 impl From<StoreFailure> for TestError {
     fn from(f: StoreFailure) -> Self {
-        TestError(f.0)
+        TestError(f.message)
     }
 }
 

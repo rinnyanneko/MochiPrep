@@ -10,6 +10,11 @@ const FUNDING_MS: i64 = 8 * 3_600_000;
 const SPREAD_FRACTION: f64 = 0.00005;
 const MINUTE_MS: i64 = 60_000;
 
+/// A tape too short to play: the cursor starts after the warmup, so at least one bar must follow.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("A replay tape needs more than {WARMUP_MINUTES} minutes, got {0}")]
+pub struct TapeTooShort(pub usize);
+
 /// Time only moves when `step()` is called, so a caller can hold the tape still while slow AI
 /// calls finish, and two runs of the same tape see identical quotes. One quote per 1m bar,
 /// taken at the close: wicks are never treated as tradable prices.
@@ -20,16 +25,24 @@ pub struct ReplayMarketData {
 }
 
 impl ReplayMarketData {
-    pub fn new(minutes: Option<usize>) -> Self {
+    /// TypeScript accepts any length and then reads past the end of a short tape; here a tape
+    /// with no bar after the warmup is refused.
+    pub fn new(minutes: Option<usize>) -> Result<Self, TapeTooShort> {
         let minutes = minutes.unwrap_or(TAPE_MINUTES);
+        if minutes <= WARMUP_MINUTES {
+            return Err(TapeTooShort(minutes));
+        }
         let tapes = DEFAULT_SYMBOLS
             .iter()
-            .map(|&symbol| (symbol, generate_tape(symbol, minutes).unwrap()))
+            .map(|&symbol| {
+                let tape = generate_tape(symbol, minutes).expect("every default symbol has a tape");
+                (symbol, tape)
+            })
             .collect();
-        Self {
+        Ok(Self {
             tapes,
             cursor: WARMUP_MINUTES,
-        }
+        })
     }
 
     /// All default tapes share one clock, so the first one answers time questions.
@@ -120,7 +133,8 @@ impl ReplayMarketData {
     /// Follows the tape's own 8h return, like a perp premium would, clamped to +-0.05%.
     fn funding_rate(&self, tape: &Tape) -> String {
         let back = self.cursor.saturating_sub(480);
-        let change = (tape.close[self.cursor] - tape.close[back]) / tape.close[back];
+        let close = tape.close();
+        let change = (close[self.cursor] - close[back]) / close[back];
         let rate = (0.0001 + change * 0.01).clamp(-0.0005, 0.0005);
         js_to_fixed(rate, 6)
     }
@@ -144,10 +158,10 @@ impl ReplayMarketData {
             i -= 1;
             while i >= 0 && tape.time(i as usize) >= bucket {
                 let at = i as usize;
-                bar.open = tape.open[at];
-                bar.high = bar.high.max(tape.high[at]);
-                bar.low = bar.low.min(tape.low[at]);
-                bar.volume += tape.volume[at];
+                bar.open = tape.open()[at];
+                bar.high = bar.high.max(tape.high()[at]);
+                bar.low = bar.low.min(tape.low()[at]);
+                bar.volume += tape.volume()[at];
                 i -= 1;
             }
             // Round through text like `Number(x.toFixed(3))` so the value matches TypeScript.

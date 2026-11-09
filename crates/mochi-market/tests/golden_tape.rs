@@ -39,7 +39,13 @@ fn full_tape_hash_matches_typescript() {
     let mut hash = Sha256::new();
     for symbol in DEFAULT_SYMBOLS {
         let tape = generate_tape(symbol, TAPE_MINUTES).unwrap();
-        for column in [&tape.open, &tape.high, &tape.low, &tape.close, &tape.volume] {
+        for column in [
+            tape.open(),
+            tape.high(),
+            tape.low(),
+            tape.close(),
+            tape.volume(),
+        ] {
             for value in column {
                 hash.update(value.to_le_bytes());
             }

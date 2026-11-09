@@ -1,0 +1,40 @@
+[package]
+name = "mochi-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+axum = { workspace = true }
+# Streams for the SSE body; axum's own Sse is built on the same crate.
+futures-util = { workspace = true }
+http-body-util = { workspace = true }
+mochi-core = { path = "../mochi-core" }
+mochi-decimal = { path = "../mochi-decimal" }
+mochi-domain = { path = "../mochi-domain" }
+mochi-market = { path = "../mochi-market" }
+mochi-store = { path = "../mochi-store" }
+rand = { workspace = true }
+regex = { workspace = true }
+# The same rusqlite as mochi-store; the runtime takes its open connection.
+rusqlite = "0.37"
+# The web build, embedded in the binary; MIME types for its files.
+rust-embed = { version = "8", features = ["mime-guess"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+subtle = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "ansi"] }
+url = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+# Paused time for the timing tests; socket reads and writes for the SSE shutdown test.
+tokio = { workspace = true, features = ["test-util", "io-util"] }
+tower = { workspace = true }
+# A local OKX WebSocket server for the live feed test.
+tokio-tungstenite = { workspace = true }

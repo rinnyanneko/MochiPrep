@@ -2,8 +2,13 @@
 //! `schema_migrations` bookkeeping, so either backend can open a database the other created.
 
 mod paper;
+pub mod rows;
+mod settings;
 
 pub use paper::SqlitePaperStore;
+pub use settings::{
+    delete_instrument, get_setting, has_vault, list_instruments, save_instrument, set_setting,
+};
 
 use rusqlite::Connection;
 use std::path::Path;
@@ -52,6 +57,10 @@ pub enum StoreError {
     Sqlite(#[from] rusqlite::Error),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// A stored JSON value that does not parse as the type asked for, or a value that cannot be
+    /// written as JSON.
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
     #[error("migration {name} failed: {source}")]
     Migration {
         name: String,
@@ -144,7 +153,7 @@ fn apply(conn: &Connection, name: &str, sql: &str) -> rusqlite::Result<()> {
     conn.execute_batch("COMMIT")
 }
 
-fn unix_ms() -> i64 {
+pub(crate) fn unix_ms() -> i64 {
     let since_epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock is before 1970");

@@ -12,9 +12,29 @@ license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["float_roundtrip", "raw_value"] }
+# preserve_order: objects keep their key order, as in JS. Request validation names unknown keys in
+# the order the client sent them, and Node writes JSON objects in insertion order.
+serde_json = { version = "1", features = ["float_roundtrip", "raw_value", "preserve_order"] }
 thiserror = "2"
 sha2 = "0.10"
 tempfile = "3"
 num-bigint = "0.4"
 num-traits = "0.2"
+# HTTP server (crates/mochi-server).
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "net"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+rand = "0.8"
+subtle = "2"
+tracing = "0.1"
+url = "2"
+regex = "1"
+uuid = { version = "1", features = ["v4"] }
+futures-util = "0.3"
+# OKX public market data (crates/mochi-market). TLS is rustls with the ring provider and the
+# Mozilla root store, set up once in code, so the build needs no system TLS library.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1"

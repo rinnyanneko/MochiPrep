@@ -57,10 +57,16 @@ import { openDatabase } from '../src/db/database.js';
 import { SqliteStore } from '../src/db/store.js';
 import { newDataKey, seal, wrapWithPassword } from '../src/vault.js';
 import { paperScenariosFixture, paperTrailingScenariosFixture } from './paper-scenarios.js';
+import { apiScriptFixture } from './api-script.js';
+import { validationFixture } from './validation.js';
+import { okxPublicFixture } from './okx-public.js';
+import { newsFixture } from './news.js';
 
 const ROUND_CASES = [
   0.5, 1.5, 2.5, -0.5, -1.5, -2.5, 2.4999999999999996, 0.49999999999999994, -0.49999999999999994,
   1e15 + 0.5, 0, 7.000000000000001,
+  // Math.round gives -0 for -0.5 <= x < 0; the third fixture column records that, since JSON can't.
+  -0.4, -0.6,
 ];
 const FIXED_CASES: Array<[number, number]> = [
   [0.125, 2], [0.375, 2], [-0.125, 2], [1.005, 2], [2.5, 0], [-2.5, 0], [68000, 1], [1e-7, 6],
@@ -68,6 +74,12 @@ const FIXED_CASES: Array<[number, number]> = [
   [-1e-7, 6], [12345.6789, 0],
   // Carry paths: rounding up must carry through a run of 9s.
   [0.5, 0], [9.5, 0], [99.5, 0], [9.875, 2], [1.5, 20],
+];
+
+// toFixed inputs JSON can't carry as numbers (NaN, ±Infinity) or that toFixed hands to ToString
+// (|x| >= 1e21). The fixture stores the input as String(x).
+const FIXED_SPECIAL_CASES: Array<[number, number]> = [
+  [Number.NaN, 2], [Infinity, 2], [-Infinity, 0], [1e21, 2], [-1.5e21, 2],
 ];
 
 const JS_NUMBER_CASES = [
@@ -1510,8 +1522,9 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     'instruments.json': DEFAULT_SYMBOLS.map((s) => INSTRUMENTS[s]),
     'jsnumber.json': JS_NUMBER_CASES.map((x) => [noNegativeZero(x), JSON.stringify(x)]),
     'jsnum.json': {
-      round: ROUND_CASES.map((x) => [noNegativeZero(x), noNegativeZero(Math.round(x))]),
+      round: ROUND_CASES.map((x) => [noNegativeZero(x), noNegativeZero(Math.round(x)), Object.is(Math.round(x), -0)]),
       toFixed: FIXED_CASES.map(([x, d]) => [noNegativeZero(x), d, x.toFixed(d)]),
+      toFixedSpecial: FIXED_SPECIAL_CASES.map(([x, d]) => [String(x), d, x.toFixed(d)]),
     },
     'accounting-types.json': accountingTypesFixture(),
     'decimal.json': decimalFixture(),
@@ -1525,6 +1538,11 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     'paper-trailing-scenarios.json': paperTrailingScenariosFixture(),
     'node-created.sqlite': nodeCreatedDatabase(),
     'vault.json': await vaultFixture(),
+    'validation.json': await validationFixture(),
+    'okx-public.json': await okxPublicFixture(),
+    'news.json': newsFixture(),
+    // Last: it registers a pair in the module-global INSTRUMENTS while it runs.
+    'api-script.json': await apiScriptFixture(),
   };
 }
 
@@ -1538,7 +1556,9 @@ async function writeGolden(all: boolean): Promise<void> {
   for (const [name, value] of Object.entries(await buildGolden())) {
     // Randomized files differ on every run, so rewriting them only churns git. `--all` forces it.
     if (!all && RANDOMIZED.has(name) && existsSync(join(GOLDEN_DIR, name))) continue;
-    const bytes = Buffer.isBuffer(value) ? value : JSON.stringify(value, null, 1) + '\n';
+    // Escape invisible fixture characters without changing the strings JSON.parse reconstructs.
+    const bytes = Buffer.isBuffer(value) ? value : JSON.stringify(value, null, 1).replace(/[\p{Cf}\u007f-\u009f\u2028\u2029]/gu, (character) =>
+      character.split('').map((unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, '0')}`).join('')) + '\n';
     writeFileSync(join(GOLDEN_DIR, name), bytes);
   }
 }
