@@ -2,14 +2,15 @@
 //! Node store reads them (`apps/server/src/db/store.ts`), so the server can answer the web app's
 //! refetches with what the database really holds.
 //!
-//! Reads only, apart from the two startup writes Node's runtime makes on every start
-//! ([`seed_mock_provider`] and [`pause_agents_after_restart`]). Nothing here ever selects a
-//! provider key, a provider's extra-header values or a sealed secret: only whether one exists.
+//! Internal configuration/key access and writes are re-exported from `ai`; browser-facing
+//! provider views below deliberately omit all credential values.
 
 use mochi_domain::jsnum::js_number_raw;
 use rusqlite::types::Type;
 use rusqlite::{Connection, OptionalExtension, Row};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+pub use crate::ai::*;
 use serde_json::value::RawValue;
 use serde_json::Value;
 
@@ -20,7 +21,7 @@ pub const MOCK_PROVIDER_ID: &str = "mock";
 
 /// An agent as `toAgent` maps its row, keys in that order. `risk` is the stored JSON as written:
 /// Node parses and re-serialises the text it wrote with `JSON.stringify`, which gives it back.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
     pub id: String,
@@ -74,7 +75,7 @@ pub struct DecisionStats {
 }
 
 /// Decode an agent row using the persisted JSON contracts shared with Node.
-fn agent_from_row(row: &Row<'_>) -> rusqlite::Result<Agent> {
+pub(crate) fn agent_from_row(row: &Row<'_>) -> rusqlite::Result<Agent> {
     let risk = RawValue::from_string(row.get("risk")?).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
     })?;

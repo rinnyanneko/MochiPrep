@@ -10,6 +10,8 @@ axum = { workspace = true }
 # Streams for the SSE body; axum's own Sse is built on the same crate.
 futures-util = { workspace = true }
 http-body-util = { workspace = true }
+indexmap = { version = "2", features = ["serde"] }
+mochi-ai = { path = "../mochi-ai" }
 mochi-core = { path = "../mochi-core" }
 mochi-decimal = { path = "../mochi-decimal" }
 mochi-domain = { path = "../mochi-domain" }

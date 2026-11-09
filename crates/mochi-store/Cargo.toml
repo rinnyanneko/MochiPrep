@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+mochi-ai = { path = "../mochi-ai" }
 mochi-core = { path = "../mochi-core" }
 mochi-domain = { path = "../mochi-domain" }
 rusqlite = { version = "0.37", features = ["bundled"] }

@@ -1,0 +1,2890 @@
+{
+ "api": [
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   },
+   "output": {
+    "name": "Gateway",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": "model",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   }
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   },
+   "output": {
+    "name": "Gateway",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": "model",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   }
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {}
+   },
+   "output": {
+    "name": "Gateway",
+    "kind": "OPENAI",
+    "extraHeaders": {},
+    "baseUrl": null,
+    "defaultModel": "model",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   }
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {
+     "1": "one",
+     "2": "two",
+     "X-Gateway": "secret",
+     "x-gateway": "last"
+    }
+   },
+   "output": {
+    "name": "Gateway",
+    "kind": "OPENAI",
+    "extraHeaders": {
+     "1": "one",
+     "2": "two",
+     "x-gateway": "last"
+    },
+    "baseUrl": null,
+    "defaultModel": "model",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   }
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {
+     "Authorization": "secret",
+     "HOST": "x"
+    }
+   },
+   "error": "extraHeaders: Authorization is set by the provider and cannot be overridden; extraHeaders: HOST is set by the provider and cannot be overridden"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {
+     "invalid name": "x"
+    }
+   },
+   "error": "extraHeaders.invalid name: Invalid key in record"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {
+     "X-Empty": ""
+    }
+   },
+   "error": "extraHeaders.X-Empty: Too small: expected string to have >=1 characters"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {
+     "X-Line": "x\ny"
+    }
+   },
+   "error": "extraHeaders.X-Line: header values cannot contain line breaks"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {
+     "X-Long": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   },
+   "error": "extraHeaders.X-Long: Too big: expected string to have <=2000 characters"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {
+     "x-0": "v",
+     "x-1": "v",
+     "x-2": "v",
+     "x-3": "v",
+     "x-4": "v",
+     "x-5": "v",
+     "x-6": "v",
+     "x-7": "v",
+     "x-8": "v",
+     "x-9": "v",
+     "x-10": "v",
+     "x-11": "v",
+     "x-12": "v",
+     "x-13": "v",
+     "x-14": "v",
+     "x-15": "v",
+     "x-16": "v",
+     "x-17": "v",
+     "x-18": "v",
+     "x-19": "v",
+     "x-20": "v"
+    }
+   },
+   "error": "extraHeaders: at most 20 headers"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": null
+   },
+   "error": "extraHeaders: Invalid input: expected record, received null"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": []
+   },
+   "error": "extraHeaders: Invalid input: expected record, received array"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {
+     "X-Number": 1
+    }
+   },
+   "error": "extraHeaders.X-Number: Invalid input: expected string, received number"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {
+     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": "v"
+    }
+   },
+   "error": "extraHeaders.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx: Invalid key in record"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   },
+   "error": "name: Invalid input: expected string, received undefined"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   },
+   "error": "kind: Invalid option: expected one of \"OPENAI_COMPATIBLE\"|\"OPENAI\"|\"ANTHROPIC\"|\"GEMINI\"|\"DEEPSEEK\"|\"OPENCODE\""
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   },
+   "error": "baseUrl: Invalid input: expected string, received undefined"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   },
+   "error": "defaultModel: Invalid input: expected string, received undefined"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "outputPricePerMTok": 0
+   },
+   "error": "inputPricePerMTok: Invalid input: expected number, received undefined"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null
+   },
+   "error": "outputPricePerMTok: Invalid input: expected number, received undefined"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "MOCK",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   },
+   "error": "kind: Invalid option: expected one of \"OPENAI_COMPATIBLE\"|\"OPENAI\"|\"ANTHROPIC\"|\"GEMINI\"|\"DEEPSEEK\"|\"OPENCODE\""
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI_COMPATIBLE",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   },
+   "output": {
+    "name": "Gateway",
+    "kind": "OPENAI_COMPATIBLE",
+    "baseUrl": null,
+    "defaultModel": "model",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   }
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "ANTHROPIC",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   },
+   "output": {
+    "name": "Gateway",
+    "kind": "ANTHROPIC",
+    "baseUrl": null,
+    "defaultModel": "model",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   }
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "GEMINI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   },
+   "output": {
+    "name": "Gateway",
+    "kind": "GEMINI",
+    "baseUrl": null,
+    "defaultModel": "model",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   }
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "DEEPSEEK",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   },
+   "output": {
+    "name": "Gateway",
+    "kind": "DEEPSEEK",
+    "baseUrl": null,
+    "defaultModel": "model",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   }
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENCODE",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   },
+   "output": {
+    "name": "Gateway",
+    "kind": "OPENCODE",
+    "baseUrl": null,
+    "defaultModel": "model",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   }
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": "https://example.test/v1",
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   },
+   "output": {
+    "name": "Gateway",
+    "kind": "OPENAI",
+    "baseUrl": "https://example.test/v1",
+    "defaultModel": "model",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   }
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": "bad",
+    "defaultModel": " model ",
+    "inputPricePerMTok": -1,
+    "outputPricePerMTok": "2"
+   },
+   "error": "baseUrl: Invalid URL; inputPricePerMTok: Too small: expected number to be >=0; outputPricePerMTok: Invalid input: expected number, received string"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extra": 1
+   },
+   "error": "input: Unrecognized key: \"extra\""
+  },
+  {
+   "schema": "ProviderInput",
+   "input": null,
+   "error": "input: Invalid input: expected object, received null"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": [],
+   "error": "input: Invalid input: expected object, received array"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {},
+   "error": "name: Invalid input: expected string, received undefined; kind: Invalid option: expected one of \"OPENAI_COMPATIBLE\"|\"OPENAI\"|\"ANTHROPIC\"|\"GEMINI\"|\"DEEPSEEK\"|\"OPENCODE\"; baseUrl: Invalid input: expected string, received undefined; defaultModel: Invalid input: expected string, received undefined; inputPricePerMTok: Invalid input: expected number, received undefined; outputPricePerMTok: Invalid input: expected number, received undefined"
+  },
+  {
+   "schema": "ProviderKey",
+   "input": {
+    "apiKey": " secret "
+   },
+   "output": {
+    "apiKey": "secret"
+   }
+  },
+  {
+   "schema": "ProviderKey",
+   "input": {
+    "apiKey": ""
+   },
+   "error": "apiKey: Too small: expected string to have >=1 characters"
+  },
+  {
+   "schema": "ProviderKey",
+   "input": {
+    "apiKey": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "error": "apiKey: Too big: expected string to have <=1000 characters"
+  },
+  {
+   "schema": "ProviderKey",
+   "input": {
+    "apiKey": null
+   },
+   "error": "apiKey: Invalid input: expected string, received null"
+  },
+  {
+   "schema": "ProviderKey",
+   "input": {
+    "apiKey": 5
+   },
+   "error": "apiKey: Invalid input: expected string, received number"
+  },
+  {
+   "schema": "ProviderKey",
+   "input": {
+    "apiKey": "x",
+    "extra": 1
+   },
+   "error": "input: Unrecognized key: \"extra\""
+  },
+  {
+   "schema": "ProviderKey",
+   "input": {},
+   "error": "apiKey: Invalid input: expected string, received undefined"
+  },
+  {
+   "schema": "ProviderKey",
+   "input": null,
+   "error": "input: Invalid input: expected object, received null"
+  },
+  {
+   "schema": "ProviderTest",
+   "input": {},
+   "output": {}
+  },
+  {
+   "schema": "ProviderTest",
+   "input": {
+    "model": ""
+   },
+   "output": {
+    "model": ""
+   }
+  },
+  {
+   "schema": "ProviderTest",
+   "input": {
+    "model": "  x "
+   },
+   "output": {
+    "model": "  x "
+   }
+  },
+  {
+   "schema": "ProviderTest",
+   "input": {
+    "model": null
+   },
+   "error": "model: Invalid input: expected string, received null"
+  },
+  {
+   "schema": "ProviderTest",
+   "input": {
+    "model": 5
+   },
+   "error": "model: Invalid input: expected string, received number"
+  },
+  {
+   "schema": "ProviderTest",
+   "input": {
+    "model": "x",
+    "extra": 1
+   },
+   "output": {
+    "model": "x"
+   }
+  },
+  {
+   "schema": "ProviderTest",
+   "input": null,
+   "error": "input: Invalid input: expected object, received null"
+  },
+  {
+   "schema": "ProviderTest",
+   "input": [],
+   "error": "input: Invalid input: expected object, received array"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    },
+    "intervalSec": 60,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60
+   },
+   "error": "name: Invalid input: expected string, received undefined"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60
+   },
+   "error": "providerId: Invalid input: expected string, received undefined"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60
+   },
+   "error": "model: Invalid input: expected string, received undefined"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60
+   },
+   "error": "symbol: Invalid input: expected string, received undefined"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60
+   },
+   "error": "timeframe: Invalid option: expected one of \"1m\"|\"5m\"|\"15m\"|\"1h\"|\"4h\""
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "accountId": "a",
+    "intervalSec": 60
+   },
+   "error": "strategy: Invalid input: expected string, received undefined"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "intervalSec": 60
+   },
+   "error": "accountId: Invalid input: expected string, received undefined"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a"
+   },
+   "error": "intervalSec: Invalid input: expected number, received undefined"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 0
+   },
+   "error": "intervalSec: Too small: expected number to be >=10"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 9
+   },
+   "error": "intervalSec: Too small: expected number to be >=10"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 10
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    },
+    "intervalSec": 10,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 86400
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    },
+    "intervalSec": 86400,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 86401
+   },
+   "error": "intervalSec: Too big: expected number to be <=86400"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 1.5
+   },
+   "error": "intervalSec: Invalid input: expected int, received number"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": "60"
+   },
+   "error": "intervalSec: Invalid input: expected number, received string"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "executionMode": "AUTO",
+    "useNews": true,
+    "allowTrailingStop": true
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    },
+    "intervalSec": 60,
+    "executionMode": "AUTO",
+    "useNews": true,
+    "allowTrailingStop": true
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "executionMode": null,
+    "useNews": 1,
+    "allowTrailingStop": "true"
+   },
+   "error": "executionMode: Invalid option: expected one of \"AUTO\"|\"SIGNAL\"; useNews: Invalid input: expected boolean, received number; allowTrailingStop: Invalid input: expected boolean, received string"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "btcusdt",
+    "timeframe": "2m",
+    "strategy": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "accountId": "a",
+    "intervalSec": 60
+   },
+   "error": "symbol: expected a pair like DOGEUSDT; timeframe: Invalid option: expected one of \"1m\"|\"5m\"|\"15m\"|\"1h\"|\"4h\"; strategy: Too big: expected string to have <=8000 characters"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "extra": 1
+   },
+   "error": "input: Unrecognized key: \"extra\""
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {}
+   },
+   "error": "risk.maxLeverage: Invalid input: expected number, received undefined; risk.maxRiskPerTradePct: Invalid input: expected number, received undefined; risk.maxDailyLossPct: Invalid input: expected number, received undefined; risk.maxOpenPositions: Invalid input: expected number, received undefined; risk.requireStopLoss: Invalid input: expected boolean, received undefined; risk.maxQuoteAgeSec: Invalid input: expected number, received undefined; risk.maxNotional: Invalid input: expected number, received undefined"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 101,
+     "maxRiskPerTradePct": 0,
+     "maxDailyLossPct": 101,
+     "maxOpenPositions": 1.5,
+     "requireStopLoss": null,
+     "maxQuoteAgeSec": 0,
+     "maxNotional": 0,
+     "extra": 1
+    }
+   },
+   "error": "risk.maxLeverage: Too big: expected number to be <=100; risk.maxRiskPerTradePct: Too small: expected number to be >0; risk.maxDailyLossPct: Too big: expected number to be <=100; risk.maxOpenPositions: Invalid input: expected int, received number; risk.requireStopLoss: Invalid input: expected boolean, received null; risk.maxQuoteAgeSec: Too small: expected number to be >=1; risk.maxNotional: Too small: expected number to be >0; risk: Unrecognized key: \"extra\""
+  },
+  {
+   "schema": "AgentInput",
+   "input": null,
+   "error": "input: Invalid input: expected object, received null"
+  },
+  {
+   "schema": "AgentInput",
+   "input": [],
+   "error": "input: Invalid input: expected object, received array"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {},
+   "error": "name: Invalid input: expected string, received undefined; providerId: Invalid input: expected string, received undefined; model: Invalid input: expected string, received undefined; symbol: Invalid input: expected string, received undefined; timeframe: Invalid option: expected one of \"1m\"|\"5m\"|\"15m\"|\"1h\"|\"4h\"; strategy: Invalid input: expected string, received undefined; accountId: Invalid input: expected string, received undefined; intervalSec: Invalid input: expected number, received undefined"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 0,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "error": "risk.maxLeverage: Too small: expected number to be >=1"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 1,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 1,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    },
+    "intervalSec": 60,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 100,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 100,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    },
+    "intervalSec": 60,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 101,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "error": "risk.maxLeverage: Too big: expected number to be <=100"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 1.5,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 1.5,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    },
+    "intervalSec": 60,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "error": "risk.maxRiskPerTradePct: Too small: expected number to be >0"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.1,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.1,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    },
+    "intervalSec": 60,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 100,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 100,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    },
+    "intervalSec": 60,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 101,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "error": "risk.maxRiskPerTradePct: Too big: expected number to be <=100"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 0,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "error": "risk.maxDailyLossPct: Too small: expected number to be >0"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 100,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 100,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    },
+    "intervalSec": 60,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 101,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "error": "risk.maxDailyLossPct: Too big: expected number to be <=100"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 0,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "error": "risk.maxOpenPositions: Too small: expected number to be >=1"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 1,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 1,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    },
+    "intervalSec": 60,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 50,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 50,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    },
+    "intervalSec": 60,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 51,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "error": "risk.maxOpenPositions: Too big: expected number to be <=50"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 1.5,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "error": "risk.maxOpenPositions: Invalid input: expected int, received number"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": "1",
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 100000
+    }
+   },
+   "error": "risk.maxOpenPositions: Invalid input: expected number, received string"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 0,
+     "maxNotional": 100000
+    }
+   },
+   "error": "risk.maxQuoteAgeSec: Too small: expected number to be >=1"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 1,
+     "maxNotional": 100000
+    }
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 1,
+     "maxNotional": 100000
+    },
+    "intervalSec": 60,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 3600,
+     "maxNotional": 100000
+    }
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 3600,
+     "maxNotional": 100000
+    },
+    "intervalSec": 60,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 3601,
+     "maxNotional": 100000
+    }
+   },
+   "error": "risk.maxQuoteAgeSec: Too big: expected number to be <=3600"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 1.5,
+     "maxNotional": 100000
+    }
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 1.5,
+     "maxNotional": 100000
+    },
+    "intervalSec": 60,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 0
+    }
+   },
+   "error": "risk.maxNotional: Too small: expected number to be >0"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 0.1
+    }
+   },
+   "output": {
+    "name": "Agent",
+    "providerId": "p",
+    "model": "model",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": 0.1
+    },
+    "intervalSec": 60,
+    "executionMode": "SIGNAL",
+    "useNews": false,
+    "allowTrailingStop": false
+   }
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": -1
+    }
+   },
+   "error": "risk.maxNotional: Too small: expected number to be >0"
+  },
+  {
+   "schema": "AgentInput",
+   "input": {
+    "name": " Agent ",
+    "providerId": "p",
+    "model": " model ",
+    "symbol": "DOGEUSDT",
+    "timeframe": "1m",
+    "strategy": "",
+    "accountId": "a",
+    "intervalSec": 60,
+    "risk": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 30,
+     "maxNotional": "1"
+    }
+   },
+   "error": "risk.maxNotional: Invalid input: expected number, received string"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {
+     "bad name": "",
+     "HOST": ""
+    }
+   },
+   "error": "extraHeaders.bad name: Invalid key in record; extraHeaders.HOST: Too small: expected string to have >=1 characters"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {
+     "HOST": 5
+    }
+   },
+   "error": "extraHeaders.HOST: Invalid input: expected string, received number"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {
+     "HOST": "x\r\ny"
+    }
+   },
+   "error": "extraHeaders.HOST: header values cannot contain line breaks; extraHeaders: HOST is set by the provider and cannot be overridden"
+  },
+  {
+   "schema": "ProviderInput",
+   "input": {
+    "name": " Gateway ",
+    "kind": "OPENAI",
+    "baseUrl": null,
+    "defaultModel": " model ",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0,
+    "extraHeaders": {
+     "constructor": "x"
+    }
+   },
+   "output": {
+    "name": "Gateway",
+    "kind": "OPENAI",
+    "extraHeaders": {
+     "constructor": "x"
+    },
+    "baseUrl": null,
+    "defaultModel": "model",
+    "inputPricePerMTok": null,
+    "outputPricePerMTok": 0
+   }
+  }
+ ],
+ "decisions": [
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null,\"trailingStop\":null}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null,
+     "trailingStop": null
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null,\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":0.1,\"activationPrice\":null}}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null,
+     "trailingStop": {
+      "kind": "RATIO",
+      "callback": 0.1,
+      "activationPrice": null
+     }
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null,\"trailingStop\":{\"kind\":\"SPREAD\",\"callback\":10,\"activationPrice\":100}}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null,
+     "trailingStop": {
+      "kind": "SPREAD",
+      "callback": 10,
+      "activationPrice": 100
+     }
+    }
+   }
+  },
+  {
+   "text": "{\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "symbol: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "action: Invalid option: expected one of \"LONG\"|\"SHORT\"|\"CLOSE\"|\"HOLD\"|\"PROTECT\""
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "orderType: Invalid option: expected one of \"MARKET\"|\"LIMIT\""
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "entryPrice: Invalid input: expected number, received undefined"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "stopLoss: Invalid input: expected number, received undefined"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "takeProfit: Invalid input: expected number, received undefined"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "reason: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "confidence: Invalid input: expected number, received undefined"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5}",
+   "result": {
+    "ok": false,
+    "error": "expiresAt: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":\"1\",\"stopLoss\":0,\"takeProfit\":-1,\"reason\":\"Waiting\",\"confidence\":2,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "entryPrice: Invalid input: expected number, received string; stopLoss: Too small: expected number to be >0; takeProfit: Too small: expected number to be >0; confidence: Too big: expected number to be <=1"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"BUY\",\"orderType\":\"STOP\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "action: Invalid option: expected one of \"LONG\"|\"SHORT\"|\"CLOSE\"|\"HOLD\"|\"PROTECT\"; orderType: Invalid option: expected one of \"MARKET\"|\"LIMIT\""
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null,\"trailingStop\":{\"kind\":\"OTHER\",\"callback\":\"1\",\"extra\":1}}",
+   "result": {
+    "ok": false,
+    "error": "trailingStop.kind: Invalid option: expected one of \"RATIO\"|\"SPREAD\"; trailingStop.callback: Invalid input: expected number, received string; trailingStop.activationPrice: Invalid input: expected number, received undefined; trailingStop: Unrecognized key: \"extra\""
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null,\"extra\":1}",
+   "result": {
+    "ok": false,
+    "error": "root: Unrecognized key: \"extra\""
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"LONG\",\"orderType\":\"LIMIT\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "entryPrice: LIMIT orders need entryPrice"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"SHORT\",\"orderType\":\"LIMIT\",\"entryPrice\":1,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "SHORT",
+     "orderType": "LIMIT",
+     "entryPrice": 1,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "reason: Too small: expected string to have >=1 characters"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "symbol: Too big: expected string to have <=32 characters; reason: Too big: expected string to have <=4000 characters"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"2024-02-29T12:30:00Z\"}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": "2024-02-29T12:30:00Z"
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"2023-02-29T12:30:00Z\"}",
+   "result": {
+    "ok": false,
+    "error": "expiresAt: Invalid ISO datetime"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"2024-01-01T12:30Z\"}",
+   "result": {
+    "ok": false,
+    "error": "expiresAt: Invalid ISO datetime"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"2024-01-01T12:30:00.123+08:00\"}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": "2024-01-01T12:30:00.123+08:00"
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"2024-01-01T24:00:00Z\"}",
+   "result": {
+    "ok": false,
+    "error": "expiresAt: Invalid ISO datetime"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"2024-01-01T12:30:00+0800\"}",
+   "result": {
+    "ok": false,
+    "error": "expiresAt: Invalid ISO datetime"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"2024-01-01T12:30:00\"}",
+   "result": {
+    "ok": false,
+    "error": "expiresAt: Invalid ISO datetime"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"2024-01-01t12:30:00z\"}",
+   "result": {
+    "ok": false,
+    "error": "expiresAt: Invalid ISO datetime"
+   }
+  },
+  {
+   "text": "null",
+   "result": {
+    "ok": false,
+    "error": "root: Invalid input: expected object, received null"
+   }
+  },
+  {
+   "text": "[]",
+   "result": {
+    "ok": false,
+    "error": "root: Invalid input: expected object, received array"
+   }
+  },
+  {
+   "text": "1",
+   "result": {
+    "ok": false,
+    "error": "root: Invalid input: expected object, received number"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":-1,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "entryPrice: Too small: expected number to be >0"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":0,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "entryPrice: Too small: expected number to be >0"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":1,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": 1,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":1.1,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": 1.1,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":\"1\",\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "entryPrice: Invalid input: expected number, received string"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":false,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "entryPrice: Invalid input: expected number, received boolean"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":[],\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "entryPrice: Invalid input: expected number, received array"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":{},\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "entryPrice: Invalid input: expected number, received object"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":-1,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "stopLoss: Too small: expected number to be >0"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":0,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "stopLoss: Too small: expected number to be >0"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":1,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": 1,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":1.1,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": 1.1,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":\"1\",\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "stopLoss: Invalid input: expected number, received string"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":false,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "stopLoss: Invalid input: expected number, received boolean"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":[],\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "stopLoss: Invalid input: expected number, received array"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":{},\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "stopLoss: Invalid input: expected number, received object"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":-1,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "takeProfit: Too small: expected number to be >0"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":0,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "takeProfit: Too small: expected number to be >0"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":1,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": 1,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":1.1,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": 1.1,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":\"1\",\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "takeProfit: Invalid input: expected number, received string"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":false,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "takeProfit: Invalid input: expected number, received boolean"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":[],\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "takeProfit: Invalid input: expected number, received array"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":{},\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "takeProfit: Invalid input: expected number, received object"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":-1,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "confidence: Too small: expected number to be >=0"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0,\"expiresAt\":null}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":1,\"expiresAt\":null}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 1,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":1.1,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "confidence: Too big: expected number to be <=1"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":\"1\",\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "confidence: Invalid input: expected number, received string"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":false,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "confidence: Invalid input: expected number, received boolean"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":[],\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "confidence: Invalid input: expected number, received array"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":{},\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "confidence: Invalid input: expected number, received object"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"LONG\",\"orderType\":\"LIMIT\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "reason: Too small: expected string to have >=1 characters; entryPrice: LIMIT orders need entryPrice"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"LONG\",\"orderType\":\"LIMIT\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":2,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "confidence: Too big: expected number to be <=1; entryPrice: LIMIT orders need entryPrice"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"\",\"action\":\"LONG\",\"orderType\":\"LIMIT\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "symbol: Too small: expected string to have >=1 characters; entryPrice: LIMIT orders need entryPrice"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"LONG\",\"orderType\":\"LIMIT\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"bad\"}",
+   "result": {
+    "ok": false,
+    "error": "expiresAt: Invalid ISO datetime; entryPrice: LIMIT orders need entryPrice"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"LONG\",\"orderType\":\"LIMIT\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null,\"extra\":1}",
+   "result": {
+    "ok": false,
+    "error": "root: Unrecognized key: \"extra\"; entryPrice: LIMIT orders need entryPrice"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"LONG\",\"orderType\":\"LIMIT\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":1,\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "reason: Invalid input: expected string, received number"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"LONG\",\"orderType\":\"LIMIT\",\"entryPrice\":null,\"stopLoss\":\"1\",\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "stopLoss: Invalid input: expected number, received string"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"LONG\",\"orderType\":\"LIMIT\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null,\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":0,\"activationPrice\":null}}",
+   "result": {
+    "ok": false,
+    "error": "trailingStop.callback: Too small: expected number to be >0; entryPrice: LIMIT orders need entryPrice"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"LONG\",\"orderType\":\"LIMIT\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null,\"trailingStop\":{\"kind\":\"RATIO\",\"callback\":1}}",
+   "result": {
+    "ok": false,
+    "error": "trailingStop.activationPrice: Invalid input: expected number, received undefined"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"0000-02-29T00:00:00Z\"}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": "0000-02-29T00:00:00Z"
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"1900-02-29T00:00:00Z\"}",
+   "result": {
+    "ok": false,
+    "error": "expiresAt: Invalid ISO datetime"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"2000-02-29T00:00:00Z\"}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": "2000-02-29T00:00:00Z"
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"2024-01-01T00:00:00+23:59\"}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": "2024-01-01T00:00:00+23:59"
+    }
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"2024-01-01T00:00:00+24:00\"}",
+   "result": {
+    "ok": false,
+    "error": "expiresAt: Invalid ISO datetime"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":\"2024-01-01T00:00:00Z\\n\"}",
+   "result": {
+    "ok": false,
+    "error": "expiresAt: Invalid ISO datetime"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"\\ud83d\\ude00\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "😀",
+     "confidence": 0.5,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "\ufeff {\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null} \ufeff",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "```json\n{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}\n```",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "```JSON {\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}```",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "```\n{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}\n```",
+   "result": {
+    "ok": true,
+    "decision": {
+     "symbol": "DOGEUSDT",
+     "action": "HOLD",
+     "orderType": "MARKET",
+     "entryPrice": null,
+     "stopLoss": null,
+     "takeProfit": null,
+     "reason": "Waiting",
+     "confidence": 0.5,
+     "expiresAt": null
+    }
+   }
+  },
+  {
+   "text": "```js\n{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}\n```",
+   "result": {
+    "ok": false,
+    "error": "Response is not valid JSON"
+   }
+  },
+  {
+   "text": "not json",
+   "result": {
+    "ok": false,
+    "error": "Response is not valid JSON"
+   }
+  },
+  {
+   "text": "prefix {\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "result": {
+    "ok": false,
+    "error": "Response is not valid JSON"
+   }
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null} trailing",
+   "result": {
+    "ok": false,
+    "error": "Response is not valid JSON"
+   }
+  }
+ ],
+ "safeRejections": [
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":1e400,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "nodeResult": {
+    "ok": false,
+    "error": "entryPrice: Invalid input: expected number, received Infinity"
+   },
+   "rustError": "Response is not valid JSON"
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":1e400,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "nodeResult": {
+    "ok": false,
+    "error": "stopLoss: Invalid input: expected number, received Infinity"
+   },
+   "rustError": "Response is not valid JSON"
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":1e400,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "nodeResult": {
+    "ok": false,
+    "error": "takeProfit: Invalid input: expected number, received Infinity"
+   },
+   "rustError": "Response is not valid JSON"
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":1e400,\"expiresAt\":null}",
+   "nodeResult": {
+    "ok": false,
+    "error": "confidence: Invalid input: expected number, received Infinity"
+   },
+   "rustError": "Response is not valid JSON"
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":-1e400,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "nodeResult": {
+    "ok": false,
+    "error": "entryPrice: Invalid input: expected number, received -Infinity"
+   },
+   "rustError": "Response is not valid JSON"
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":-1e400,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "nodeResult": {
+    "ok": false,
+    "error": "stopLoss: Invalid input: expected number, received -Infinity"
+   },
+   "rustError": "Response is not valid JSON"
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":-1e400,\"reason\":\"Waiting\",\"confidence\":0.5,\"expiresAt\":null}",
+   "nodeResult": {
+    "ok": false,
+    "error": "takeProfit: Invalid input: expected number, received -Infinity"
+   },
+   "rustError": "Response is not valid JSON"
+  },
+  {
+   "text": "{\"symbol\":\"DOGEUSDT\",\"action\":\"HOLD\",\"orderType\":\"MARKET\",\"entryPrice\":null,\"stopLoss\":null,\"takeProfit\":null,\"reason\":\"Waiting\",\"confidence\":-1e400,\"expiresAt\":null}",
+   "nodeResult": {
+    "ok": false,
+    "error": "confidence: Invalid input: expected number, received -Infinity"
+   },
+   "rustError": "Response is not valid JSON"
+  }
+ ]
+}
