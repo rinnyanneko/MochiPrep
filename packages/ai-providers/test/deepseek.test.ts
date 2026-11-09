@@ -112,3 +112,15 @@ describe('retries', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('error text bounds', () => {
+  it('redacts complete secrets before bounding an echoed HTTP error', async () => {
+    const syntheticKey = 'synthetic-provider-credential';
+    const syntheticHeader = 'synthetic-gateway-credential';
+    for (const secret of [syntheticKey, syntheticHeader]) {
+      const fetchImpl = vi.fn(async () => new Response('x'.repeat(390) + secret, { status: 400 }));
+      const provider = createRemoteProvider({ ...config, extraHeaders: { 'x-org': syntheticHeader } }, syntheticKey, fetchImpl as unknown as typeof fetch, []);
+      await expect(provider.complete(request)).rejects.not.toThrow(/synthetic-/);
+    }
+  });
+});
