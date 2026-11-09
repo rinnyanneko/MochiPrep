@@ -365,3 +365,25 @@ async fn auth_after_transient_error_stays_critical_and_reports_attempts() {
     assert_eq!(captured.lock().unwrap().len(), 2);
     task.abort();
 }
+
+#[tokio::test]
+async fn overlapping_credentials_echoed_by_http_are_fully_redacted_in_either_order() {
+    for (body, first, second) in [
+        (
+            "shared-credential-prefix-private-gateway-suffix",
+            "shared-credential-prefix",
+            "shared-credential-prefix-private-gateway-suffix",
+        ),
+        ("left-overlap-right", "left-overlap", "overlap-right"),
+    ] {
+        for (key, header) in [(first, second), (second, first)] {
+            let (base, _, task) = serve(vec![Reply::error(400, body)]).await;
+            let mut cfg = config(ProviderKind::Openai, &base);
+            cfg.extra_headers = Some([("x-gateway".into(), header.into())].into_iter().collect());
+            let provider = RemoteProvider::with_options(cfg, key.into(), options()).unwrap();
+            let error = provider.complete(&request()).await.unwrap_err();
+            assert_eq!(error.message, "Provider returned HTTP 400: [REDACTED]");
+            task.abort();
+        }
+    }
+}

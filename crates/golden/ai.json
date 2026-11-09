@@ -11411,6 +11411,118 @@
    "text": "x-api-key=sk-abcdefgh123",
    "secrets": [],
    "expected": "x-api-key=[REDACTED]"
+  },
+  {
+   "text": "shared-credential-prefix-private-gateway-suffix",
+   "secrets": [
+    "shared-credential-prefix",
+    "shared-credential-prefix-private-gateway-suffix"
+   ],
+   "expected": "[REDACTED]"
+  },
+  {
+   "text": "shared-credential-prefix-private-gateway-suffix",
+   "secrets": [
+    "shared-credential-prefix-private-gateway-suffix",
+    "shared-credential-prefix"
+   ],
+   "expected": "[REDACTED]"
+  },
+  {
+   "text": "left-overlap-right",
+   "secrets": [
+    "left-overlap",
+    "overlap-right"
+   ],
+   "expected": "[REDACTED]"
+  },
+  {
+   "text": "left-overlap-right",
+   "secrets": [
+    "overlap-right",
+    "left-overlap"
+   ],
+   "expected": "[REDACTED]"
+  },
+  {
+   "text": "left-overlap-right|left-overlap-right",
+   "secrets": [
+    "left-overlap",
+    "overlap-right"
+   ],
+   "expected": "[REDACTED]|[REDACTED]"
+  },
+  {
+   "text": "left-overlap-right|left-overlap-right",
+   "secrets": [
+    "overlap-right",
+    "left-overlap"
+   ],
+   "expected": "[REDACTED]|[REDACTED]"
+  },
+  {
+   "text": "left-right",
+   "secrets": [
+    "left-",
+    "right"
+   ],
+   "expected": "[REDACTED][REDACTED]"
+  },
+  {
+   "text": "left-right",
+   "secrets": [
+    "right",
+    "left-"
+   ],
+   "expected": "[REDACTED][REDACTED]"
+  },
+  {
+   "text": "left gap right",
+   "secrets": [
+    "left",
+    "right"
+   ],
+   "expected": "[REDACTED] gap [REDACTED]"
+  },
+  {
+   "text": "left gap right",
+   "secrets": [
+    "right",
+    "left"
+   ],
+   "expected": "[REDACTED] gap [REDACTED]"
+  },
+  {
+   "text": "π😀secret-tail",
+   "secrets": [
+    "π😀secret",
+    "secret-tail"
+   ],
+   "expected": "[REDACTED]"
+  },
+  {
+   "text": "π😀secret-tail",
+   "secrets": [
+    "secret-tail",
+    "π😀secret"
+   ],
+   "expected": "[REDACTED]"
+  },
+  {
+   "text": "ababa",
+   "secrets": [
+    "aba",
+    ""
+   ],
+   "expected": "[REDACTED]"
+  },
+  {
+   "text": "ababa",
+   "secrets": [
+    "",
+    "aba"
+   ],
+   "expected": "[REDACTED]"
   }
  ]
 }

@@ -41,5 +41,17 @@ export async function aiFixture() {
   const prompts = contexts.flatMap((context,i) => [false,true].map(allowTrailingStop => ({name:`prompt-${i}-${allowTrailingStop}`,context,allowTrailingStop,system:buildSystemPrompt({allowTrailingStop}),user:buildUserPrompt(context,{allowTrailingStop})})));
   const redactions = [ ['failed secret secret', ['secret']], ['Authorization: Bearer abc.def, "api_key":"xyz" X-API-KEY=q1', []], ['sk-abcdefgh123 AIzaabcdefghijklmnop12 xsk-abcdefgh123 sk-short', []] ].map(([text,secrets]) => ({text,secrets,expected:redactSecrets(text as string,secrets as string[])}));
   for (const text of ['Authorization:\uFEFFBearer token', 'Authorization:\u0085token next', 'api_Key=value', 'X-API-KEY\u2028Bearer token', 'x-api-key=sk-abcdefgh123']) redactions.push({ text, secrets: [], expected: redactSecrets(text) });
+  const overlapCases: Array<[string, string[]]> = [
+    ['shared-credential-prefix-private-gateway-suffix', ['shared-credential-prefix', 'shared-credential-prefix-private-gateway-suffix']],
+    ['left-overlap-right', ['left-overlap', 'overlap-right']],
+    ['left-overlap-right|left-overlap-right', ['left-overlap', 'overlap-right']],
+    ['left-right', ['left-', 'right']],
+    ['left gap right', ['left', 'right']],
+    ['π😀secret-tail', ['π😀secret', 'secret-tail']],
+    ['ababa', ['aba', '']],
+  ];
+  for (const [text, secrets] of overlapCases) {
+    for (const ordered of [secrets, [...secrets].reverse()]) redactions.push({ text, secrets: ordered, expected: redactSecrets(text, ordered) });
+  }
   return {indicators,mocks,prompts,redactions};
 }

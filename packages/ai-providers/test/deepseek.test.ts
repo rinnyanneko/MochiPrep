@@ -124,3 +124,16 @@ describe('error text bounds', () => {
     }
   });
 });
+
+describe('overlapping credentials', () => {
+  it.each([
+    ['shared-credential-prefix-private-gateway-suffix', 'shared-credential-prefix', 'shared-credential-prefix-private-gateway-suffix'],
+    ['left-overlap-right', 'left-overlap', 'overlap-right'],
+  ])('redacts overlapping credentials echoed by HTTP: %s', async (body, first, second) => {
+    for (const [key, header] of [[first, second], [second, first]]) {
+      const fetchImpl = vi.fn(async () => new Response(body, { status: 400 }));
+      const provider = createRemoteProvider({ ...config, extraHeaders: { 'x-gateway': header! } }, key!, fetchImpl as unknown as typeof fetch, []);
+      await expect(provider.complete(request)).rejects.toMatchObject({ message: 'Provider returned HTTP 400: [REDACTED]' });
+    }
+  });
+});
