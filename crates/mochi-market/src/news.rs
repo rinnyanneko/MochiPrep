@@ -113,6 +113,7 @@ fn coin_names(base_currency: &str) -> &'static [&'static str] {
 
 // ---- UTF-16 ---------------------------------------------------------------------------------
 
+/// Use UTF-16 units so lengths and slicing follow the Node sanitizer.
 fn to_units(text: &str) -> Vec<u16> {
     text.encode_utf16().collect()
 }
@@ -141,6 +142,7 @@ fn slice_units(text: &str, max: usize) -> String {
     out
 }
 
+/// Recognize JavaScript whitespace without treating a lone surrogate as a character.
 fn is_space_unit(unit: u16) -> bool {
     char::from_u32(u32::from(unit)).is_some_and(is_js_space)
 }
@@ -365,6 +367,8 @@ fn href_attr<'a>(block: &'a str, lower: &str) -> Option<&'a str> {
                 }
             }
         }
+        // Nested openers before this delimiter search a suffix of the same failed run.
+        from = run_end.max(from);
     }
     None
 }
@@ -476,6 +480,8 @@ pub fn validate_feed_url(text: &str) -> Option<&'static str> {
     // `.replace(/^\[|\]$/g, '')`
     let host = lowered.strip_prefix('[').unwrap_or(&lowered);
     let host = host.strip_suffix(']').unwrap_or(host);
+    // DNS root dots do not change whether the hostname is local.
+    let host = host.trim_end_matches('.');
     let private_172 = host.strip_prefix("172.").is_some_and(|rest| {
         let b = rest.as_bytes();
         b.len() >= 3
@@ -612,6 +618,7 @@ enum Token {
 }
 
 impl Token {
+    /// Return a numeric token value; non-numeric tokens use V8's zero sentinel.
     fn number(self) -> i32 {
         match self {
             Token::Number { value, .. } => value,
@@ -621,6 +628,7 @@ impl Token {
     fn is_number(self) -> bool {
         matches!(self, Token::Number { .. })
     }
+    /// Check digit width as well as token kind for fixed-width ISO date components.
     fn is_fixed_number(self, n: usize) -> bool {
         matches!(self, Token::Number { length, .. } if length == n)
     }
@@ -637,6 +645,7 @@ impl Token {
     fn is_kind(self, wanted: KeywordKind) -> bool {
         matches!(self, Token::Keyword { kind, .. } if kind == wanted)
     }
+    /// Distinguish the one-letter UTC suffix from other zero-offset zone names.
     fn is_keyword_z(self) -> bool {
         matches!(
             self,
@@ -680,6 +689,7 @@ const KEYWORDS: &[(&[u8; 3], KeywordKind, i32)] = &[
     (b"t\0\0", KeywordKind::TimeSeparator, 0),
 ];
 
+/// Match V8's three-letter keyword table, allowing long spellings only for months.
 fn keyword(prefix: [u32; 3], length: usize) -> (KeywordKind, i32) {
     for (word, kind, value) in KEYWORDS {
         let same = prefix
@@ -702,6 +712,7 @@ struct Scanner<'a> {
 }
 
 impl<'a> Scanner<'a> {
+    /// Prime one-token lookahead before the date parser consumes input.
     fn new(units: &'a [u16]) -> Self {
         let mut scanner = Scanner {
             units,
@@ -714,6 +725,7 @@ impl<'a> Scanner<'a> {
         scanner
     }
 
+    /// Read the next UTF-16 unit, using NUL as the end-of-input sentinel.
     fn advance(&mut self) {
         self.ch = self.units.get(self.index).copied().unwrap_or(0);
         self.index += 1;
@@ -744,6 +756,7 @@ impl<'a> Scanner<'a> {
         n
     }
 
+    /// Tokenize numbers, keywords and separators while skipping nested parenthesized text.
     fn scan(&mut self) -> Token {
         let start = self.index;
         if self.ch == 0 {
@@ -804,6 +817,7 @@ impl<'a> Scanner<'a> {
         Token::Unknown
     }
 
+    /// Consume lookahead and scan its replacement without rewinding the input.
     fn next_token(&mut self) -> Token {
         let token = self.next;
         self.next = self.scan();
@@ -814,6 +828,7 @@ impl<'a> Scanner<'a> {
         self.next
     }
 
+    /// Consume the requested delimiter only when it is the current lookahead.
     fn skip_symbol(&mut self, symbol: u8) -> bool {
         if self.next == Token::Symbol(symbol) {
             self.next_token();
@@ -868,6 +883,7 @@ impl DayComposer {
     fn is_empty(&self) -> bool {
         self.index == 0
     }
+    /// Append a date or time component only while its fixed-size composer has room.
     fn add(&mut self, n: i32) -> bool {
         if self.index < 3 {
             self.comp[self.index] = n;
@@ -915,11 +931,13 @@ impl TimeComposer {
     fn is_empty(&self) -> bool {
         self.index == 0
     }
+    /// Check whether this value can fill the next missing time or offset component.
     fn is_expecting(&self, n: i32) -> bool {
         (self.index == 1 && is_minute(n))
             || (self.index == 2 && is_minute(n))
             || (self.index == 3 && is_millisecond(n))
     }
+    /// Append a date or time component only while its fixed-size composer has room.
     fn add(&mut self, n: i32) -> bool {
         if self.index < 4 {
             self.comp[self.index] = n;
@@ -929,6 +947,7 @@ impl TimeComposer {
             false
         }
     }
+    /// Finish the time by padding all omitted components with zero.
     fn add_final(&mut self, n: i32) -> bool {
         if !self.add(n) {
             return false;
@@ -974,12 +993,14 @@ struct ZoneComposer {
 }
 
 impl ZoneComposer {
+    /// Store an hour offset as sign and absolute components for later validation.
     fn set(&mut self, offset_hours: i32) {
         let sign = if offset_hours < 0 { -1 } else { 1 };
         self.sign = Some(sign);
         self.hour = Some(offset_hours * sign);
         self.minute = Some(0);
     }
+    /// Check whether this value can fill the next missing time or offset component.
     fn is_expecting(&self, n: i32) -> bool {
         self.hour.is_some() && self.minute.is_none() && is_minute(n)
     }
@@ -1045,74 +1066,8 @@ fn parse_es5(
         if scanner.peek() != Token::End {
             return scanner.next_token();
         }
-    } else {
-        scanner.next_token();
-        let hour = scanner.peek();
-        if !hour.is_fixed_number(2) || !(0..=24).contains(&hour.number()) {
-            return Token::Invalid;
-        }
-        // 24:00[:00[.000]] only.
-        let hour_is_24 = hour.number() == 24;
-        time.add(scanner.next_token().number());
-        if !scanner.skip_symbol(b':') {
-            return Token::Invalid;
-        }
-        let minute = scanner.peek();
-        if !minute.is_fixed_number(2)
-            || !is_minute(minute.number())
-            || (hour_is_24 && minute.number() > 0)
-        {
-            return Token::Invalid;
-        }
-        time.add(scanner.next_token().number());
-        if scanner.skip_symbol(b':') {
-            let second = scanner.peek();
-            if !second.is_fixed_number(2)
-                || !is_minute(second.number())
-                || (hour_is_24 && second.number() > 0)
-            {
-                return Token::Invalid;
-            }
-            time.add(scanner.next_token().number());
-            if scanner.skip_symbol(b'.') {
-                let fraction = scanner.peek();
-                if !fraction.is_number() || (hour_is_24 && fraction.number() > 0) {
-                    return Token::Invalid;
-                }
-                time.add(read_milliseconds(scanner.next_token()));
-            }
-        }
-        if scanner.peek().is_keyword_z() {
-            scanner.next_token();
-            zone.set(0);
-        } else if scanner.peek().is_sign() {
-            zone.sign = Some(scanner.next_token().sign());
-            if scanner.peek().is_fixed_number(4) {
-                // The hhmm extension.
-                let hour_minute = scanner.next_token().number();
-                let (hour, minute) = (hour_minute / 100, hour_minute % 100);
-                if !is_hour(hour) || !is_minute(minute) {
-                    return Token::Invalid;
-                }
-                zone.hour = Some(hour);
-                zone.minute = Some(minute);
-            } else {
-                if !scanner.peek().is_fixed_number(2) || !is_hour(scanner.peek().number()) {
-                    return Token::Invalid;
-                }
-                zone.hour = Some(scanner.next_token().number());
-                if !scanner.skip_symbol(b':') {
-                    return Token::Invalid;
-                }
-                if !scanner.peek().is_fixed_number(2) || !is_minute(scanner.peek().number()) {
-                    return Token::Invalid;
-                }
-                zone.minute = Some(scanner.next_token().number());
-            }
-        }
-        if scanner.peek() != Token::End {
-            return Token::Invalid;
-        }
+    } else if parse_iso_time(scanner, time, zone).is_none() {
+        return Token::Invalid;
     }
     // A date-only form is UTC; a date-time without an offset is local.
     if zone.is_empty() && time.is_empty() {
@@ -1120,6 +1075,88 @@ fn parse_es5(
     }
     day.is_iso_date = true;
     Token::End
+}
+
+/// Read the ISO time after `T`; 24 is allowed only for exactly midnight.
+fn parse_iso_time(
+    scanner: &mut Scanner,
+    time: &mut TimeComposer,
+    zone: &mut ZoneComposer,
+) -> Option<()> {
+    scanner.next_token();
+    let hour = scanner.peek();
+    if !hour.is_fixed_number(2) || !(0..=24).contains(&hour.number()) {
+        return None;
+    }
+    // 24:00[:00[.000]] only.
+    let hour_is_24 = hour.number() == 24;
+    time.add(scanner.next_token().number());
+    if !scanner.skip_symbol(b':') {
+        return None;
+    }
+    let minute = scanner.peek();
+    if !minute.is_fixed_number(2)
+        || !is_minute(minute.number())
+        || (hour_is_24 && minute.number() > 0)
+    {
+        return None;
+    }
+    time.add(scanner.next_token().number());
+    if scanner.skip_symbol(b':') {
+        let second = scanner.peek();
+        if !second.is_fixed_number(2)
+            || !is_minute(second.number())
+            || (hour_is_24 && second.number() > 0)
+        {
+            return None;
+        }
+        time.add(scanner.next_token().number());
+        if scanner.skip_symbol(b'.') {
+            let fraction = scanner.peek();
+            if !fraction.is_number() || (hour_is_24 && fraction.number() > 0) {
+                return None;
+            }
+            time.add(read_milliseconds(scanner.next_token()));
+        }
+    }
+    parse_iso_zone(scanner, zone)?;
+    if scanner.peek() != Token::End {
+        return None;
+    }
+    Some(())
+}
+
+/// Read an optional ISO offset, accepting both hh:mm and V8's hhmm extension.
+fn parse_iso_zone(scanner: &mut Scanner, zone: &mut ZoneComposer) -> Option<()> {
+    if scanner.peek().is_keyword_z() {
+        scanner.next_token();
+        zone.set(0);
+    } else if scanner.peek().is_sign() {
+        zone.sign = Some(scanner.next_token().sign());
+        if scanner.peek().is_fixed_number(4) {
+            // The hhmm extension.
+            let hour_minute = scanner.next_token().number();
+            let (hour, minute) = (hour_minute / 100, hour_minute % 100);
+            if !is_hour(hour) || !is_minute(minute) {
+                return None;
+            }
+            zone.hour = Some(hour);
+            zone.minute = Some(minute);
+        } else {
+            if !scanner.peek().is_fixed_number(2) || !is_hour(scanner.peek().number()) {
+                return None;
+            }
+            zone.hour = Some(scanner.next_token().number());
+            if !scanner.skip_symbol(b':') {
+                return None;
+            }
+            if !scanner.peek().is_fixed_number(2) || !is_minute(scanner.peek().number()) {
+                return None;
+            }
+            zone.minute = Some(scanner.next_token().number());
+        }
+    }
+    Some(())
 }
 
 /// The legacy grammar, from the token the ISO parser stopped at. `None` when the text is not a
@@ -1137,52 +1174,7 @@ fn parse_legacy(
         match token {
             Token::Number { value: n, .. } => {
                 has_read_number = true;
-                if scanner.skip_symbol(b':') {
-                    if scanner.skip_symbol(b':') {
-                        // n::
-                        if !time.is_empty() {
-                            return None;
-                        }
-                        time.add(n);
-                        time.add(0);
-                    } else {
-                        // n:
-                        if !time.add(n) {
-                            return None;
-                        }
-                        if scanner.peek() == Token::Symbol(b'.') {
-                            scanner.next_token();
-                        }
-                    }
-                } else if scanner.skip_symbol(b'.') && time.is_expecting(n) {
-                    time.add(n);
-                    if !scanner.peek().is_number() {
-                        return None;
-                    }
-                    let ms = read_milliseconds(scanner.next_token());
-                    if ms < 0 {
-                        return None;
-                    }
-                    time.add_final(ms);
-                } else if zone.is_expecting(n) {
-                    zone.minute = Some(n);
-                } else if time.is_expecting(n) {
-                    time.add_final(n);
-                    // The time must end at the end, a space, `Z` or a sign.
-                    let peek = scanner.peek();
-                    if peek != Token::End
-                        && peek != Token::WhiteSpace
-                        && !peek.is_keyword_z()
-                        && !peek.is_sign()
-                    {
-                        return None;
-                    }
-                } else {
-                    if !day.add(n) {
-                        return None;
-                    }
-                    scanner.skip_symbol(b'-');
-                }
+                parse_legacy_number(scanner, n, day, time, zone)?;
             }
             Token::Keyword { kind, value, .. } => {
                 if kind == KeywordKind::AmPm && !time.is_empty() {
@@ -1201,27 +1193,8 @@ fn parse_legacy(
                 }
             }
             Token::Symbol(_) if token.is_sign() && (zone.is_utc() || !time.is_empty()) => {
-                // An offset, after UTC or a time.
-                zone.sign = Some(token.sign());
-                let (mut n, mut length) = (0, 0);
-                if let Token::Number { value, length: l } = scanner.peek() {
-                    scanner.next_token();
-                    n = value;
-                    length = l;
-                }
+                parse_legacy_zone(scanner, token, zone)?;
                 has_read_number = true;
-                if scanner.peek() == Token::Symbol(b':') {
-                    zone.hour = Some(n);
-                    zone.minute = None;
-                } else if length == 1 || length == 2 {
-                    zone.hour = Some(n);
-                    zone.minute = Some(0);
-                } else if length == 3 || length == 4 {
-                    zone.hour = Some(n / 100);
-                    zone.minute = Some(n % 100);
-                } else {
-                    return None;
-                }
             }
             Token::Symbol(b'+' | b'-' | b')') if has_read_number => return None,
             Token::Invalid => return None,
@@ -1229,6 +1202,88 @@ fn parse_legacy(
             _ => {}
         }
         token = scanner.next_token();
+    }
+    Some(())
+}
+
+/// Interpret a legacy number according to the following separator and composer state.
+fn parse_legacy_number(
+    scanner: &mut Scanner,
+    n: i32,
+    day: &mut DayComposer,
+    time: &mut TimeComposer,
+    zone: &mut ZoneComposer,
+) -> Option<()> {
+    if scanner.skip_symbol(b':') {
+        if scanner.skip_symbol(b':') {
+            // n::
+            if !time.is_empty() {
+                return None;
+            }
+            time.add(n);
+            time.add(0);
+        } else {
+            // n:
+            if !time.add(n) {
+                return None;
+            }
+            if scanner.peek() == Token::Symbol(b'.') {
+                scanner.next_token();
+            }
+        }
+    } else if scanner.skip_symbol(b'.') && time.is_expecting(n) {
+        time.add(n);
+        if !scanner.peek().is_number() {
+            return None;
+        }
+        let ms = read_milliseconds(scanner.next_token());
+        if ms < 0 {
+            return None;
+        }
+        time.add_final(ms);
+    } else if zone.is_expecting(n) {
+        zone.minute = Some(n);
+    } else if time.is_expecting(n) {
+        time.add_final(n);
+        // The time must end at the end, a space, `Z` or a sign.
+        let peek = scanner.peek();
+        if peek != Token::End
+            && peek != Token::WhiteSpace
+            && !peek.is_keyword_z()
+            && !peek.is_sign()
+        {
+            return None;
+        }
+    } else {
+        if !day.add(n) {
+            return None;
+        }
+        scanner.skip_symbol(b'-');
+    }
+    Some(())
+}
+
+/// Interpret a legacy signed offset, leaving a colon's minutes for the next token.
+fn parse_legacy_zone(scanner: &mut Scanner, token: Token, zone: &mut ZoneComposer) -> Option<()> {
+    // An offset, after UTC or a time.
+    zone.sign = Some(token.sign());
+    let (mut n, mut length) = (0, 0);
+    if let Token::Number { value, length: l } = scanner.peek() {
+        scanner.next_token();
+        n = value;
+        length = l;
+    }
+    if scanner.peek() == Token::Symbol(b':') {
+        zone.hour = Some(n);
+        zone.minute = None;
+    } else if length == 1 || length == 2 {
+        zone.hour = Some(n);
+        zone.minute = Some(0);
+    } else if length == 3 || length == 4 {
+        zone.hour = Some(n / 100);
+        zone.minute = Some(n % 100);
+    } else {
+        return None;
     }
     Some(())
 }
@@ -1312,6 +1367,7 @@ impl Default for NetFeedTransport {
 }
 
 impl NetFeedTransport {
+    /// Build an HTTP client with automatic redirects disabled so each hop is validated.
     pub fn new() -> Self {
         let client = reqwest::Client::builder()
             .use_preconfigured_tls((*tls_config()).clone())
@@ -1326,6 +1382,7 @@ impl NetFeedTransport {
 }
 
 impl FeedTransport for NetFeedTransport {
+    /// Fetch one hop with fixed headers and a bounded body; never forward credentials.
     fn get(&self, url: String) -> BoxFuture<'static, Result<FeedReply, String>> {
         let request = self
             .client
@@ -1485,6 +1542,7 @@ impl NewsService {
         Self::with_transport(Arc::new(NetFeedTransport::new()), Arc::new(unix_ms))
     }
 
+    /// Create an empty cache with injectable transport and clock for deterministic tests.
     pub fn with_transport(transport: Arc<dyn FeedTransport>, now: Clock) -> Self {
         NewsService {
             inner: Arc::new(Inner {
@@ -1540,6 +1598,7 @@ impl NewsService {
     }
 }
 
+/// Detach a refresh from readers and share its completion among concurrent requests.
 fn start_refresh(inner: Arc<Inner>, sources: Vec<NewsSource>) -> Refresh {
     let task = tokio::spawn(refresh(inner, sources));
     let done: BoxFuture<'static, ()> = Box::pin(async move {
@@ -1558,6 +1617,7 @@ impl Drop for RefreshDone {
     }
 }
 
+/// Fetch enabled sources concurrently and retain old headlines on a total outage.
 async fn refresh(inner: Arc<Inner>, sources: Vec<NewsSource>) {
     let _done = RefreshDone(inner.clone());
     let enabled: Vec<NewsSource> = sources.into_iter().filter(|s| s.enabled).collect();

@@ -76,7 +76,7 @@
   },
   {
    "schema": "CreateAccount",
-   "body": "{\"name\":\" 　﻿Main \",\"source\":\"REPLAY\"}",
+   "body": "{\"name\":\" 　\ufeffMain\u2028\",\"source\":\"REPLAY\"}",
    "status": 200,
    "response": {
     "name": "Main",
@@ -1648,7 +1648,7 @@
     "content-type": "application/json",
     "content-length": "19"
    },
-   "body": "﻿{\"enabled\":true}",
+   "body": "\ufeff{\"enabled\":true}",
    "status": 200,
    "response": {
     "enabled": true

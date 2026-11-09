@@ -85,7 +85,8 @@ export function validateFeedUrl(text: string): string | null {
     return 'Not a valid URL';
   }
   if (url.protocol !== 'https:') return 'Feeds must use https';
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  // A DNS root dot must not let local names evade the same checks as their undotted form.
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
   const isPrivate = host === 'localhost' || host.endsWith('.local') || host.endsWith('.localhost') || !host.includes('.')
     || /^(127|10|0)\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
     || host.includes(':');

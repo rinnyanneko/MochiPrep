@@ -62,6 +62,7 @@ async fn not_found() -> ApiError {
     ApiError::not_found("Not found")
 }
 
+/// Apply origin, host and token checks before any route or fallback handles the request.
 async fn guard_request(State(guard): State<Arc<Guard>>, request: Request, next: Next) -> Response {
     if let Err(error) = guard.check(&request) {
         return error.into_response();
@@ -75,6 +76,7 @@ async fn guard_request(State(guard): State<Arc<Guard>>, request: Request, next: 
 }
 
 impl Guard {
+    /// Enforce the same host, origin, session and bearer-token order as the Node server.
     fn check(&self, request: &Request) -> Result<(), ApiError> {
         let headers = request.headers();
 

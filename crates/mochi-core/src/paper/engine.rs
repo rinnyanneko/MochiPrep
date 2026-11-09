@@ -19,7 +19,12 @@ use mochi_domain::{
 
 use super::store::PaperStore;
 use super::trailing::validate_trailing;
-use super::types::*;
+use super::types::{
+    attached_protection, closing_side, dec, given, math_error, money, reject, same_trailing,
+    side_of, side_text, status_text, trailing_spec_of, zero, Attempt, Clock, CreateAccountArgs,
+    EngineError, EngineEvent, EventSink, IdSource, PaperEngineDeps, Posting, ProtectionResult,
+    QuoteLookup, MAX_FILL_QUOTE_AGE_MS,
+};
 use crate::{fill_model, perp};
 
 /// A self-contained perpetuals simulator. See docs/PAPER_ENGINE.md for the exact rules.

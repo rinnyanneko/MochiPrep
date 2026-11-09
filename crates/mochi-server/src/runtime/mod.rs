@@ -129,6 +129,7 @@ pub struct StateBody {
     pub instruments: Vec<InstrumentSpecification>,
 }
 
+/// Serialize instruments keyed by symbol, matching the Node state response.
 fn instruments_as_object<S: Serializer>(
     specs: &[InstrumentSpecification],
     serializer: S,
@@ -583,6 +584,7 @@ impl Runtime {
 
     // ---- read models ----------------------------------------------------------------------
 
+    /// Expose the replay cursor and controls using the feed's current bounds.
     pub fn replay_state(&self) -> ReplayState {
         let replay = lock(&self.replay);
         let start = replay.first_playable_time();
@@ -624,6 +626,7 @@ impl Runtime {
         )
     }
 
+    /// Assemble state from the actor-owned database and feeds without inventing missing data.
     pub fn state(&self) -> Result<StateBody, ApiError> {
         let demo = get_setting::<serde_json::Value>(self.connection(), "demo.active")
             .map_err(|e| self.api_error(e))?;
@@ -648,6 +651,7 @@ impl Runtime {
         }
     }
 
+    /// Update the replay clock, persist its speed, and publish the new control state.
     pub fn set_speed(&mut self, speed: u32) -> Result<(), ApiError> {
         self.clock.set_speed(speed);
         set_setting(self.connection(), "replay.speed", &speed).map_err(|e| self.api_error(e))?;
@@ -666,11 +670,12 @@ impl Runtime {
         result
     }
 
+    /// Spend replay credit on one batch at a time and report failures without killing the actor.
     fn on_replay_tick(&mut self) {
         if let Some(steps) = self.clock.on_tick() {
             // A failure has already paused the tape with a toast; the log is for the owner.
             if let Err(error) = self.step_replay(steps) {
-                tracing::warn!(message = %error.message(), "replay batch failed");
+                tracing::warn!(error = %error.message(), "replay batch failed");
             }
         }
     }
@@ -758,7 +763,7 @@ impl Runtime {
         if let Err(error) = result {
             // Node lets this throw out of the WebSocket handler. Here the quote still goes out
             // for display, and the next quote tries again.
-            tracing::warn!(message = %self.redact(&error.to_string()), "live quote failed in the paper engine");
+            tracing::warn!(error = %self.redact(&error.to_string()), "live quote failed in the paper engine");
         }
         self.events.emit_live_quote(quote);
     }
@@ -798,7 +803,7 @@ impl Runtime {
             (_, Some(text)) => text.clone(),
             _ => "a panic without a message".to_string(),
         };
-        tracing::error!(message = %self.redact(&text), "runtime work panicked; carrying on");
+        tracing::error!(error = %self.redact(&text), "runtime work panicked; carrying on");
     }
 
     /// Starts a batch without ending it, so a test can panic in the middle of one.
@@ -925,6 +930,7 @@ async fn run(mut runtime: Runtime, mut inbox: mpsc::Receiver<Command>, mut live:
     runtime.live.stop();
 }
 
+/// Disable an optional select branch by waiting forever when no deadline exists.
 async fn sleep_until_some(at: Option<Instant>) {
     match at {
         Some(at) => sleep_until(at).await,
@@ -932,6 +938,7 @@ async fn sleep_until_some(at: Option<Instant>) {
     }
 }
 
+/// Disable quote polling when no live receiver exists.
 async fn next_quote(quotes: &mut Option<mpsc::Receiver<Quote>>) -> Option<Quote> {
     match quotes {
         Some(quotes) => quotes.recv().await,
@@ -939,6 +946,7 @@ async fn next_quote(quotes: &mut Option<mpsc::Receiver<Quote>>) -> Option<Quote>
     }
 }
 
+/// Disable status polling when no live receiver exists.
 async fn next_status(
     statuses: &mut Option<mpsc::UnboundedReceiver<FeedStatus>>,
 ) -> Option<FeedStatus> {

@@ -73,6 +73,7 @@ pub struct DecisionStats {
     pub estimated_cost: Option<f64>,
 }
 
+/// Decode an agent row using the persisted JSON contracts shared with Node.
 fn agent_from_row(row: &Row<'_>) -> rusqlite::Result<Agent> {
     let risk = RawValue::from_string(row.get("risk")?).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
@@ -234,14 +235,9 @@ pub fn decision_stats(conn: &Connection, agent_id: &str) -> Result<DecisionStats
     })
 }
 
-/// `Number(text)` for the decimal strings decisions store: surrounding whitespace is ignored and
-/// an empty string is 0; anything Rust cannot read as a plain number is NaN.
+/// Stored costs use Node's `Number(text)` rules, including JS whitespace and radix prefixes.
 fn js_number_from_string(text: &str) -> f64 {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return 0.0;
-    }
-    trimmed.parse().unwrap_or(f64::NAN)
+    mochi_domain::jsnum::js_string_to_number(text)
 }
 
 /// `hasSealedExchangeCredentials(accountId)`: the owner saved this account's OKX keys, sealed by

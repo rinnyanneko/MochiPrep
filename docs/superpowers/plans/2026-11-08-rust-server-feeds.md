@@ -21,7 +21,7 @@ The saved CodeRabbit review covered the committed diff from `f6866d9` through `f
 
 Plan 3 is complete within that scope. Node remains the default; agents/providers and demo execution belong to Plan 4, while vault runtime and OKX trading belong to Plan 5. The existing news URL validation gap, Windows Ctrl-Break shutdown limitation, and other accepted differences remain documented.
 
-The owner subsequently instructed that every completed phase must receive a CodeRabbit review, commit, push, and ready-for-review PR, superseding Task 11's original no-push instruction. A fresh CodeRabbit review against `f6866d9` completed on 2026-11-09 with one minor finding and no critical or warning findings: `href_attr` rescans repeated unterminated `<link` openers. Source inspection confirmed the existing quadratic path; it remains in the accounting plan's tracked cleanup row and is disclosed in the PR. No runtime changes were made during this publication step.
+The owner subsequently instructed that every completed phase must receive a CodeRabbit review, commit, push, and ready-for-review PR, superseding Task 11's original no-push instruction. A fresh CodeRabbit review against `f6866d9` completed on 2026-11-09 with one minor finding and no critical or warning findings: `href_attr` rescans repeated unterminated `<link` openers. Source inspection confirmed the existing quadratic path; it was initially carried in the accounting plan's cleanup row and disclosed in the PR; the subsequent review-fix pass below resolves it. No runtime changes were made during that publication step.
 
 **Architecture:**
 - A new `crates/mochi-server` crate (lib + bin) on axum/tokio holds the routes, auth, SSE, validation and a `Runtime` actor. The actor owns the synchronous `PaperExecutionEngine`, the replay feed and the settings store on one task and talks to routes through messages.
@@ -394,3 +394,14 @@ Two of the three tests in `e2e/demo.spec.ts` need agents and the mock AI, and de
 - [ ] **Step 1:** Add jsnum tests for NaN/±Infinity and −0 output, with expectations from TS added to `jsnum.json`. Implement.
 - [ ] **Step 2:** Update the docs. Run every check plus `pnpm test:e2e` and `pnpm test:e2e:rust -- e2e/display.spec.ts e2e/paper.spec.ts`. Record the counts.
 - [ ] **Step 3:** Run the CodeRabbit CLI locally against `origin/main`. It's in WSL. Clone into WSL, check out the branch, run `coderabbit review --agent -t committed --base-commit <merge-base>`, then delete the clone. Fix the valid findings, then commit. Do not push.
+
+
+## PR #7 review fixes — 2026-11-09
+
+The owner authorized fixing the PR feedback in both backends. Trailing root dots are now removed from parsed hostnames before local-host checks, including encoded/Unicode dot forms; public HTTPS names with root dots remain accepted. Tests exercise registration validation, persisted sources and redirects without making unsafe requests. This closes the reported hostname-normalization bypass, not the separate DNS-resolution limitation.
+
+Stored decision-cost strings now use the shared JavaScript Number conversion helper. The Rust e2e instructions name the supported display and paper specs, and the runner launches the installed Playwright CLI through the current Node executable without a shell. The wildcard import is explicit, duplicate tracing fields have distinct names, and the HTML test fixture declares its language.
+
+Hostile Unicode fixtures retain their original parsed values but use visible escapes in source and generated JSON. The ISO/legacy date parsers and non-string validation checks were split into smaller helpers while preserving their golden outputs. Documentation now describes the compatibility-sensitive parser, validation and runtime contracts. The malformed-link scan skips previously exhausted runs; its 20,000-opener regression exceeded three seconds before the fix.
+
+Verification after review fixes: 422 TypeScript tests and 197 Rust tests passed; typecheck, rustfmt and Clippy passed; all five Node and both Rust browser tests passed. The Rust suite used a fresh target/pr7-verification build directory after repeated Windows linker locks in the original target directory. CodeRabbit's review of the fix patch completed with zero findings.

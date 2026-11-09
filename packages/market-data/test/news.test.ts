@@ -88,13 +88,15 @@ describe('selectNews', () => {
 });
 
 describe('validateFeedUrl', () => {
-  it.each(['https://cointelegraph.com/rss', 'https://example.co.uk/feed.xml'])('accepts %s', (url) => {
+  it.each(['https://cointelegraph.com/rss', 'https://example.co.uk/feed.xml', 'https://example.com./rss'])('accepts %s', (url) => {
     expect(validateFeedUrl(url)).toBeNull();
   });
 
   it.each([
     'http://example.com/feed', 'file:///etc/passwd', 'not a url', 'https://localhost/feed', 'https://127.0.0.1/x', 'https://10.0.0.1/x',
     'https://192.168.1.1/x', 'https://172.16.0.1/x', 'https://169.254.169.254/latest', 'https://[::1]/x', 'https://router/x', 'https://nas.local/x',
+    'https://localhost./x', 'https://localhost../x', 'https://app.localhost./x', 'https://nas.local./x', 'https://router./x',
+    'https://localhost%2e/x', 'https://localhost。/x',
   ])('refuses %s', (url) => {
     expect(validateFeedUrl(url)).not.toBeNull();
   });
@@ -167,12 +169,19 @@ describe('NewsService', () => {
       expect((fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].redirect).toBe('manual');
     });
 
-    it.each(['https://169.254.169.254/latest', 'https://localhost/x', 'http://example.com/feed'])('never follows one to %s', async (target) => {
+    it.each(['https://169.254.169.254/latest', 'https://localhost/x', 'https://localhost./x', 'https://nas.local./x', 'http://example.com/feed'])('never follows one to %s', async (target) => {
       const fetchImpl = vi.fn(async () => redirect(target));
       const result = await read(fetchImpl);
       expect(result.items).toEqual([]);
       expect(result.error).toContain('a');
       expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it('accepts a public redirect with a DNS root dot', async () => {
+      const fetchImpl = vi.fn(async (url: string) => url === 'https://a.test/feed'
+        ? redirect('https://example.com./rss') : new Response(feed('Moved')));
+      expect((await read(fetchImpl)).items.map((n) => n.title)).toEqual(['Moved']);
+      expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual(['https://a.test/feed', 'https://example.com./rss']);
     });
 
     it('gives up on a redirect loop', async () => {
@@ -186,5 +195,12 @@ describe('NewsService', () => {
     const fetchImpl = vi.fn(async () => new Response('x'.repeat(3_000_001)));
     const service = new NewsService(() => [source('a')], fetchImpl as unknown as typeof fetch, () => NOW);
     expect((await service.forSymbol('BTCUSDT', 'BTC')).error).toContain('a');
+  });
+
+  it('rejects a persisted local source before requesting it', async () => {
+    const fetchImpl = vi.fn();
+    const service = new NewsService(() => [{ ...source('a'), url: 'https://localhost./rss' }], fetchImpl, () => NOW);
+    expect((await service.forSymbol('BTCUSDT', 'BTC')).error).toContain('a');
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

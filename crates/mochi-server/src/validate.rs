@@ -48,6 +48,7 @@ mod msg {
         }
     }
 
+    /// Keep Zod's singular/plural wording and input key order in unknown-key errors.
     pub fn unrecognized(keys: &[String]) -> String {
         let quoted: Vec<String> = keys.iter().map(|k| format!("\"{k}\"")).collect();
         let plural = if keys.len() > 1 { "s" } else { "" };
@@ -254,6 +255,7 @@ const CLIENT_ORDER_ID: StringRule = StringRule {
     ..StringRule::PLAIN
 };
 
+/// Validate the string decimal grammar without converting money to floating point.
 fn decimal(input: Input) -> Checked {
     check_string(input, &DECIMAL)
 }
@@ -275,6 +277,7 @@ fn create_account(input: Input) -> Checked {
     fields.strict()
 }
 
+/// Check order fields in schema order and reject keys outside the order contract.
 fn place_order(input: Input) -> Checked {
     let mut fields = Fields::new(input)?;
     fields.required("accountId", |v| {
@@ -302,6 +305,7 @@ fn place_order(input: Input) -> Checked {
     fields.strict()
 }
 
+/// Validate optional protection changes while retaining absent-versus-null semantics.
 fn protection(input: Input) -> Checked {
     let mut fields = Fields::new(input)?;
     fields.nullable("stopLoss", decimal);
@@ -311,6 +315,7 @@ fn protection(input: Input) -> Checked {
     fields.strict()
 }
 
+/// Require a close fraction in (0, 1] and the client's idempotency identifier.
 fn close_position(input: Input) -> Checked {
     let mut fields = Fields::new(input)?;
     let fraction = NumberRule {
@@ -348,6 +353,7 @@ fn news_source_toggle(input: Input) -> Checked {
     fields.strict()
 }
 
+/// Validate replay actions and speed limits before the runtime receives them.
 fn replay_control(input: Input) -> Checked {
     let mut fields = Fields::new(input)?;
     fields.optional("playing", check_bool);
@@ -358,6 +364,7 @@ fn replay_control(input: Input) -> Checked {
 
 // Query schemas are `z.object` (not strict): unknown keys are dropped, not refused.
 
+/// Coerce and bound the query limit while keeping the schema's default.
 fn candle_query(input: Input) -> Checked {
     let mut fields = Fields::new(input)?;
     fields.required("source", |v| check_enum(v, SOURCES));
@@ -375,6 +382,7 @@ fn source_query(input: Input) -> Checked {
     fields.strip()
 }
 
+/// Apply the shared integer query-limit coercion and default in one place.
 fn limit_field(fields: &mut Fields) {
     fields.defaulted("limit", json!(200), |v| {
         check_coerced_number(v, &NumberRule::int(1.0, 2000.0))
@@ -464,6 +472,7 @@ struct Fields<'a> {
 }
 
 impl<'a> Fields<'a> {
+    /// Require an object and initialize ordered collection of known fields and errors.
     fn new(input: Input<'a>) -> Result<Self, Vec<Issue>> {
         match input {
             Some(Value::Object(map)) => Ok(Self {
@@ -479,6 +488,7 @@ impl<'a> Fields<'a> {
         }
     }
 
+    /// Keep valid fields and prefix failed field checks with their schema path.
     fn record(&mut self, key: &'static str, result: Checked) {
         match result {
             Ok(value) => {
@@ -589,6 +599,7 @@ fn array_index(key: &str) -> Option<u64> {
 
 // ---- primitives ------------------------------------------------------------------------------
 
+/// Accept only a named schema option, preserving the shared Zod error text.
 fn check_enum(input: Input, options: &[&str]) -> Checked {
     match input {
         Some(Value::String(s)) if options.contains(&s.as_str()) => Ok(Value::String(s.clone())),
@@ -597,6 +608,7 @@ fn check_enum(input: Input, options: &[&str]) -> Checked {
     }
 }
 
+/// Require a JSON boolean; strings and numeric truthy values are not coerced.
 fn check_bool(input: Input) -> Checked {
     match input {
         Some(Value::Bool(b)) => Ok(Value::Bool(*b)),
@@ -646,34 +658,40 @@ impl StringRule {
     }
 }
 
-fn check_string(input: Input, rule: &StringRule) -> Checked {
-    let Some(Value::String(raw)) = input else {
-        let mut issues = vec![Issue::new(msg::invalid_type("string", received(input)))];
-        // Zod quirk: its length checks run even after the type error, on any value that has a
-        // `.length`. An array counts items; another object's `length` key is compared as JS
-        // would (`"0x29" <= 40` is false, and NaN fails every comparison), and reported as an
-        // "unknown" origin.
-        if let Some((length, origin)) = js_length(input) {
-            if let Some(min) = rule.min {
-                if length.is_nan() || length < min as f64 {
-                    issues.push(Issue::new(msg::bound(
-                        "Too small",
-                        origin,
-                        &format!(">={min}"),
-                    )));
-                }
-            }
-            if let Some(max) = rule.max {
-                if length.is_nan() || length > max as f64 {
-                    issues.push(Issue::new(msg::bound(
-                        "Too big",
-                        origin,
-                        &format!("<={max}"),
-                    )));
-                }
+/// Preserve Zod's extra length errors for non-string values with a `.length` property.
+fn non_string_issues(input: Input, rule: &StringRule) -> Vec<Issue> {
+    let mut issues = vec![Issue::new(msg::invalid_type("string", received(input)))];
+    // Zod quirk: its length checks run even after the type error, on any value that has a
+    // `.length`. An array counts items; another object's `length` key is compared as JS
+    // would (`"0x29" <= 40` is false, and NaN fails every comparison), and reported as an
+    // "unknown" origin.
+    if let Some((length, origin)) = js_length(input) {
+        if let Some(min) = rule.min {
+            if length.is_nan() || length < min as f64 {
+                issues.push(Issue::new(msg::bound(
+                    "Too small",
+                    origin,
+                    &format!(">={min}"),
+                )));
             }
         }
-        return Err(issues);
+        if let Some(max) = rule.max {
+            if length.is_nan() || length > max as f64 {
+                issues.push(Issue::new(msg::bound(
+                    "Too big",
+                    origin,
+                    &format!("<={max}"),
+                )));
+            }
+        }
+    }
+    issues
+}
+
+/// Apply normalization, format and length checks in Zod's error-reporting order.
+fn check_string(input: Input, rule: &StringRule) -> Checked {
+    let Some(Value::String(raw)) = input else {
+        return Err(non_string_issues(input, rule));
     };
 
     let mut value = if rule.trim {
@@ -943,6 +961,7 @@ enum BodyKind {
     Text,
 }
 
+/// Select the Fastify-compatible parser from the request content type.
 fn body_kind(headers: &HeaderMap) -> Result<BodyKind, ApiError> {
     let unsupported = || {
         ApiError::new(
@@ -988,6 +1007,7 @@ fn media_type(header: &[u8]) -> Option<String> {
     (token(&kind) && token(&subtype)).then(|| format!("{kind}/{subtype}"))
 }
 
+/// Parse JSON with the compatibility rules used by the Node request parser.
 fn parse_json(bytes: &[u8]) -> Result<Value, ApiError> {
     if bytes.is_empty() {
         return Err(ApiError::bad_request(msg::EMPTY_JSON_BODY));
@@ -1046,6 +1066,7 @@ pub fn query_object(raw_query: &str) -> Value {
     Value::Object(map)
 }
 
+/// Decode query escapes and plus-as-space with Node-compatible replacement behavior.
 fn query_decode(part: &str) -> String {
     let spaced = part.replace('+', " ");
     if !spaced.contains('%') {

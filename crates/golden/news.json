@@ -50,7 +50,7 @@
    "loneSurrogates": false
   },
   {
-   "input": "a\u0000b​c‮d\nnew",
+   "input": "a\u0000b\u200bc\u202ed\nnew",
    "output": "a b c d new",
    "loneSurrogates": false
   },
@@ -65,32 +65,32 @@
    "loneSurrogates": false
   },
   {
-   "input": "zero‍width‌joiner⁠word﻿bom",
+   "input": "zero\u200dwidth\u200cjoiner\u2060word\ufeffbom",
    "output": "zero width joiner word bom",
    "loneSurrogates": false
   },
   {
-   "input": "bidi ‪LRE‫RLE‬PDF‭LRO‮RLO⁦LRI⁧RLI⁨FSI⁩PDI‎LRM‏RLM؜ALM",
+   "input": "bidi \u202aLRE\u202bRLE\u202cPDF\u202dLRO\u202eRLO\u2066LRI\u2067RLI\u2068FSI\u2069PDI\u200eLRM\u200fRLM\u061cALM",
    "output": "bidi LRE RLE PDF LRO RLO LRI RLI FSI PDI LRM RLM ALM",
    "loneSurrogates": false
   },
   {
-   "input": "nel ᠎mvs᠎ ­soft­hyphen",
+   "input": "\u0085nel\u0085 \u180emvs\u180e \u00adsoft\u00adhyphen",
    "output": "nel mvs soft hyphen",
    "loneSurrogates": false
   },
   {
-   "input": "tags 󠀁󠁁󠁿 music 𝅳x𝅺",
+   "input": "tags \udb40\udc01\udb40\udc41\udb40\udc7f music \ud834\udd73x\ud834\udd7a",
    "output": "tags music x",
    "loneSurrogates": false
   },
   {
-   "input": "interlinear ￹a￺b￻c",
+   "input": "interlinear \ufff9a\ufffab\ufffbc",
    "output": "interlinear a b c",
    "loneSurrogates": false
   },
   {
-   "input": "line sep para　ideo math ogham narrow",
+   "input": "line\u2028sep\u2029para　ideo math ogham narrow",
    "output": "line sep para ideo math ogham narrow",
    "loneSurrogates": false
   },
@@ -105,7 +105,7 @@
    "loneSurrogates": false
   },
   {
-   "input": "👨‍👩‍👧 family",
+   "input": "👨\u200d👩\u200d👧 family",
    "output": "👨 👩 👧 family",
    "loneSurrogates": false
   },
@@ -125,7 +125,7 @@
    "loneSurrogates": false
   },
   {
-   "input": "\u0000\u001f controls",
+   "input": "\u0000\u001f\u007f\u0080\u009f controls",
    "output": "controls",
    "loneSurrogates": false
   },
@@ -140,17 +140,17 @@
    "loneSurrogates": false
   },
   {
-   "input": "؀۝܏࢐࢑࣢ arabic and syriac format",
+   "input": "\u0600\u06dd\u070f\u0890\u0891\u08e2 arabic and syriac format",
    "output": "arabic and syriac format",
    "loneSurrogates": false
   },
   {
-   "input": "𑂽𓐰𓐸𛲠𛲣 more format",
+   "input": "\ud804\udcbd\ud80d\udc30\ud80d\udc38\ud82f\udca0\ud82f\udca3 more format",
    "output": "more format",
    "loneSurrogates": false
   },
   {
-   "input": "egyptian 𓐹a𓐺b𓐻c𓐼d𓐽e𓐾f𓐿 Unicode 15 format",
+   "input": "egyptian \ud80d\udc39a\ud80d\udc3ab\ud80d\udc3bc\ud80d\udc3cd\ud80d\udc3de\ud80d\udc3ef\ud80d\udc3f Unicode 15 format",
    "output": "egyptian a b c d e f Unicode 15 format",
    "loneSurrogates": false
   },
@@ -160,12 +160,12 @@
    "loneSurrogates": false
   },
   {
-   "input": "​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​hidden",
+   "input": "\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200bhidden",
    "output": "hidden",
    "loneSurrogates": false
   },
   {
-   "input": "surrogate-adjacent 😀​😁‮😂",
+   "input": "surrogate-adjacent 😀\u200b😁\u202e😂",
    "output": "surrogate-adjacent 😀 😁 😂",
    "loneSurrogates": false
   }
@@ -645,7 +645,7 @@
    "items": []
   },
   {
-   "xml": "<item><title>​‮</title><pubDate>Fri, 06 Nov 2026 20:09:18 +0000</pubDate></item>",
+   "xml": "<item><title>\u200b\u202e</title><pubDate>Fri, 06 Nov 2026 20:09:18 +0000</pubDate></item>",
    "source": "Titles",
    "loneSurrogates": false,
    "items": []
@@ -693,7 +693,7 @@
    ]
   },
   {
-   "xml": "<item><title>Bidi ‮evil‬ &#x202E;entity&#x202C; &#8203;zw</title><pubDate>Fri, 06 Nov 2026 20:09:18 +0000</pubDate></item>",
+   "xml": "<item><title>Bidi \u202eevil\u202c &#x202E;entity&#x202C; &#8203;zw</title><pubDate>Fri, 06 Nov 2026 20:09:18 +0000</pubDate></item>",
    "source": "Titles",
    "loneSurrogates": false,
    "items": [
@@ -2158,6 +2158,30 @@
   },
   {
    "url": "https://localhost./x",
+   "problem": "Feeds must be on a public host"
+  },
+  {
+   "url": "https://localhost../x",
+   "problem": "Feeds must be on a public host"
+  },
+  {
+   "url": "https://localhost%2e/x",
+   "problem": "Feeds must be on a public host"
+  },
+  {
+   "url": "https://localhost。/x",
+   "problem": "Feeds must be on a public host"
+  },
+  {
+   "url": "https://app.localhost./x",
+   "problem": "Feeds must be on a public host"
+  },
+  {
+   "url": "https://router./x",
+   "problem": "Feeds must be on a public host"
+  },
+  {
+   "url": "https://example.com./rss",
    "problem": null
   },
   {
@@ -2238,7 +2262,7 @@
   },
   {
    "url": "https://example.local./x",
-   "problem": null
+   "problem": "Feeds must be on a public host"
   },
   {
    "url": "https://10.example.com/x",

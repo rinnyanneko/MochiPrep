@@ -162,6 +162,11 @@ async fn redirect_to_private_host_refused() {
             "https://169.254.169.254/latest",
         ),
         ("https://localhost/x", "https://localhost/x"),
+        ("https://localhost./x", "https://localhost./x"),
+        ("https://localhost../x", "https://localhost../x"),
+        ("https://nas.local./x", "https://nas.local./x"),
+        ("https://localhost%2e/x", "https://localhost./x"),
+        ("https://localhost。/x", "https://localhost./x"),
         ("https://10.0.0.1/x", "https://10.0.0.1/x"),
         ("https://[::1]/x", "https://[::1]/x"),
         ("https://0x7f.1/x", "https://127.0.0.1/x"),
@@ -198,6 +203,28 @@ async fn redirect_hops_resolve_relative_locations() {
             "https://b.test/final"
         ]
     );
+}
+
+#[tokio::test]
+async fn public_root_dot_is_allowed_but_local_source_is_never_fetched() {
+    let s = setup();
+    s.feeds
+        .redirect("https://a.test/feed", "https://example.com./rss");
+    s.feeds.feed("https://example.com./rss", &feed("Moved"));
+    assert_eq!(
+        fetch_source(s.feeds.as_ref(), &source("a")).await.unwrap()[0].title,
+        "Moved"
+    );
+    assert_eq!(
+        s.feeds.asked(),
+        ["https://a.test/feed", "https://example.com./rss"]
+    );
+
+    let s = setup();
+    let mut local = source("a");
+    local.url = "https://localhost./rss".into();
+    assert!(fetch_source(s.feeds.as_ref(), &local).await.is_err());
+    assert!(s.feeds.asked().is_empty());
 }
 
 #[tokio::test]

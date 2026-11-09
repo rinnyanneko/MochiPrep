@@ -79,7 +79,7 @@ const FIXED_CASES: Array<[number, number]> = [
 // toFixed inputs JSON can't carry as numbers (NaN, ±Infinity) or that toFixed hands to ToString
 // (|x| >= 1e21). The fixture stores the input as String(x).
 const FIXED_SPECIAL_CASES: Array<[number, number]> = [
-  [NaN, 2], [Infinity, 2], [-Infinity, 0], [1e21, 2], [-1.5e21, 2],
+  [Number.NaN, 2], [Infinity, 2], [-Infinity, 0], [1e21, 2], [-1.5e21, 2],
 ];
 
 const JS_NUMBER_CASES = [
@@ -1556,7 +1556,9 @@ async function writeGolden(all: boolean): Promise<void> {
   for (const [name, value] of Object.entries(await buildGolden())) {
     // Randomized files differ on every run, so rewriting them only churns git. `--all` forces it.
     if (!all && RANDOMIZED.has(name) && existsSync(join(GOLDEN_DIR, name))) continue;
-    const bytes = Buffer.isBuffer(value) ? value : JSON.stringify(value, null, 1) + '\n';
+    // Escape invisible fixture characters without changing the strings JSON.parse reconstructs.
+    const bytes = Buffer.isBuffer(value) ? value : JSON.stringify(value, null, 1).replace(/[\p{Cf}\u007f-\u009f\u2028\u2029]/gu, (character) =>
+      character.split('').map((unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, '0')}`).join('')) + '\n';
     writeFileSync(join(GOLDEN_DIR, name), bytes);
   }
 }

@@ -159,3 +159,16 @@ fn large_feeds_parse_in_linear_time() {
         );
     }
 }
+
+#[test]
+fn repeated_unterminated_links_do_not_rescan_the_same_run() {
+    let xml = format!(
+        "<item><title>News</title><pubDate>2026-11-07T06:00:00Z</pubDate>{}</item>",
+        "<link".repeat(20_000)
+    );
+    let started = std::time::Instant::now();
+    let items = parse_feed(&xml, "S");
+    assert_eq!(items.len(), 1);
+    assert!(items[0].url.is_empty());
+    assert!(started.elapsed() < std::time::Duration::from_secs(3));
+}
