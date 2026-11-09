@@ -4,6 +4,23 @@
 
 **Goal:** A Rust backend binary, `mochi-server`, that serves the same HTTP API, SSE stream, auth and web UI as the Node server for everything except agents, AI providers, the vault runtime and OKX trading. It is proven by byte-level API goldens recorded from Node and by the unchanged `e2e/display.spec.ts` running against it.
 
+## Completion handoff — 2026-11-09
+
+Tasks 1–11 are implemented on `claude/rust-server-feeds`; Task 11's implementation ends at `08df677`. The original task steps below are retained as the implementation recipe. The final handoff was recovered after the previous session reached its usage limit.
+
+Fresh verification on this worktree:
+- `pnpm test`: 410 tests passed across 26 files.
+- `pnpm typecheck`, `cargo fmt --all -- --check`, and `cargo clippy --workspace --all-targets -- -D warnings`: exit 0.
+- `cargo test --workspace`: all tests passed.
+- `pnpm test:e2e`: all 5 Node browser tests passed.
+- `pnpm test:e2e:rust -- e2e/display.spec.ts e2e/paper.spec.ts`: release build succeeded and both Rust browser tests passed.
+
+The initial sandboxed Node and Rust runs could not connect to their loopback test servers; both full suites passed with localhost access. Cargo emitted incremental-cache hard-link fallback warnings, but no Clippy diagnostics. The installed pnpm 11.25.0 ran the checks; Corepack could not download the pinned 11.24.0 in the sandbox.
+
+The saved CodeRabbit review covered the committed diff from `f6866d9` through `ffc900f`. Two minor findings were fixed in `08df677`. The remaining handshake-timeout finding is carried in the accounting plan's follow-up table: it affects both backends and is deferred to preserve the agreed parity scope. The continuation also corrected a `toFixed` documentation comment; runtime behaviour is unchanged.
+
+Plan 3 is complete within that scope. Node remains the default; agents/providers and demo execution belong to Plan 4, while vault runtime and OKX trading belong to Plan 5. The existing news URL validation gap, Windows Ctrl-Break shutdown limitation, and other accepted differences remain documented. Keep the branch local as instructed by Task 11; no push or merge is part of this handoff.
+
 **Architecture:**
 - A new `crates/mochi-server` crate (lib + bin) on axum/tokio holds the routes, auth, SSE, validation and a `Runtime` actor. The actor owns the synchronous `PaperExecutionEngine`, the replay feed and the settings store on one task and talks to routes through messages.
 - Live OKX public data and news go into `crates/mochi-market` behind reqwest/tokio-tungstenite.
