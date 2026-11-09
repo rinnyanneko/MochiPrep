@@ -16,7 +16,7 @@
 - Match TypeScript prompt strings, API paths/status/bodies, SSE shapes and persisted SQLite format. Reference implementation is current `packages/ai-providers`, `packages/agents`, and `apps/server/src/{app,runtime}.ts`.
 - Rust ledger and money arithmetic uses `mochi_decimal::Dec`, never `f64` or `rust_decimal`. Indicators, mock analysis and model numeric output use numbers as in TypeScript.
 - AI output is untrusted. Only the runner may turn it into orders after schema validation and the risk engine.
-- Never include provider keys or extra-header values in browser payloads, logs, recorded responses or errors. OKX credentials are outside this phase.
+- Never include provider keys or extra-header values in browser payloads, logs, recorded responses or errors. Redact BEFORE truncation; minimal corresponding Node corrections and cutoff regression tests are authorized when the reference leaks secret prefixes. Sanitize parsed decision text and schema diagnostics before persistence as well. OKX credentials are outside this phase.
 - Vault mutation and OKX trading remain Plan 5. Locked vaults fail closed for remote AI; plaintext provider keys remain owner-controlled when vault is OFF.
 - Tests use deterministic local transports and replay, never paid models or real trading.
 - Follow AGENTS.md phase workflow: CodeRabbit, verification, commit, push, ready PR; do not merge.
@@ -52,7 +52,7 @@
 
 ### Task 3: Runner and asynchronous scheduling
 
-**Files:** Create `crates/mochi-server/src/runtime/agents.rs` and focused cycle/execution modules; modify runtime/mod.rs and replay integration, add `tests/agents.rs` and test helpers. Core risk fixes only for carried Plan4 issues.
+**Files:** Create `crates/mochi-server/src/runtime/agents.rs` and focused cycle/execution modules; modify runtime/mod.rs and replay integration, add `tests/agents.rs` and test helpers. Core risk fixes only for carried Plan4 issues. Required reference tests: apps/server/test/agent-runner.test.ts, agent-signals.test.ts, agent-news.test.ts; every runner/signal scenario must have a Rust equivalent, with exchange-specific protection failures covered by an execution seam or explicitly carried to Plan5 when no exchange engine exists.
 
 **Interfaces:** RuntimeHandle async `run_cycle(id,trigger)` and `execute_signal(id)`; actor preparation/completion phases preserve in-flight exclusion. Lifecycle start/pause/resume/stop/stop_all, expiry/dismissal and status updates accessible to routes. Use Task1 providers and Task2 rows. Extend RuntimeOptions with injected provider factory for tests. Replay batching awaits due agents at EACH bar without holding runtime actor. Live scheduling ticks each second independently of 60s equity sampling.
 
@@ -68,7 +68,9 @@
 **Interfaces:** Replace current 501s for provider CRUD/key/test, agents CRUD/lifecycle/analyze/run/stop-all, suggestions execute/dismiss, demo start/reset/exit. Preserve vault/OKX 501s. API schemas, defaults and statuses exactly follow app.ts; runtime refs and busy guards exactly follow runtime.ts. Provider tests use actual transport seam, never production endpoints.
 
 - [ ] Write RED API tests for Node-compatible bodies/status including malformed bodies before missing IDs, provider views exclude secrets, key OFF versus LOCKED behavior, duplicate pair/unknown refs, busy CRUD, stop-all signal retirement, demo lifecycle preserving non-demo data.
-- [ ] Port handlers/demo seeds/reset ownership and runtime redaction (all loaded keys + header values); use Task3 async APIs. Full e2e/demo.spec.ts must run unchanged against Rust.
+- [ ] Port handlers/demo seeds/reset ownership and runtime redaction (all loaded keys + header values); use Task3 async APIs. Port demo-reset.test.ts economic-sequence repeatability test; preserve user data. Full e2e/demo.spec.ts must run unchanged against Rust.
 - [ ] Run `pnpm test`, `pnpm typecheck`, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `pnpm test:e2e`, `pnpm test:e2e:rust`. Expected: all pass; document actual counts and any real limitations, never claim Plan5 work implemented.
 - [ ] Fresh whole-branch review and CodeRabbit review; fix validated important findings with regression tests. Update docs and carryovers, commit, push branch, open ready PR into main. Node stays default.
+
+
 
