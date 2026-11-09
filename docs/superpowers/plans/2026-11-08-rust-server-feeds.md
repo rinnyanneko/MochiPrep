@@ -19,7 +19,9 @@ The initial sandboxed Node and Rust runs could not connect to their loopback tes
 
 The saved CodeRabbit review covered the committed diff from `f6866d9` through `ffc900f`. Two minor findings were fixed in `08df677`. The remaining handshake-timeout finding is carried in the accounting plan's follow-up table: it affects both backends and is deferred to preserve the agreed parity scope. The continuation also corrected a `toFixed` documentation comment; runtime behaviour is unchanged.
 
-Plan 3 is complete within that scope. Node remains the default; agents/providers and demo execution belong to Plan 4, while vault runtime and OKX trading belong to Plan 5. The existing news URL validation gap, Windows Ctrl-Break shutdown limitation, and other accepted differences remain documented. Keep the branch local as instructed by Task 11; no push or merge is part of this handoff.
+Plan 3 is complete within that scope. Node remains the default; agents/providers and demo execution belong to Plan 4, while vault runtime and OKX trading belong to Plan 5. The existing news URL validation gap, Windows Ctrl-Break shutdown limitation, and other accepted differences remain documented.
+
+The owner subsequently instructed that every completed phase must receive a CodeRabbit review, commit, push, and ready-for-review PR, superseding Task 11's original no-push instruction. A fresh CodeRabbit review against `f6866d9` completed on 2026-11-09 with one minor finding and no critical or warning findings: `href_attr` rescans repeated unterminated `<link` openers. Source inspection confirmed the existing quadratic path; it remains in the accounting plan's tracked cleanup row and is disclosed in the PR. No runtime changes were made during this publication step.
 
 **Architecture:**
 - A new `crates/mochi-server` crate (lib + bin) on axum/tokio holds the routes, auth, SSE, validation and a `Runtime` actor. The actor owns the synchronous `PaperExecutionEngine`, the replay feed and the settings store on one task and talks to routes through messages.
