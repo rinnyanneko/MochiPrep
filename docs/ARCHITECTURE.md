@@ -49,7 +49,9 @@ SQLite stores accounts, orders, positions, fills, ledger events, agents, decisio
 
 A Rust port of the backend is being built under `crates/`. So far it has instrument specs and market types (`mochi-domain`), decimal math that matches decimal.js (`mochi-decimal`), the accounting core (`mochi-core`: perp math, fill model, ledger audit, performance, risk engine and the quote-driven paper engine), SQLite opening, the same migrations and the paper store (`mochi-store`), master-password crypto compatible with `vault.ts` in both directions (`mochi-vault`), and the deterministic replay tape and feed (`mochi-market`). Golden fixtures in `crates/golden`, generated from the TypeScript code, keep the two in step; 47 scenarios prove the paper engine matches Node, and a test shows a reopened file database restores paper state.
 
-`mochi-server` is a Rust HTTP server on axum and tokio. A `Runtime` actor owns the paper engine, the replay clock, the live OKX public feed and the settings store on one task; routes talk to it through messages. It serves the Node API's auth (token, Host and Origin checks), the SSE `/api/events` stream, the embedded web UI (from `apps/web/dist`), paper accounts and trading, replay, market data, instruments and news. Byte-level API goldens recorded from Node prove the responses match, and `e2e/display.spec.ts` and `e2e/paper.spec.ts` run against it (`pnpm test:e2e:rust -- e2e/display.spec.ts e2e/paper.spec.ts`). Agents, AI providers, the vault, OKX trading and demo writes answer 501 `Not available in the Rust backend yet` until Plans 4-5 port them; their GETs return what the database holds and never fabricate. `MOCHIPREP_OFFLINE=1` is a Rust-only switch that turns off the OKX public feed and news fetching. It is not the default backend: `pnpm dev`, `pnpm start` and `pnpm test:e2e` still run Node.
+`mochi-server` is a Rust HTTP server on axum and tokio. A `Runtime` actor owns the paper engine, replay clock, live OKX public feed, settings and agent state. Routes and asynchronous model/candle/news completions communicate with that actor, so stalled models do not block HTTP or live quotes. Replay awaits due agents at each bar before advancing. The server provides the Node auth, SSE, embedded UI, paper accounts/trading, market data, instruments, news, provider CRUD/keys/tests, agent lifecycle/analysis, suggestions and demo lifecycle. Demo reset removes only demo-owned data and repeats economic results from the first bar. Existing browser tests run with `pnpm test:e2e:rust`; Node stays the default for `pnpm dev`, `pnpm start` and `pnpm test:e2e`. `MOCHIPREP_OFFLINE=1` disables the Rust OKX public feed and news fetching.
+
+Rust vault mutations and OKX trading still answer 501 `Not available in the Rust backend yet`. A saved vault stays LOCKED; remote AI cannot load sealed keys. MOCK needs no key, and provider keys can be stored in plaintext while the vault is OFF. The crypto format exists in `mochi-vault`; runtime unlock/sealing orchestration is Plan 5.
 
 Accepted differences from Node, none on a path the web UI depends on:
 - A feed date with no time zone is read as UTC; Node reads it as the machine's local time.
@@ -59,6 +61,16 @@ Accepted differences from Node, none on a path the web UI depends on:
 - Static files carry no `Last-Modified`, a different `ETag` and no percent-decoding, unlike `@fastify/send`.
 - Playwright runs one worker against one shared backend, so spec files depend on their name order: `demo.spec.ts`'s 40,000.00 total equity holds only before `paper.spec.ts` creates its account.
 - Neither backend handles Ctrl-Break on Windows (Node listens for SIGINT and SIGTERM only), so Ctrl-Break ends the process without a clean shutdown. On Ctrl-C the Rust server closes open event streams and the database cleanly.
+
+## Rust carryovers
+
+| Area | Current boundary / next work |
+| --- | --- |
+| Plan 5 vault | Enable/unlock/change/disable/reset orchestration, sealed credentials and saved OKX reconnect are not implemented in Rust. Existing vaults fail closed. |
+| Plan 5 OKX | Private trading sessions, arming, unknown-outcome lookup and exchange protection changes remain unavailable. No simulated exchange execution is presented as real trading. |
+| Exchange protection tests | Pending confirmations, partial `ProtectionChangeError.after` and post-alignment unchanged-result scenarios require the Plan 5 exchange engine. Paper protection changes are synchronous, return pending=false and do not align stop prices. |
+| Untrusted JSON | Numeric overflow, isolated UTF-16 surrogate escapes and JSON deeper than serde_json's recursion bound are safely rejected with Rust invalid-JSON text; Node may accept the JSON and produce a different validation error. Valid Unicode and finite numeric decisions retain parity. |
+| Text cutoffs | Rust preserves UTF-8 at response/sample cutoffs and drops an astral character that would cross the UTF-16 boundary; JavaScript can retain an isolated surrogate. Secrets are redacted before cutting. |
 
 ## Security model
 

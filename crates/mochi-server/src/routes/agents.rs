@@ -1,0 +1,218 @@
+//! Agent API parity. The asynchronous runtime runner owns all model-to-order paths.
+use super::providers::{body, call};
+use crate::{
+    error::ApiError,
+    runtime::agents::CycleTrigger,
+    validate::{self, AgentInput, Schema},
+    AppState,
+};
+use axum::{
+    body::Bytes,
+    extract::{Path, State},
+    http::HeaderMap,
+    routing::{get, post, put},
+    Json, Router,
+};
+use mochi_store::rows;
+use serde_json::{json, Value};
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/api/agents", get(list).post(create))
+        .route("/api/agents/{id}", put(update).delete(remove))
+        .route("/api/agents/stop-all", post(stop_all))
+        .route(
+            "/api/agents/{id}/start",
+            post(|s, p, h, b| action(s, p, h, b, "start")),
+        )
+        .route(
+            "/api/agents/{id}/pause",
+            post(|s, p, h, b| action(s, p, h, b, "pause")),
+        )
+        .route(
+            "/api/agents/{id}/resume",
+            post(|s, p, h, b| action(s, p, h, b, "resume")),
+        )
+        .route(
+            "/api/agents/{id}/stop",
+            post(|s, p, h, b| action(s, p, h, b, "stop")),
+        )
+        .route(
+            "/api/agents/{id}/analyze",
+            post(|s, p, h, b| action(s, p, h, b, "analyze")),
+        )
+        .route(
+            "/api/agents/{id}/run",
+            post(|s, p, h, b| action(s, p, h, b, "run")),
+        )
+        .route("/api/signals/{id}/execute", post(execute))
+        .route("/api/signals/{id}/dismiss", post(dismiss))
+        .route("/api/demo/start", post(|s, h, b| demo(s, h, b, "start")))
+        .route("/api/demo/reset", post(|s, h, b| demo(s, h, b, "reset")))
+        .route("/api/demo/exit", post(|s, h, b| demo(s, h, b, "exit")))
+}
+async fn list(State(state): State<AppState>) -> Result<Json<Vec<rows::Agent>>, ApiError> {
+    Ok(Json(
+        call(&state, |r| {
+            rows::list_agents(r.connection()).map_err(|e| r.api_error(e))
+        })
+        .await?,
+    ))
+}
+async fn create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    bytes: Bytes,
+) -> Result<Json<rows::Agent>, ApiError> {
+    let body = body(&state, &headers, &bytes).await?;
+    Ok(Json(
+        call(&state, move |r| {
+            let input: AgentInput = validate::parse_input(Schema::AgentInput, body.as_ref())?;
+            r.create_agent(input, false)
+        })
+        .await?,
+    ))
+}
+async fn update(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    bytes: Bytes,
+) -> Result<Json<rows::Agent>, ApiError> {
+    let body = body(&state, &headers, &bytes).await?;
+    Ok(Json(
+        call(&state, move |r| {
+            let input: AgentInput = validate::parse_input(Schema::AgentInput, body.as_ref())?;
+            r.update_agent(&id, input)
+        })
+        .await?,
+    ))
+}
+async fn remove(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    bytes: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    body(&state, &headers, &bytes).await?;
+    call(&state, move |r| r.delete_agent(&id)).await?;
+    Ok(Json(json!({"ok":true})))
+}
+async fn action(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    bytes: Bytes,
+    action: &'static str,
+) -> Result<Json<Value>, ApiError> {
+    body(&state, &headers, &bytes).await?;
+    if action == "run" || action == "analyze" {
+        let id = call(&state, move |r| Ok(r.api_agent(&id)?.id)).await?;
+        let result = state
+            .runtime
+            .run_cycle(
+                id,
+                if action == "run" {
+                    CycleTrigger::RunOnce
+                } else {
+                    CycleTrigger::Analyze
+                },
+            )
+            .await;
+        return Ok(Json(
+            call(&state, move |_| {
+                result?
+                    .ok_or_else(|| ApiError::conflict("A cycle is already running for this agent"))
+            })
+            .await?,
+        ));
+    }
+    Ok(Json(
+        call(&state, move |r| {
+            r.api_agent(&id)?;
+            match action {
+                "start" => r.start_agent(&id)?,
+                "resume" => r.resume_agent(&id)?,
+                "pause" => r.pause_agent(&id, Some("Paused by user".into()))?,
+                "stop" => r.stop_agent(&id)?,
+                _ => return Err(ApiError::not_found("Not Found")),
+            };
+            serde_json::to_value(r.api_agent(&id)?).map_err(|e| r.api_error(e))
+        })
+        .await?,
+    ))
+}
+async fn stop_all(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    bytes: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    body(&state, &headers, &bytes).await?;
+    Ok(Json(
+        call(&state, |r| {
+            let stopped = r.stop_all_agents()?;
+            r.set_playing(false);
+            Ok(json!({"stopped":stopped}))
+        })
+        .await?,
+    ))
+}
+async fn execute(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    bytes: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    body(&state, &headers, &bytes).await?;
+    Ok(Json(
+        call(&state, move |r| {
+            r.api_signal(&id)?;
+            r.execute_signal(&id)
+        })
+        .await?,
+    ))
+}
+async fn dismiss(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    bytes: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    body(&state, &headers, &bytes).await?;
+    Ok(Json(
+        call(&state, move |r| {
+            r.api_signal(&id)?;
+            r.dismiss_signal(&id)
+        })
+        .await?,
+    ))
+}
+async fn demo(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    bytes: Bytes,
+    action: &'static str,
+) -> Result<Json<Value>, ApiError> {
+    body(&state, &headers, &bytes).await?;
+    match action {
+        "start" => call(&state, |r| r.start_demo()).await?,
+        "reset" | "exit" => {
+            call(&state, |r| {
+                r.set_playing(false);
+                Ok(())
+            })
+            .await?;
+            state.runtime.wait_replay_idle().await?;
+            let reset = action == "reset";
+            call(&state, move |r| {
+                r.clear_demo()?;
+                if reset {
+                    r.start_demo()?;
+                }
+                Ok(())
+            })
+            .await?;
+        }
+        _ => return Err(ApiError::not_found("Not Found")),
+    }
+    Ok(Json(json!({"demoActive":action!="exit"})))
+}

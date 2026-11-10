@@ -31,6 +31,8 @@ pnpm start
 
 `pnpm start` bundles the backend first (under a second) and runs the bundle, which uses about 80 MiB of memory in one process, against about 125 MiB across the two processes `pnpm dev` runs for the backend. To skip pnpm's own process too, run `node --max-semi-space-size=1 apps/server/dist/main.mjs` after a start or `pnpm --filter @mochiprep/server build`.
 
+A Rust backend is available for paper trading, replay, demo mode, AI providers, agents and suggestions. Build the web UI with `pnpm build`, then run `cargo run -p mochi-server`; it uses the same local API and database format. Node remains the default for `pnpm dev` and `pnpm start`. Rust vault mutations and OKX trading are still unavailable; a saved master password stays locked and remote AI cannot load its keys. See [backend status and compatibility limits](docs/ARCHITECTURE.md#rust-backend-in-progress). `pnpm test:e2e:rust` runs the existing browser suite against Rust.
+
 ## Test
 
 ```sh

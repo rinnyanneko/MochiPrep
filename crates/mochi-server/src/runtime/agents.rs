@@ -157,6 +157,11 @@ impl Runtime {
                     "The AI provider for this agent was removed",
                 )
             })?;
+        let provider = self.provider_for(&c)?;
+        Ok((provider, c))
+    }
+    pub fn provider_for(&self, c: &ProviderConfig) -> Result<Arc<dyn AiProvider>, ProviderError> {
+        let fail = |s: String| ProviderError::new(ProviderErrorCode::BadResponse, self.redact(&s));
         let key = self
             .agents
             .keys
@@ -180,11 +185,11 @@ impl Runtime {
             Arc::new(MockProvider)
         } else {
             match &self.agents.factory {
-                Some(f) => f(&c, key)?,
+                Some(f) => f(c, key)?,
                 None => Arc::new(RemoteProvider::new(c.clone(), key.into())?),
             }
         };
-        Ok((provider, c))
+        Ok(provider)
     }
     pub(super) fn market_now(&self, source: DataSource) -> i64 {
         match source {

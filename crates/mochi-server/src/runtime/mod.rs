@@ -1,7 +1,7 @@
 //! The runtime: one task that owns the paper engine, the replay tape, the live feed handle, the
 //! settings, agent futures, provider keys and the instrument registry. Slow analysis leaves
-//! the actor with owned snapshots and returns for current-state risk checks. OKX execution,
-//! vault mutation and demo routes come with later tasks.
+//! the actor with owned snapshots and returns for current-state risk checks. OKX execution
+//! and vault mutation remain for Plan 5.
 //!
 //! Routes reach it through [`RuntimeHandle`]: every method sends a message to that one task and
 //! awaits the answer. The engine is synchronous and not `Sync`, so this way it is only ever used
@@ -9,6 +9,7 @@
 
 mod agent_cycle;
 mod agent_execution;
+mod ai_api;
 pub use agent_execution::effective_risk;
 pub mod agents;
 pub mod events;
