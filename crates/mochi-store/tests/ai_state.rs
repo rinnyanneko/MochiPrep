@@ -242,3 +242,119 @@ fn grouped_deletes_roll_back_on_failure() {
         1
     );
 }
+
+fn seed_keys(conn: &rusqlite::Connection) {
+    rows::save_provider_key(conn, "provider", "synthetic-key", 1).unwrap();
+    conn.execute(
+        "INSERT INTO sealed_provider_keys VALUES ('provider','synthetic-sealed',1)",
+        [],
+    )
+    .unwrap();
+}
+fn sealed_key_count(conn: &rusqlite::Connection) -> i64 {
+    conn.query_row("SELECT count(*) FROM sealed_provider_keys", [], |r| {
+        r.get(0)
+    })
+    .unwrap()
+}
+
+#[test]
+fn nested_agent_delete_is_restored_by_outer_rollback() {
+    let conn = seeded();
+    let before = sql_snapshot(&conn);
+    let outer = conn.unchecked_transaction().unwrap();
+    rows::delete_agent(&outer, "agent").unwrap();
+    assert!(rows::get_agent(&outer, "agent").unwrap().is_none());
+    assert!(rows::list_decisions(&outer, None, 100).unwrap().is_empty());
+    outer.rollback().unwrap();
+    assert_eq!(sql_snapshot(&conn), before);
+}
+
+#[test]
+fn nested_key_delete_is_restored_by_outer_rollback() {
+    let conn = seeded();
+    seed_keys(&conn);
+    let outer = conn.unchecked_transaction().unwrap();
+    rows::delete_provider_key(&outer, "provider").unwrap();
+    assert!(rows::get_provider_keys(&outer).unwrap().is_empty());
+    assert_eq!(sealed_key_count(&outer), 0);
+    outer.rollback().unwrap();
+    assert_eq!(
+        rows::get_provider_keys(&conn).unwrap()["provider"],
+        "synthetic-key"
+    );
+    assert_eq!(sealed_key_count(&conn), 1);
+}
+
+#[test]
+fn failed_nested_agent_delete_preserves_outer_transaction() {
+    let conn = seeded();
+    conn.execute_batch("CREATE TRIGGER deny_agent_delete BEFORE DELETE ON agents BEGIN SELECT RAISE(ABORT,'denied agent delete'); END;").unwrap();
+    let outer = conn.unchecked_transaction().unwrap();
+    outer
+        .execute("UPDATE accounts SET name='outer-before'", [])
+        .unwrap();
+    let error = rows::delete_agent(&outer, "agent").unwrap_err();
+    assert!(error.to_string().contains("denied agent delete"), "{error}");
+    assert_eq!(rows::list_decisions(&outer, None, 100).unwrap().len(), 2);
+    assert!(rows::get_agent(&outer, "agent").unwrap().is_some());
+    assert_eq!(
+        outer
+            .query_row("SELECT name FROM accounts", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "outer-before"
+    );
+    outer
+        .execute("UPDATE providers SET name='outer-after'", [])
+        .unwrap();
+    outer.commit().unwrap();
+    assert_eq!(
+        rows::get_provider(&conn, "provider").unwrap().unwrap().name,
+        "outer-after"
+    );
+    assert_eq!(
+        conn.query_row("SELECT name FROM accounts", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "outer-before"
+    );
+}
+
+#[test]
+fn failed_nested_key_delete_preserves_outer_transaction() {
+    let conn = seeded();
+    seed_keys(&conn);
+    conn.execute_batch("CREATE TRIGGER deny_sealed_delete BEFORE DELETE ON sealed_provider_keys BEGIN SELECT RAISE(ABORT,'denied sealed delete'); END;").unwrap();
+    let outer = conn.unchecked_transaction().unwrap();
+    outer
+        .execute("UPDATE accounts SET name='outer-before'", [])
+        .unwrap();
+    let error = rows::delete_provider_key(&outer, "provider").unwrap_err();
+    assert!(
+        error.to_string().contains("denied sealed delete"),
+        "{error}"
+    );
+    assert_eq!(
+        rows::get_provider_keys(&outer).unwrap()["provider"],
+        "synthetic-key"
+    );
+    assert_eq!(sealed_key_count(&outer), 1);
+    assert_eq!(
+        outer
+            .query_row("SELECT name FROM accounts", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "outer-before"
+    );
+    outer
+        .execute("UPDATE providers SET name='outer-after'", [])
+        .unwrap();
+    outer.commit().unwrap();
+    assert_eq!(
+        rows::get_provider(&conn, "provider").unwrap().unwrap().name,
+        "outer-after"
+    );
+    assert_eq!(
+        conn.query_row("SELECT name FROM accounts", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "outer-before"
+    );
+}

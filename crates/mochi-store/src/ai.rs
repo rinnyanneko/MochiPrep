@@ -77,11 +77,11 @@ pub fn save_agent(conn: &Connection, a: &Agent) -> Result<(), StoreError> {
     Ok(())
 }
 pub fn delete_agent(conn: &Connection, id: &str) -> Result<(), StoreError> {
-    let tx = conn.unchecked_transaction()?;
-    tx.execute("DELETE FROM decisions WHERE agent_id=?", [id])?;
-    tx.execute("DELETE FROM agents WHERE id=?", [id])?;
-    tx.commit()?;
-    Ok(())
+    grouped_delete(conn, |conn| {
+        conn.execute("DELETE FROM decisions WHERE agent_id=?", [id])?;
+        conn.execute("DELETE FROM agents WHERE id=?", [id])?;
+        Ok(())
+    })
 }
 fn provider_from_row(row: &Row<'_>) -> rusqlite::Result<ProviderConfig> {
     let kind: String = row.get("kind")?;
@@ -179,11 +179,11 @@ pub fn save_provider_key(
 }
 /// Delete both storage formats atomically; either may exist after a vault transition.
 pub fn delete_provider_key(conn: &Connection, id: &str) -> Result<(), StoreError> {
-    let tx = conn.unchecked_transaction()?;
-    tx.execute("DELETE FROM provider_keys WHERE provider_id=?", [id])?;
-    tx.execute("DELETE FROM sealed_provider_keys WHERE provider_id=?", [id])?;
-    tx.commit()?;
-    Ok(())
+    grouped_delete(conn, |conn| {
+        conn.execute("DELETE FROM provider_keys WHERE provider_id=?", [id])?;
+        conn.execute("DELETE FROM sealed_provider_keys WHERE provider_id=?", [id])?;
+        Ok(())
+    })
 }
 
 // Deserialize only the indexed fields, requiring a complete record before any SQL mutation.
@@ -225,4 +225,36 @@ pub fn get_decision(conn: &Connection, id: &str) -> Result<Option<Value>, StoreE
         .query_row("SELECT body FROM decisions WHERE id=?", [id], |r| r.get(0))
         .optional()?;
     Ok(body.map(|v| serde_json::from_str(&v)).transpose()?)
+}
+
+// SAVEPOINT commits standalone groups while preserving an enclosing runtime transaction.
+fn grouped_delete(
+    conn: &Connection,
+    delete: impl FnOnce(&Connection) -> Result<(), StoreError>,
+) -> Result<(), StoreError> {
+    conn.execute_batch("SAVEPOINT mochi_ai_delete")?;
+    let mut guard = DeleteSavepoint {
+        conn,
+        finished: false,
+    };
+    delete(conn)?;
+    conn.execute_batch("RELEASE mochi_ai_delete")?;
+    guard.finished = true;
+    Ok(())
+}
+
+struct DeleteSavepoint<'a> {
+    conn: &'a Connection,
+    finished: bool,
+}
+
+impl Drop for DeleteSavepoint<'_> {
+    fn drop(&mut self) {
+        if !self.finished {
+            // On failure or panic, roll back only this innermost group and keep its caller usable.
+            let _ = self
+                .conn
+                .execute_batch("ROLLBACK TO mochi_ai_delete; RELEASE mochi_ai_delete");
+        }
+    }
 }
