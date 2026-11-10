@@ -164,7 +164,7 @@ export class AgentRunner {
       const source = this.source(agent);
       const market = this.deps.market(source);
       this.update(agent, { status: 'ANALYZING', statusDetail: null });
-      const record = await this.analyzeAndAct(agent, market, source, trigger);
+      const record = sanitizeRecord(await this.analyzeAndAct(agent, market, source, trigger), this.deps.secrets());
       if (record.outcome === 'SIGNAL') this.retireSignals((s) => s.agentId === agentId, 'Replaced by a newer suggestion');
       this.deps.store.insertDecision(record);
       this.finishCycle(agent, market, record);
@@ -476,7 +476,7 @@ export class AgentRunner {
       return conclude('AI_ERROR', critical ? `[critical] ${message}` : message);
     }
     record.latencyMs = Date.now() - started;
-    record.rawResponse = redactSecrets(text.slice(0, RAW_RESPONSE_LIMIT), this.deps.secrets());
+    record.rawResponse = redactSecrets(text, this.deps.secrets()).slice(0, RAW_RESPONSE_LIMIT);
 
     // 7. Validate.
     const parsed = parseDecision(text);
@@ -625,3 +625,10 @@ function estimateCost(config: ProviderConfig, input: number | null, output: numb
   return ((input * config.inputPricePerMTok + output * config.outputPricePerMTok) / 1_000_000).toFixed(6);
 }
 
+/** Keep validated numbers intact while removing echoed credentials from persisted model text. */
+function sanitizeRecord(record: DecisionRecord, secrets: Iterable<string>): DecisionRecord {
+  const known = [...secrets];
+  return JSON.parse(JSON.stringify(record, (_key, value: unknown) =>
+    typeof value === 'string' ? redactSecrets(value, known) : value,
+  )) as DecisionRecord;
+}

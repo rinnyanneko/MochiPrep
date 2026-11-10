@@ -133,6 +133,23 @@ describe('AgentRunner integration', () => {
     expect(stored.rawResponse).toBe(record!.rawResponse);
   });
 
+  it('redacts secrets crossing the raw response cutoff before truncation', async () => {
+    complete = async () => ({ text: 'x'.repeat(7990) + 'custom-secret-agent-key', inputTokens: null, outputTokens: null });
+    const record = await runtime.runner.runCycle(agentId, 'RUN_ONCE');
+    expect(record!.rawResponse).not.toContain('custom-sec');
+    expect(record!.rawResponse).toContain('[REDACTED]');
+  });
+
+  it('sanitizes parsed decision text and schema diagnostics before recording', async () => {
+    complete = async () => ({ text: JSON.stringify({ ...JSON.parse(hold), reason: 'custom-secret-agent-key' }), inputTokens: null, outputTokens: null });
+    const valid = await runtime.runner.runCycle(agentId, 'RUN_ONCE');
+    expect(valid!.decision!.reason).toBe('[REDACTED]');
+    complete = async () => ({ text: JSON.stringify({ ...JSON.parse(hold), 'custom-secret-agent-key': true }), inputTokens: null, outputTokens: null });
+    const invalid = await runtime.runner.runCycle(agentId, 'RUN_ONCE');
+    expect(invalid!.validationError).not.toContain('custom-secret-agent-key');
+    expect(invalid!.outcomeDetail).not.toContain('custom-secret-agent-key');
+  });
+
   describe('PROTECT and trailing stops', () => {
     const trailing = { kind: 'RATIO' as const, callback: '0.02', activationPrice: null };
     const accountId = () => runtime.store.getAgent(agentId)!.accountId;

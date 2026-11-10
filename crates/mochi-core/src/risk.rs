@@ -118,6 +118,32 @@ fn run_checks(
     let balance = &input.balance;
     let open_positions = &input.open_positions;
 
+    let mut numeric = vec![
+        settings.max_leverage,
+        settings.max_risk_per_trade_pct,
+        settings.max_daily_loss_pct,
+        settings.max_open_positions,
+        settings.max_quote_age_sec,
+        settings.max_notional,
+        decision.confidence,
+    ];
+    numeric.extend(
+        [
+            decision.entry_price,
+            decision.stop_loss,
+            decision.take_profit,
+        ]
+        .into_iter()
+        .flatten(),
+    );
+    if let Some(Some(t)) = &decision.trailing_stop {
+        numeric.push(t.callback);
+        numeric.extend(t.activation_price);
+    }
+    if numeric.iter().any(|n| !n.is_finite()) {
+        return Err(Unevaluable::Invalid("Risk inputs must be finite".into()));
+    }
+
     let symbol_ok = decision.symbol == input.symbol;
     checks.check(
         "symbol",
@@ -196,7 +222,7 @@ fn run_checks(
     }
 
     let quote = input.quote.as_ref();
-    let fresh = check_freshness(input, checks);
+    let fresh = check_freshness(input, checks)?;
 
     let day_base = Dec::parse(&input.day_start_equity)?;
     let loss_limit = day_base
@@ -447,11 +473,21 @@ fn run_checks(
     }))
 }
 
-fn check_freshness(input: &RiskInput, checks: &mut Checks) -> bool {
+fn check_freshness(input: &RiskInput, checks: &mut Checks) -> Result<bool, Unevaluable> {
     let quote = input.quote.as_ref();
     // No quote is an infinite age, which never satisfies the limit.
-    let quote_age_sec = quote.map_or(f64::INFINITY, |q| (input.now - q.ts) as f64 / 1000.0);
-    checks.check(
+    let quote_age_sec = match quote {
+        None => f64::INFINITY,
+        Some(q) => {
+            input
+                .now
+                .checked_sub(q.ts)
+                .ok_or_else(|| Unevaluable::Invalid("Quote age overflow".into()))?
+                as f64
+                / 1000.0
+        }
+    };
+    Ok(checks.check(
         "freshness",
         "Market data fresh",
         quote_age_sec <= input.settings.max_quote_age_sec,
@@ -463,7 +499,7 @@ fn check_freshness(input: &RiskInput, checks: &mut Checks) -> bool {
             ),
             None => "no quote available".to_string(),
         },
-    )
+    ))
 }
 
 /// PROTECT changes the stops of an open position and nothing else: no sizing, no leverage. The
@@ -490,7 +526,7 @@ fn protect(
         return Ok(());
     };
 
-    let fresh = check_freshness(input, checks);
+    let fresh = check_freshness(input, checks)?;
     let quote = match &input.quote {
         Some(q) if fresh => q,
         _ => return Ok(()),
@@ -726,7 +762,7 @@ fn stop_on_correct_side(side: PositionSide, reference: &Dec, stop: f64) -> bool 
 
 /// Milliseconds since the Unix epoch for `YYYY-MM-DDTHH:MM:SS[.fff](Z|+HH:MM|-HH:MM)`.
 /// Fractional digits beyond milliseconds are truncated, as V8 does.
-fn parse_iso_datetime(text: &str) -> Option<i64> {
+pub fn parse_iso_datetime(text: &str) -> Option<i64> {
     let b = text.as_bytes();
     let digits = |from: usize, len: usize| -> Option<i64> {
         let part = b.get(from..from + len)?;
@@ -899,6 +935,11 @@ mod tests {
 
         let mut input: RiskInput = serde_json::from_value(cases[0]["input"].clone()).unwrap();
         input.quote.as_mut().unwrap().ask = "0".to_string();
-        assert!(!evaluate_risk(&input, &instruments).approved);
+        input.decision.stop_loss = None;
+        input.decision.take_profit = None;
+        input.settings.require_stop_loss = false;
+        let result = evaluate_risk(&input, &instruments);
+        assert!(!result.approved);
+        assert_eq!(result.checks.last().unwrap().id, "input");
     }
 }
