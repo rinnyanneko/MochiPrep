@@ -18,6 +18,7 @@ pub mod news;
 pub mod redact;
 pub mod replay_clock;
 mod scheduling;
+pub use scheduling::DemoAction;
 
 use std::fmt::Display;
 use std::panic::{catch_unwind, AssertUnwindSafe};

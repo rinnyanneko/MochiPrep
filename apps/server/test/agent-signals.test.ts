@@ -114,6 +114,19 @@ describe('suggestion mode', () => {
     expect(runtime.store.listPendingSignals()).toHaveLength(0);
   });
 
+  it('expires a suggestion after the agent changes to another account for the same pair', async () => {
+    const signal = await raise();
+    expect(signal.outcome).toBe('SIGNAL');
+    const replacement = runtime.engine.createAccount({ name: 'replacement', source: 'REPLAY' }).id;
+    runtime.store.saveAgent({ ...runtime.store.getAgent(signal.agentId)!, accountId: replacement });
+    const result = await call('POST', `/api/signals/${signal.id}/execute`);
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ outcome: 'SIGNAL_EXPIRED', signalExpiresAt: null, accountId });
+    expect(runtime.store.getDecision(signal.id)!.outcome).toBe('SIGNAL_EXPIRED');
+    expect(runtime.store.listOrders(replacement, 50)).toEqual([]);
+    expect(orders()).toEqual([]);
+  });
+
   it('resizes from current equity rather than the original analysis', async () => {
     const signal = await raise();
     const original = Number(signal.risk!.sized!.quantity);

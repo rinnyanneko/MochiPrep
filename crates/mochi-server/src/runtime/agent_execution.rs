@@ -285,16 +285,18 @@ impl Runtime {
             ));
         }
         let account = self.require_account(&a.account_id)?;
-        self.assert_can_run(&a)?;
-        let d: AiDecisionData =
-            serde_json::from_value(r["decision"].clone()).map_err(|e| self.api_error(e))?;
-        if r["signalExpiresAt"].as_i64().unwrap_or(0) <= self.market_now(account.source) {
-            settle(
-                &mut r,
-                "SIGNAL_EXPIRED",
-                Some("Expired before it was acted on".into()),
-            );
+        let expired = if r["accountId"] != account.id || r["source"] != json!(account.source) {
+            Some("Account or market source changed since this suggestion")
         } else {
+            self.assert_can_run(&a)?;
+            (r["signalExpiresAt"].as_i64().unwrap_or(0) <= self.market_now(account.source))
+                .then_some("Expired before it was acted on")
+        };
+        if let Some(detail) = expired {
+            settle(&mut r, "SIGNAL_EXPIRED", Some(detail.into()));
+        } else {
+            let d: AiDecisionData =
+                serde_json::from_value(r["decision"].clone()).map_err(|e| self.api_error(e))?;
             let protection = self.current_protection(&a)?;
             let before = serde_json::from_value::<Protection>(r["protectionBefore"].clone()).ok();
             if d.action == AiAction::Protect

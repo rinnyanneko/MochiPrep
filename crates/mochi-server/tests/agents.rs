@@ -474,6 +474,43 @@ async fn signals_replace_dismiss_expire_and_stop_all() {
     rt.shutdown().await;
 }
 #[tokio::test]
+async fn suggestion_expires_after_account_or_source_changes() {
+    let (rt, model, original) = setup("SIGNAL").await;
+    *model.response.lock().unwrap() = Ok(decision("LONG").to_string());
+    let signal = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(signal["outcome"], "SIGNAL");
+    let replacement = rt
+        .call(|r| {
+            let account = r
+                .engine_mut()
+                .create_account(CreateAccountArgs {
+                    name: "replacement".into(),
+                    source: DataSource::Replay,
+                    initial_balance: None,
+                    is_demo: None,
+                    config: None,
+                })
+                .unwrap();
+            let mut agent = rows::get_agent(r.connection(), "agent").unwrap().unwrap();
+            agent.account_id = account.id.clone();
+            rows::save_agent(r.connection(), &agent).unwrap();
+            account.id
+        })
+        .await
+        .unwrap();
+    let result = rt
+        .execute_signal(signal["id"].as_str().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(result["outcome"], "SIGNAL_EXPIRED");
+    assert_eq!(result["accountId"], original);
+    assert!(result["signalExpiresAt"].is_null());
+    assert_eq!(order_count(&rt, original).await, 0);
+    assert_eq!(order_count(&rt, replacement).await, 0);
+    rt.shutdown().await;
+}
+
+#[tokio::test]
 async fn signal_reassesses_risk_and_current_equity_and_rejects_close() {
     let (rt, m, a) = setup("SIGNAL").await;
     *m.response.lock().unwrap() = Ok(decision("LONG").to_string());

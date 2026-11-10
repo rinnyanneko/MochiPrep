@@ -15,24 +15,44 @@ pub(super) struct ReplayBatch {
     quotes: Vec<Quote>,
     waiting: bool,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DemoAction {
+    Start,
+    Reset,
+    Exit,
+}
+
 impl RuntimeHandle {
     /// Change demo ownership inside the actor's idle transition, without handing an idle
     /// acknowledgement back to a route that could race a newly queued batch.
-    pub async fn change_demo(&self, reset: bool) -> Result<(), ApiError> {
+    pub async fn change_demo(&self, action: DemoAction) -> Result<(), ApiError> {
         let (reply, done) = oneshot::channel();
         self.call(move |r| {
-            r.set_playing(false);
-            r.replay_idle_work.push(Box::new(move |r| {
-                // Playing may have been requested again while the earlier batches drained.
+            if action == DemoAction::Start {
+                if r.is_demo_active()? {
+                    let _ = reply.send(Ok(()));
+                    return Ok::<(), ApiError>(());
+                }
+            } else {
                 r.set_playing(false);
-                let result = r
-                    .clear_demo()
-                    .and_then(|()| if reset { r.start_demo() } else { Ok(()) });
+            }
+            r.replay_idle_work.push(Box::new(move |r| {
+                let result = if action == DemoAction::Start {
+                    r.start_demo()
+                } else {
+                    // Playing may have been requested again while the earlier batches drained.
+                    r.set_playing(false);
+                    r.clear_demo().and_then(|()| match action {
+                        DemoAction::Reset => r.start_demo(),
+                        _ => Ok(()),
+                    })
+                };
                 let _ = reply
                     .send(result.map_err(|e| ApiError::new(e.status(), r.redact(e.message()))));
             }));
+            Ok(())
         })
-        .await?;
+        .await??;
         done.await.map_err(|_| super::stopped())?
     }
 

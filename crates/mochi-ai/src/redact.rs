@@ -32,11 +32,16 @@ pub fn redact_secrets<'a>(text: &str, secrets: impl IntoIterator<Item = &'a str>
         if secret.is_empty() {
             continue;
         }
-        let mut from = 0;
-        while let Some(offset) = text[from..].find(secret) {
-            let start = from + offset;
-            matches.push((start, start + secret.len()));
-            from = start + text[start..].chars().next().unwrap().len_utf8();
+        // Provider diagnostics often embed credentials as escaped JSON string content.
+        let quoted = serde_json::to_string(secret).expect("a string always serializes");
+        let escaped = &quoted[1..quoted.len() - 1];
+        for needle in std::iter::once(secret).chain((escaped != secret).then_some(escaped)) {
+            let mut from = 0;
+            while let Some(offset) = text[from..].find(needle) {
+                let start = from + offset;
+                matches.push((start, start + needle.len()));
+                from = start + text[start..].chars().next().unwrap().len_utf8();
+            }
         }
     }
     matches.sort_unstable();

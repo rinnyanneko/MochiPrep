@@ -367,7 +367,13 @@ export class Runtime {
     return this.store.getSetting<boolean>('demo.active') === true;
   }
 
-  startDemo() {
+  async startDemo() {
+    if (this.isDemoActive()) return;
+    while (this.stepping) await this.stepping;
+    this.seedDemo();
+  }
+
+  private seedDemo() {
     if (this.isDemoActive()) return;
     this.replay.seek(0);
     this.store.setSetting('replay.cursor', this.replay.position);
@@ -406,7 +412,7 @@ export class Runtime {
     this.setPlaying(false);
     while (this.stepping) await this.stepping;
     this.clearDemo();
-    this.startDemo();
+    this.seedDemo();
   }
 
   /** Leaves Demo Mode: removes demo data without rebuilding it. */
@@ -837,6 +843,8 @@ export class Runtime {
    */
   assertCanExecuteSignal(signal: DecisionRecord) {
     const account = this.store.getAccount(signal.accountId);
+    // The runner expires mismatched suggestions before checking the execution venue.
+    if (this.store.getAgent(signal.agentId)?.accountId !== signal.accountId || account?.source !== signal.source) return;
     const action = signal.decision?.action;
     if (account?.venue !== 'OKX_LIVE' || action === 'CLOSE' || action === 'PROTECT') return;
     if (!this.exchanges.get(account.id)?.armed) throw new Error(`${account.name} is not armed. Arm it in Settings first.`);

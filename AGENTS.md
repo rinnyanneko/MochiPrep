@@ -42,6 +42,8 @@ Needs Node >= 22.13 (`node:sqlite`). Workspace packages export TypeScript source
 
 After each implementation phase, run CodeRabbit review, assess and address valid findings, and run the relevant verification checks. Commit the completed phase, push its branch, and open a ready-for-review PR (or update its existing PR). This owner instruction supersedes older plan steps that say not to push. Do not merge the PR without an explicit request.
 
+Before pushing or opening or updating a pull request, verify the publishing GitHub login is `rinnyanneko`.
+
 ## Rules that must not bend
 
 - Accounting uses `D` from `packages/core/src/decimal.ts`, never JS number arithmetic.

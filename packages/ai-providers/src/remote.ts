@@ -36,6 +36,8 @@ async function postOnce(
       method: 'POST',
       headers: { ...extraHeaders, 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body),
+      // Arbitrary gateway credentials must stay on the configured endpoint.
+      redirect: 'manual',
       signal,
     });
   } catch (error) {

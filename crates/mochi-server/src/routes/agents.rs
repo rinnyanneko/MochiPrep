@@ -2,7 +2,7 @@
 use super::providers::{body, call};
 use crate::{
     error::ApiError,
-    runtime::agents::CycleTrigger,
+    runtime::{agents::CycleTrigger, DemoAction},
     validate::{self, AgentInput, Schema},
     AppState,
 };
@@ -46,9 +46,18 @@ pub fn router() -> Router<AppState> {
         )
         .route("/api/signals/{id}/execute", post(execute))
         .route("/api/signals/{id}/dismiss", post(dismiss))
-        .route("/api/demo/start", post(|s, h, b| demo(s, h, b, "start")))
-        .route("/api/demo/reset", post(|s, h, b| demo(s, h, b, "reset")))
-        .route("/api/demo/exit", post(|s, h, b| demo(s, h, b, "exit")))
+        .route(
+            "/api/demo/start",
+            post(|s, h, b| demo(s, h, b, DemoAction::Start)),
+        )
+        .route(
+            "/api/demo/reset",
+            post(|s, h, b| demo(s, h, b, DemoAction::Reset)),
+        )
+        .route(
+            "/api/demo/exit",
+            post(|s, h, b| demo(s, h, b, DemoAction::Exit)),
+        )
 }
 async fn list(State(state): State<AppState>) -> Result<Json<Vec<rows::Agent>>, ApiError> {
     Ok(Json(
@@ -190,15 +199,9 @@ async fn demo(
     State(state): State<AppState>,
     headers: HeaderMap,
     bytes: Bytes,
-    action: &'static str,
+    action: DemoAction,
 ) -> Result<Json<Value>, ApiError> {
     body(&state, &headers, &bytes).await?;
-    match action {
-        "start" => call(&state, |r| r.start_demo()).await?,
-        "reset" | "exit" => {
-            state.runtime.change_demo(action == "reset").await?;
-        }
-        _ => return Err(ApiError::not_found("Not Found")),
-    }
-    Ok(Json(json!({"demoActive":action!="exit"})))
+    state.runtime.change_demo(action).await?;
+    Ok(Json(json!({"demoActive": action != DemoAction::Exit})))
 }

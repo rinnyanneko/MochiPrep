@@ -99,6 +99,35 @@ fn success() -> Reply {
     )
 }
 #[tokio::test]
+async fn provider_redirect_never_contacts_another_origin() {
+    let (destination, requests, destination_task) = serve(vec![success()]).await;
+    let redirect = format!("{destination}/other");
+    let source = Router::new().fallback(post(move || async move {
+        (
+            StatusCode::TEMPORARY_REDIRECT,
+            [(axum::http::header::LOCATION, redirect)],
+        )
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let source_task = tokio::spawn(async move { axum::serve(listener, source).await.unwrap() });
+    let provider = RemoteProvider::with_options(
+        config(ProviderKind::OpenaiCompatible, &base),
+        "provider-secret".into(),
+        options(),
+    )
+    .unwrap();
+    let result = provider.complete(&request()).await;
+    source_task.abort();
+    destination_task.abort();
+    assert!(
+        requests.lock().unwrap().is_empty(),
+        "redirect contacted a different origin"
+    );
+    assert_eq!(result.unwrap_err().code, ProviderErrorCode::Http);
+}
+
+#[tokio::test]
 async fn openai_family_paths_reserved_headers_json_modes_and_tokens() {
     for kind in [
         ProviderKind::Openai,

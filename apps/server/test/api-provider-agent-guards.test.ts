@@ -79,6 +79,26 @@ describe('provider samples and agent mutation guards', () => {
     return { input, agent: runtime.createAgent(input) };
   };
 
+  it('redacts JSON-escaped gateway headers in samples and stored model responses', async () => {
+    const secret = 'gateway"\\diagnostic';
+    const input = { ...providerInput, extraHeaders: { 'x-org': secret } };
+    expect((await call('PUT', '/api/providers/remote', input)).statusCode).toBe(200);
+    const text = JSON.stringify({
+      reason: 'x'.repeat(102) + secret,
+      symbol: 'BTCUSDT', action: 'HOLD', orderType: 'MARKET', entryPrice: null, stopLoss: null,
+      takeProfit: null, confidence: 0.8, expiresAt: null,
+    });
+    transport = async () => response(text);
+    const sample = (await call('POST', '/api/providers/remote/test', {})).json().sample as string;
+    const { agent } = setupAgent();
+    const decision = (await call('POST', '/api/agents/' + agent.id + '/analyze')).json();
+    const stored = runtime.store.getDecision(decision.id)!;
+    const escaped = JSON.stringify(secret).slice(1, -1);
+    expect([sample, JSON.parse(stored.rawResponse!).reason]).toEqual([
+      text.replace(escaped, '[REDACTED]').slice(0, 120), 'x'.repeat(102) + '[REDACTED]',
+    ]);
+  });
+
   const holdDecision = () => {
     const entered = deferred();
     const release = deferred();

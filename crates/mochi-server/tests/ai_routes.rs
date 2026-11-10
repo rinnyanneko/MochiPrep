@@ -231,6 +231,45 @@ async fn connection_test_uses_transport_and_redacts_old_and_current_secrets_befo
     t.close().await;
 }
 #[tokio::test]
+async fn escaped_gateway_headers_are_redacted_in_samples_and_stored_model_responses() {
+    let t = Test::new().await;
+    let provider = t.provider().await;
+    let secret = r#"gateway"\diagnostic"#;
+    let mut input = t.provider_input();
+    input["extraHeaders"] = json!({"x-org": secret});
+    t.ok("PUT", &format!("/api/providers/{provider}"), Some(input))
+        .await;
+    // Place the escaped value across the sample cutoff and in the persisted JSON response.
+    let reason = format!("{}{secret}", "x".repeat(102));
+    *t.gateway.text.lock().unwrap() = json!({"reason":reason,"symbol":"BTCUSDT","action":"HOLD","orderType":"MARKET","entryPrice":null,"stopLoss":null,"takeProfit":null,"confidence":0.8,"expiresAt":null}).to_string();
+    let sample = t
+        .ok("POST", &format!("/api/providers/{provider}/test"), None)
+        .await;
+    let (agent, _) = t.agent(&provider).await;
+    let record = t
+        .ok("POST", &format!("/api/agents/{agent}/analyze"), None)
+        .await;
+    let stored = t.ok("GET", "/api/decisions", None).await;
+    assert_eq!(stored[0]["id"], record["id"]);
+    let raw: Value = serde_json::from_str(stored[0]["rawResponse"].as_str().unwrap()).unwrap();
+    // The snippet is checked against the fully sanitized text, so cutoff cannot hide a prefix leak.
+    let text = t.gateway.text.lock().unwrap().clone();
+    let escaped = serde_json::to_string(secret).unwrap();
+    let clean = text.replace(&escaped[1..escaped.len() - 1], "[REDACTED]");
+    assert_eq!(
+        (
+            sample["sample"].as_str().unwrap().to_string(),
+            raw["reason"].as_str().unwrap().to_string()
+        ),
+        (
+            clean.chars().take(120).collect::<String>(),
+            "x".repeat(102) + "[REDACTED]"
+        )
+    );
+    t.close().await;
+}
+
+#[tokio::test]
 async fn agent_refs_busy_crud_lifecycle_and_signal_statuses() {
     let t = Test::new().await;
     let provider = t.provider().await;
@@ -626,6 +665,49 @@ async fn reset_keeps_replay_idle_and_ownership_change_atomic() {
 #[tokio::test]
 async fn exit_keeps_replay_idle_and_ownership_change_atomic() {
     queued_step_cannot_cross_demo_idle_handoff("exit").await;
+}
+
+#[tokio::test]
+async fn demo_start_waits_for_a_user_replay_bar_before_rewinding() {
+    let t = Test::new().await;
+    let provider = t.provider().await;
+    let (agent, _) = t.agent(&provider).await;
+    let initial = t.state.runtime.replay_state().await.unwrap().now;
+    t.state.runtime.step_replay(2).await.unwrap();
+    t.ok("POST", &format!("/api/agents/{agent}/start"), None)
+        .await;
+    *t.gateway.text.lock().unwrap() = json!({"symbol":"BTCUSDT","action":"HOLD","orderType":"MARKET","entryPrice":null,"stopLoss":null,"takeProfit":null,"reason":"held","confidence":0.8,"expiresAt":null}).to_string();
+    t.gateway.blocked.store(true, Ordering::SeqCst);
+    let mut step = Box::pin(t.state.runtime.step_replay(1));
+    assert!(futures_util::poll!(step.as_mut()).is_pending());
+    timeout(Duration::from_secs(2), t.gateway.entered.notified())
+        .await
+        .unwrap();
+    let held = t.state.runtime.replay_state().await.unwrap().now;
+    let mut demo = Box::pin(t.send("POST", "/api/demo/start", None));
+    assert!(futures_util::poll!(demo.as_mut()).is_pending());
+    let during = t.state.runtime.replay_state().await.unwrap().now;
+    t.gateway.blocked.store(false, Ordering::SeqCst);
+    t.gateway.release.notify_one();
+    timeout(Duration::from_secs(3), step.as_mut())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        timeout(Duration::from_secs(3), demo.as_mut())
+            .await
+            .unwrap()
+            .0,
+        200
+    );
+    assert_eq!(
+        during, held,
+        "demo start moved the tape during the user's held replay bar"
+    );
+    assert_eq!(t.state.runtime.replay_state().await.unwrap().now, initial);
+    drop(step);
+    drop(demo);
+    t.close().await;
 }
 
 #[tokio::test]

@@ -105,10 +105,16 @@ impl Runtime {
         }
         Ok(signal)
     }
-    pub fn start_demo(&mut self) -> Result<(), ApiError> {
-        if get_setting::<Value>(self.connection(), "demo.active").map_err(|e| self.api_error(e))?
-            == Some(Value::Bool(true))
-        {
+    pub(super) fn is_demo_active(&self) -> Result<bool, ApiError> {
+        Ok(
+            get_setting::<Value>(self.connection(), "demo.active")
+                .map_err(|e| self.api_error(e))?
+                == Some(Value::Bool(true)),
+        )
+    }
+
+    pub(super) fn start_demo(&mut self) -> Result<(), ApiError> {
+        if self.is_demo_active()? {
             return Ok(());
         }
         {

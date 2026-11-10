@@ -43,9 +43,13 @@ impl RemoteProvider {
             ));
         }
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let client = reqwest::Client::builder().build().map_err(|_| {
-            ProviderError::new(Code::Network, "Could not create the provider HTTP client")
-        })?;
+        let client = reqwest::Client::builder()
+            // Gateways can attach arbitrary credential headers that redirect filters cannot identify.
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| {
+                ProviderError::new(Code::Network, "Could not create the provider HTTP client")
+            })?;
         Ok(Self {
             config,
             api_key,

@@ -226,8 +226,10 @@ export class AgentRunner {
     this.inFlight.add(agent.id);
     try {
       const account = this.deps.account(agent.accountId)!;
-      const market = this.deps.market(signal.source);
-      if ((signal.signalExpiresAt ?? 0) <= market.now()) {
+      const market = this.deps.market(account.source);
+      if (signal.accountId !== account.id || signal.source !== account.source) {
+        settle(signal, 'SIGNAL_EXPIRED', 'Account or market source changed since this suggestion');
+      } else if ((signal.signalExpiresAt ?? 0) <= market.now()) {
         settle(signal, 'SIGNAL_EXPIRED', 'Expired before it was acted on');
       } else {
         const engine = this.deps.execution(agent.accountId);

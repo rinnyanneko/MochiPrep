@@ -5,8 +5,12 @@ export function redactSecrets(text: string, secrets: Iterable<string> = []): str
   const matches: Array<[number, number]> = [];
   for (const secret of secrets) {
     if (!secret) continue;
-    for (let start = text.indexOf(secret); start !== -1; start = text.indexOf(secret, start + 1)) {
-      matches.push([start, start + secret.length]);
+    // Provider diagnostics can echo credentials inside JSON strings.
+    const escaped = JSON.stringify(secret).slice(1, -1);
+    for (const needle of escaped === secret ? [secret] : [secret, escaped]) {
+      for (let start = text.indexOf(needle); start !== -1; start = text.indexOf(needle, start + 1)) {
+        matches.push([start, start + needle.length]);
+      }
     }
   }
   matches.sort(([a], [b]) => a - b);

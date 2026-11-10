@@ -430,7 +430,7 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
 
   // ---- demo & replay --------------------------------------------------------------------
   app.post('/api/demo/start', async () => {
-    runtime.startDemo();
+    await runtime.startDemo();
     return { demoActive: true };
   });
   app.post('/api/demo/reset', async () => {
