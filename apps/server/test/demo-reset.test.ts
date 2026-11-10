@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
 import { openDatabase } from '../src/db/database';
 import { Runtime } from '../src/runtime';
+import { createRemoteProvider } from '@mochiprep/ai-providers';
 
 describe('Demo reset determinism', () => {
   let db: DatabaseSync | undefined;
@@ -40,5 +41,38 @@ describe('Demo reset determinism', () => {
     await runtime.resetDemo();
     const second = await run();
     expect(second).toEqual(first);
+  });
+
+  it.each(['reset', 'exit'] as const)('%s waits for queued batches before changing demo ownership', async (action) => {
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((done) => { enter = done; });
+    const held = new Promise<void>((done) => { release = done; });
+    let calls = 0;
+    db = openDatabase(':memory:');
+    runtime = new Runtime({ db, replayMinutes: 6_500, providerFactory: (config, key) => createRemoteProvider(config, key, async () => {
+      if (calls++ === 0) { enter(); await held; }
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+        symbol: 'BTCUSDT', action: 'HOLD', orderType: 'MARKET', entryPrice: null, stopLoss: null,
+        takeProfit: null, reason: 'held', confidence: 0.8, expiresAt: null,
+      }) } }] }));
+    }) });
+    runtime.store.insertProvider({ id: 'remote', name: 'test', kind: 'OPENAI_COMPATIBLE', baseUrl: 'https://local-transport.test', defaultModel: 'm', inputPricePerMTok: null, outputPricePerMTok: null, createdAt: 1 });
+    runtime.setKey('remote', 'local-transport-key');
+    runtime.startDemo();
+    const start = runtime.replay.position;
+    const agent = runtime.store.listAgents()[0]!;
+    runtime.store.saveAgent({ ...agent, providerId: 'remote', intervalSec: 10 });
+    runtime.runner.start(agent.id);
+    const first = runtime.stepReplay(1);
+    await entered;
+    const queued = runtime.stepReplay(10);
+    const changing = action === 'reset' ? runtime.resetDemo() : runtime.exitDemo();
+    release();
+    await Promise.all([first, queued, changing]);
+    expect(calls).toBe(11);
+    expect(runtime.replay.position).toBe(action === 'reset' ? start : start + 11);
+    expect(runtime.store.listDecisions({ limit: 100 })).toEqual([]);
+    expect(runtime.store.listAgents().some((a) => a.id === agent.id)).toBe(false);
   });
 });

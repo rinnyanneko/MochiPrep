@@ -203,9 +203,13 @@ async fn connection_test_uses_transport_and_redacts_old_and_current_secrets_befo
     let path = format!("/api/providers/{id}/test");
     let pending = tokio::spawn(async move { send(&state, "POST", &path, Some("{}".into())).await });
     // The first request left a notification; consume it before observing the new request.
-    while t.gateway.requests.lock().unwrap().len() < 2 {
-        tokio::task::yield_now().await;
-    }
+    timeout(Duration::from_secs(2), async {
+        while t.gateway.requests.lock().unwrap().len() < 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("second provider connection test did not reach the local transport");
     t.ok(
         "PUT",
         &format!("/api/providers/{id}/key"),
@@ -528,5 +532,156 @@ async fn demo_reset_removes_inflight_demo_ownership_without_late_records_or_orde
         .unwrap()
         .iter()
         .all(|a| a["id"] != id));
+    t.close().await;
+}
+
+async fn queued_step_cannot_cross_demo_idle_handoff(action: &str) {
+    let t = Test::new().await;
+    let provider = t.provider().await;
+    t.ok("POST", "/api/demo/start", None).await;
+    let agents = t.ok("GET", "/api/agents", None).await;
+    let agent = &agents[0];
+    let id = agent["id"].as_str().unwrap();
+    t.ok("PUT",&format!("/api/agents/{id}"),Some(json!({"name":agent["name"],"providerId":provider,"model":"m","symbol":"BTCUSDT","timeframe":"15m","strategy":"","accountId":agent["accountId"],"risk":agent["risk"],"intervalSec":10,"executionMode":"AUTO"}))).await;
+    t.ok("POST", &format!("/api/agents/{id}/start"), None).await;
+    *t.gateway.text.lock().unwrap()=json!({"symbol":"BTCUSDT","action":"HOLD","orderType":"MARKET","entryPrice":null,"stopLoss":null,"takeProfit":null,"reason":"held","confidence":0.8,"expiresAt":null}).to_string();
+    t.gateway.blocked.store(true, Ordering::SeqCst);
+
+    // Poll the route at its actor handoffs without allowing it to resume automatically.
+    // Another request queues stepping after an idle acknowledgement but before the route
+    // can send a separate destructive mutation. A correct actor-owned mutation has already
+    // finished here, so that same later step legitimately sees only the new ownership.
+    let path = format!("/api/demo/{action}");
+    let mut change = Box::pin(t.send("POST", &path, None));
+    assert!(futures_util::poll!(change.as_mut()).is_pending());
+    t.state.runtime.call(|_| ()).await.unwrap();
+    let mut changed = match futures_util::poll!(change.as_mut()) {
+        std::task::Poll::Ready(v) => Some(v),
+        std::task::Poll::Pending => None,
+    };
+    let mut step = Box::pin(t.state.runtime.step_replay(10));
+    assert!(futures_util::poll!(step.as_mut()).is_pending());
+    t.state.runtime.call(|_| ()).await.unwrap();
+    let old_batch_held=timeout(Duration::from_secs(2),async {
+        tokio::select! {()=t.gateway.entered.notified()=>true,result=step.as_mut()=>{result.unwrap();false}}
+    }).await.expect("neither the queued batch nor its local transport made progress");
+    if old_batch_held {
+        assert!(
+            changed.is_none(),
+            "old demo model started after ownership was already removed"
+        );
+        assert!(futures_util::poll!(change.as_mut()).is_pending());
+        t.state.runtime.call(|_| ()).await.unwrap();
+        let completed_while_batch_held = match futures_util::poll!(change.as_mut()) {
+            std::task::Poll::Ready(v) => {
+                changed = Some(v);
+                true
+            }
+            std::task::Poll::Pending => false,
+        };
+        t.gateway.blocked.store(false, Ordering::SeqCst);
+        t.gateway.release.notify_one();
+        timeout(Duration::from_secs(3), step.as_mut())
+            .await
+            .unwrap()
+            .unwrap();
+        if changed.is_none() {
+            changed = Some(
+                timeout(Duration::from_secs(3), change.as_mut())
+                    .await
+                    .unwrap(),
+            );
+        }
+        assert!(
+            !completed_while_batch_held,
+            "demo ownership changed while the queued old replay batch still waited for its model"
+        );
+    } else if changed.is_none() {
+        changed = Some(
+            timeout(Duration::from_secs(3), change.as_mut())
+                .await
+                .unwrap(),
+        );
+    }
+    assert_eq!(
+        changed.unwrap(),
+        (200, json!({"demoActive":action=="reset"}))
+    );
+    let agents = t.ok("GET", "/api/agents", None).await;
+    assert!(agents.as_array().unwrap().iter().all(|a| a["id"] != id));
+    assert!(t
+        .ok("GET", "/api/decisions", None)
+        .await
+        .as_array()
+        .unwrap()
+        .is_empty());
+    drop(change);
+    drop(step);
+    t.close().await;
+}
+#[tokio::test]
+async fn reset_keeps_replay_idle_and_ownership_change_atomic() {
+    queued_step_cannot_cross_demo_idle_handoff("reset").await;
+}
+#[tokio::test]
+async fn exit_keeps_replay_idle_and_ownership_change_atomic() {
+    queued_step_cannot_cross_demo_idle_handoff("exit").await;
+}
+
+#[tokio::test]
+async fn reset_drains_held_and_queued_batches_before_seeking() {
+    let t = Test::new().await;
+    let provider = t.provider().await;
+    let (id, _) = t.agent(&provider).await;
+    t.ok("POST", "/api/demo/start", None).await;
+    let before = t.ok("GET", "/api/state", None).await["replay"]["now"].clone();
+    let old_demo = t.ok("GET", "/api/agents", None).await;
+    t.ok("POST", &format!("/api/agents/{id}/start"), None).await;
+    *t.gateway.text.lock().unwrap()=json!({"symbol":"BTCUSDT","action":"HOLD","orderType":"MARKET","entryPrice":null,"stopLoss":null,"takeProfit":null,"reason":"held","confidence":0.8,"expiresAt":null}).to_string();
+    t.gateway.blocked.store(true, Ordering::SeqCst);
+    let mut first = Box::pin(t.state.runtime.step_replay(1));
+    assert!(futures_util::poll!(first.as_mut()).is_pending());
+    timeout(Duration::from_secs(2), t.gateway.entered.notified())
+        .await
+        .unwrap();
+    let mut reset = Box::pin(t.send("POST", "/api/demo/reset", None));
+    assert!(futures_util::poll!(reset.as_mut()).is_pending());
+    let mut queued = Box::pin(t.state.runtime.step_replay(10));
+    assert!(futures_util::poll!(queued.as_mut()).is_pending());
+    t.state.runtime.call(|_| ()).await.unwrap();
+    assert!(futures_util::poll!(reset.as_mut()).is_pending());
+    assert_eq!(
+        t.ok("GET", "/api/agents", None)
+            .await
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|a| a["isDemo"] == true)
+            .map(|a| a["id"].clone())
+            .collect::<Vec<_>>(),
+        old_demo
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|a| a["isDemo"] == true)
+            .map(|a| a["id"].clone())
+            .collect::<Vec<_>>()
+    );
+    t.gateway.blocked.store(false, Ordering::SeqCst);
+    t.gateway.release.notify_one();
+    timeout(Duration::from_secs(3), async {
+        first.as_mut().await.unwrap();
+        queued.as_mut().await.unwrap();
+        assert_eq!(reset.as_mut().await.0, 200);
+    })
+    .await
+    .expect("reset or its preceding replay batches did not drain");
+    assert_eq!(
+        t.ok("GET", "/api/state", None).await["replay"]["now"],
+        before
+    );
+    drop(first);
+    drop(queued);
+    drop(reset);
     t.close().await;
 }

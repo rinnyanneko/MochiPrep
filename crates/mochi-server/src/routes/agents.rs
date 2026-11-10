@@ -196,21 +196,7 @@ async fn demo(
     match action {
         "start" => call(&state, |r| r.start_demo()).await?,
         "reset" | "exit" => {
-            call(&state, |r| {
-                r.set_playing(false);
-                Ok(())
-            })
-            .await?;
-            state.runtime.wait_replay_idle().await?;
-            let reset = action == "reset";
-            call(&state, move |r| {
-                r.clear_demo()?;
-                if reset {
-                    r.start_demo()?;
-                }
-                Ok(())
-            })
-            .await?;
+            state.runtime.change_demo(action == "reset").await?;
         }
         _ => return Err(ApiError::not_found("Not Found")),
     }

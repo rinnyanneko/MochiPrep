@@ -16,7 +16,27 @@ pub(super) struct ReplayBatch {
     waiting: bool,
 }
 impl RuntimeHandle {
-    /// Used by ownership-changing operations before seeking/resetting the replay tape.
+    /// Change demo ownership inside the actor's idle transition, without handing an idle
+    /// acknowledgement back to a route that could race a newly queued batch.
+    pub async fn change_demo(&self, reset: bool) -> Result<(), ApiError> {
+        let (reply, done) = oneshot::channel();
+        self.call(move |r| {
+            r.set_playing(false);
+            r.replay_idle_work.push(Box::new(move |r| {
+                // Playing may have been requested again while the earlier batches drained.
+                r.set_playing(false);
+                let result = r
+                    .clear_demo()
+                    .and_then(|()| if reset { r.start_demo() } else { Ok(()) });
+                let _ = reply
+                    .send(result.map_err(|e| ApiError::new(e.status(), r.redact(e.message()))));
+            }));
+        })
+        .await?;
+        done.await.map_err(|_| super::stopped())?
+    }
+
+    /// An observational barrier only; ownership mutations must run inside the idle transition.
     pub async fn wait_replay_idle(&self) -> Result<(), ApiError> {
         let (reply, done) = oneshot::channel();
         self.call(move |r| {
@@ -58,6 +78,9 @@ impl Runtime {
         loop {
             if self.replay_batch.is_none() {
                 let Some(request) = self.replay_queue.pop_front() else {
+                    for work in std::mem::take(&mut self.replay_idle_work) {
+                        work(self);
+                    }
                     for done in self.replay_idle.drain(..) {
                         let _ = done.send(());
                     }

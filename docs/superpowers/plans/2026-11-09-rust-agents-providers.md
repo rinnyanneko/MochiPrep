@@ -71,6 +71,3 @@
 - [ ] Port handlers/demo seeds/reset ownership and runtime redaction (all loaded keys + header values); use Task3 async APIs. Port demo-reset.test.ts economic-sequence repeatability test; preserve user data. Full e2e/demo.spec.ts must run unchanged against Rust.
 - [ ] Run `pnpm test`, `pnpm typecheck`, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `pnpm test:e2e`, `pnpm test:e2e:rust`. Expected: all pass; document actual counts and any real limitations, never claim Plan5 work implemented.
 - [ ] Fresh whole-branch review and CodeRabbit review; fix validated important findings with regression tests. Update docs and carryovers, commit, push branch, open ready PR into main. Node stays default.
-
-
-

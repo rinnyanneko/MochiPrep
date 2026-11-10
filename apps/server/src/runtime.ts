@@ -404,7 +404,7 @@ export class Runtime {
   /** Removes everything demo-owned and rebuilds it from the first bar. User data is untouched. */
   async resetDemo() {
     this.setPlaying(false);
-    if (this.stepping) await this.stepping;
+    while (this.stepping) await this.stepping;
     this.clearDemo();
     this.startDemo();
   }
@@ -412,7 +412,7 @@ export class Runtime {
   /** Leaves Demo Mode: removes demo data without rebuilding it. */
   async exitDemo() {
     this.setPlaying(false);
-    if (this.stepping) await this.stepping;
+    while (this.stepping) await this.stepping;
     this.clearDemo();
     this.invalidate('accounts', 'agents', 'arena', 'decisions', 'orders', 'positions');
   }

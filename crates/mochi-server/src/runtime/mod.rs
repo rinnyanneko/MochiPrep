@@ -270,6 +270,7 @@ pub struct Runtime {
     replay_batch: Option<scheduling::ReplayBatch>,
     replay_queue: std::collections::VecDeque<scheduling::ReplayRequest>,
     replay_idle: Vec<oneshot::Sender<()>>,
+    replay_idle_work: Vec<Command>,
     signal_raised: bool,
     /// Shared with the engine's quote and clock callbacks, which cannot borrow the runtime.
     /// Only the runtime task locks it, so it is never contended.
@@ -350,6 +351,7 @@ impl Runtime {
             replay_batch: None,
             replay_queue: Default::default(),
             replay_idle: Vec::new(),
+            replay_idle_work: Vec::new(),
             signal_raised: false,
             replay,
             live,
