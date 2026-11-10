@@ -768,12 +768,14 @@ impl Runtime {
     }
 
     /// Puts the runtime back in a usable state after work panicked: the engine's queued events
-    /// belong to a rolled-back transaction, so they are discarded, and a batch cut short must
-    /// not leave the timer believing one is still running.
+    /// belong to a rolled-back transaction, so they are discarded. An asynchronous replay
+    /// batch survives unrelated command failures and must keep blocking timer credit.
     fn recover_from_panic(&mut self, panic: &(dyn std::any::Any + Send)) {
         self.engine.discard_queued_events();
         lock(&self.engine_events).clear();
-        self.clock.end_batch();
+        if self.replay_batch.is_none() {
+            self.clock.end_batch();
+        }
         let text = match (panic.downcast_ref::<&str>(), panic.downcast_ref::<String>()) {
             (Some(text), _) => text.to_string(),
             (_, Some(text)) => text.clone(),
@@ -869,6 +871,10 @@ async fn run(mut runtime: Runtime, mut inbox: mpsc::Receiver<Command>, mut live:
             _ = live_tick.tick() => Wake::LiveTick,
             Some(completion) = futures_util::StreamExt::next(&mut runtime.agents.pending), if !runtime.agents.pending.is_empty() => Wake::Agent(Box::new(completion)),
         };
+        let cycle = match &wake {
+            Wake::Agent(completion) => Some(completion.identity()),
+            _ => None,
+        };
         let work: Box<dyn FnOnce(&mut Runtime)> = match wake {
             Wake::HandlesDropped => break,
             Wake::LiveFeedClosed => {
@@ -894,6 +900,13 @@ async fn run(mut runtime: Runtime, mut inbox: mpsc::Receiver<Command>, mut live:
         // the task, and with it live paper trading, carries on. Unwind safety: the store rolls
         // its transaction back while unwinding, and `recover_from_panic` clears the rest.
         if let Err(panic) = catch_unwind(AssertUnwindSafe(|| work(&mut runtime))) {
+            // The completion owns the reply and is dropped on unwind. Release only its
+            // matching cycle so the replay barrier and later requests cannot be stranded.
+            if let Some((id, token)) = cycle {
+                if runtime.agents.active.get(&id) == Some(&token) {
+                    runtime.agents.active.remove(&id);
+                }
+            }
             runtime.recover_from_panic(panic.as_ref());
         }
         if let Err(panic) = catch_unwind(AssertUnwindSafe(|| runtime.pump_replay())) {

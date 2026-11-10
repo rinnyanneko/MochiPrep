@@ -160,11 +160,13 @@ export class AgentRunner {
     if (this.inFlight.has(agentId)) return null;
     this.inFlight.add(agentId);
     const agent = this.requireAgent(agentId);
+    // Keep keys already used by this cycle when settings change during any await.
+    const secrets = [...this.deps.secrets()];
     try {
       const source = this.source(agent);
       const market = this.deps.market(source);
       this.update(agent, { status: 'ANALYZING', statusDetail: null });
-      const record = sanitizeRecord(await this.analyzeAndAct(agent, market, source, trigger), this.deps.secrets());
+      const record = sanitizeRecord(await this.analyzeAndAct(agent, market, source, trigger, secrets), [...secrets, ...this.deps.secrets()]);
       if (record.outcome === 'SIGNAL') this.retireSignals((s) => s.agentId === agentId, 'Replaced by a newer suggestion');
       this.deps.store.insertDecision(record);
       this.finishCycle(agent, market, record);
@@ -355,6 +357,7 @@ export class AgentRunner {
     market: MarketDataProvider,
     source: DataSource,
     trigger: CycleTrigger,
+    secrets: string[],
   ): Promise<DecisionRecord> {
     const now = market.now();
     const account = this.deps.account(agent.accountId)!;
@@ -456,7 +459,9 @@ export class AgentRunner {
     let text: string;
     const started = Date.now();
     try {
+      secrets.push(...this.deps.secrets());
       const { provider, config } = this.deps.resolveProvider(agent);
+      secrets.push(...this.deps.secrets());
       record.providerKind = config.kind;
       record.isMock = config.kind === 'MOCK';
       const response = await provider.complete({
@@ -471,12 +476,12 @@ export class AgentRunner {
       record.estimatedCost = estimateCost(config, response.inputTokens, response.outputTokens);
     } catch (error) {
       record.latencyMs = Date.now() - started;
-      const message = redactSecrets((error as Error).message, this.deps.secrets());
+      const message = redactSecrets((error as Error).message, [...secrets, ...this.deps.secrets()]);
       const critical = error instanceof ProviderError && error.critical;
       return conclude('AI_ERROR', critical ? `[critical] ${message}` : message);
     }
     record.latencyMs = Date.now() - started;
-    record.rawResponse = redactSecrets(text, this.deps.secrets()).slice(0, RAW_RESPONSE_LIMIT);
+    record.rawResponse = redactSecrets(text, [...secrets, ...this.deps.secrets()]).slice(0, RAW_RESPONSE_LIMIT);
 
     // 7. Validate.
     const parsed = parseDecision(text);
@@ -625,10 +630,24 @@ function estimateCost(config: ProviderConfig, input: number | null, output: numb
   return ((input * config.inputPricePerMTok + output * config.outputPricePerMTok) / 1_000_000).toFixed(6);
 }
 
-/** Keep validated numbers intact while removing echoed credentials from persisted model text. */
+/** Free text may echo credentials; IDs, enums, validated dates and trade decimals must stay intact. */
 function sanitizeRecord(record: DecisionRecord, secrets: Iterable<string>): DecisionRecord {
   const known = [...secrets];
-  return JSON.parse(JSON.stringify(record, (_key, value: unknown) =>
-    typeof value === 'string' ? redactSecrets(value, known) : value,
-  )) as DecisionRecord;
+  const clean = (text: string) => redactSecrets(text, known);
+  for (const field of ['rawResponse', 'validationError', 'outcomeDetail', 'newsError'] as const) {
+    if (record[field] !== null) record[field] = clean(record[field]);
+  }
+  if (record.decision) {
+    record.decision.reason = clean(record.decision.reason);
+    // A matching symbol is trusted agent data; a rejected mismatch is arbitrary model text.
+    if (record.decision.symbol !== record.symbol) record.decision.symbol = clean(record.decision.symbol);
+  }
+  if (record.risk) {
+    for (const check of record.risk.checks) check.detail = clean(check.detail);
+    record.risk.rejectionReasons = record.risk.rejectionReasons.map(clean);
+  }
+  if (record.news) {
+    record.news = record.news.map((item) => ({ ...item, id: clean(item.id), source: clean(item.source), title: clean(item.title), url: clean(item.url) }));
+  }
+  return record;
 }

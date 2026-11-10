@@ -16,6 +16,7 @@ struct Model {
     calls: AtomicUsize,
     gate: Notify,
     blocked: AtomicUsize,
+    panics: AtomicUsize,
     requests: Mutex<Vec<AiRequest>>,
 }
 impl AiProvider for Model {
@@ -29,6 +30,7 @@ impl AiProvider for Model {
             if self.blocked.load(Ordering::SeqCst) > 0 {
                 self.gate.notified().await;
             }
+            assert_eq!(self.panics.swap(0, Ordering::SeqCst), 0, "model panicked");
             self.response
                 .lock()
                 .unwrap()
@@ -62,11 +64,14 @@ async fn setup_with(
         calls: AtomicUsize::new(0),
         gate: Notify::new(),
         blocked: AtomicUsize::new(0),
+        panics: AtomicUsize::new(0),
         requests: Mutex::new(Vec::new()),
     });
     options.replay_minutes = Some(5800);
     let m = model.clone();
-    options.provider_factory = Some(Arc::new(move |_, _| Ok(m.clone())));
+    options
+        .provider_factory
+        .get_or_insert_with(|| Arc::new(move |_, _| Ok(m.clone())));
     let rt = RuntimeHandle::start(options).unwrap();
     let mode = mode.to_owned();
     let account=rt.call(move |r|{
@@ -176,6 +181,57 @@ async fn redact_before_cutoff_and_sanitize_decision_and_diagnostics() {
     assert!(!r.to_string().contains("custom-secret-agent-key"));
     rt.shutdown().await;
 }
+#[tokio::test]
+async fn short_secrets_preserve_record_identity_outcomes_and_trade_data() {
+    let (rt, m, account) = setup("SIGNAL").await;
+    let mut d = decision("LONG");
+    d["reason"] = json!("a1");
+    *m.response.lock().unwrap() = Ok(d.to_string());
+    let baseline = cycle(&rt, CycleTrigger::RunOnce).await;
+    rt.call(|r| {
+        let mut p = rows::get_provider(r.connection(), "provider")
+            .unwrap()
+            .unwrap();
+        p.extra_headers = Some(
+            [
+                ("x-one".into(), "1".into()),
+                ("x-letter".into(), "a".into()),
+                ("x-outcome".into(), "SIGNAL".into()),
+                ("x-symbol".into(), "BTCUSDT".into()),
+                ("x-model-symbol".into(), "private-symbol".into()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        rows::save_provider(r.connection(), &p).unwrap();
+    })
+    .await
+    .unwrap();
+    let record = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(record["agentId"], "agent");
+    assert_eq!(record["accountId"], account);
+    assert_eq!(record["outcome"], "SIGNAL");
+    assert_eq!(record["symbol"], "BTCUSDT");
+    assert_eq!(record["decision"]["symbol"], "BTCUSDT");
+    assert_eq!(record["decision"]["action"], "LONG");
+    assert_eq!(record["decision"]["reason"], "[REDACTED][REDACTED]");
+    for field in ["snapshot", "estimatedCost", "indicators"] {
+        assert_eq!(record[field], baseline[field]);
+    }
+    assert_eq!(record["risk"]["sized"], baseline["risk"]["sized"]);
+    let id = record["id"].as_str().unwrap().to_owned();
+    assert!(rt
+        .call(move |r| rows::get_decision(r.connection(), &id).unwrap().is_some())
+        .await
+        .unwrap());
+    d["symbol"] = json!("private-symbol");
+    *m.response.lock().unwrap() = Ok(d.to_string());
+    let rejected = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(rejected["outcome"], "RISK_REJECTED");
+    assert_eq!(rejected["decision"]["symbol"], "[REDACTED]");
+    assert!(!rejected.to_string().contains("private-symbol"));
+    rt.shutdown().await;
+}
 
 async fn wait_calls(m: &Model, n: usize) {
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -185,6 +241,122 @@ async fn wait_calls(m: &Model, n: usize) {
     })
     .await
     .expect("model should be reached");
+}
+#[tokio::test]
+async fn panicking_models_release_cycles_and_replay_on_first_and_resumed_poll() {
+    for blocked in [0, 1] {
+        let (rt, m, account) = setup("AUTO").await;
+        m.panics.store(1, Ordering::SeqCst);
+        m.blocked.store(blocked, Ordering::SeqCst);
+        rt.call(|r| {
+            let mut a = r.require_agent("agent").unwrap();
+            a.interval_sec = 60;
+            rows::save_agent(r.connection(), &a).unwrap();
+            r.start_agent("agent").unwrap();
+        })
+        .await
+        .unwrap();
+        let h = rt.clone();
+        let step = tokio::spawn(async move { h.step_replay(1).await });
+        wait_calls(&m, 1).await;
+        assert!(
+            rt.replay_state().await.is_ok(),
+            "actor must remain responsive"
+        );
+        m.blocked.store(0, Ordering::SeqCst);
+        if blocked > 0 {
+            m.gate.notify_one();
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(2), step)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(!rt.call(|r| r.is_agent_busy("agent")).await.unwrap());
+        assert_eq!(order_count(&rt, account).await, 0);
+        let record = rt
+            .call(|r| {
+                let records = rows::list_decisions(r.connection(), Some("agent"), 1).unwrap();
+                serde_json::from_str::<Value>(records[0].get()).unwrap()
+            })
+            .await
+            .unwrap();
+        assert_eq!(record["outcome"], "AI_ERROR");
+        rt.step_replay(1).await.unwrap();
+        assert_eq!(m.calls.load(Ordering::SeqCst), 2);
+        rt.wait_replay_idle().await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), rt.shutdown())
+            .await
+            .unwrap();
+    }
+}
+#[tokio::test(start_paused = true)]
+async fn command_panic_preserves_blocked_replay_batch_and_timer_credit() {
+    let (rt, m, _) = setup("AUTO").await;
+    m.blocked.store(1, Ordering::SeqCst);
+    rt.call(|r| r.start_agent("agent")).await.unwrap().unwrap();
+    rt.set_speed(5).await.unwrap();
+    let begin = rt.replay_state().await.unwrap().now.unwrap();
+    let h = rt.clone();
+    let step = tokio::spawn(async move { h.step_replay(1).await });
+    wait_calls(&m, 1).await;
+    rt.set_playing(true).await.unwrap();
+    assert!(rt
+        .call::<()>(|_| panic!("unrelated command"))
+        .await
+        .is_err());
+    for _ in 0..5 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(rt.replay_state().await.unwrap().now, Some(begin + 60000));
+    }
+    rt.set_playing(false).await.unwrap();
+    m.blocked.store(0, Ordering::SeqCst);
+    m.gate.notify_one();
+    step.await.unwrap().unwrap();
+    rt.wait_replay_idle().await.unwrap();
+    assert_eq!(
+        rt.replay_state().await.unwrap().now,
+        Some(begin + 60000),
+        "blocked ticks must not queue bars"
+    );
+    rt.set_playing(true).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(
+        rt.replay_state().await.unwrap().now,
+        Some(begin + 60000),
+        "blocked ticks must not earn fractional credit"
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(rt.replay_state().await.unwrap().now, Some(begin + 120000));
+    rt.shutdown().await;
+}
+#[tokio::test]
+async fn completion_panic_releases_active_cycle_and_replay_barrier() {
+    let mut options = RuntimeOptions::new(open_in_memory().unwrap());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    options.provider_factory = Some(Arc::new(move |_, _| {
+        assert_ne!(
+            count.fetch_add(1, Ordering::SeqCst),
+            0,
+            "factory panicked in completion"
+        );
+        Err(ProviderError::new(
+            mochi_ai::ProviderErrorCode::Network,
+            "offline",
+        ))
+    }));
+    let (rt, _, account) = setup_with("AUTO", options, DataSource::Replay).await;
+    assert!(rt.run_cycle("agent", CycleTrigger::RunOnce).await.is_err());
+    assert!(!rt.call(|r| r.is_agent_busy("agent")).await.unwrap());
+    assert_eq!(order_count(&rt, account).await, 0);
+    assert_eq!(
+        cycle(&rt, CycleTrigger::RunOnce).await["outcome"],
+        "AI_ERROR"
+    );
+    rt.step_replay(1).await.unwrap();
+    rt.wait_replay_idle().await.unwrap();
+    rt.shutdown().await;
 }
 #[tokio::test]
 async fn failure_counts_auth_and_invalid_output_auto_pause() {
@@ -553,6 +725,7 @@ struct Feed {
     candles: Mutex<Result<Vec<Candle>, String>>,
     blocked: AtomicUsize,
     entered: AtomicUsize,
+    panics: AtomicUsize,
     gate: Notify,
 }
 impl LiveFeed for Feed {
@@ -576,6 +749,7 @@ impl LiveFeed for Feed {
             if self.blocked.load(Ordering::SeqCst) > 0 {
                 self.gate.notified().await;
             }
+            assert_eq!(self.panics.swap(0, Ordering::SeqCst), 0, "candles panicked");
             self.candles.lock().unwrap().clone()
         })
     }
@@ -615,6 +789,7 @@ fn feed() -> Arc<Feed> {
             .collect())),
         blocked: AtomicUsize::new(0),
         entered: AtomicUsize::new(0),
+        panics: AtomicUsize::new(0),
         gate: Notify::new(),
     })
 }
@@ -622,6 +797,47 @@ async fn setup_live(f: Arc<Feed>) -> (RuntimeHandle, Arc<Model>, String) {
     let mut o = RuntimeOptions::new(open_in_memory().unwrap());
     o.live = f;
     setup_with("AUTO", o, DataSource::Live).await
+}
+#[tokio::test]
+async fn panicking_candles_release_cycles_on_first_and_resumed_poll() {
+    for blocked in [0, 1] {
+        let f = feed();
+        f.panics.store(1, Ordering::SeqCst);
+        f.blocked.store(blocked, Ordering::SeqCst);
+        let (rt, m, account) = setup_live(f.clone()).await;
+        let h = rt.clone();
+        let job = tokio::spawn(async move { h.run_cycle("agent", CycleTrigger::RunOnce).await });
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while f.entered.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            rt.replay_state().await.is_ok(),
+            "actor must remain responsive"
+        );
+        f.blocked.store(0, Ordering::SeqCst);
+        if blocked > 0 {
+            f.gate.notify_one();
+        }
+        let record = tokio::time::timeout(std::time::Duration::from_secs(2), job)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(record["outcome"], "DATA_ERROR");
+        assert_eq!(m.calls.load(Ordering::SeqCst), 0);
+        assert!(!rt.call(|r| r.is_agent_busy("agent")).await.unwrap());
+        assert_eq!(order_count(&rt, account).await, 0);
+        assert_eq!(cycle(&rt, CycleTrigger::RunOnce).await["outcome"], "HOLD");
+        rt.step_replay(1).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), rt.shutdown())
+            .await
+            .unwrap();
+    }
 }
 #[tokio::test]
 async fn stale_missing_short_and_failed_candles_skip_model_but_existing_position_can_analyze() {

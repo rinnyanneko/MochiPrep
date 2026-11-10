@@ -41,20 +41,62 @@ impl Cycle {
         redact_secrets(text, self.secrets.iter().map(String::as_str))
     }
 }
-fn clean_value(value: &mut Value, secrets: &[String]) {
-    match value {
-        Value::String(s) => *s = redact_secrets(s, secrets.iter().map(String::as_str)),
-        Value::Array(a) => {
-            for v in a {
-                clean_value(v, secrets);
+impl Completion {
+    pub(super) fn identity(&self) -> (String, String) {
+        let c = match self {
+            Self::Candles(c, _) | Self::News(c, _) | Self::Model(c, _) => c,
+        };
+        (c.agent.id.clone(), c.record["id"].as_str().unwrap().into())
+    }
+}
+fn clean_record(record: &mut Value, secrets: &[String]) {
+    let clean = |v: &mut Value| {
+        if let Value::String(s) = v {
+            *s = redact_secrets(s, secrets.iter().map(String::as_str));
+        }
+    };
+    // Only free text crosses this boundary: short keys must not rewrite IDs, enums,
+    // validated dates, or decimal quantities needed to execute a saved signal.
+    for path in [
+        "/rawResponse",
+        "/validationError",
+        "/outcomeDetail",
+        "/newsError",
+        "/decision/reason",
+    ] {
+        if let Some(v) = record.pointer_mut(path) {
+            clean(v);
+        }
+    }
+    // An approved symbol is the trusted agent symbol. A mismatched model symbol can echo
+    // arbitrary credentials and is retained only as rejected diagnostic text.
+    if record["decision"]["symbol"] != record["symbol"] {
+        if let Some(v) = record.pointer_mut("/decision/symbol") {
+            clean(v);
+        }
+    }
+    if let Some(checks) = record
+        .pointer_mut("/risk/checks")
+        .and_then(Value::as_array_mut)
+    {
+        for check in checks {
+            clean(&mut check["detail"]);
+        }
+    }
+    if let Some(reasons) = record
+        .pointer_mut("/risk/rejectionReasons")
+        .and_then(Value::as_array_mut)
+    {
+        for reason in reasons {
+            clean(reason);
+        }
+    }
+    if let Some(news) = record["news"].as_array_mut() {
+        for item in news {
+            for field in ["id", "source", "title", "url"] {
+                clean(&mut item[field]);
             }
         }
-        Value::Object(o) => {
-            for v in o.values_mut() {
-                clean_value(v, secrets);
-            }
-        }
-        _ => {}
     }
 }
 impl Runtime {
@@ -116,10 +158,16 @@ impl Runtime {
             None
         };
         self.agents.pending.push(Box::pin(async move {
-            let result = match candles {
-                Some(c) => Ok(c),
-                None => live.candles(&c.agent.symbol, c.timeframe, 200).await,
-            };
+            // Include future construction as well as every poll of external feed work.
+            let result = std::panic::AssertUnwindSafe(async {
+                match candles {
+                    Some(c) => Ok(c),
+                    None => live.candles(&c.agent.symbol, c.timeframe, 200).await,
+                }
+            })
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| Err("Candle provider panicked".into()));
             Completion::Candles(c, result)
         }));
         Ok(())
@@ -213,7 +261,16 @@ impl Runtime {
                 context: Some(context),
             };
             let started = Instant::now();
-            let response = provider.complete(&request).await;
+            let response =
+                std::panic::AssertUnwindSafe(async { provider.complete(&request).await })
+                    .catch_unwind()
+                    .await
+                    .unwrap_or_else(|_| {
+                        Err(ProviderError::new(
+                            mochi_ai::ProviderErrorCode::BadResponse,
+                            "AI provider panicked",
+                        ))
+                    });
             c.record["latencyMs"] = json!(started.elapsed().as_millis() as u64);
             if let Ok(r) = &response {
                 c.record["inputTokens"] = json!(r.input_tokens);
@@ -445,7 +502,7 @@ impl Runtime {
                 return Ok(None);
             }
             c.secrets.extend(self.secrets());
-            clean_value(&mut c.record, &c.secrets);
+            clean_record(&mut c.record, &c.secrets);
             if c.record["outcome"] == "SIGNAL" {
                 self.retire_signals(
                     |s| s["agentId"] == c.agent.id,
