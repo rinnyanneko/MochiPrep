@@ -581,6 +581,12 @@ export class Runtime {
     return redactSecrets(text, this.secrets());
   }
 
+  /** Retain credentials used by a request even if Settings changes while it waits. */
+  captureRedactor() {
+    const secrets = [...this.secrets()];
+    return (text: string) => redactSecrets(text, [...secrets, ...this.secrets()]);
+  }
+
   // ---- master password ------------------------------------------------------------------
 
   vaultStatus(): VaultStatus {

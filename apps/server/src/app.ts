@@ -302,14 +302,15 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
     const model = z.object({ model: z.string().optional() }).parse(request.body ?? {}).model ?? config.defaultModel;
     const provider = runtime.providerFor(config);
     if (config.kind === 'MOCK') return { ok: true, sample: 'Mock provider needs no connection.' };
+    const redact = runtime.captureRedactor();
     const response = await provider.complete({
       model,
       // OpenAI and DeepSeek reject JSON mode unless the prompt itself mentions JSON.
       system: 'Reply with this JSON object and nothing else: {"ok":true}',
       user: 'Connection test. Answer in JSON.',
       context: undefined as never,
-    });
-    return { ok: true, sample: runtime.redact(response.text.slice(0, 120)) };
+    }).catch((error: Error) => { error.message = redact(error.message); throw error; });
+    return { ok: true, sample: redact(response.text).slice(0, 120) };
   });
 
   // ---- agents ---------------------------------------------------------------------------
@@ -325,6 +326,7 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
     const input = AgentInputSchema.parse(request.body);
     runtime.assertAgentRefs(input.providerId, input.accountId, input.symbol);
     const agent = { ...requireAgent(request.params.id), ...input };
+    if (runtime.runner.isBusy(agent.id)) throw Object.assign(new Error('A cycle is already running for this agent; try again after it settles'), { statusCode: 409 });
     runtime.store.saveAgent(agent);
     runtime.invalidate('agents', 'arena');
     return agent;
@@ -332,6 +334,7 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   app.delete<{ Params: IdParams }>('/api/agents/:id', async (request) => {
     const agent = requireAgent(request.params.id);
     if (agent.running) throw new Error('Stop the agent first');
+    if (runtime.runner.isBusy(agent.id)) throw Object.assign(new Error('A cycle is already running for this agent; try again after it settles'), { statusCode: 409 });
     runtime.store.deleteAgent(agent.id);
     runtime.invalidate('agents', 'decisions', 'arena');
     return { ok: true };
