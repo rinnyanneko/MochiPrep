@@ -53,7 +53,7 @@ impl RuntimeHandle {
             Ok(())
         })
         .await??;
-        done.await.map_err(|_| super::stopped())?
+        done.await.map_err(|_| self.reply_error())?
     }
 
     /// An observational barrier only; ownership mutations must run inside the idle transition.
@@ -67,7 +67,7 @@ impl RuntimeHandle {
             }
         })
         .await?;
-        done.await.map_err(|_| super::stopped())
+        done.await.map_err(|_| self.reply_error())
     }
 }
 impl Runtime {

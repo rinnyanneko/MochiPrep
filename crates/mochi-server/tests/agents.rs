@@ -160,7 +160,12 @@ async fn slow_provider_no_overlap_stop_delete_and_shutdown() {
         .await
         .unwrap();
     m.gate.notify_one();
-    assert!(deleted.await.unwrap().unwrap().is_none());
+    let error = deleted.await.unwrap().unwrap_err();
+    assert_eq!(error.status().as_u16(), 409);
+    assert_eq!(
+        error.message(),
+        "The agent or its account changed while the cycle was running"
+    );
     rt.shutdown().await;
 }
 #[tokio::test]
@@ -347,7 +352,12 @@ async fn completion_panic_releases_active_cycle_and_replay_barrier() {
         ))
     }));
     let (rt, _, account) = setup_with("AUTO", options, DataSource::Replay).await;
-    assert!(rt.run_cycle("agent", CycleTrigger::RunOnce).await.is_err());
+    let error = rt
+        .run_cycle("agent", CycleTrigger::RunOnce)
+        .await
+        .unwrap_err();
+    assert_eq!(error.status().as_u16(), 500);
+    assert_eq!(error.message(), "Internal Server Error");
     assert!(!rt.call(|r| r.is_agent_busy("agent")).await.unwrap());
     assert_eq!(order_count(&rt, account).await, 0);
     assert_eq!(
@@ -725,16 +735,56 @@ async fn stop_then_restart_while_model_waits_cannot_resurrect_execution() {
     rt.shutdown().await;
 }
 #[tokio::test]
+async fn late_auth_failure_preserves_restarted_lifecycle() {
+    let (rt, model, _) = setup("AUTO").await;
+    model.blocked.store(1, Ordering::SeqCst);
+    *model.response.lock().unwrap() = Err(ProviderError::new(
+        mochi_ai::ProviderErrorCode::Auth,
+        "old credential refused",
+    ));
+    rt.call(|r| r.start_agent("agent")).await.unwrap().unwrap();
+    let h = rt.clone();
+    let pending = tokio::spawn(async move { h.run_cycle("agent", CycleTrigger::Schedule).await });
+    wait_calls(&model, 1).await;
+    let restarted = rt
+        .call(|r| {
+            r.stop_agent("agent").unwrap();
+            r.start_agent("agent").unwrap();
+            json!(r.require_agent("agent").unwrap())
+        })
+        .await
+        .unwrap();
+    model.gate.notify_one();
+    let result = pending.await.unwrap().unwrap().unwrap();
+    assert_eq!(result["outcome"], "AI_ERROR");
+    let (current, stored) = rt
+        .call(move |r| {
+            (
+                json!(r.require_agent("agent").unwrap()),
+                rows::get_decision(r.connection(), result["id"].as_str().unwrap()).unwrap(),
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(current, restarted);
+    assert_eq!(stored.unwrap()["outcome"], "AI_ERROR");
+    rt.shutdown().await;
+}
+
+#[tokio::test]
 async fn shutdown_drops_pending_model_and_all_handles_do_not_leak_actor() {
     let (rt, m, _) = setup("AUTO").await;
     m.blocked.store(1, Ordering::SeqCst);
     let h = rt.clone();
     let job = tokio::spawn(async move { h.run_cycle("agent", CycleTrigger::RunOnce).await });
     wait_calls(&m, 1).await;
+    let mut step = Box::pin(rt.step_replay(1));
+    assert!(futures_util::poll!(step.as_mut()).is_pending());
     tokio::time::timeout(std::time::Duration::from_secs(2), rt.shutdown())
         .await
         .unwrap();
-    assert!(job.await.unwrap().is_err());
+    assert_eq!(job.await.unwrap().unwrap_err().status().as_u16(), 503);
+    assert_eq!(step.await.unwrap_err().status().as_u16(), 503);
     let (rt, m, _) = setup("AUTO").await;
     m.blocked.store(1, Ordering::SeqCst);
     rt.call(|r| r.start_agent("agent")).await.unwrap().unwrap();

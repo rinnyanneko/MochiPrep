@@ -201,15 +201,16 @@ impl RuntimeHandle {
             let _ = reply.send(value);
         });
         self.commands.send(command).await.map_err(|_| stopped())?;
-        // The reply is dropped unanswered either when the task stops (the channel closes) or
-        // when the work panicked, which the task survives: only the first is "shutting down".
-        answer.await.map_err(|_| {
-            if self.commands.is_closed() {
-                stopped()
-            } else {
-                internal_error()
-            }
-        })
+        answer.await.map_err(|_| self.reply_error())
+    }
+
+    // A caught panic can drop a reply while the actor still accepts commands.
+    fn reply_error(&self) -> ApiError {
+        if self.commands.is_closed() {
+            stopped()
+        } else {
+            internal_error()
+        }
     }
 
     pub async fn invalidate(&self, topics: &[Topic]) -> Result<(), ApiError> {
@@ -234,7 +235,7 @@ impl RuntimeHandle {
         let (reply, done) = oneshot::channel();
         self.call(move |runtime| runtime.queue_replay(steps, Some(reply)))
             .await?;
-        done.await.map_err(|_| stopped())?
+        done.await.map_err(|_| self.reply_error())?
     }
 
     pub async fn state(&self) -> Result<StateBody, ApiError> {
@@ -921,6 +922,8 @@ async fn run(mut runtime: Runtime, mut inbox: mpsc::Receiver<Command>, mut live:
             // runtime closes the database before `shutdown` returns.
             runtime.set_playing(false);
             runtime.live.stop();
+            // Mark shutdown before dropping pending reply senders.
+            inbox.close();
             drop(runtime);
             let _ = done.send(());
             return;

@@ -557,7 +557,13 @@ async fn demo_reset_removes_inflight_demo_ownership_without_late_records_or_orde
         .unwrap();
     t.ok("POST", "/api/demo/reset", None).await;
     t.gateway.release.notify_one();
-    assert_eq!(pending.await.unwrap().0, 409);
+    assert_eq!(
+        pending.await.unwrap(),
+        (
+            409,
+            json!({"error":"The agent or its account changed while the cycle was running"})
+        )
+    );
     assert!(t
         .ok("GET", "/api/decisions", None)
         .await

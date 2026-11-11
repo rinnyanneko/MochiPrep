@@ -121,6 +121,22 @@ describe('AgentRunner integration', () => {
     expect(runtime.store.getAgent(second)).toMatchObject({ running: false, status: 'PAUSED' });
   });
 
+  it('keeps the restarted lifecycle when an older model call fails authentication', async () => {
+    let reject!: (error: Error) => void;
+    complete = () => new Promise((_resolve, fail) => { reject = fail; });
+    runtime.runner.start(agentId);
+    const pending = runtime.runner.runCycle(agentId, 'SCHEDULE');
+    await vi.waitFor(() => expect(reject).toBeTypeOf('function'));
+    runtime.runner.stop(agentId);
+    runtime.runner.start(agentId);
+    const restarted = runtime.store.getAgent(agentId);
+    reject(new ProviderError('AUTH', 'old credential refused'));
+    const result = await pending;
+    expect(result?.outcome).toBe('AI_ERROR');
+    expect(runtime.store.listDecisions({ agentId, limit: 1 })[0]?.id).toBe(result?.id);
+    expect(runtime.store.getAgent(agentId)).toEqual(restarted);
+  });
+
   it('redacts secrets from invalid raw responses before persistence', async () => {
     complete = async () => ({
       text: 'not-json custom-secret-agent-key sk-proj_abcdefghijk', inputTokens: null, outputTokens: null,

@@ -60,7 +60,7 @@ export type CycleTrigger = DecisionRecord['trigger'];
 
 /** Runs the analysis loop. Only this class turns AI output into orders, and only via the risk engine. */
 export class AgentRunner {
-  private readonly inFlight = new Set<string>();
+  private readonly inFlight = new Map<string, { lifecycleChanged: boolean }>();
   private readonly newId: () => string;
 
   constructor(private readonly deps: AgentRunnerDeps) {
@@ -87,15 +87,21 @@ export class AgentRunner {
 
   // ---- lifecycle ------------------------------------------------------------------------
 
+  private changeLifecycle(agent: Agent, patch: Partial<Agent>) {
+    this.update(agent, patch);
+    const pending = this.inFlight.get(agent.id);
+    if (pending) pending.lifecycleChanged = true;
+  }
+
   start(id: string) {
     const agent = this.requireAgent(id);
     const now = this.deps.market(this.source(agent)).now();
-    this.update(agent, { running: true, status: 'WAITING', nextRunAt: now, statusDetail: null, consecutiveErrors: 0 });
+    this.changeLifecycle(agent, { running: true, status: 'WAITING', nextRunAt: now, statusDetail: null, consecutiveErrors: 0 });
   }
 
   pause(id: string, detail: string | null = 'Paused by user') {
     const agent = this.requireAgent(id);
-    this.update(agent, { running: false, status: 'PAUSED', nextRunAt: null, statusDetail: detail });
+    this.changeLifecycle(agent, { running: false, status: 'PAUSED', nextRunAt: null, statusDetail: detail });
   }
 
   resume(id: string) {
@@ -104,14 +110,14 @@ export class AgentRunner {
 
   stop(id: string) {
     const agent = this.requireAgent(id);
-    this.update(agent, { running: false, status: 'IDLE', nextRunAt: null, statusDetail: null });
+    this.changeLifecycle(agent, { running: false, status: 'IDLE', nextRunAt: null, statusDetail: null });
   }
 
   stopAll(): number {
     let stopped = 0;
     for (const agent of this.deps.store.listAgents()) {
       if (agent.running || agent.status !== 'IDLE') {
-        this.update(agent, { running: false, status: 'IDLE', nextRunAt: null, statusDetail: 'Stopped by Stop All' });
+        this.changeLifecycle(agent, { running: false, status: 'IDLE', nextRunAt: null, statusDetail: 'Stopped by Stop All' });
         stopped++;
       }
     }
@@ -158,8 +164,9 @@ export class AgentRunner {
   /** One pass of the loop. Returns null when a cycle for this agent is already in progress. */
   async runCycle(agentId: string, trigger: CycleTrigger): Promise<DecisionRecord | null> {
     if (this.inFlight.has(agentId)) return null;
-    this.inFlight.add(agentId);
     const agent = this.requireAgent(agentId);
+    const pending = { lifecycleChanged: false };
+    this.inFlight.set(agentId, pending);
     // Keep keys already used by this cycle when settings change during any await.
     const secrets = [...this.deps.secrets()];
     try {
@@ -169,7 +176,8 @@ export class AgentRunner {
       const record = sanitizeRecord(await this.analyzeAndAct(agent, market, source, trigger, secrets), [...secrets, ...this.deps.secrets()]);
       if (record.outcome === 'SIGNAL') this.retireSignals((s) => s.agentId === agentId, 'Replaced by a newer suggestion');
       this.deps.store.insertDecision(record);
-      this.finishCycle(agent, market, record);
+      // Keep the old result in History without overwriting the newer lifecycle action.
+      if (!pending.lifecycleChanged) this.finishCycle(agent, market, record);
       this.deps.onChange(['decisions', 'accounts', 'orders', 'positions', 'arena']);
       if (record.outcome === 'SIGNAL') this.deps.onSignal?.(record);
       return record;
@@ -223,7 +231,7 @@ export class AgentRunner {
     const signal = this.requirePendingSignal(id);
     const agent = this.requireAgent(signal.agentId);
     if (this.inFlight.has(agent.id)) throw new Error('This agent is busy. Try again in a moment.');
-    this.inFlight.add(agent.id);
+    this.inFlight.set(agent.id, { lifecycleChanged: false });
     try {
       const account = this.deps.account(agent.accountId)!;
       const market = this.deps.market(account.source);

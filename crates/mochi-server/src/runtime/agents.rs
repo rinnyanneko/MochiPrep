@@ -41,7 +41,7 @@ impl RuntimeHandle {
         let (reply, done) = oneshot::channel();
         self.call(move |r| r.begin_cycle(&id, trigger, Some(reply)))
             .await??;
-        done.await.map_err(|_| super::stopped())?
+        done.await.map_err(|_| self.reply_error())?
     }
     pub async fn execute_signal(&self, id: impl Into<String>) -> Result<Value, ApiError> {
         let id = id.into();
@@ -81,7 +81,11 @@ impl Runtime {
         a.next_run_at = Some(self.market_now(source));
         a.status_detail = None;
         a.consecutive_errors = 0;
-        self.save_agent(&a)
+        self.save_agent(&a)?;
+        if self.is_agent_busy(id) {
+            *self.agents.generations.entry(id.into()).or_default() += 1;
+        }
+        Ok(())
     }
     pub fn resume_agent(&mut self, id: &str) -> Result<(), ApiError> {
         self.start_agent(id)

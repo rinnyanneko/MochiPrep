@@ -499,6 +499,11 @@ impl Runtime {
     fn finish_cycle(&mut self, mut c: Cycle) {
         let result = (|| -> Result<Option<Value>, ApiError> {
             if !self.cycle_owned(&c)? {
+                if c.reply.is_some() {
+                    return Err(ApiError::conflict(
+                        "The agent or its account changed while the cycle was running",
+                    ));
+                }
                 return Ok(None);
             }
             c.secrets.extend(self.secrets());
@@ -510,6 +515,19 @@ impl Runtime {
                 )?;
             }
             rows::insert_decision(self.connection(), &c.record).map_err(|e| self.api_error(e))?;
+            // A cycle can finish after a lifecycle action. Keep its decision in History,
+            // but leave the newer schedule and failure state alone.
+            if self
+                .agents
+                .generations
+                .get(&c.agent.id)
+                .copied()
+                .unwrap_or_default()
+                != c.generation
+            {
+                self.invalidate_cycle();
+                return Ok(Some(c.record.clone()));
+            }
             let mut a = self.require_agent(&c.agent.id)?;
             let failed =
                 c.record["outcome"] == "AI_ERROR" || c.record["outcome"] == "INVALID_OUTPUT";
