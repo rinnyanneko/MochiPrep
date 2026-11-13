@@ -13,7 +13,7 @@ describe('Demo reset determinism', () => {
     db?.close();
   });
 
-  it('waits for a user replay bar before starting Demo Mode and rewinding', async () => {
+  it.each(['scheduled', 'standalone'] as const)('waits for a %s user replay cycle before starting Demo Mode and rewinding', async (mode) => {
     let enter!: () => void;
     let release!: () => void;
     const entered = new Promise<void>((done) => { enter = done; });
@@ -36,8 +36,8 @@ describe('Demo reset determinism', () => {
       name: 'user', providerId: 'remote', accountId: account.id, symbol: 'BTCUSDT', timeframe: '15m',
       strategy: '', model: 'm', risk: DEFAULT_RISK_SETTINGS, intervalSec: 900,
     });
-    runtime.runner.start(agent.id);
-    const step = runtime.stepReplay(1);
+    if (mode === 'scheduled') runtime.runner.start(agent.id);
+    const step = mode === 'scheduled' ? runtime.stepReplay(1) : runtime.runner.runCycle(agent.id, 'RUN_ONCE');
     await entered;
     const waiting = runtime.replay.position;
     const demo = runtime.startDemo();

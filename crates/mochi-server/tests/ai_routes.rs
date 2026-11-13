@@ -120,6 +120,127 @@ async fn send(state: &AppState, method: &str, path: &str, body: Option<String>) 
     (status, serde_json::from_slice(&bytes).unwrap())
 }
 #[tokio::test]
+async fn failed_provider_deletion_preserves_saved_and_loaded_keys() {
+    let t = Test::new().await;
+    let provider = t.provider().await;
+    t.state.runtime.call(|r| {
+        r.connection().execute_batch("CREATE TRIGGER refuse_provider BEFORE DELETE ON providers BEGIN SELECT RAISE(ABORT, 'provider delete refused'); END").unwrap();
+    }).await.unwrap();
+    let path = format!("/api/providers/{provider}");
+    assert_eq!(t.send("DELETE", &path, None).await.0, 400);
+    let id = provider.clone();
+    assert!(t
+        .state
+        .runtime
+        .call(
+            move |r| mochi_store::rows::get_provider_keys(r.connection())
+                .unwrap()
+                .contains_key(&id)
+        )
+        .await
+        .unwrap());
+    t.ok("POST", &format!("{path}/test"), None).await;
+    t.state
+        .runtime
+        .call(|r| {
+            r.connection()
+                .execute_batch("DROP TRIGGER refuse_provider")
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    t.ok("DELETE", &path, None).await;
+    assert!(!t
+        .state
+        .runtime
+        .call(
+            move |r| mochi_store::rows::get_provider_keys(r.connection())
+                .unwrap()
+                .contains_key(&provider)
+        )
+        .await
+        .unwrap());
+    t.close().await;
+}
+
+#[tokio::test]
+async fn running_agent_schedule_moves_to_the_new_source_clock() {
+    let t = Test::new().await;
+    let provider = t.provider().await;
+    let (agent, input) = t.agent(&provider).await;
+    let live = t
+        .ok(
+            "POST",
+            "/api/accounts",
+            Some(json!({"name":"live data","source":"LIVE"})),
+        )
+        .await;
+    let path = format!("/api/agents/{agent}");
+    let mut live_input = input.clone();
+    live_input["accountId"] = live["id"].clone();
+    t.ok("PUT", &path, Some(live_input)).await;
+    let replay_now = t.state.runtime.replay_state().await.unwrap().now.unwrap();
+    let running = t.ok("POST", &format!("{path}/start"), None).await;
+    assert!(running["nextRunAt"].as_i64().unwrap() > replay_now);
+    let updated = t.ok("PUT", &path, Some(input)).await;
+    assert_eq!(updated["running"], true);
+    assert_eq!(updated["nextRunAt"], replay_now);
+    t.close().await;
+}
+
+#[tokio::test]
+async fn standalone_cycle_blocks_demo_seek_and_idle_barrier() {
+    let t = Test::new().await;
+    let provider = t.provider().await;
+    let (agent, _) = t.agent(&provider).await;
+    let first = t.state.runtime.replay_state().await.unwrap().now;
+    t.state.runtime.step_replay(2).await.unwrap();
+    let before = t.state.runtime.replay_state().await.unwrap().now;
+    *t.gateway.text.lock().unwrap() = json!({"symbol":"BTCUSDT","action":"HOLD","orderType":"MARKET","entryPrice":null,"stopLoss":null,"takeProfit":null,"reason":"held","confidence":0.8,"expiresAt":null}).to_string();
+    t.gateway.blocked.store(true, Ordering::SeqCst);
+    let path = format!("/api/agents/{agent}/run");
+    let state = t.state.clone();
+    let cycle = tokio::spawn(async move { send(&state, "POST", &path, None).await });
+    timeout(Duration::from_secs(2), t.gateway.entered.notified())
+        .await
+        .unwrap();
+    let mut idle = Box::pin(t.state.runtime.wait_replay_idle());
+    assert!(futures_util::poll!(idle.as_mut()).is_pending());
+    let mut start = Box::pin(t.send("POST", "/api/demo/start", None));
+    assert!(futures_util::poll!(start.as_mut()).is_pending());
+    let during = t.state.runtime.replay_state().await.unwrap().now;
+    let idle_during = futures_util::poll!(idle.as_mut());
+    t.gateway.release.notify_one();
+    assert_eq!(
+        timeout(Duration::from_secs(3), cycle)
+            .await
+            .unwrap()
+            .unwrap()
+            .0,
+        200
+    );
+    assert_eq!(
+        timeout(Duration::from_secs(3), start.as_mut())
+            .await
+            .unwrap()
+            .0,
+        200
+    );
+    assert_eq!(
+        during, before,
+        "a standalone replay cycle must finish before the demo seeks"
+    );
+    assert!(idle_during.is_pending());
+    timeout(Duration::from_secs(3), idle.as_mut())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(t.state.runtime.replay_state().await.unwrap().now, first);
+    drop((idle, start));
+    t.close().await;
+}
+
+#[tokio::test]
 async fn provider_crud_views_key_modes_and_validation_order() {
     let t = Test::new().await;
     assert_eq!(
@@ -538,7 +659,7 @@ async fn all_new_writes_parse_malformed_bodies_before_missing_ids_and_redact_sch
     t.close().await;
 }
 #[tokio::test]
-async fn demo_reset_removes_inflight_demo_ownership_without_late_records_or_orders() {
+async fn demo_reset_waits_then_removes_old_demo_ownership_and_records() {
     let t = Test::new().await;
     let provider = t.provider().await;
     t.ok("POST", "/api/demo/start", None).await;
@@ -555,14 +676,29 @@ async fn demo_reset_removes_inflight_demo_ownership_without_late_records_or_orde
     timeout(Duration::from_secs(2), t.gateway.entered.notified())
         .await
         .unwrap();
-    t.ok("POST", "/api/demo/reset", None).await;
+    let mut reset = Box::pin(t.send("POST", "/api/demo/reset", None));
+    assert!(futures_util::poll!(reset.as_mut()).is_pending());
+    let state = t.ok("GET", "/api/agents", None).await;
+    assert!(state
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|agent| agent["id"] == id));
     t.gateway.release.notify_one();
     assert_eq!(
-        pending.await.unwrap(),
-        (
-            409,
-            json!({"error":"The agent or its account changed while the cycle was running"})
-        )
+        timeout(Duration::from_secs(3), pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .0,
+        200
+    );
+    assert_eq!(
+        timeout(Duration::from_secs(3), reset.as_mut())
+            .await
+            .unwrap()
+            .0,
+        200
     );
     assert!(t
         .ok("GET", "/api/decisions", None)
@@ -577,6 +713,7 @@ async fn demo_reset_removes_inflight_demo_ownership_without_late_records_or_orde
         .unwrap()
         .iter()
         .all(|a| a["id"] != id));
+    drop(reset);
     t.close().await;
 }
 

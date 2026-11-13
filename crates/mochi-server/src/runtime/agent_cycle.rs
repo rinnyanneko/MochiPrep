@@ -29,6 +29,7 @@ pub(super) struct Cycle {
     reply: Option<CycleReply>,
     quote: Option<Quote>,
     stale: bool,
+    critical_error: Option<String>,
     secrets: Vec<String>,
 }
 pub(super) enum Completion {
@@ -39,6 +40,17 @@ pub(super) enum Completion {
 impl Cycle {
     fn clean(&self, text: &str) -> String {
         redact_secrets(text, self.secrets.iter().map(String::as_str))
+    }
+
+    fn provider_error(&mut self, error: ProviderError) {
+        let detail = self.clean(&error.message);
+        let display = if error.critical() {
+            self.critical_error = Some(error.message);
+            format!("[critical] {detail}")
+        } else {
+            detail
+        };
+        settle(&mut self.record, "AI_ERROR", Some(display));
     }
 }
 impl Completion {
@@ -131,6 +143,7 @@ impl Runtime {
             reply,
             quote: None,
             stale: false,
+            critical_error: None,
             secrets: self.secrets(),
         };
         self.agents.active.insert(id.into(), token);
@@ -236,16 +249,7 @@ impl Runtime {
             Ok(p) => p,
             Err(e) => {
                 c.record["latencyMs"] = json!(0);
-                let detail = c.clean(&e.message);
-                settle(
-                    &mut c.record,
-                    "AI_ERROR",
-                    Some(if e.critical() {
-                        format!("[critical] {detail}")
-                    } else {
-                        detail
-                    }),
-                );
+                c.provider_error(e);
                 self.finish_cycle(c);
                 return;
             }
@@ -373,16 +377,7 @@ impl Runtime {
         let response = match response {
             Ok(r) => r,
             Err(e) => {
-                let detail = c.clean(&e.message);
-                settle(
-                    &mut c.record,
-                    "AI_ERROR",
-                    Some(if e.critical() {
-                        format!("[critical] {detail}")
-                    } else {
-                        detail
-                    }),
-                );
+                c.provider_error(e);
                 return Ok(());
             }
         };
@@ -542,15 +537,12 @@ impl Runtime {
                 a.next_run_at = Some(now.saturating_add(a.interval_sec.saturating_mul(1000)));
             }
             let detail = c.record["outcomeDetail"].as_str().map(String::from);
-            let critical = detail
-                .as_deref()
-                .is_some_and(|s| s.starts_with("[critical]"));
-            if failed && (critical || a.consecutive_errors >= 3) {
-                let detail = if critical {
-                    detail.unwrap_or_default().replacen("[critical] ", "", 1)
-                } else {
-                    format!("{} failed cycles in a row", a.consecutive_errors)
-                };
+            if failed && (c.critical_error.is_some() || a.consecutive_errors >= 3) {
+                let detail = c
+                    .critical_error
+                    .as_deref()
+                    .map(|text| c.clean(text))
+                    .unwrap_or_else(|| format!("{} failed cycles in a row", a.consecutive_errors));
                 a.running = false;
                 a.status = "PAUSED".into();
                 a.next_run_at = None;

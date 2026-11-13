@@ -369,6 +369,38 @@ async fn completion_panic_releases_active_cycle_and_replay_barrier() {
     rt.shutdown().await;
 }
 #[tokio::test]
+async fn critical_auth_pause_survives_redaction_of_the_display_marker() {
+    let (rt, model, _) = setup("AUTO").await;
+    *model.response.lock().unwrap() = Err(ProviderError::new(
+        mochi_ai::ProviderErrorCode::Auth,
+        "credential refused",
+    ));
+    rt.call(|r| {
+        r.set_key("provider", "a").unwrap();
+        r.start_agent("agent").unwrap();
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        cycle(&rt, CycleTrigger::RunOnce).await["outcome"],
+        "AI_ERROR"
+    );
+    let agent = rt
+        .call(|r| r.require_agent("agent").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            agent.status.as_str(),
+            agent.running,
+            agent.consecutive_errors
+        ),
+        ("PAUSED", false, 1)
+    );
+    rt.shutdown().await;
+}
+
+#[tokio::test]
 async fn failure_counts_auth_and_invalid_output_auto_pause() {
     let (rt, m, _) = setup("AUTO").await;
     rt.call(|r| r.start_agent("agent")).await.unwrap().unwrap();

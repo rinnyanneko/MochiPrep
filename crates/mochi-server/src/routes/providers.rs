@@ -139,10 +139,7 @@ async fn remove(
         {
             return Err(ApiError::bad_request("Agents still use this provider"));
         }
-        r.delete_key(&id)?;
-        rows::delete_provider(r.connection(), &id).map_err(|e| r.api_error(e))?;
-        r.invalidate(&[Topic::Providers]);
-        Ok(())
+        r.delete_provider(&id)
     })
     .await?;
     Ok(Json(json!({"ok":true})))

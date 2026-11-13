@@ -57,7 +57,7 @@ export interface AgentRunnerDeps {
 }
 
 export type CycleTrigger = DecisionRecord['trigger'];
-type PendingCycle = { lifecycleChanged: boolean };
+type PendingCycle = { lifecycleChanged: boolean; criticalError?: string; replayDone?: Promise<void> };
 
 /** Runs the analysis loop. Only this class turns AI output into orders, and only via the risk engine. */
 export class AgentRunner {
@@ -94,6 +94,24 @@ export class AgentRunner {
     if (pending) pending.lifecycleChanged = true;
   }
 
+  private beginInFlight(id: string, source: DataSource) {
+    const pending: PendingCycle = { lifecycleChanged: false };
+    let finishReplay: (() => void) | undefined;
+    if (source === 'REPLAY') pending.replayDone = new Promise<void>((resolve) => { finishReplay = resolve; });
+    this.inFlight.set(id, pending);
+    return { pending, finish: () => {
+      this.inFlight.delete(id);
+      finishReplay?.();
+    } };
+  }
+
+  pendingReplay() {
+    for (const pending of this.inFlight.values()) {
+      if (pending.replayDone) return pending.replayDone;
+    }
+    return undefined;
+  }
+
   start(id: string) {
     const agent = this.requireAgent(id);
     const now = this.deps.market(this.source(agent)).now();
@@ -117,7 +135,7 @@ export class AgentRunner {
   stopAll(): number {
     let stopped = 0;
     for (const agent of this.deps.store.listAgents()) {
-      if (agent.running || agent.status !== 'IDLE') {
+      if (agent.running || agent.status !== 'IDLE' || this.isBusy(agent.id)) {
         this.changeLifecycle(agent, { running: false, status: 'IDLE', nextRunAt: null, statusDetail: 'Stopped by Stop All' });
         stopped++;
       }
@@ -166,24 +184,25 @@ export class AgentRunner {
   async runCycle(agentId: string, trigger: CycleTrigger): Promise<DecisionRecord | null> {
     if (this.inFlight.has(agentId)) return null;
     const agent = this.requireAgent(agentId);
-    const pending = { lifecycleChanged: false };
-    this.inFlight.set(agentId, pending);
-    // Keep keys already used by this cycle when settings change during any await.
-    const secrets = [...this.deps.secrets()];
+    const source = this.source(agent);
+    const { pending, finish } = this.beginInFlight(agentId, source);
     try {
-      const source = this.source(agent);
+      // Keep keys already used by this cycle when settings change during any await.
+      const secrets = [...this.deps.secrets()];
       const market = this.deps.market(source);
       this.update(agent, { status: 'ANALYZING', statusDetail: null });
       const record = sanitizeRecord(await this.analyzeAndAct(agent, market, source, trigger, secrets, pending), [...secrets, ...this.deps.secrets()]);
       if (record.outcome === 'SIGNAL') this.retireSignals((s) => s.agentId === agentId, 'Replaced by a newer suggestion');
       this.deps.store.insertDecision(record);
       // Keep the old result in History without overwriting the newer lifecycle action.
-      if (!pending.lifecycleChanged) this.finishCycle(agent, market, record);
+      const criticalError = pending.criticalError === undefined ? undefined :
+        redactSecrets(pending.criticalError, [...secrets, ...this.deps.secrets()]);
+      if (!pending.lifecycleChanged) this.finishCycle(agent, market, record, criticalError);
       this.deps.onChange(['decisions', 'accounts', 'orders', 'positions', 'arena']);
       if (record.outcome === 'SIGNAL') this.deps.onSignal?.(record);
       return record;
     } finally {
-      this.inFlight.delete(agentId);
+      finish();
     }
   }
 
@@ -191,7 +210,9 @@ export class AgentRunner {
 
   private retireSignals(match: (signal: DecisionRecord) => boolean, detail: string) {
     for (const signal of this.deps.store.listPendingSignals()) {
-      if (match(signal)) this.deps.store.saveDecision(settle(signal, 'SIGNAL_EXPIRED', detail));
+      if (!match(signal)) continue;
+      signal.signalExpiresAt = null;
+      this.deps.store.saveDecision(settle(signal, 'SIGNAL_EXPIRED', detail));
     }
     this.deps.onChange(['decisions']);
   }
@@ -232,7 +253,7 @@ export class AgentRunner {
     const signal = this.requirePendingSignal(id);
     const agent = this.requireAgent(signal.agentId);
     if (this.inFlight.has(agent.id)) throw new Error('This agent is busy. Try again in a moment.');
-    this.inFlight.set(agent.id, { lifecycleChanged: false });
+    const { pending, finish } = this.beginInFlight(agent.id, this.source(agent));
     try {
       const account = this.deps.account(agent.accountId)!;
       const market = this.deps.market(account.source);
@@ -247,20 +268,28 @@ export class AgentRunner {
         const moved =
           signal.decision!.action === 'PROTECT' &&
           !(protection && signal.protectionBefore && sameProtection(protection, signal.protectionBefore));
-        if (moved) {
+        if (pending.lifecycleChanged) {
+          this.cancelExecution(signal);
+        } else if (moved) {
           settle(signal, 'SIGNAL_EXPIRED', 'Protection changed since this suggestion');
         } else {
           signal.risk = await this.assess(agent, account, signal.decision!, engine, market, market.getQuote(agent.symbol) ?? null, protection);
-          if (!signal.risk.approved) settle(signal, 'RISK_REJECTED', signal.risk.rejectionReasons.join(' | '));
-          else await this.execute(agent, signal.decision!, signal, engine);
+          if (pending.lifecycleChanged) this.cancelExecution(signal);
+          else if (!signal.risk.approved) settle(signal, 'RISK_REJECTED', signal.risk.rejectionReasons.join(' | '));
+          else await this.execute(agent, signal.decision!, signal, engine, pending);
         }
+      }
+      if (pending.lifecycleChanged && signal.outcome === 'SIGNAL_EXPIRED') {
+        // Stop All may have already retired this suggestion while its checks were pending.
+        const current = this.deps.store.getDecision(id);
+        if (current?.outcome === 'SIGNAL_EXPIRED') return current;
       }
       signal.signalExpiresAt = null;
       this.deps.store.saveDecision(signal);
       this.deps.onChange(['decisions', 'accounts', 'orders', 'positions', 'arena']);
       return signal;
     } finally {
-      this.inFlight.delete(agent.id);
+      finish();
     }
   }
 
@@ -296,13 +325,18 @@ export class AgentRunner {
     });
   }
 
-  private async execute(agent: Agent, decision: AiDecisionData, record: DecisionRecord, engine: ExecutionEngine, pending?: PendingCycle) {
+  private cancelExecution(record: DecisionRecord) {
+    return settle(record, record.outcome === 'SIGNAL' ? 'SIGNAL_EXPIRED' : 'ANALYSIS_ONLY', 'Agent was stopped before execution');
+  }
+
+  private async execute(agent: Agent, decision: AiDecisionData, record: DecisionRecord, engine: ExecutionEngine, pending: PendingCycle) {
+    if (pending.lifecycleChanged) return this.cancelExecution(record);
     if (decision.action === 'PROTECT') return this.protect(agent, decision, record, engine);
     let result;
     try {
       const order = await this.toOrder(agent, decision, record, engine);
       // Order preparation can await the current position for a CLOSE.
-      if (pending?.lifecycleChanged) return settle(record, 'ANALYSIS_ONLY', 'Agent was stopped before execution');
+      if (pending.lifecycleChanged) return this.cancelExecution(record);
       result = await engine.placeOrder(order);
     } catch (error) {
       return settle(record, 'ORDER_REJECTED', redactSecrets((error as Error).message, this.deps.secrets()));
@@ -345,7 +379,7 @@ export class AgentRunner {
     return settle(record, 'EXECUTED', 'Protection updated');
   }
 
-  private finishCycle(agent: Agent, market: MarketDataProvider, record: DecisionRecord) {
+  private finishCycle(agent: Agent, market: MarketDataProvider, record: DecisionRecord, criticalError?: string) {
     const latest = this.requireAgent(agent.id);
     const failed = record.outcome === 'AI_ERROR' || record.outcome === 'INVALID_OUTPUT';
     const errors = failed ? latest.consecutiveErrors + 1 : 0;
@@ -353,9 +387,8 @@ export class AgentRunner {
     const patch: Partial<Agent> = { lastRunAt: now, consecutiveErrors: errors };
     if (latest.running) patch.nextRunAt = now + latest.intervalSec * 1000;
 
-    const critical = record.outcomeDetail?.startsWith('[critical]') ?? false;
-    if (failed && (critical || errors >= MAX_CONSECUTIVE_ERRORS)) {
-      const detail = critical ? (record.outcomeDetail ?? '').replace('[critical] ', '') : `${errors} failed cycles in a row`;
+    if (failed && (criticalError !== undefined || errors >= MAX_CONSECUTIVE_ERRORS)) {
+      const detail = criticalError ?? `${errors} failed cycles in a row`;
       Object.assign(patch, { running: false, status: 'PAUSED', nextRunAt: null, statusDetail: `Auto-paused: ${detail}` });
       this.deps.onNotice?.('error', `${agent.name} auto-paused: ${detail}`);
     } else if (failed) {
@@ -493,6 +526,7 @@ export class AgentRunner {
       record.latencyMs = Date.now() - started;
       const message = redactSecrets((error as Error).message, [...secrets, ...this.deps.secrets()]);
       const critical = error instanceof ProviderError && error.critical;
+      if (critical) pending.criticalError = error.message;
       return conclude('AI_ERROR', critical ? `[critical] ${message}` : message);
     }
     record.latencyMs = Date.now() - started;

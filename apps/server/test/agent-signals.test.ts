@@ -61,6 +61,42 @@ describe('suggestion mode', () => {
   const call = (method: 'GET' | 'POST', url: string) =>
     app.inject({ method, url, headers: { host: 'localhost:8787', authorization: `Bearer ${token}` } });
 
+  const holdAcceptance = async (id: string) => {
+    const getPositions = runtime.engine.getPositions;
+    let entered!: () => void;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    runtime.engine.getPositions = async (...args) => {
+      entered();
+      await held;
+      return getPositions.apply(runtime.engine, args);
+    };
+    const result = runtime.runner.executeSignal(id);
+    await waiting;
+    return async () => {
+      runtime.engine.getPositions = getPositions;
+      release();
+      return result;
+    };
+  };
+
+  it.each(['stop', 'stop-all'] as const)('cancels a held accepted entry on %s even when its agent is idle', async (action) => {
+    const signal = await raise();
+    expect(runtime.store.getAgent(signal.agentId)?.status).toBe('IDLE');
+    const finish = await holdAcceptance(signal.id);
+    const stopped = await call('POST', action === 'stop' ? `/api/agents/${signal.agentId}/stop` : '/api/agents/stop-all');
+    const result = await finish();
+    expect(stopped.statusCode).toBe(200);
+    expect(result).toMatchObject({ outcome: 'SIGNAL_EXPIRED', signalExpiresAt: null });
+    if (action === 'stop-all') {
+      expect(stopped.json().stopped).toBe(1);
+      expect(result.outcomeDetail).toBe('Cleared by Stop All');
+    }
+    expect(orders()).toEqual([]);
+    expect(runtime.store.getDecision(signal.id)).toEqual(result);
+  });
+
   it('suggests instead of ordering, with entry, size and an expiry', async () => {
     const signal = await raise();
     expect(signal.outcome).toBe('SIGNAL');
@@ -208,6 +244,19 @@ describe('suggestion mode', () => {
     });
     const openWithStop = (stopLoss: string) =>
       runtime.engine.placeOrderSync({ accountId, clientOrderId: 'open', symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET', quantity: '0.01', leverage: 3, stopLoss });
+
+    it('leaves protection unchanged when paused during acceptance', async () => {
+      const loose = String(Math.round(last() * 0.95));
+      openWithStop(loose);
+      override = protect(Math.round(last() * 0.98));
+      const signal = await raise();
+      expect(signal.outcome).toBe('SIGNAL');
+      const finish = await holdAcceptance(signal.id);
+      runtime.runner.pause(signal.agentId);
+      const result = await finish();
+      expect(result).toMatchObject({ outcome: 'SIGNAL_EXPIRED', signalExpiresAt: null });
+      expect(runtime.engine.protectionOfSync(accountId, 'BTCUSDT').stopLoss).toBe(loose);
+    });
 
     it('a PROTECT signal expires when protection changed before it was accepted', async () => {
       const loose = String(Math.round(last() * 0.95));

@@ -137,6 +137,15 @@ describe('AgentRunner integration', () => {
     expect(runtime.store.getAgent(second)).toMatchObject({ running: false, status: 'PAUSED' });
   });
 
+  it('pauses on a critical provider error even when redaction matches its display marker', async () => {
+    runtime.setKey(config.id, 'a');
+    complete = async () => { throw new ProviderError('AUTH', 'credential refused'); };
+    runtime.runner.start(agentId);
+    const result = await runtime.runner.runCycle(agentId, 'RUN_ONCE');
+    expect(result?.outcome).toBe('AI_ERROR');
+    expect(runtime.store.getAgent(agentId)).toMatchObject({ status: 'PAUSED', running: false, consecutiveErrors: 1 });
+  });
+
   it('keeps the restarted lifecycle when an older model call fails authentication', async () => {
     let reject!: (error: Error) => void;
     complete = () => new Promise((_resolve, fail) => { reject = fail; });

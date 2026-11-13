@@ -68,6 +68,17 @@ impl Runtime {
         self.assert_agent_refs(&input.provider_id, &input.account_id, &input.symbol)?;
         let mut agent = self.api_agent(id)?;
         self.assert_agent_editable(id)?;
+        if agent.running && agent.account_id != input.account_id {
+            let source = self.require_account(&input.account_id)?.source;
+            let previous = self
+                .engine()
+                .store()
+                .get_account(&agent.account_id)
+                .map_err(|e| self.api_error(e))?;
+            if previous.map(|account| account.source) != Some(source) {
+                agent.next_run_at = Some(self.market_now(source));
+            }
+        }
         apply_input(&mut agent, input)?;
         rows::save_agent(self.connection(), &agent).map_err(|e| self.api_error(e))?;
         self.invalidate(&[Topic::Agents, Topic::Arena]);

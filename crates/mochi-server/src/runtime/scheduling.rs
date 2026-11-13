@@ -60,7 +60,7 @@ impl RuntimeHandle {
     pub async fn wait_replay_idle(&self) -> Result<(), ApiError> {
         let (reply, done) = oneshot::channel();
         self.call(move |r| {
-            if r.replay_batch.is_none() && r.replay_queue.is_empty() {
+            if r.replay_batch.is_none() && r.replay_queue.is_empty() && !r.replay_busy() {
                 let _ = reply.send(());
             } else {
                 r.replay_idle.push(reply);
@@ -98,6 +98,9 @@ impl Runtime {
         loop {
             if self.replay_batch.is_none() {
                 let Some(request) = self.replay_queue.pop_front() else {
+                    if self.replay_busy() {
+                        return;
+                    }
                     for work in std::mem::take(&mut self.replay_idle_work) {
                         work(self);
                     }
@@ -147,14 +150,17 @@ impl Runtime {
                 batch.waiting = true;
                 Ok(true)
             })();
-            match result {
+            let processing = match result {
                 Ok(true) => {
                     self.replay_batch = Some(batch);
                     continue;
                 }
-                Ok(false) => {}
-                Err(e) => self.stop_replay_with(e.message()),
-            }
+                Ok(false) => Ok(()),
+                Err(e) => {
+                    self.stop_replay_with(e.message());
+                    Err(e)
+                }
+            };
             let position = lock(&self.replay).position();
             let persisted = set_setting(self.connection(), "replay.cursor", &position)
                 .map_err(|e| self.api_error(e));
@@ -173,7 +179,7 @@ impl Runtime {
             self.invalidate(&[Topic::Accounts, Topic::Positions]);
             self.clock.end_batch();
             if let Some(reply) = batch.request.reply {
-                let _ = reply.send(persisted);
+                let _ = reply.send(processing.and(persisted));
             }
         }
     }

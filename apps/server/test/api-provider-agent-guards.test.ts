@@ -79,6 +79,37 @@ describe('provider samples and agent mutation guards', () => {
     return { input, agent: runtime.createAgent(input) };
   };
 
+  it('keeps provider keys when SQLite refuses to delete the provider', async () => {
+    db.exec("CREATE TRIGGER refuse_provider BEFORE DELETE ON providers WHEN OLD.id='remote' BEGIN SELECT RAISE(ABORT, 'provider delete refused'); END");
+    expect((await call('DELETE', '/api/providers/remote')).statusCode).toBe(400);
+    expect(runtime.store.getProviderKeys().get('remote')).toBe('original-gateway-secret');
+    expect((await call('POST', '/api/providers/remote/test')).statusCode).toBe(200);
+    db.exec('DROP TRIGGER refuse_provider');
+    expect((await call('DELETE', '/api/providers/remote')).statusCode).toBe(200);
+    expect(runtime.store.getProviderKeys().has('remote')).toBe(false);
+  });
+
+  it('moves a running agent schedule to the destination source clock', async () => {
+    const { input, agent } = setupAgent();
+    const live = runtime.engine.createAccount({ name: 'live data', source: 'LIVE' });
+    runtime.store.saveAgent({ ...agent, accountId: live.id });
+    runtime.runner.start(agent.id);
+    const scheduled = runtime.store.getAgent(agent.id)!;
+    expect(scheduled.nextRunAt).toBeGreaterThan(runtime.replay.now());
+    const result = await call('PUT', `/api/agents/${agent.id}`, input);
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ running: true, nextRunAt: runtime.replay.now() });
+  });
+
+  it('reports a replay processing failure and still persists the reached cursor', async () => {
+    const before = runtime.replay.position;
+    runtime.engine.onQuote = () => { throw new Error('failed replay processing'); };
+    const result = await call('POST', '/api/replay', { steps: 3 });
+    expect(result.statusCode).toBe(400);
+    expect(result.json().error).toContain('failed replay processing');
+    expect(runtime.store.getSetting('replay.cursor')).toBe(before + 1);
+  });
+
   it('redacts JSON-escaped gateway headers in samples and stored model responses', async () => {
     const secret = 'gateway"\\diagnostic';
     const input = { ...providerInput, extraHeaders: { 'x-org': secret } };

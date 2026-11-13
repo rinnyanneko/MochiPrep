@@ -190,7 +190,7 @@ export class Runtime {
 
   async stop() {
     this.setPlaying(false);
-    if (this.stepping) await this.stepping;
+    if (this.stepping) await this.stepping.catch(() => {});
     if (this.liveTimer) clearInterval(this.liveTimer);
     if (this.invalidateTimer) clearTimeout(this.invalidateTimer);
     this.live.stop();
@@ -307,17 +307,21 @@ export class Runtime {
 
   private onReplayTimer() {
     // The tape waits for agents: a slow model pauses market time rather than missing bars.
-    if (this.stepping) return;
+    if (this.replayWork()) return;
     this.stepCredit += (this.speed * REPLAY_BATCH_MS) / 1000;
     const steps = Math.floor(this.stepCredit);
     if (steps < 1) return;
     this.stepCredit -= steps;
-    void this.stepReplay(steps);
+    void this.stepReplay(steps).catch(() => {});
+  }
+
+  private replayWork() {
+    return this.stepping ?? this.runner.pendingReplay();
   }
 
   /** Advances the tape, awaiting all due agents at every bar. Calls are serialized. */
   async stepReplay(steps: number): Promise<void> {
-    while (this.stepping) await this.stepping;
+    for (let pending = this.replayWork(); pending; pending = this.replayWork()) await pending.catch(() => {});
     this.stepping = this.doSteps(steps).finally(() => {
       this.stepping = null;
     });
@@ -336,6 +340,12 @@ export class Runtime {
 
   private async doSteps(steps: number) {
     let quotes: Quote[] = [];
+    let failure: { error: unknown } | undefined;
+    const fail = (error: unknown) => {
+      failure ??= { error };
+      this.setPlaying(false);
+      this.emit({ type: 'toast', level: 'error', message: `Replay stopped: ${redactSecrets(String(error), this.secrets())}` });
+    };
     try {
       this.signalRaised = false;
       for (let i = 0; i < steps && !this.signalRaised; i++) {
@@ -351,14 +361,18 @@ export class Runtime {
         }
       }
     } catch (error) {
-      this.setPlaying(false);
-      this.emit({ type: 'toast', level: 'error', message: `Replay stopped: ${redactSecrets(String(error), this.secrets())}` });
+      fail(error);
     }
-    this.store.setSetting('replay.cursor', this.replay.position);
+    try {
+      this.store.setSetting('replay.cursor', this.replay.position);
+    } catch (error) {
+      fail(error);
+    }
     for (const quote of quotes) this.emit({ type: 'quote', quote });
     if (this.replay.atEnd) this.setPlaying(false);
     this.emit({ type: 'replay', state: this.replayState() });
     this.invalidate('accounts', 'positions');
+    if (failure) throw failure.error;
   }
 
   // ---- demo -----------------------------------------------------------------------------
@@ -369,7 +383,7 @@ export class Runtime {
 
   async startDemo() {
     if (this.isDemoActive()) return;
-    while (this.stepping) await this.stepping;
+    for (let pending = this.replayWork(); pending; pending = this.replayWork()) await pending.catch(() => {});
     this.seedDemo();
   }
 
@@ -410,7 +424,7 @@ export class Runtime {
   /** Removes everything demo-owned and rebuilds it from the first bar. User data is untouched. */
   async resetDemo() {
     this.setPlaying(false);
-    while (this.stepping) await this.stepping;
+    for (let pending = this.replayWork(); pending; pending = this.replayWork()) await pending.catch(() => {});
     this.clearDemo();
     this.seedDemo();
   }
@@ -418,7 +432,7 @@ export class Runtime {
   /** Leaves Demo Mode: removes demo data without rebuilding it. */
   async exitDemo() {
     this.setPlaying(false);
-    while (this.stepping) await this.stepping;
+    for (let pending = this.replayWork(); pending; pending = this.replayWork()) await pending.catch(() => {});
     this.clearDemo();
     this.invalidate('accounts', 'agents', 'arena', 'decisions', 'orders', 'positions');
   }
@@ -573,6 +587,13 @@ export class Runtime {
 
   clearKey(providerId: string) {
     this.store.deleteProviderKey(providerId);
+    this.keys.delete(providerId);
+    this.invalidate('providers');
+  }
+
+  deleteProvider(providerId: string) {
+    // The database cascades both durable key formats within this DELETE.
+    this.store.deleteProvider(providerId);
     this.keys.delete(providerId);
     this.invalidate('providers');
   }

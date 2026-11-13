@@ -148,6 +148,13 @@ impl Runtime {
         self.invalidate(&[Topic::Providers]);
         Ok(())
     }
+    pub fn delete_provider(&mut self, id: &str) -> Result<(), ApiError> {
+        // SQLite cascades both durable key formats within this DELETE.
+        rows::delete_provider(self.connection(), id).map_err(|e| self.api_error(e))?;
+        self.agents.keys.remove(id);
+        self.invalidate(&[Topic::Providers]);
+        Ok(())
+    }
     pub(super) fn resolve_provider(
         &self,
         agent: &rows::Agent,

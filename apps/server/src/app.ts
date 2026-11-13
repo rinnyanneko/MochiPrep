@@ -283,9 +283,7 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   app.delete<{ Params: IdParams }>('/api/providers/:id', async (request) => {
     const { id } = editableProvider(request.params.id);
     if (runtime.store.listAgents().some((a) => a.providerId === id)) throw new Error('Agents still use this provider');
-    runtime.clearKey(id);
-    runtime.store.deleteProvider(id);
-    runtime.invalidate('providers');
+    runtime.deleteProvider(id);
     return { ok: true };
   });
   app.put<{ Params: IdParams }>('/api/providers/:id/key', async (request) => {
@@ -325,8 +323,13 @@ export function buildApp(runtime: Runtime, config: ServerConfig): { app: Fastify
   app.put<{ Params: IdParams }>('/api/agents/:id', async (request) => {
     const input = AgentInputSchema.parse(request.body);
     runtime.assertAgentRefs(input.providerId, input.accountId, input.symbol);
-    const agent = { ...requireAgent(request.params.id), ...input };
+    const previous = requireAgent(request.params.id);
+    const agent = { ...previous, ...input };
     if (runtime.runner.isBusy(agent.id)) throw Object.assign(new Error('A cycle is already running for this agent; try again after it settles'), { statusCode: 409 });
+    if (agent.running && agent.accountId !== previous.accountId) {
+      const source = runtime.store.getAccount(agent.accountId)!.source;
+      if (source !== runtime.store.getAccount(previous.accountId)?.source) agent.nextRunAt = runtime.market(source).now();
+    }
     runtime.store.saveAgent(agent);
     runtime.invalidate('agents', 'arena');
     return agent;
