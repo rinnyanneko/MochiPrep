@@ -90,6 +90,83 @@ describe('OKX parsing', () => {
   });
 });
 
+describe('OKX WebSocket handshake timeout', () => {
+  /** A socket whose handshake never completes unless the test opens it. Closing it while
+   *  CONNECTING fires error, then close, as a real WebSocket does. */
+  class HungSocket {
+    static instances: HungSocket[] = [];
+    OPEN = 1;
+    readyState = 0;
+    closed = false;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    constructor(_url: string) { HungSocket.instances.push(this); }
+    send(_value: string) {}
+    open() { this.readyState = 1; this.onopen?.(); }
+    close() {
+      this.closed = true;
+      if (this.readyState === 0) this.onerror?.();
+      this.readyState = 3;
+      this.onclose?.();
+    }
+  }
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ code: '0', msg: '', data: [] }) }) as unknown as Response;
+  const startFeed = () => {
+    HungSocket.instances = [];
+    vi.useFakeTimers();
+    const feed = new OkxMarketData({ fetchImpl, WebSocketImpl: HungSocket as unknown as typeof WebSocket });
+    feed.start();
+    return feed;
+  };
+  const DETAIL = 'WebSocket handshake timed out; reconnecting, REST polling meanwhile';
+
+  it('closes a hung handshake at 10 s, goes DEGRADED and redials with the backoff', async () => {
+    const feed = startFeed();
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(feed.status().state).toBe('CONNECTING');
+    expect(HungSocket.instances[0]!.closed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(HungSocket.instances[0]!.closed).toBe(true);
+    expect(feed.status()).toMatchObject({ state: 'DEGRADED', detail: DETAIL });
+    // Backoff for attempt 0 is 1 s.
+    await vi.advanceTimersByTimeAsync(999);
+    expect(HungSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(HungSocket.instances).toHaveLength(2);
+    expect(feed.status().state).toBe('CONNECTING');
+    // The attempt count is not reset by a timeout: the next redial waits 2 s.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(feed.status()).toMatchObject({ state: 'DEGRADED', detail: DETAIL });
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(HungSocket.instances).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(HungSocket.instances).toHaveLength(3);
+    feed.stop();
+  });
+
+  it('never times out a socket that opened in time', async () => {
+    const feed = startFeed();
+    await vi.advanceTimersByTimeAsync(9_000);
+    HungSocket.instances[0]!.open();
+    expect(feed.status().state).toBe('CONNECTED');
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(feed.status().state).toBe('CONNECTED');
+    expect(HungSocket.instances).toHaveLength(1);
+    expect(HungSocket.instances[0]!.closed).toBe(false);
+    feed.stop();
+  });
+
+  it('stopping during the handshake leaves no timer behind', async () => {
+    const feed = startFeed();
+    feed.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(feed.status().state).toBe('DISCONNECTED');
+    expect(HungSocket.instances).toHaveLength(1);
+  });
+});
+
 describe('OKX pair subscriptions', () => {
   class Socket {
     static instances: Socket[] = [];
