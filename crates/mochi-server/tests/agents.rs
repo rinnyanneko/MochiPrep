@@ -325,7 +325,9 @@ async fn command_panic_preserves_blocked_replay_batch_and_timer_credit() {
         "blocked ticks must not queue bars"
     );
     rt.set_playing(true).await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    // Read between ticks (100 ms apart), never on one: a read at the exact tick instant races
+    // the timer inside the actor, so its result would depend on scheduling order.
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
     assert_eq!(
         rt.replay_state().await.unwrap().now,
         Some(begin + 60000),

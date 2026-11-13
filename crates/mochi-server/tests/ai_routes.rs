@@ -149,17 +149,39 @@ async fn failed_provider_deletion_preserves_saved_and_loaded_keys() {
         })
         .await
         .unwrap();
+    // A sealed row is the other durable key format; the delete must cascade to both tables.
+    let id = provider.clone();
+    t.state
+        .runtime
+        .call(move |r| {
+            r.connection()
+                .execute(
+                    "INSERT INTO sealed_provider_keys (provider_id, sealed, updated_at) VALUES (?1, 'v1.a.b.c', 0)",
+                    [&id],
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
     t.ok("DELETE", &path, None).await;
-    assert!(!t
+    let remaining: (i64, i64) = t
         .state
         .runtime
-        .call(
-            move |r| mochi_store::rows::get_provider_keys(r.connection())
-                .unwrap()
-                .contains_key(&provider)
-        )
+        .call(move |r| {
+            let count = |table: &str| -> i64 {
+                r.connection()
+                    .query_row(
+                        &format!("SELECT COUNT(*) FROM {table} WHERE provider_id = ?1"),
+                        [&provider],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            };
+            (count("provider_keys"), count("sealed_provider_keys"))
+        })
         .await
-        .unwrap());
+        .unwrap();
+    assert_eq!(remaining, (0, 0), "plaintext and sealed keys both deleted");
     t.close().await;
 }
 
