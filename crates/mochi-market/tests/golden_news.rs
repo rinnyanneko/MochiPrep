@@ -7,8 +7,8 @@
 
 use mochi_domain::{NewsItem, NewsSource};
 use mochi_market::news::{
-    default_news_sources, mentions_coin, parse_feed, parse_js_date, sanitize_headline, select_news,
-    validate_feed_url,
+    default_news_sources, is_public_address, mentions_coin, parse_feed, parse_js_date,
+    sanitize_headline, select_news, validate_feed_url,
 };
 use serde_json::Value;
 
@@ -138,6 +138,26 @@ fn validate_feed_url_matches_node() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn public_addresses_match_node() {
+    let golden = golden();
+    let cases = cases(&golden, "addresses");
+    assert!(cases.len() > 80);
+    let mut failures = Vec::new();
+    for case in cases {
+        let text = case["address"].as_str().unwrap();
+        let address: std::net::IpAddr = text.parse().unwrap();
+        let public = is_public_address(address);
+        if public != case["public"].as_bool().unwrap() {
+            failures.push(format!("{text}: got {public}, Node {}", case["public"]));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    // Both answers are in the corpus.
+    assert!(cases.iter().any(|c| c["public"] == true));
+    assert!(cases.iter().any(|c| c["public"] == false));
 }
 
 /// A 3 MB feed of empty blocks must parse in linear time: the refresh runs on a tokio worker,

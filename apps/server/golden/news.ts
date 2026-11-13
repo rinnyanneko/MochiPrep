@@ -1,4 +1,4 @@
-import { DEFAULT_NEWS_SOURCES, mentionsCoin, parseFeed, sanitizeHeadline, selectNews, validateFeedUrl } from '@mochiprep/market-data';
+import { DEFAULT_NEWS_SOURCES, isPublicAddress, mentionsCoin, parseFeed, sanitizeHeadline, selectNews, validateFeedUrl } from '@mochiprep/market-data';
 import type { NewsItem } from '@mochiprep/shared';
 
 /**
@@ -210,6 +210,24 @@ const URL_CASES = [
   'https://éxample.com/x', 'https://xn--xample-9ua.com/x', 'https://example.local./x', 'https://10.example.com/x',
   'https://127.0.0.1.nip.io/x', 'https://%31%32%37.0.0.1/x', 'https://example.com\\x', 'wss://example.com/x',
   'https://', 'https://.com/x', 'https://example..com/x', 'HtTpS://a.b', 'https://a.b#frag', 'https://a.b?x=<y>',
+  'https://100.64.0.1/x', 'https://100.128.0.1/x', 'https://198.18.0.1/x', 'https://198.20.0.1/x', 'https://192.0.0.8/x',
+  'https://192.0.2.1/x', 'https://224.0.0.1/x', 'https://240.0.0.1/x', 'https://255.255.255.255/x', 'https://8.8.8.8/x',
+  'https://0x64.0x40.0.1/x', 'https://3758096385/x',
+];
+
+/** Resolved addresses for the connect-time check, at and either side of every range edge. */
+const ADDRESS_CASES = [
+  '0.0.0.0', '0.255.255.255', '1.0.0.0', '1.1.1.1', '9.255.255.255', '10.0.0.0', '10.0.0.5', '10.255.255.255', '11.0.0.0',
+  '100.63.255.255', '100.64.0.0', '100.127.255.255', '100.128.0.0', '126.255.255.255', '127.0.0.1', '127.255.255.255',
+  '128.0.0.0', '169.253.255.255', '169.254.0.0', '169.254.169.254', '169.255.0.0', '172.15.255.255', '172.16.0.0',
+  '172.31.255.255', '172.32.0.0', '191.255.255.255', '192.0.0.0', '192.0.0.255', '192.0.1.0', '192.0.2.1', '192.167.255.255',
+  '192.168.0.0', '192.168.255.255', '192.169.0.0', '198.17.255.255', '198.18.0.0', '198.19.255.255', '198.20.0.0',
+  '223.255.255.255', '224.0.0.0', '239.255.255.255', '240.0.0.0', '255.255.255.255', '93.184.215.14',
+  '::', '::1', '::2', '::0.0.0.1', '1::', '2001:db8::1', '2606:4700::1111', 'fbff:ffff::1', 'fc00::', 'fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff',
+  'fe00::1', 'fe7f::1', 'fe80::', 'fe80::1', 'febf:ffff::1', 'fec0::', 'feff::1', 'ff00::', 'ff02::1', 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff',
+  '::ffff:0:0', '::ffff:0.0.0.1', '::ffff:8.8.8.8', '::ffff:10.0.0.5', '::ffff:127.0.0.1', '::ffff:192.168.1.1', '::ffff:c0a8:101',
+  '::ffff:100.64.0.1', '::ffff:224.0.0.1', '::fffe:8.8.8.8', '0:0:0:0:1:ffff:808:808',
+  '64:ff9b::', '64:ff9b::8.8.8.8', '64:ff9b::10.0.0.1', '64:ff9b::7f00:1', '64:ff9b::1:0:0:1', '64:ff9a::10.0.0.1', '64:ff9b:1::10.0.0.1',
 ];
 
 export function newsFixture() {
@@ -246,5 +264,6 @@ export function newsFixture() {
     },
     mentions: MENTION_CASES.map(([title, base]) => ({ title, base, result: mentionsCoin(title, base) })),
     urls: URL_CASES.map((url) => ({ url, problem: validateFeedUrl(url) })),
+    addresses: ADDRESS_CASES.map((address) => ({ address, public: isPublicAddress(address) })),
   };
 }

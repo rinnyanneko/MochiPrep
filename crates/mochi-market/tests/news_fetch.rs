@@ -3,7 +3,9 @@
 //! fake that answers by exact URL, and the real transport is tested against a loopback server.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::io;
+use std::net::IpAddr;
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -13,8 +15,8 @@ use axum::routing::get;
 use axum::Router;
 use mochi_domain::NewsSource;
 use mochi_market::news::{
-    fetch_source, FeedReply, FeedTransport, NetFeedTransport, NewsService, ACCEPT, MAX_BODY_BYTES,
-    MAX_FEED_CHARS, REFRESH_MS, USER_AGENT,
+    fetch_following, fetch_source, FeedReply, FeedTransport, HostLookup, NetFeedTransport,
+    NewsService, ACCEPT, MAX_BODY_BYTES, MAX_FEED_CHARS, REFRESH_MS, USER_AGENT,
 };
 use mochi_market::okx_public::BoxFuture;
 use tokio::net::TcpListener;
@@ -505,4 +507,123 @@ async fn a_truncated_body_is_too_large() {
     }
     let error = fetch_source(&Truncated, &source("a")).await.unwrap_err();
     assert_eq!(error, "feed too large");
+}
+
+// ---- the real transport's resolve-time check ---------------------------------------------------
+
+/// DNS answers by name, recording every name asked for; an unknown name fails as DNS does.
+fn fake_dns(answers: &[(&str, &[&str])]) -> (HostLookup, Arc<Mutex<Vec<String>>>) {
+    let answers: HashMap<String, Vec<IpAddr>> = answers
+        .iter()
+        .map(|(name, ips)| {
+            (
+                name.to_string(),
+                ips.iter().map(|ip| ip.parse().unwrap()).collect(),
+            )
+        })
+        .collect();
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let lookup: HostLookup = {
+        let asked = asked.clone();
+        Arc::new(move |name: String| {
+            asked.lock().unwrap().push(name.clone());
+            let found = answers.get(&name).cloned();
+            Box::pin(async move {
+                found.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no such host"))
+            })
+        })
+    };
+    (lookup, asked)
+}
+
+/// A loopback listener that counts the connections it is offered.
+async fn counting_listener() -> (u16, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let count = accepted.clone();
+    tokio::spawn(async move {
+        while let Ok((socket, _)) = listener.accept().await {
+            count.fetch_add(1, Ordering::SeqCst);
+            drop(socket);
+        }
+    });
+    (port, accepted)
+}
+
+#[tokio::test]
+async fn a_name_resolving_to_any_private_address_is_refused_before_connecting() {
+    let (port, accepted) = counting_listener().await;
+    for answer in [
+        &["127.0.0.1"][..],
+        &["10.0.0.5"],
+        &["::1"],
+        &["::ffff:192.168.1.1"],
+        &["93.184.215.14", "10.0.0.5"],
+        &["2606:4700::1111", "fe80::1"],
+    ] {
+        let (lookup, asked) = fake_dns(&[("feed.test", answer)]);
+        let transport = NetFeedTransport::with_lookup(lookup);
+        let url = format!("https://feed.test:{port}/rss");
+        let error = fetch_following(&transport, &url).await.unwrap_err();
+        assert_eq!(
+            error,
+            format!("Feeds must be on a public host: {url}"),
+            "{answer:?}"
+        );
+        assert_eq!(*asked.lock().unwrap(), ["feed.test"], "{answer:?}");
+    }
+    tokio::task::yield_now().await;
+    assert_eq!(accepted.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_dns_failure_is_a_fetch_failure() {
+    let (lookup, asked) = fake_dns(&[]);
+    let transport = NetFeedTransport::with_lookup(lookup);
+    let error = fetch_following(&transport, "https://gone.test/rss")
+        .await
+        .unwrap_err();
+    assert_eq!(error, "fetch failed");
+    assert_eq!(*asked.lock().unwrap(), ["gone.test"]);
+}
+
+#[tokio::test]
+async fn a_redirect_whose_target_resolves_private_is_refused_at_that_hop() {
+    // The first hop answers from memory with a redirect; the second goes through the real
+    // transport, whose resolver sees `evil.test` resolve to a private address.
+    struct FirstHopThenNet {
+        net: NetFeedTransport,
+        asked: Mutex<Vec<String>>,
+    }
+    impl FeedTransport for FirstHopThenNet {
+        fn get(&self, url: String) -> BoxFuture<'static, Result<FeedReply, String>> {
+            self.asked.lock().unwrap().push(url.clone());
+            if url == "https://a.test/feed" {
+                return Box::pin(async {
+                    Ok(FeedReply {
+                        status: 302,
+                        location: Some("https://evil.test/rss".to_string()),
+                        ..FeedReply::default()
+                    })
+                });
+            }
+            self.net.get(url)
+        }
+    }
+    let (lookup, dns_asked) = fake_dns(&[("evil.test", &["10.0.0.5"])]);
+    let transport = FirstHopThenNet {
+        net: NetFeedTransport::with_lookup(lookup),
+        asked: Mutex::default(),
+    };
+    let error = fetch_source(&transport, &source("a")).await.unwrap_err();
+    assert_eq!(
+        error,
+        "Feeds must be on a public host: https://evil.test/rss"
+    );
+    assert_eq!(
+        *transport.asked.lock().unwrap(),
+        ["https://a.test/feed", "https://evil.test/rss"]
+    );
+    assert_eq!(*dns_asked.lock().unwrap(), ["evil.test"]);
 }

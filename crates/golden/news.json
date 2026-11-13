@@ -2307,6 +2307,384 @@
   {
    "url": "https://a.b?x=<y>",
    "problem": null
+  },
+  {
+   "url": "https://100.64.0.1/x",
+   "problem": "Feeds must be on a public host"
+  },
+  {
+   "url": "https://100.128.0.1/x",
+   "problem": null
+  },
+  {
+   "url": "https://198.18.0.1/x",
+   "problem": "Feeds must be on a public host"
+  },
+  {
+   "url": "https://198.20.0.1/x",
+   "problem": null
+  },
+  {
+   "url": "https://192.0.0.8/x",
+   "problem": "Feeds must be on a public host"
+  },
+  {
+   "url": "https://192.0.2.1/x",
+   "problem": null
+  },
+  {
+   "url": "https://224.0.0.1/x",
+   "problem": "Feeds must be on a public host"
+  },
+  {
+   "url": "https://240.0.0.1/x",
+   "problem": "Feeds must be on a public host"
+  },
+  {
+   "url": "https://255.255.255.255/x",
+   "problem": "Feeds must be on a public host"
+  },
+  {
+   "url": "https://8.8.8.8/x",
+   "problem": null
+  },
+  {
+   "url": "https://0x64.0x40.0.1/x",
+   "problem": "Feeds must be on a public host"
+  },
+  {
+   "url": "https://3758096385/x",
+   "problem": "Feeds must be on a public host"
+  }
+ ],
+ "addresses": [
+  {
+   "address": "0.0.0.0",
+   "public": false
+  },
+  {
+   "address": "0.255.255.255",
+   "public": false
+  },
+  {
+   "address": "1.0.0.0",
+   "public": true
+  },
+  {
+   "address": "1.1.1.1",
+   "public": true
+  },
+  {
+   "address": "9.255.255.255",
+   "public": true
+  },
+  {
+   "address": "10.0.0.0",
+   "public": false
+  },
+  {
+   "address": "10.0.0.5",
+   "public": false
+  },
+  {
+   "address": "10.255.255.255",
+   "public": false
+  },
+  {
+   "address": "11.0.0.0",
+   "public": true
+  },
+  {
+   "address": "100.63.255.255",
+   "public": true
+  },
+  {
+   "address": "100.64.0.0",
+   "public": false
+  },
+  {
+   "address": "100.127.255.255",
+   "public": false
+  },
+  {
+   "address": "100.128.0.0",
+   "public": true
+  },
+  {
+   "address": "126.255.255.255",
+   "public": true
+  },
+  {
+   "address": "127.0.0.1",
+   "public": false
+  },
+  {
+   "address": "127.255.255.255",
+   "public": false
+  },
+  {
+   "address": "128.0.0.0",
+   "public": true
+  },
+  {
+   "address": "169.253.255.255",
+   "public": true
+  },
+  {
+   "address": "169.254.0.0",
+   "public": false
+  },
+  {
+   "address": "169.254.169.254",
+   "public": false
+  },
+  {
+   "address": "169.255.0.0",
+   "public": true
+  },
+  {
+   "address": "172.15.255.255",
+   "public": true
+  },
+  {
+   "address": "172.16.0.0",
+   "public": false
+  },
+  {
+   "address": "172.31.255.255",
+   "public": false
+  },
+  {
+   "address": "172.32.0.0",
+   "public": true
+  },
+  {
+   "address": "191.255.255.255",
+   "public": true
+  },
+  {
+   "address": "192.0.0.0",
+   "public": false
+  },
+  {
+   "address": "192.0.0.255",
+   "public": false
+  },
+  {
+   "address": "192.0.1.0",
+   "public": true
+  },
+  {
+   "address": "192.0.2.1",
+   "public": true
+  },
+  {
+   "address": "192.167.255.255",
+   "public": true
+  },
+  {
+   "address": "192.168.0.0",
+   "public": false
+  },
+  {
+   "address": "192.168.255.255",
+   "public": false
+  },
+  {
+   "address": "192.169.0.0",
+   "public": true
+  },
+  {
+   "address": "198.17.255.255",
+   "public": true
+  },
+  {
+   "address": "198.18.0.0",
+   "public": false
+  },
+  {
+   "address": "198.19.255.255",
+   "public": false
+  },
+  {
+   "address": "198.20.0.0",
+   "public": true
+  },
+  {
+   "address": "223.255.255.255",
+   "public": true
+  },
+  {
+   "address": "224.0.0.0",
+   "public": false
+  },
+  {
+   "address": "239.255.255.255",
+   "public": false
+  },
+  {
+   "address": "240.0.0.0",
+   "public": false
+  },
+  {
+   "address": "255.255.255.255",
+   "public": false
+  },
+  {
+   "address": "93.184.215.14",
+   "public": true
+  },
+  {
+   "address": "::",
+   "public": false
+  },
+  {
+   "address": "::1",
+   "public": false
+  },
+  {
+   "address": "::2",
+   "public": true
+  },
+  {
+   "address": "::0.0.0.1",
+   "public": false
+  },
+  {
+   "address": "1::",
+   "public": true
+  },
+  {
+   "address": "2001:db8::1",
+   "public": true
+  },
+  {
+   "address": "2606:4700::1111",
+   "public": true
+  },
+  {
+   "address": "fbff:ffff::1",
+   "public": true
+  },
+  {
+   "address": "fc00::",
+   "public": false
+  },
+  {
+   "address": "fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+   "public": false
+  },
+  {
+   "address": "fe00::1",
+   "public": true
+  },
+  {
+   "address": "fe7f::1",
+   "public": true
+  },
+  {
+   "address": "fe80::",
+   "public": false
+  },
+  {
+   "address": "fe80::1",
+   "public": false
+  },
+  {
+   "address": "febf:ffff::1",
+   "public": false
+  },
+  {
+   "address": "fec0::",
+   "public": true
+  },
+  {
+   "address": "feff::1",
+   "public": true
+  },
+  {
+   "address": "ff00::",
+   "public": false
+  },
+  {
+   "address": "ff02::1",
+   "public": false
+  },
+  {
+   "address": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+   "public": false
+  },
+  {
+   "address": "::ffff:0:0",
+   "public": false
+  },
+  {
+   "address": "::ffff:0.0.0.1",
+   "public": false
+  },
+  {
+   "address": "::ffff:8.8.8.8",
+   "public": true
+  },
+  {
+   "address": "::ffff:10.0.0.5",
+   "public": false
+  },
+  {
+   "address": "::ffff:127.0.0.1",
+   "public": false
+  },
+  {
+   "address": "::ffff:192.168.1.1",
+   "public": false
+  },
+  {
+   "address": "::ffff:c0a8:101",
+   "public": false
+  },
+  {
+   "address": "::ffff:100.64.0.1",
+   "public": false
+  },
+  {
+   "address": "::ffff:224.0.0.1",
+   "public": false
+  },
+  {
+   "address": "::fffe:8.8.8.8",
+   "public": true
+  },
+  {
+   "address": "0:0:0:0:1:ffff:808:808",
+   "public": true
+  },
+  {
+   "address": "64:ff9b::",
+   "public": false
+  },
+  {
+   "address": "64:ff9b::8.8.8.8",
+   "public": true
+  },
+  {
+   "address": "64:ff9b::10.0.0.1",
+   "public": false
+  },
+  {
+   "address": "64:ff9b::7f00:1",
+   "public": false
+  },
+  {
+   "address": "64:ff9b::1:0:0:1",
+   "public": true
+  },
+  {
+   "address": "64:ff9a::10.0.0.1",
+   "public": true
+  },
+  {
+   "address": "64:ff9b:1::10.0.0.1",
+   "public": true
   }
  ]
 }
