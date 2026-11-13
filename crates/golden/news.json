@@ -2234,7 +2234,15 @@
   },
   {
    "url": "https://user:pass@example.com/x",
-   "problem": null
+   "problem": "Feeds must not include a username or password"
+  },
+  {
+   "url": "https://user@example.com/x",
+   "problem": "Feeds must not include a username or password"
+  },
+  {
+   "url": "https://:pass@example.com/x",
+   "problem": "Feeds must not include a username or password"
   },
   {
    "url": "https://example.com:8443/x",
@@ -2544,7 +2552,7 @@
   },
   {
    "address": "::2",
-   "public": true
+   "public": false
   },
   {
    "address": "::0.0.0.1",
@@ -2596,11 +2604,11 @@
   },
   {
    "address": "fec0::",
-   "public": true
+   "public": false
   },
   {
    "address": "feff::1",
-   "public": true
+   "public": false
   },
   {
    "address": "ff00::",
@@ -2684,6 +2692,106 @@
   },
   {
    "address": "64:ff9b:1::10.0.0.1",
+   "public": false
+  },
+  {
+   "address": "2001:ffff:ffff::1",
+   "public": true
+  },
+  {
+   "address": "2002::",
+   "public": false
+  },
+  {
+   "address": "2002:808:808::1",
+   "public": true
+  },
+  {
+   "address": "2002:a00:1::",
+   "public": false
+  },
+  {
+   "address": "2002:7f00:1::",
+   "public": false
+  },
+  {
+   "address": "2002:c0a8:101::1",
+   "public": false
+  },
+  {
+   "address": "2002:ffff:ffff::",
+   "public": false
+  },
+  {
+   "address": "2003::",
+   "public": true
+  },
+  {
+   "address": "2003::10.0.0.1",
+   "public": true
+  },
+  {
+   "address": "::8.8.8.8",
+   "public": true
+  },
+  {
+   "address": "::10.0.0.1",
+   "public": false
+  },
+  {
+   "address": "::0.0.0.2",
+   "public": false
+  },
+  {
+   "address": "::127.0.0.1",
+   "public": false
+  },
+  {
+   "address": "::1:0:0",
+   "public": true
+  },
+  {
+   "address": "::1:808:808",
+   "public": true
+  },
+  {
+   "address": "::ffff:1:0:0",
+   "public": true
+  },
+  {
+   "address": "64:ff9b:0:ffff::1",
+   "public": true
+  },
+  {
+   "address": "64:ff9b:1::",
+   "public": false
+  },
+  {
+   "address": "64:ff9b:1:ffff:ffff:ffff:ffff:ffff",
+   "public": false
+  },
+  {
+   "address": "64:ff9b:2::",
+   "public": true
+  },
+  {
+   "address": "64:ff9b:2::10.0.0.1",
+   "public": true
+  },
+  {
+   "address": "febf:ffff:ffff:ffff::1",
+   "public": false
+  },
+  {
+   "address": "fec0::1",
+   "public": false
+  },
+  {
+   "address": "feff:ffff:ffff:ffff::1",
+   "public": false
+  },
+  {
+   "address": "fe7f:ffff::1",
    "public": true
   }
  ]

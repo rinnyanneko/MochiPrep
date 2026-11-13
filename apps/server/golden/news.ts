@@ -205,7 +205,7 @@ const URL_CASES = [
   'HTTPS://Example.COM/Feed', 'https://LOCALHOST/x', 'https://localhost./x', 'https://localhost../x', 'https://localhost%2e/x', 'https://localhost。/x', 'https://app.localhost./x', 'https://router./x', 'https://example.com./rss', 'https://app.localhost/x',
   'https://0x7f.1/x', 'https://2130706433/x', 'https://0177.0.0.1/x', 'https://127.1/x', 'https://0.0.0.0/x',
   'https://172.15.0.1/x', 'https://172.32.0.1/x', 'https://172.31.255.255/x', 'https://172.2.0.1/x',
-  'https://[2001:db8::1]/x', 'https://[::ffff:127.0.0.1]/x', 'https://user:pass@example.com/x',
+  'https://[2001:db8::1]/x', 'https://[::ffff:127.0.0.1]/x', 'https://user:pass@example.com/x', 'https://user@example.com/x', 'https://:pass@example.com/x',
   'https://example.com:8443/x', 'https:example.com/x', ' https://example.com/x ', 'https://ex ample.com/x',
   'https://éxample.com/x', 'https://xn--xample-9ua.com/x', 'https://example.local./x', 'https://10.example.com/x',
   'https://127.0.0.1.nip.io/x', 'https://%31%32%37.0.0.1/x', 'https://example.com\\x', 'wss://example.com/x',
@@ -228,6 +228,10 @@ const ADDRESS_CASES = [
   '::ffff:0:0', '::ffff:0.0.0.1', '::ffff:8.8.8.8', '::ffff:10.0.0.5', '::ffff:127.0.0.1', '::ffff:192.168.1.1', '::ffff:c0a8:101',
   '::ffff:100.64.0.1', '::ffff:224.0.0.1', '::fffe:8.8.8.8', '0:0:0:0:1:ffff:808:808',
   '64:ff9b::', '64:ff9b::8.8.8.8', '64:ff9b::10.0.0.1', '64:ff9b::7f00:1', '64:ff9b::1:0:0:1', '64:ff9a::10.0.0.1', '64:ff9b:1::10.0.0.1',
+  '2001:ffff:ffff::1', '2002::', '2002:808:808::1', '2002:a00:1::', '2002:7f00:1::', '2002:c0a8:101::1', '2002:ffff:ffff::',
+  '2003::', '2003::10.0.0.1', '::8.8.8.8', '::10.0.0.1', '::0.0.0.2', '::127.0.0.1', '::1:0:0', '::1:808:808', '::ffff:1:0:0',
+  '64:ff9b:0:ffff::1', '64:ff9b:1::', '64:ff9b:1:ffff:ffff:ffff:ffff:ffff', '64:ff9b:2::', '64:ff9b:2::10.0.0.1',
+  'febf:ffff:ffff:ffff::1', 'fec0::1', 'feff:ffff:ffff:ffff::1', 'fe7f:ffff::1',
 ];
 
 export function newsFixture() {

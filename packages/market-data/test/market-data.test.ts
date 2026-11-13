@@ -103,7 +103,8 @@ describe('OKX WebSocket handshake timeout', () => {
     onerror: (() => void) | null = null;
     onclose: (() => void) | null = null;
     constructor(_url: string) { HungSocket.instances.push(this); }
-    send(_value: string) {}
+    sent: string[] = [];
+    send(value: string) { this.sent.push(value); }
     open() { this.readyState = 1; this.onopen?.(); }
     close() {
       this.closed = true;
@@ -113,13 +114,21 @@ describe('OKX WebSocket handshake timeout', () => {
     }
   }
   const fetchImpl = async () => ({ ok: true, json: async () => ({ code: '0', msg: '', data: [] }) }) as unknown as Response;
+  let started: OkxMarketData | null = null;
   const startFeed = () => {
     HungSocket.instances = [];
     vi.useFakeTimers();
     const feed = new OkxMarketData({ fetchImpl, WebSocketImpl: HungSocket as unknown as typeof WebSocket });
     feed.start();
+    started = feed;
     return feed;
   };
+  // Runs even when an assertion failed, so no feed or fake clock leaks into the next test.
+  afterEach(() => {
+    started?.stop();
+    started = null;
+    vi.useRealTimers();
+  });
   const DETAIL = 'WebSocket handshake timed out; reconnecting, REST polling meanwhile';
 
   it('closes a hung handshake at 10 s, goes DEGRADED and redials with the backoff', async () => {
@@ -156,6 +165,30 @@ describe('OKX WebSocket handshake timeout', () => {
     expect(HungSocket.instances).toHaveLength(1);
     expect(HungSocket.instances[0]!.closed).toBe(false);
     feed.stop();
+  });
+
+  it('a replaced socket closing late changes nothing on the active connection', async () => {
+    const feed = startFeed();
+    const first = HungSocket.instances[0]!;
+    first.open();
+    const staleClose = first.onclose!;
+    const staleError = first.onerror!;
+    staleClose();
+    // Backoff for attempt 0 is 1 s; the new socket opens.
+    await vi.advanceTimersByTimeAsync(1_000);
+    const second = HungSocket.instances[1]!;
+    second.open();
+    expect(feed.status()).toMatchObject({ state: 'CONNECTED' });
+    // The old socket's events arrive again, late.
+    staleError();
+    staleClose();
+    expect(feed.status().state).toBe('CONNECTED');
+    expect(feed.status().detail).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(HungSocket.instances).toHaveLength(2);
+    // The active socket's ping timer survived.
+    expect(second.sent).toContain('ping');
+    expect(feed.status().state).toBe('CONNECTED');
   });
 
   it('stopping during the handshake leaves no timer behind', async () => {

@@ -109,8 +109,11 @@ export function createFeedFetch(deps: { lookupAll?: LookupAll; request?: FeedReq
           return;
         }
         // Only a 2xx body is ever read; a redirect or error status is judged by its status.
+        // Its body is destroyed, not drained: a hostile server could trickle it forever, and
+        // with agent:false there is no connection worth keeping.
         if (status >= 300) {
-          message.resume();
+          message.destroy();
+          req?.destroy();
           signal?.removeEventListener('abort', onAbort);
           resolve(responseFrom(message, null));
           return;

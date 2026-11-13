@@ -503,8 +503,13 @@ pub fn is_public_address(ip: IpAddr) -> bool {
     if g == [0; 8] || g == [0, 0, 0, 0, 0, 0, 0, 1] {
         return false;
     }
-    // fc00::/7 unique local, fe80::/10 link-local, ff00::/8 multicast
-    if g[0] & 0xfe00 == 0xfc00 || g[0] & 0xffc0 == 0xfe80 || g[0] & 0xff00 == 0xff00 {
+    // fc00::/7 unique local, fe80::/10 link-local, fec0::/10 site-local (deprecated, still
+    // routable inside a site), ff00::/8 multicast
+    if g[0] & 0xfe00 == 0xfc00
+        || g[0] & 0xffc0 == 0xfe80
+        || g[0] & 0xffc0 == 0xfec0
+        || g[0] & 0xff00 == 0xff00
+    {
         return false;
     }
     // ::ffff:0:0/96 (IPv4-mapped) and 64:ff9b::/96 (NAT64) carry an IPv4 address in the last 32
@@ -513,6 +518,21 @@ pub fn is_public_address(ip: IpAddr) -> bool {
     let nat64 = g[0] == 0x64 && g[1] == 0xff9b && g[2..6] == [0; 4];
     if mapped || nat64 {
         let [.., a, b, c, d] = ip.octets();
+        return ipv4_public(Ipv4Addr::new(a, b, c, d));
+    }
+    // 64:ff9b:1::/48 local-use NAT64
+    if g[0] == 0x64 && g[1] == 0xff9b && g[2] == 1 {
+        return false;
+    }
+    // IPv4-compatible ::/96 (deprecated) holds an IPv4 address in its low 32 bits; :: and ::1
+    // were refused above.
+    if g[..6] == [0; 6] {
+        let [.., a, b, c, d] = ip.octets();
+        return ipv4_public(Ipv4Addr::new(a, b, c, d));
+    }
+    // 6to4 2002::/16 tunnels to the IPv4 address in bits 16-48.
+    if g[0] == 0x2002 {
+        let [_, _, a, b, c, d, ..] = ip.octets();
         return ipv4_public(Ipv4Addr::new(a, b, c, d));
     }
     true
@@ -527,6 +547,10 @@ pub fn validate_feed_url(text: &str) -> Option<&'static str> {
     };
     if url.scheme() != "https" {
         return Some("Feeds must use https");
+    }
+    // Credentials in a feed URL would be sent to whichever host it points at.
+    if !url.username().is_empty() || url.password().is_some() {
+        return Some("Feeds must not include a username or password");
     }
     let lowered = url.host_str().unwrap_or("").to_lowercase();
     // `.replace(/^\[|\]$/g, '')`
@@ -1404,9 +1428,11 @@ pub struct FeedReply {
 
 /// How the news service reaches a feed.
 pub trait FeedTransport: Send + Sync {
-    /// One anonymous GET of exactly `url`, sending [`USER_AGENT`] and [`ACCEPT`]: no cookies,
-    /// no proxy, and never a redirect followed, because each hop must be checked first. Errors
-    /// are the text a failed `fetch` gives in Node.
+    /// One GET of exactly `url`, sending [`USER_AGENT`] and [`ACCEPT`]: no cookies, no proxy,
+    /// and never a redirect followed, because each hop must be checked first. It is anonymous
+    /// because [`validate_feed_url`] refuses a URL with a username or password before any hop
+    /// gets here. Only a 2xx body is read; any other reply is dropped unread, which closes its
+    /// connection. Errors are the text a failed `fetch` gives in Node.
     fn get(&self, url: String) -> BoxFuture<'static, Result<FeedReply, String>>;
 }
 
@@ -1837,18 +1863,30 @@ mod resolve_tests {
             ("93.184.215.14", true),
             ("::", false),
             ("::1", false),
-            ("::2", true),
+            ("::2", false),
             ("2606:4700::1111", true),
             ("fc00::1", false),
             ("fdff::1", false),
             ("fe80::1", false),
             ("febf::1", false),
-            ("fec0::1", true),
+            ("fec0::1", false),
             ("ff02::1", false),
             ("::ffff:192.168.1.1", false),
             ("::ffff:8.8.8.8", true),
             ("64:ff9b::10.0.0.1", false),
             ("64:ff9b::8.8.8.8", true),
+            ("2002:808:808::1", true),
+            ("2002:a00:1::1", false),
+            ("2002:7f00:1::", false),
+            ("2003::1", true),
+            ("::8.8.8.8", true),
+            ("::10.0.0.1", false),
+            ("::1:808:808", true),
+            ("64:ff9b:1::", false),
+            ("64:ff9b:2::1", true),
+            ("fec0::", false),
+            ("feff:ffff::1", false),
+            ("fe7f::1", true),
         ] {
             let ip: IpAddr = address.parse().unwrap();
             assert_eq!(is_public_address(ip), public, "{address}");

@@ -88,6 +88,8 @@ export function validateFeedUrl(text: string): string | null {
     return 'Not a valid URL';
   }
   if (url.protocol !== 'https:') return 'Feeds must use https';
+  // Credentials in a feed URL would be sent to whichever host it points at.
+  if (url.username || url.password) return 'Feeds must not include a username or password';
   // A DNS root dot must not let local names evade the same checks as their undotted form.
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
   const isPrivate = host === 'localhost' || host.endsWith('.local') || host.endsWith('.localhost') || !host.includes('.')

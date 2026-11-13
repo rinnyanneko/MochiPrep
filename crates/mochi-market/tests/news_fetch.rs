@@ -13,6 +13,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
+use futures_util::StreamExt;
 use mochi_domain::NewsSource;
 use mochi_market::news::{
     fetch_following, fetch_source, FeedReply, FeedTransport, HostLookup, NetFeedTransport,
@@ -626,4 +627,43 @@ async fn a_redirect_whose_target_resolves_private_is_refused_at_that_hop() {
         ["https://a.test/feed", "https://evil.test/rss"]
     );
     assert_eq!(*dns_asked.lock().unwrap(), ["evil.test"]);
+}
+
+#[tokio::test]
+async fn a_redirect_or_error_whose_body_never_ends_settles_at_once() {
+    // One chunk, then nothing, forever: the reply is judged by its status, its body never read,
+    // and dropping the response closes the connection.
+    let endless = |status: StatusCode| {
+        let chunks =
+            futures_util::stream::once(async { Ok::<_, io::Error>("trickle".to_string()) })
+                .chain(futures_util::stream::pending());
+        (
+            status,
+            [("location", "/next")],
+            axum::body::Body::from_stream(chunks),
+        )
+            .into_response()
+    };
+    let router = Router::new()
+        .route(
+            "/moved",
+            get(move || async move { endless(StatusCode::FOUND) }),
+        )
+        .route(
+            "/broken",
+            get(move || async move { endless(StatusCode::INTERNAL_SERVER_ERROR) }),
+        );
+    let base = serve(router).await;
+    let transport = NetFeedTransport::new();
+    for (path, status) in [("/moved", 302), ("/broken", 500)] {
+        let reply = tokio::time::timeout(
+            Duration::from_secs(2),
+            transport.get(format!("{base}{path}")),
+        )
+        .await
+        .expect("settles without reading the body")
+        .unwrap();
+        assert_eq!(reply.status, status);
+        assert!(reply.body.is_empty());
+    }
 }

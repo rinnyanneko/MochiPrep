@@ -202,13 +202,17 @@ export class OkxMarketData implements MarketDataProvider {
     };
     socket.onmessage = (event) => this.handleMessage(String(event.data));
     socket.onerror = () => {
+      if (this.socket !== socket) return;
       this.detail = 'WebSocket error';
     };
     socket.onclose = () => {
+      // A replaced socket's late close must not touch the active connection's timers or status,
+      // nor schedule a second reconnect.
+      if (this.socket !== socket) return;
+      this.socket = null;
       this.clearHandshakeTimer();
       if (this.pingTimer) clearInterval(this.pingTimer);
       this.pingTimer = null;
-      if (this.socket === socket) this.socket = null;
       if (this.running) this.scheduleReconnect(this.detail ?? 'Connection closed');
     };
   }

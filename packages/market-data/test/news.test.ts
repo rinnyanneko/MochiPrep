@@ -104,6 +104,7 @@ describe('validateFeedUrl', () => {
     'https://192.168.1.1/x', 'https://172.16.0.1/x', 'https://169.254.169.254/latest', 'https://[::1]/x', 'https://router/x', 'https://nas.local/x',
     'https://localhost./x', 'https://localhost../x', 'https://app.localhost./x', 'https://nas.local./x', 'https://router./x',
     'https://localhost%2e/x', 'https://localhost。/x',
+    'https://user:pass@example.com/x', 'https://user@example.com/x', 'https://:pass@example.com/x',
     'https://100.64.0.1/x', 'https://198.18.0.1/x', 'https://192.0.0.8/x', 'https://224.0.0.1/x', 'https://255.255.255.255/x',
   ])('refuses %s', (url) => {
     expect(validateFeedUrl(url)).not.toBeNull();
@@ -119,10 +120,14 @@ describe('isPublicAddress', () => {
     ['192.0.2.1', true], ['192.168.1.1', false], ['192.169.0.1', true], ['198.17.255.255', true], ['198.18.0.1', false],
     ['198.19.255.255', false], ['198.20.0.0', true], ['223.255.255.255', true], ['224.0.0.1', false], ['239.255.255.255', false],
     ['240.0.0.1', false], ['255.255.255.255', false], ['93.184.215.14', true],
-    ['::', false], ['::1', false], ['::2', true], ['2606:4700::1111', true], ['2001:db8::1', true], ['fc00::1', false],
-    ['fdff:ffff::1', false], ['fe80::1', false], ['febf::1', false], ['fec0::1', true], ['ff02::1', false], ['ff00::', false],
+    ['::', false], ['::1', false], ['::2', false], ['2606:4700::1111', true], ['2001:db8::1', true], ['fc00::1', false],
+    ['fdff:ffff::1', false], ['fe80::1', false], ['febf::1', false], ['fec0::1', false], ['ff02::1', false], ['ff00::', false],
     ['::ffff:192.168.1.1', false], ['::ffff:127.0.0.1', false], ['::ffff:8.8.8.8', true], ['::ffff:c0a8:101', false],
     ['::ffff:0:0', false], ['64:ff9b::10.0.0.1', false], ['64:ff9b::8.8.8.8', true], ['64:ff9b::1:0:0:1', true],
+    ['2002:808:808::1', true], ['2002:a00:1::1', false], ['2002:7f00:1::', false], ['2001:ffff::1', true], ['2003::1', true],
+    ['::8.8.8.8', true], ['::10.0.0.1', false], ['::0.0.0.2', false], ['::1:808:808', true],
+    ['64:ff9b:1::', false], ['64:ff9b:1:ffff::8.8.8.8', false], ['64:ff9b:2::1', true], ['64:ff9b:0:1::1', true],
+    ['febf:ffff::1', false], ['fec0::', false], ['feff:ffff::1', false], ['fe7f::1', true],
     ['not an address', false], ['', false], ['example.com', false],
   ] as const)('%s is public: %s', (address, expected) => {
     expect(isPublicAddress(address)).toBe(expected);
@@ -130,7 +135,7 @@ describe('isPublicAddress', () => {
 });
 
 describe('createFeedFetch', () => {
-  interface Reply { status: number; headers?: Record<string, string>; body?: string | Buffer }
+  interface Reply { status: number; headers?: Record<string, string>; body?: string | Buffer; endless?: boolean }
   const init = (signal: AbortSignal = AbortSignal.timeout(8_000)): RequestInit => ({
     headers: { 'user-agent': 'MochiPrep/0.1 (RSS reader)' }, redirect: 'manual', signal,
   });
@@ -142,6 +147,7 @@ describe('createFeedFetch', () => {
   const fakeNet = (dns: Record<string, string[]>, replies: Record<string, Reply> = {}) => {
     const lookups: string[] = [];
     const connected: { url: string; addresses: string[] }[] = [];
+    const responses: Readable[] = [];
     const sentHeaders: RequestOptions['headers'][] = [];
     const lookupAll = async (host: string) => {
       lookups.push(host);
@@ -160,7 +166,13 @@ describe('createFeedFetch', () => {
           }
           connected.push({ url: url.href, addresses: (addresses as LookupAddress[]).map((a) => a.address) });
           const reply = replies[url.href] ?? { status: 404 };
-          const response = Object.assign(Readable.from([Buffer.from(reply.body ?? '')]), {
+          // An endless body trickles one chunk and then never ends, as a hostile server can.
+          const stream = reply.endless
+            ? new Readable({ read() {} })
+            : Readable.from([Buffer.from(reply.body ?? '')]);
+          if (reply.endless) stream.push(Buffer.from('trickle'));
+          responses.push(stream);
+          const response = Object.assign(stream, {
             statusCode: reply.status, headers: reply.headers ?? {},
           });
           req.emit('response', response);
@@ -168,7 +180,7 @@ describe('createFeedFetch', () => {
       };
       return req as unknown as ClientRequest;
     };
-    return { fetch: createFeedFetch({ lookupAll, request }), lookups, connected, sentHeaders };
+    return { fetch: createFeedFetch({ lookupAll, request }), lookups, connected, sentHeaders, responses };
   };
 
   it.each([
@@ -216,6 +228,16 @@ describe('createFeedFetch', () => {
     expect(response.status).toBe(301);
     expect(response.headers.get('location')).toBe('/next');
     expect(net.connected).toHaveLength(1);
+  });
+
+  it.each([302, 500])('settles a %i whose body never ends at once and destroys its stream', async (status) => {
+    const net = fakeNet({ 'feed.test': ['93.184.215.14'] }, {
+      'https://feed.test/rss': { status, headers: { location: '/next' }, endless: true },
+    });
+    const response = await net.fetch('https://feed.test/rss', init());
+    expect(response.status).toBe(status);
+    expect(response.headers.get('location')).toBe('/next');
+    expect(net.responses[0]!.destroyed).toBe(true);
   });
 
   it('fails a DNS error as fetch does', async () => {
