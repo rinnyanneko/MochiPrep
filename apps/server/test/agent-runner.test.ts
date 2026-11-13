@@ -77,6 +77,22 @@ describe('AgentRunner integration', () => {
     expect(record!.outcomeDetail).toContain('stopped');
   });
 
+  it.each(['SCHEDULE', 'RUN_ONCE'] as const)('does not execute a held %s cycle after Stop and Start', async (trigger) => {
+    let release!: (value: { text: string; inputTokens: null; outputTokens: null }) => void;
+    complete = () => new Promise((resolve) => { release = resolve; });
+    runtime.runner.start(agentId);
+    const pending = runtime.runner.runCycle(agentId, trigger);
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    runtime.runner.stop(agentId);
+    runtime.runner.start(agentId);
+    const restarted = runtime.store.getAgent(agentId)!;
+    release({ text: long, inputTokens: null, outputTokens: null });
+    const result = await pending;
+    expect(result).toMatchObject({ outcome: 'ANALYSIS_ONLY', risk: { approved: true } });
+    expect(runtime.store.listOrders(restarted.accountId, 10)).toEqual([]);
+    expect(runtime.store.getAgent(agentId)).toEqual(restarted);
+  });
+
   it('turns a risk rejection into no order at all', async () => {
     const unprotected = JSON.stringify({ ...JSON.parse(long), stopLoss: null });
     complete = async () => ({ text: unprotected, inputTokens: null, outputTokens: null });

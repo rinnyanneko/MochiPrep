@@ -57,10 +57,11 @@ export interface AgentRunnerDeps {
 }
 
 export type CycleTrigger = DecisionRecord['trigger'];
+type PendingCycle = { lifecycleChanged: boolean };
 
 /** Runs the analysis loop. Only this class turns AI output into orders, and only via the risk engine. */
 export class AgentRunner {
-  private readonly inFlight = new Map<string, { lifecycleChanged: boolean }>();
+  private readonly inFlight = new Map<string, PendingCycle>();
   private readonly newId: () => string;
 
   constructor(private readonly deps: AgentRunnerDeps) {
@@ -173,7 +174,7 @@ export class AgentRunner {
       const source = this.source(agent);
       const market = this.deps.market(source);
       this.update(agent, { status: 'ANALYZING', statusDetail: null });
-      const record = sanitizeRecord(await this.analyzeAndAct(agent, market, source, trigger, secrets), [...secrets, ...this.deps.secrets()]);
+      const record = sanitizeRecord(await this.analyzeAndAct(agent, market, source, trigger, secrets, pending), [...secrets, ...this.deps.secrets()]);
       if (record.outcome === 'SIGNAL') this.retireSignals((s) => s.agentId === agentId, 'Replaced by a newer suggestion');
       this.deps.store.insertDecision(record);
       // Keep the old result in History without overwriting the newer lifecycle action.
@@ -295,11 +296,14 @@ export class AgentRunner {
     });
   }
 
-  private async execute(agent: Agent, decision: AiDecisionData, record: DecisionRecord, engine: ExecutionEngine) {
+  private async execute(agent: Agent, decision: AiDecisionData, record: DecisionRecord, engine: ExecutionEngine, pending?: PendingCycle) {
     if (decision.action === 'PROTECT') return this.protect(agent, decision, record, engine);
     let result;
     try {
-      result = await engine.placeOrder(await this.toOrder(agent, decision, record, engine));
+      const order = await this.toOrder(agent, decision, record, engine);
+      // Order preparation can await the current position for a CLOSE.
+      if (pending?.lifecycleChanged) return settle(record, 'ANALYSIS_ONLY', 'Agent was stopped before execution');
+      result = await engine.placeOrder(order);
     } catch (error) {
       return settle(record, 'ORDER_REJECTED', redactSecrets((error as Error).message, this.deps.secrets()));
     }
@@ -368,6 +372,7 @@ export class AgentRunner {
     source: DataSource,
     trigger: CycleTrigger,
     secrets: string[],
+    pending: PendingCycle,
   ): Promise<DecisionRecord> {
     const now = market.now();
     const account = this.deps.account(agent.accountId)!;
@@ -523,8 +528,9 @@ export class AgentRunner {
       record.protectionBefore = protection;
     }
 
-    // A Stop pressed while the model was thinking must win.
-    if (trigger === 'SCHEDULE' && !this.requireAgent(agent.id).running) {
+    // An old response must not act after a lifecycle change, even if the agent is running again.
+    const latest = this.requireAgent(agent.id);
+    if (pending.lifecycleChanged || (trigger === 'SCHEDULE' && !latest.running)) {
       return conclude('ANALYSIS_ONLY', 'Agent was stopped before execution');
     }
 
@@ -534,8 +540,8 @@ export class AgentRunner {
       record.signalExpiresAt = Math.min(aiExpiry, market.now() + agent.intervalSec * 1000);
       return conclude('SIGNAL', 'Waiting for you to accept or dismiss');
     }
-    this.update(agent, { status: 'EXECUTING' });
-    return this.execute(agent, parsed.decision, record, engine);
+    this.update(latest, { status: 'EXECUTING' });
+    return this.execute(agent, parsed.decision, record, engine, pending);
   }
 
   private async toOrder(agent: Agent, decision: AiDecisionData, record: DecisionRecord, engine: ExecutionEngine): Promise<OrderRequest> {
