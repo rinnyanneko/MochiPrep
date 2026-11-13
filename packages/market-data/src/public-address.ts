@@ -20,7 +20,7 @@ function ipv6Groups(text: string): number[] {
     rest = `${rest.slice(0, rest.length - tail.length)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
   }
   const [head, after] = rest.split('::') as [string, string | undefined];
-  const parse = (part: string) => (part ? part.split(':').map((g) => parseInt(g, 16)) : []);
+  const parse = (part: string) => (part ? part.split(':').map((g) => Number.parseInt(g, 16)) : []);
   const front = parse(head);
   if (after === undefined) return front;
   const back = parse(after);
@@ -37,8 +37,11 @@ export function isPublicAddress(address: string): boolean {
     const [a, b, c] = address.split('.').map(Number) as [number, number, number];
     return ipv4Public(a, b, c);
   }
-  if (!isIPv6(address)) return false;
-  const g = ipv6Groups(address);
+  return isIPv6(address) && ipv6Public(ipv6Groups(address));
+}
+
+/** The IPv6 half of `isPublicAddress`, on the eight 16-bit groups. */
+function ipv6Public(g: number[]): boolean {
   if (g.every((x) => x === 0)) return false; // ::
   if (g.slice(0, 7).every((x) => x === 0) && g[7] === 1) return false; // ::1
   if ((g[0]! & 0xfe00) === 0xfc00) return false; // fc00::/7 unique local

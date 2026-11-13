@@ -51,10 +51,16 @@ function publicOnlyLookup(lookupAll: LookupAll): LookupFunction {
   };
 }
 
+/** Node gives a header as a string, an array for repeated headers, or undefined. */
+function headerValues(value: string | string[] | undefined): string[] {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
 function responseFrom(message: IncomingMessage, body: Buffer | null): Response {
   const headers = new Headers();
   for (const [name, value] of Object.entries(message.headers)) {
-    for (const one of Array.isArray(value) ? value : value === undefined ? [] : [value]) headers.append(name, one);
+    for (const one of headerValues(value)) headers.append(name, one);
   }
   const status = message.statusCode ?? 0;
   return new Response(NULL_BODY_STATUSES.has(status) ? null : body, { status, headers });
