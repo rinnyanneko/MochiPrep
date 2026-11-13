@@ -9,7 +9,11 @@ const GOLDEN_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../crate
 
 describe('golden fixtures', () => {
   it('are up to date with the TypeScript backend', async () => {
-    for (const [name, fresh] of Object.entries(await buildGolden())) {
+    const fixtures = await buildGolden();
+    expect(fixtures).toHaveProperty('ai.json');
+    expect(fixtures).toHaveProperty('ai-validation.json');
+    expect(fixtures).toHaveProperty('ai-state.json');
+    for (const [name, fresh] of Object.entries(fixtures)) {
       if (RANDOMIZED.has(name)) continue;
       const committed = readFileSync(join(GOLDEN_DIR, name));
       const message = `crates/golden/${name} is stale: run pnpm golden`;

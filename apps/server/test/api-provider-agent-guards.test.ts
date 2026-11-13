@@ -1,0 +1,193 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { DatabaseSync } from 'node:sqlite';
+import { createRemoteProvider } from '@mochiprep/ai-providers';
+import { DEFAULT_RISK_SETTINGS } from '@mochiprep/shared';
+import { buildApp } from '../src/app';
+import { openDatabase } from '../src/db/database';
+import { Runtime } from '../src/runtime';
+
+const providerInput = {
+  name: 'Gateway', kind: 'OPENAI_COMPATIBLE', baseUrl: 'https://gateway.test/v1', defaultModel: 'm',
+  inputPricePerMTok: null, outputPricePerMTok: null,
+};
+const response = (text: string) => new Response(JSON.stringify({ choices: [{ message: { content: text } }] }));
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+};
+
+describe('provider samples and agent mutation guards', () => {
+  let db: DatabaseSync;
+  let runtime: Runtime;
+  let app: ReturnType<typeof buildApp>['app'];
+  let token: string;
+  let transport: typeof fetch;
+
+  const call = (method: 'POST' | 'PUT' | 'DELETE', url: string, payload?: object) =>
+    app.inject({ method, url, headers: { host: 'localhost:8787', authorization: `Bearer ${token}` }, ...(payload ? { payload } : {}) });
+
+  beforeEach(() => {
+    db = openDatabase(':memory:');
+    transport = async () => response('{"ok":true}');
+    runtime = new Runtime({ db, replayMinutes: 5_800, providerFactory: (config, key) => createRemoteProvider(config, key, transport) });
+    runtime.store.insertProvider({ ...providerInput, kind: 'OPENAI_COMPATIBLE', id: 'remote', createdAt: 1 });
+    runtime.setKey('remote', 'original-gateway-secret');
+    ({ app, token } = buildApp(runtime, { host: '127.0.0.1', port: 8787, dataDir: '.', allowedOrigins: ['http://localhost:8787'] }));
+  });
+
+  afterEach(async () => {
+    await app.close();
+    await runtime.stop();
+    db.close();
+  });
+
+  it('redacts an echoed secret before cutting the connection sample at 120 characters', async () => {
+    transport = async () => response('x'.repeat(112) + 'original-gateway-secret');
+    const result = await call('POST', '/api/providers/remote/test', {});
+    expect(result.statusCode).toBe(200);
+    expect(result.json().sample).toBe('x'.repeat(112) + '[REDACTE');
+    expect(result.body).not.toContain('original');
+  });
+
+  it('redacts both the old and current keys and headers after edits during a connection test', async () => {
+    const entered = deferred();
+    const release = deferred();
+    await call('PUT', '/api/providers/remote', { ...providerInput, extraHeaders: { 'x-org': 'old-header-secret' } });
+    transport = async () => {
+      entered.resolve();
+      await release.promise;
+      return response('original-gateway-secret current-gateway-secret old-header-secret current-header-secret');
+    };
+    const pending = call('POST', '/api/providers/remote/test', {}).then((result) => result);
+    await entered.promise;
+    try {
+      await call('PUT', '/api/providers/remote/key', { apiKey: 'current-gateway-secret' });
+      await call('PUT', '/api/providers/remote', { ...providerInput, extraHeaders: { 'x-org': 'current-header-secret' } });
+    } finally {
+      release.resolve();
+    }
+    expect((await pending).json()).toEqual({ ok: true, sample: '[REDACTED] [REDACTED] [REDACTED] [REDACTED]' });
+  });
+
+  const setupAgent = () => {
+    const accountId = runtime.engine.createAccount({ name: 'paper', source: 'REPLAY' }).id;
+    const input = {
+      name: 'a', providerId: 'remote', model: 'm', symbol: 'BTCUSDT', timeframe: '15m' as const, strategy: '', accountId,
+      risk: DEFAULT_RISK_SETTINGS, intervalSec: 900, executionMode: 'SIGNAL' as const,
+    };
+    return { input, agent: runtime.createAgent(input) };
+  };
+
+  it('keeps provider keys when SQLite refuses to delete the provider', async () => {
+    db.exec("CREATE TRIGGER refuse_provider BEFORE DELETE ON providers WHEN OLD.id='remote' BEGIN SELECT RAISE(ABORT, 'provider delete refused'); END");
+    expect((await call('DELETE', '/api/providers/remote')).statusCode).toBe(400);
+    expect(runtime.store.getProviderKeys().get('remote')).toBe('original-gateway-secret');
+    expect((await call('POST', '/api/providers/remote/test')).statusCode).toBe(200);
+    db.exec('DROP TRIGGER refuse_provider');
+    expect((await call('DELETE', '/api/providers/remote')).statusCode).toBe(200);
+    expect(runtime.store.getProviderKeys().has('remote')).toBe(false);
+  });
+
+  it('moves a running agent schedule to the destination source clock', async () => {
+    const { input, agent } = setupAgent();
+    const live = runtime.engine.createAccount({ name: 'live data', source: 'LIVE' });
+    runtime.store.saveAgent({ ...agent, accountId: live.id });
+    runtime.runner.start(agent.id);
+    const scheduled = runtime.store.getAgent(agent.id)!;
+    expect(scheduled.nextRunAt).toBeGreaterThan(runtime.replay.now());
+    const result = await call('PUT', `/api/agents/${agent.id}`, input);
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ running: true, nextRunAt: runtime.replay.now() });
+  });
+
+  it('reports a replay processing failure and still persists the reached cursor', async () => {
+    const before = runtime.replay.position;
+    runtime.engine.onQuote = () => { throw new Error('failed replay processing'); };
+    const result = await call('POST', '/api/replay', { steps: 3 });
+    expect(result.statusCode).toBe(400);
+    expect(result.json().error).toContain('failed replay processing');
+    expect(runtime.store.getSetting('replay.cursor')).toBe(before + 1);
+  });
+
+  it('redacts JSON-escaped gateway headers in samples and stored model responses', async () => {
+    const secret = 'gateway"\\diagnostic';
+    const input = { ...providerInput, extraHeaders: { 'x-org': secret } };
+    expect((await call('PUT', '/api/providers/remote', input)).statusCode).toBe(200);
+    const text = JSON.stringify({
+      reason: 'x'.repeat(102) + secret,
+      symbol: 'BTCUSDT', action: 'HOLD', orderType: 'MARKET', entryPrice: null, stopLoss: null,
+      takeProfit: null, confidence: 0.8, expiresAt: null,
+    });
+    transport = async () => response(text);
+    const sample = (await call('POST', '/api/providers/remote/test', {})).json().sample as string;
+    const { agent } = setupAgent();
+    const decision = (await call('POST', '/api/agents/' + agent.id + '/analyze')).json();
+    const stored = runtime.store.getDecision(decision.id)!;
+    const escaped = JSON.stringify(secret).slice(1, -1);
+    expect([sample, JSON.parse(stored.rawResponse!).reason]).toEqual([
+      text.replace(escaped, '[REDACTED]').slice(0, 120), 'x'.repeat(102) + '[REDACTED]',
+    ]);
+  });
+
+  const holdDecision = () => {
+    const entered = deferred();
+    const release = deferred();
+    const last = Number(runtime.replay.getQuote('BTCUSDT')!.last);
+    transport = async () => {
+      entered.resolve();
+      await release.promise;
+      return response(JSON.stringify({
+        symbol: 'BTCUSDT', action: 'LONG', orderType: 'MARKET', entryPrice: null, stopLoss: last * 0.98,
+        takeProfit: last * 1.04, reason: 'held', confidence: 0.8, expiresAt: null,
+      }));
+    };
+    return { entered, release };
+  };
+
+  it('rejects edits and deletion while busy, preserving validation precedence and the pending settings', async () => {
+    const { agent, input } = setupAgent();
+    const { entered, release } = holdDecision();
+    const pending = call('POST', `/api/agents/${agent.id}/run`).then((result) => result);
+    await entered.promise;
+    const edited = { ...input, executionMode: 'AUTO', risk: { ...input.risk, maxLeverage: 1 } };
+    try {
+      expect((await call('PUT', `/api/agents/${agent.id}`, {})).statusCode).toBe(400);
+      expect((await call('PUT', `/api/agents/${agent.id}`, { ...edited, providerId: 'missing' })).statusCode).toBe(400);
+      expect((await call('PUT', '/api/agents/missing', edited)).statusCode).toBe(404);
+      const edit = await call('PUT', `/api/agents/${agent.id}`, edited);
+      expect(edit.statusCode).toBe(409);
+      expect(edit.json().error).toMatch(/cycle.*running.*try again/i);
+      expect((await call('DELETE', `/api/agents/${agent.id}`)).statusCode).toBe(409);
+      expect(runtime.store.getAgent(agent.id)).toMatchObject({ executionMode: 'SIGNAL', risk: DEFAULT_RISK_SETTINGS });
+    } finally {
+      release.resolve();
+      await pending;
+    }
+    expect((await pending).json().outcome).toBe('SIGNAL');
+    expect(runtime.store.listOrders(input.accountId, 50)).toHaveLength(0);
+    expect((await call('PUT', `/api/agents/${agent.id}`, edited)).statusCode).toBe(200);
+    expect(runtime.store.getAgent(agent.id)).toMatchObject({ executionMode: 'AUTO', risk: { maxLeverage: 1 } });
+    expect((await call('DELETE', `/api/agents/${agent.id}`)).statusCode).toBe(200);
+  });
+
+  it('keeps the running-delete error first and permits Pause and Stop during a cycle', async () => {
+    const { agent } = setupAgent();
+    runtime.runner.start(agent.id);
+    const { entered, release } = holdDecision();
+    const pending = call('POST', `/api/agents/${agent.id}/run`).then((result) => result);
+    await entered.promise;
+    try {
+      const deletion = await call('DELETE', `/api/agents/${agent.id}`);
+      expect(deletion.statusCode).toBe(400);
+      expect(deletion.json().error).toBe('Stop the agent first');
+      expect((await call('POST', `/api/agents/${agent.id}/pause`)).statusCode).toBe(200);
+      expect((await call('POST', `/api/agents/${agent.id}/stop`)).statusCode).toBe(200);
+      expect((await call('DELETE', `/api/agents/${agent.id}`)).statusCode).toBe(409);
+    } finally {
+      release.resolve();
+      await pending;
+    }
+    expect((await call('DELETE', `/api/agents/${agent.id}`)).statusCode).toBe(200);
+  });
+});

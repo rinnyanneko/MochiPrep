@@ -1,12 +1,14 @@
 //! HTTP routes. Each answers exactly as the same route in `apps/server/src/app.ts` does.
 
 pub mod accounts;
+pub mod agents;
 pub mod events;
 pub mod instruments;
 pub mod later;
 pub mod market;
 pub mod news;
 pub mod orders;
+pub mod providers;
 pub mod replay;
 pub mod state;
 pub mod static_files;
@@ -32,6 +34,8 @@ pub fn router() -> Router<AppState> {
         .merge(instruments::router())
         .merge(accounts::router())
         .merge(orders::router())
+        .merge(agents::router())
+        .merge(providers::router())
         .merge(replay::router())
         .merge(later::router())
 }

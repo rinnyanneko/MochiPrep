@@ -1,39 +1,5 @@
-//! `redactSecrets` from `packages/ai-providers/src/redact.ts`: every message that leaves the
-//! runtime (an HTTP error, a toast) passes through this, so a key that slipped into an error
-//! text from a provider or exchange never reaches the browser.
-
-use std::sync::LazyLock;
-
-use regex::Regex;
-
-const REDACTED: &str = "[REDACTED]";
-
-// The same three patterns, in the same order. `(?-u:\b)` is JS's ASCII word boundary.
-static PREFIXED_KEY: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?-u:\b)(sk|pk|rk)-[A-Za-z0-9_-]{8,}").unwrap());
-static GOOGLE_KEY: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?-u:\b)AIza[A-Za-z0-9_-]{16,}").unwrap());
-static KEY_HEADER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"(?i)(authorization|x-api-key|x-goog-api-key|api[_-]?key)(["':=\s]+)(bearer\s+)?[^\s"',}]+"#,
-    )
-    .unwrap()
-});
-
-/// Replaces every known secret, then anything shaped like an API key or an auth header value.
-pub fn redact_secrets<'a>(text: &str, secrets: impl IntoIterator<Item = &'a str>) -> String {
-    let mut out = text.to_string();
-    for secret in secrets {
-        if !secret.is_empty() {
-            out = out.replace(secret, REDACTED);
-        }
-    }
-    let out = PREFIXED_KEY.replace_all(&out, REDACTED);
-    let out = GOOGLE_KEY.replace_all(&out, REDACTED);
-    KEY_HEADER
-        .replace_all(&out, "${1}${2}[REDACTED]")
-        .into_owned()
-}
+//! Shared provider/runtime redaction; one implementation covers overlapping secrets.
+pub use mochi_ai::redact_secrets;
 
 #[cfg(test)]
 mod tests {

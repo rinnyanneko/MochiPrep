@@ -77,6 +77,22 @@ describe('AgentRunner integration', () => {
     expect(record!.outcomeDetail).toContain('stopped');
   });
 
+  it.each(['SCHEDULE', 'RUN_ONCE'] as const)('does not execute a held %s cycle after Stop and Start', async (trigger) => {
+    let release!: (value: { text: string; inputTokens: null; outputTokens: null }) => void;
+    complete = () => new Promise((resolve) => { release = resolve; });
+    runtime.runner.start(agentId);
+    const pending = runtime.runner.runCycle(agentId, trigger);
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    runtime.runner.stop(agentId);
+    runtime.runner.start(agentId);
+    const restarted = runtime.store.getAgent(agentId)!;
+    release({ text: long, inputTokens: null, outputTokens: null });
+    const result = await pending;
+    expect(result).toMatchObject({ outcome: 'ANALYSIS_ONLY', risk: { approved: true } });
+    expect(runtime.store.listOrders(restarted.accountId, 10)).toEqual([]);
+    expect(runtime.store.getAgent(agentId)).toEqual(restarted);
+  });
+
   it('turns a risk rejection into no order at all', async () => {
     const unprotected = JSON.stringify({ ...JSON.parse(long), stopLoss: null });
     complete = async () => ({ text: unprotected, inputTokens: null, outputTokens: null });
@@ -121,6 +137,31 @@ describe('AgentRunner integration', () => {
     expect(runtime.store.getAgent(second)).toMatchObject({ running: false, status: 'PAUSED' });
   });
 
+  it('pauses on a critical provider error even when redaction matches its display marker', async () => {
+    runtime.setKey(config.id, 'a');
+    complete = async () => { throw new ProviderError('AUTH', 'credential refused'); };
+    runtime.runner.start(agentId);
+    const result = await runtime.runner.runCycle(agentId, 'RUN_ONCE');
+    expect(result?.outcome).toBe('AI_ERROR');
+    expect(runtime.store.getAgent(agentId)).toMatchObject({ status: 'PAUSED', running: false, consecutiveErrors: 1 });
+  });
+
+  it('keeps the restarted lifecycle when an older model call fails authentication', async () => {
+    let reject!: (error: Error) => void;
+    complete = () => new Promise((_resolve, fail) => { reject = fail; });
+    runtime.runner.start(agentId);
+    const pending = runtime.runner.runCycle(agentId, 'SCHEDULE');
+    await vi.waitFor(() => expect(reject).toBeTypeOf('function'));
+    runtime.runner.stop(agentId);
+    runtime.runner.start(agentId);
+    const restarted = runtime.store.getAgent(agentId);
+    reject(new ProviderError('AUTH', 'old credential refused'));
+    const result = await pending;
+    expect(result?.outcome).toBe('AI_ERROR');
+    expect(runtime.store.listDecisions({ agentId, limit: 1 })[0]?.id).toBe(result?.id);
+    expect(runtime.store.getAgent(agentId)).toEqual(restarted);
+  });
+
   it('redacts secrets from invalid raw responses before persistence', async () => {
     complete = async () => ({
       text: 'not-json custom-secret-agent-key sk-proj_abcdefghijk', inputTokens: null, outputTokens: null,
@@ -131,6 +172,72 @@ describe('AgentRunner integration', () => {
     expect(record!.rawResponse).not.toContain('sk-proj_abcdefghijk');
     const stored = runtime.store.listDecisions({ agentId, limit: 10 })[0]!;
     expect(stored.rawResponse).toBe(record!.rawResponse);
+  });
+
+  it('redacts secrets crossing the raw response cutoff before truncation', async () => {
+    complete = async () => ({ text: 'x'.repeat(7990) + 'custom-secret-agent-key', inputTokens: null, outputTokens: null });
+    const record = await runtime.runner.runCycle(agentId, 'RUN_ONCE');
+    expect(record!.rawResponse).not.toContain('custom-sec');
+    expect(record!.rawResponse).toContain('[REDACTED]');
+  });
+
+  it('sanitizes parsed decision text and schema diagnostics before recording', async () => {
+    complete = async () => ({ text: JSON.stringify({ ...JSON.parse(hold), reason: 'custom-secret-agent-key' }), inputTokens: null, outputTokens: null });
+    const valid = await runtime.runner.runCycle(agentId, 'RUN_ONCE');
+    expect(valid!.decision!.reason).toBe('[REDACTED]');
+    complete = async () => ({ text: JSON.stringify({ ...JSON.parse(hold), 'custom-secret-agent-key': true }), inputTokens: null, outputTokens: null });
+    const invalid = await runtime.runner.runCycle(agentId, 'RUN_ONCE');
+    expect(invalid!.validationError).not.toContain('custom-secret-agent-key');
+    expect(invalid!.outcomeDetail).not.toContain('custom-secret-agent-key');
+  });
+
+  it.each(['clear', 'replace'] as const)('retains in-flight secrets after key %s for responses and errors', async (change) => {
+    for (const reply of ['valid', 'invalid', 'error'] as const) {
+      runtime.setKey(config.id, 'custom-secret-agent-key');
+      let release!: () => void;
+      complete = async () => {
+        await new Promise<void>((resolve) => { release = resolve; });
+        const echoed = 'custom-secret-agent-key replacement-private-key';
+        if (reply === 'error') throw new ProviderError('AUTH', echoed);
+        return {
+          text: reply === 'valid' ? JSON.stringify({ ...JSON.parse(hold), reason: echoed })
+            : JSON.stringify({ ...JSON.parse(hold), [echoed]: true }),
+          inputTokens: null, outputTokens: null,
+        };
+      };
+      const pending = runtime.runner.runCycle(agentId, 'RUN_ONCE');
+      await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+      if (change === 'clear') runtime.clearKey(config.id);
+      else runtime.setKey(config.id, 'replacement-private-key');
+      release();
+      const record = (await pending)!;
+      expect(record.outcome).toBe(reply === 'valid' ? 'HOLD' : reply === 'invalid' ? 'INVALID_OUTPUT' : 'AI_ERROR');
+      for (const value of [record, runtime.store.listDecisions({ agentId, limit: 1 })[0], runtime.store.getAgent(agentId)]) {
+        expect(JSON.stringify(value)).not.toContain('custom-secret-agent-key');
+        if (change === 'replace') expect(JSON.stringify(value)).not.toContain('replacement-private-key');
+      }
+      if (reply === 'valid') expect(record.decision!.reason).toContain('[REDACTED]');
+    }
+  });
+
+  it('preserves record identity, outcomes and trade decimals with short header secrets', async () => {
+    const agent = runtime.store.getAgent(agentId)!;
+    runtime.store.saveAgent({ ...agent, executionMode: 'SIGNAL' });
+    complete = async () => ({ text: JSON.stringify({ ...JSON.parse(long), reason: 'a1' }), inputTokens: 1, outputTokens: 1 });
+    const baseline = (await runtime.runner.runCycle(agentId, 'RUN_ONCE'))!;
+    runtime.store.saveProvider({ ...config, extraHeaders: { 'x-one': '1', 'x-letter': 'a', 'x-outcome': 'SIGNAL', 'x-symbol': 'BTCUSDT', 'x-model-symbol': 'private-symbol' } });
+    const record = (await runtime.runner.runCycle(agentId, 'RUN_ONCE'))!;
+    expect(record).toMatchObject({ agentId, accountId: agent.accountId, outcome: 'SIGNAL', symbol: 'BTCUSDT', decision: { action: 'LONG', symbol: 'BTCUSDT', reason: '[REDACTED][REDACTED]' } });
+    expect(record.snapshot).toEqual(baseline.snapshot);
+    expect(record.indicators).toEqual(baseline.indicators);
+    expect(record.risk!.sized).toEqual(baseline.risk!.sized);
+    expect(record.estimatedCost).toEqual(baseline.estimatedCost);
+    expect(runtime.store.getDecision(record.id)).toEqual(record);
+    complete = async () => ({ text: JSON.stringify({ ...JSON.parse(long), symbol: 'private-symbol' }), inputTokens: null, outputTokens: null });
+    const rejected = (await runtime.runner.runCycle(agentId, 'RUN_ONCE'))!;
+    expect(rejected.outcome).toBe('RISK_REJECTED');
+    expect(rejected.decision!.symbol).toBe('[REDACTED]');
+    expect(JSON.stringify(rejected)).not.toContain('private-symbol');
   });
 
   describe('PROTECT and trailing stops', () => {

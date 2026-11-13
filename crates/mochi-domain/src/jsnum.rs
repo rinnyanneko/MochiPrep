@@ -19,9 +19,12 @@ pub fn js_round(x: f64) -> f64 {
     }
 }
 
-/// `Number.prototype.toFixed` for the subset `digits <= 20` used by this port.
+/// `Number.prototype.toFixed` over its valid `digits <= 100` range.
 pub fn js_to_fixed(x: f64, digits: usize) -> String {
-    debug_assert!(digits <= 20, "toFixed digits must be 0..=20, got {digits}");
+    debug_assert!(
+        digits <= 100,
+        "toFixed digits must be 0..=100, got {digits}"
+    );
     // JS returns "NaN", "Infinity" and "-Infinity" for non-finite values, and for |x| >= 1e21
     // it returns String(x) (e.g. "1e+21"), which is the JSON.stringify text for those numbers.
     if x.is_nan() {

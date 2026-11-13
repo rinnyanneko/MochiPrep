@@ -1,22 +1,21 @@
-//! The areas later plans port: agents, AI providers, suggestions and decisions, the arena, the
-//! master password, OKX trading and demo mode (`app.ts` from "AI providers" to "demo & replay").
+//! Read models for decisions/arena and the remaining Plan 5 vault/OKX routes.
 //!
 //! The web app refetches their lists every time its event stream opens, so their GETs answer
 //! with what the database really holds, exactly as Node reads it. Nothing is made up: a server
 //! without OKX sessions reports every exchange account as not connected, and a vault it cannot
-//! unlock as LOCKED. Every write answers 501 until its plan ports it.
+//! unlock as LOCKED. Vault and OKX writes answer 501 until Plan 5 ports them.
 
 use axum::body::Bytes;
 use axum::extract::{RawQuery, State};
 use axum::http::HeaderMap;
-use axum::routing::{get, post, put};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use mochi_core::paper::PaperStore;
 use mochi_core::performance::{max_drawdown_pct, win_rate_pct};
 use mochi_decimal::Dec;
 use mochi_domain::jsnum::js_number_raw;
 use mochi_domain::{default_live_limits, AccountVenue, DataSource, RiskSettings};
-use mochi_store::rows::{self, Agent, ProviderView};
+use mochi_store::rows;
 use serde::Serialize;
 use serde_json::value::RawValue;
 use serde_json::{json, Value};
@@ -28,27 +27,6 @@ use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        // AI providers
-        .route("/api/providers", get(providers).post(not_available))
-        .route(
-            "/api/providers/{id}",
-            put(not_available).delete(not_available),
-        )
-        .route(
-            "/api/providers/{id}/key",
-            put(not_available).delete(not_available),
-        )
-        .route("/api/providers/{id}/test", post(not_available))
-        // agents
-        .route("/api/agents", get(agents).post(not_available))
-        .route("/api/agents/stop-all", post(not_available))
-        .route("/api/agents/{id}", put(not_available).delete(not_available))
-        .route("/api/agents/{id}/start", post(not_available))
-        .route("/api/agents/{id}/pause", post(not_available))
-        .route("/api/agents/{id}/resume", post(not_available))
-        .route("/api/agents/{id}/stop", post(not_available))
-        .route("/api/agents/{id}/analyze", post(not_available))
-        .route("/api/agents/{id}/run", post(not_available))
         // master password
         .route("/api/vault", get(vault).post(not_available))
         .route("/api/vault/unlock", post(not_available))
@@ -63,14 +41,8 @@ pub fn router() -> Router<AppState> {
         .route("/api/exchange/okx/{id}/disarm", post(not_available))
         // suggestions, decisions, arena
         .route("/api/signals", get(signals))
-        .route("/api/signals/{id}/execute", post(not_available))
-        .route("/api/signals/{id}/dismiss", post(not_available))
         .route("/api/decisions", get(decisions))
         .route("/api/arena", get(arena))
-        // demo mode creates agents, so it comes with them
-        .route("/api/demo/start", post(not_available))
-        .route("/api/demo/reset", post(not_available))
-        .route("/api/demo/exit", post(not_available))
 }
 
 /// A write this backend cannot do yet. Fastify parses the body before any handler, so a body
@@ -90,21 +62,6 @@ async fn read<T: Serialize + Send + 'static>(
     Ok(Json(
         state.runtime.call(move |runtime| work(runtime)).await??,
     ))
-}
-
-async fn agents(State(state): State<AppState>) -> Result<Json<Vec<Agent>>, ApiError> {
-    read(&state, |runtime| {
-        rows::list_agents(runtime.connection()).map_err(|e| runtime.api_error(e))
-    })
-    .await
-}
-
-async fn providers(State(state): State<AppState>) -> Result<Json<Vec<ProviderView>>, ApiError> {
-    read(&state, |runtime| {
-        let has_vault = runtime.vault_status()? != mochi_domain::VaultStatus::Off;
-        rows::list_provider_views(runtime.connection(), has_vault).map_err(|e| runtime.api_error(e))
-    })
-    .await
 }
 
 async fn signals(State(state): State<AppState>) -> Result<Json<Vec<Box<RawValue>>>, ApiError> {

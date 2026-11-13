@@ -1,5 +1,4 @@
-//! The areas later plans own (agents, AI providers, suggestions, the vault, OKX trading, demo
-//! mode) and the embedded web build.
+//! The remaining Plan 5 vault/OKX writes, persisted read models and the embedded web build.
 //!
 //! Their reads against Node are byte-checked in `golden_api.rs`; this file covers what the Node
 //! script cannot show: every write answering 501, the read models in states the script never
@@ -102,22 +101,6 @@ async fn sql(state: &AppState, statements: &'static str) {
 
 /// Every write of the later plans' areas, as `apps/server/src/app.ts` registers it.
 const LATER_WRITES: &[(&str, &str)] = &[
-    ("POST", "/api/providers"),
-    ("PUT", "/api/providers/prov_1"),
-    ("DELETE", "/api/providers/prov_1"),
-    ("PUT", "/api/providers/prov_1/key"),
-    ("DELETE", "/api/providers/prov_1/key"),
-    ("POST", "/api/providers/mock/test"),
-    ("POST", "/api/agents"),
-    ("PUT", "/api/agents/agent_1"),
-    ("DELETE", "/api/agents/agent_1"),
-    ("POST", "/api/agents/agent_1/start"),
-    ("POST", "/api/agents/agent_1/pause"),
-    ("POST", "/api/agents/agent_1/resume"),
-    ("POST", "/api/agents/agent_1/stop"),
-    ("POST", "/api/agents/agent_1/analyze"),
-    ("POST", "/api/agents/agent_1/run"),
-    ("POST", "/api/agents/stop-all"),
     ("POST", "/api/vault"),
     ("POST", "/api/vault/unlock"),
     ("POST", "/api/vault/password"),
@@ -127,11 +110,6 @@ const LATER_WRITES: &[(&str, &str)] = &[
     ("POST", "/api/exchange/okx/acct_1/disconnect"),
     ("POST", "/api/exchange/okx/acct_1/arm"),
     ("POST", "/api/exchange/okx/acct_1/disarm"),
-    ("POST", "/api/signals/dec_1/execute"),
-    ("POST", "/api/signals/dec_1/dismiss"),
-    ("POST", "/api/demo/start"),
-    ("POST", "/api/demo/reset"),
-    ("POST", "/api/demo/exit"),
 ];
 
 #[tokio::test]

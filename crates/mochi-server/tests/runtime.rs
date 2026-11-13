@@ -618,6 +618,33 @@ async fn a_panic_mid_batch_does_not_block_later_ticks() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn replay_processing_failure_is_returned_after_cursor_persistence() {
+    let rt = start(open_in_memory().unwrap(), None);
+    let original = rt.replay_state().await.unwrap().now.unwrap();
+    rt.call(|r| {
+        r.engine_mut().create_account(CreateAccountArgs {
+            name: "paper".into(), source: DataSource::Replay, initial_balance: None, is_demo: None, config: None,
+        }).unwrap();
+        r.connection().execute_batch(
+            "CREATE TRIGGER refuse_equity BEFORE INSERT ON equity_history BEGIN SELECT RAISE(ABORT, 'replay equity refused'); END"
+        ).unwrap();
+    }).await.unwrap();
+    let result = rt.step_replay(20).await;
+    let now = rt.replay_state().await.unwrap().now.unwrap();
+    assert_eq!(now, original + 15 * MINUTE);
+    let saved = rt
+        .call(|r| mochi_store::get_setting::<usize>(r.connection(), "replay.cursor").unwrap())
+        .await
+        .unwrap();
+    assert!(saved.is_some());
+    assert!(result
+        .unwrap_err()
+        .message()
+        .contains("replay equity refused"));
+    rt.shutdown().await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_failed_batch_stops_the_replay_with_a_toast() {
     let rt = start(open_in_memory().unwrap(), None);
     rt.call(|rt| {

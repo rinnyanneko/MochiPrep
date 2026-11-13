@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import type { ProviderConfig } from '@mochiprep/shared';
 import { createRemoteProvider, ProviderError, type AiRequest } from '../src/index';
 
@@ -47,6 +50,30 @@ describe('OpenCode provider', () => {
 });
 
 describe('extra headers', () => {
+  it('does not send provider headers to a redirect origin', async () => {
+    let redirects = 0;
+    const destination = createServer((_req, res) => {
+      redirects++;
+      res.end(JSON.stringify({ choices: [{ message: { content: '{}' } }] }));
+    }).listen(0, '127.0.0.1');
+    await once(destination, 'listening');
+    const target = (destination.address() as AddressInfo).port;
+    const source = createServer((_req, res) => {
+      res.writeHead(307, { location: `http://127.0.0.1:${target}/other` }).end();
+    }).listen(0, '127.0.0.1');
+    try {
+      await once(source, 'listening');
+      const port = (source.address() as AddressInfo).port;
+      const provider = createRemoteProvider({ ...config, baseUrl: `http://127.0.0.1:${port}`, extraHeaders: { 'x-gateway': 'synthetic-gateway-key' } }, 'synthetic-key', fetch, []);
+      const [result] = await Promise.allSettled([provider.complete(request)]);
+      expect(redirects).toBe(0);
+      expect(result).toMatchObject({ status: 'rejected', reason: { code: 'HTTP' } });
+    } finally {
+      source.close();
+      destination.close();
+    }
+  });
+
   const kinds: [ProviderConfig['kind'], string][] = [['OPENAI_COMPATIBLE', 'https://x.test/v1'], ['ANTHROPIC', 'https://x.test'], ['GEMINI', 'https://x.test']];
 
   it.each(kinds)('reach the provider on %s', async (kind, baseUrl) => {
@@ -110,5 +137,30 @@ describe('retries', () => {
     const fetchImpl = vi.fn<() => Promise<Response>>().mockResolvedValueOnce(status(500)).mockResolvedValueOnce(new Response(JSON.stringify(body)));
     await createRemoteProvider({ ...config, kind: 'ANTHROPIC' }, 'key', fetchImpl as unknown as typeof fetch, [0]).complete(request);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('error text bounds', () => {
+  it('redacts complete secrets before bounding an echoed HTTP error', async () => {
+    const syntheticKey = 'synthetic-provider-credential';
+    const syntheticHeader = 'synthetic-gateway-credential';
+    for (const secret of [syntheticKey, syntheticHeader]) {
+      const fetchImpl = vi.fn(async () => new Response('x'.repeat(390) + secret, { status: 400 }));
+      const provider = createRemoteProvider({ ...config, extraHeaders: { 'x-org': syntheticHeader } }, syntheticKey, fetchImpl as unknown as typeof fetch, []);
+      await expect(provider.complete(request)).rejects.not.toThrow(/synthetic-/);
+    }
+  });
+});
+
+describe('overlapping credentials', () => {
+  it.each([
+    ['shared-credential-prefix-private-gateway-suffix', 'shared-credential-prefix', 'shared-credential-prefix-private-gateway-suffix'],
+    ['left-overlap-right', 'left-overlap', 'overlap-right'],
+  ])('redacts overlapping credentials echoed by HTTP: %s', async (body, first, second) => {
+    for (const [key, header] of [[first, second], [second, first]]) {
+      const fetchImpl = vi.fn(async () => new Response(body, { status: 400 }));
+      const provider = createRemoteProvider({ ...config, extraHeaders: { 'x-gateway': header! } }, key!, fetchImpl as unknown as typeof fetch, []);
+      await expect(provider.complete(request)).rejects.toMatchObject({ message: 'Provider returned HTTP 400: [REDACTED]' });
+    }
   });
 });

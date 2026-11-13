@@ -19,6 +19,9 @@ use serde_json::{json, Map, Value};
 
 use crate::error::ApiError;
 
+mod ai;
+pub use ai::{AgentInput, ProviderInput, ProviderKeyInput, ProviderTestInput};
+
 /// Every message text, in one place so it can be audited against Zod and Fastify.
 mod msg {
     // Custom messages from packages/shared/src/schemas.ts.
@@ -66,6 +69,10 @@ mod msg {
 /// The schemas the ported routes use. Names follow the TS constants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Schema {
+    ProviderInput,
+    ProviderKey,
+    ProviderTest,
+    AgentInput,
     CreateAccount,
     PlaceOrder,
     ClosePosition,
@@ -211,6 +218,10 @@ pub fn parse_symbol(param: &str) -> Result<String, ApiError> {
 /// or the 400 Node's error handler sends for its issues.
 pub fn check(schema: Schema, input: Option<&Value>) -> Result<Value, ApiError> {
     let result = match schema {
+        Schema::ProviderInput => ai::provider_input(input),
+        Schema::ProviderKey => ai::provider_key(input),
+        Schema::ProviderTest => ai::provider_test(input),
+        Schema::AgentInput => ai::agent_input(input),
         Schema::CreateAccount => create_account(input),
         Schema::PlaceOrder => place_order(input),
         Schema::ClosePosition => close_position(input),
@@ -227,6 +238,11 @@ pub fn check(schema: Schema, input: Option<&Value>) -> Result<Value, ApiError> {
         Schema::Symbol => check_string(input, &SYMBOL),
     };
     result.map_err(|issues| ApiError::bad_request(format_issues(&issues)))
+}
+
+/// Validate model output using the same issue contract, with `root` for root-level errors.
+pub(crate) fn check_ai_decision(input: &Value) -> Result<Value, String> {
+    ai::ai_decision(Some(input)).map_err(|issues| format_issues_at(&issues, "root"))
 }
 
 // ---- schemas ---------------------------------------------------------------------------------
@@ -428,11 +444,15 @@ impl Issue {
 
 /// `issues.map(i => `${i.path.join('.') || 'input'}: ${i.message}`).join('; ')`, as app.ts does.
 fn format_issues(issues: &[Issue]) -> String {
+    format_issues_at(issues, "input")
+}
+
+fn format_issues_at(issues: &[Issue], root: &str) -> String {
     let parts: Vec<String> = issues
         .iter()
         .map(|issue| {
             let path = if issue.path.is_empty() {
-                "input".to_string()
+                root.to_string()
             } else {
                 issue.path.join(".")
             };

@@ -1,17 +1,24 @@
 //! The runtime: one task that owns the paper engine, the replay tape, the live feed handle, the
-//! settings and the instrument registry. A port of `apps/server/src/runtime.ts` as far as the
-//! paper and market routes need it; agents, AI keys, OKX trading, the vault and demo mode come
-//! with later plans.
+//! settings, agent futures, provider keys and the instrument registry. Slow analysis leaves
+//! the actor with owned snapshots and returns for current-state risk checks. OKX execution
+//! and vault mutation remain for Plan 5.
 //!
 //! Routes reach it through [`RuntimeHandle`]: every method sends a message to that one task and
 //! awaits the answer. The engine is synchronous and not `Sync`, so this way it is only ever used
 //! by one thread at a time, in the order requests arrive, with no lock for a route to forget.
 
+mod agent_cycle;
+mod agent_execution;
+mod ai_api;
+pub use agent_execution::effective_risk;
+pub mod agents;
 pub mod events;
 pub mod live_feed;
 pub mod news;
 pub mod redact;
 pub mod replay_clock;
+mod scheduling;
+pub use scheduling::DemoAction;
 
 use std::fmt::Display;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -76,6 +83,7 @@ pub struct RuntimeOptions {
     pub live_statuses: Option<mpsc::UnboundedReceiver<FeedStatus>>,
     /// Headlines for `/api/news`, fetched outside the runtime task.
     pub news: NewsService,
+    pub provider_factory: Option<agents::ProviderFactory>,
 }
 
 impl RuntimeOptions {
@@ -89,6 +97,7 @@ impl RuntimeOptions {
             live_quotes: None,
             live_statuses: None,
             news: NewsService::with_transport(Arc::new(OfflineNews), Arc::new(unix_ms)),
+            provider_factory: None,
         }
     }
 
@@ -104,6 +113,7 @@ impl RuntimeOptions {
             live_quotes,
             live_statuses,
             news: NewsService::new(),
+            provider_factory: None,
         }
     }
 }
@@ -156,6 +166,7 @@ impl RuntimeHandle {
             options.replay_minutes,
             options.live,
             options.news,
+            options.provider_factory,
         )?;
         let events = runtime.events.sender();
         let (commands, inbox) = mpsc::channel(COMMAND_QUEUE);
@@ -190,15 +201,16 @@ impl RuntimeHandle {
             let _ = reply.send(value);
         });
         self.commands.send(command).await.map_err(|_| stopped())?;
-        // The reply is dropped unanswered either when the task stops (the channel closes) or
-        // when the work panicked, which the task survives: only the first is "shutting down".
-        answer.await.map_err(|_| {
-            if self.commands.is_closed() {
-                stopped()
-            } else {
-                internal_error()
-            }
-        })
+        answer.await.map_err(|_| self.reply_error())
+    }
+
+    // A caught panic can drop a reply while the actor still accepts commands.
+    fn reply_error(&self) -> ApiError {
+        if self.commands.is_closed() {
+            stopped()
+        } else {
+            internal_error()
+        }
     }
 
     pub async fn invalidate(&self, topics: &[Topic]) -> Result<(), ApiError> {
@@ -220,7 +232,10 @@ impl RuntimeHandle {
 
     /// Returns once these steps have run. A timer batch in progress finishes first.
     pub async fn step_replay(&self, steps: u32) -> Result<(), ApiError> {
-        self.call(move |runtime| runtime.step_replay(steps)).await?
+        let (reply, done) = oneshot::channel();
+        self.call(move |runtime| runtime.queue_replay(steps, Some(reply)))
+            .await?;
+        done.await.map_err(|_| self.reply_error())?
     }
 
     pub async fn state(&self) -> Result<StateBody, ApiError> {
@@ -253,6 +268,12 @@ fn stopped() -> ApiError {
 /// Everything the runtime task owns. Only reachable through [`RuntimeHandle::call`].
 pub struct Runtime {
     engine: Engine,
+    agents: agents::Agents,
+    replay_batch: Option<scheduling::ReplayBatch>,
+    replay_queue: std::collections::VecDeque<scheduling::ReplayRequest>,
+    replay_idle: Vec<oneshot::Sender<()>>,
+    replay_idle_work: Vec<Command>,
+    signal_raised: bool,
     /// Shared with the engine's quote and clock callbacks, which cannot borrow the runtime.
     /// Only the runtime task locks it, so it is never contended.
     replay: Arc<Mutex<ReplayMarketData>>,
@@ -293,6 +314,7 @@ impl Runtime {
         replay_minutes: Option<usize>,
         live: Arc<dyn LiveFeed>,
         news: NewsService,
+        provider_factory: Option<agents::ProviderFactory>,
     ) -> Result<Self, StartError> {
         let replay = Arc::new(Mutex::new(ReplayMarketData::new(replay_minutes)?));
         let engine_events: Arc<Mutex<Vec<EngineEvent>>> = Arc::default();
@@ -324,6 +346,15 @@ impl Runtime {
 
         let mut runtime = Runtime {
             engine,
+            agents: agents::Agents {
+                factory: provider_factory,
+                ..Default::default()
+            },
+            replay_batch: None,
+            replay_queue: Default::default(),
+            replay_idle: Vec::new(),
+            replay_idle_work: Vec::new(),
+            signal_raised: false,
             replay,
             live,
             news,
@@ -343,6 +374,9 @@ impl Runtime {
             runtime.register_instrument(spec);
         }
 
+        if !has_vault(runtime.connection())? {
+            runtime.agents.keys = rows::get_provider_keys(runtime.connection())?;
+        }
         // All durable state is in SQLite; only the tape cursor needs seeking.
         if let Some(cursor) = get_setting::<i64>(runtime.connection(), "replay.cursor")? {
             lock(&runtime.replay).seek(cursor);
@@ -351,8 +385,7 @@ impl Runtime {
         runtime.clock.set_speed(speed.unwrap_or(DEFAULT_SPEED));
         runtime.last_replay_equity_at = lock(&runtime.replay).now();
         // Agents never survive the process: nothing trades after a restart until the owner
-        // starts it. This backend cannot run agents yet, but the database it shares with Node
-        // must show the same state Node would.
+        // starts it. Pending futures are intentionally process-local.
         if rows::pause_agents_after_restart(runtime.connection())? > 0 {
             runtime.invalidate(&[Topic::Agents]);
         }
@@ -373,10 +406,25 @@ impl Runtime {
         self.engine.store().connection()
     }
 
-    /// Secrets that must never reach a client. None are held in memory yet: AI keys and OKX
-    /// credentials arrive with later plans, and add themselves here.
+    /// Every loaded AI key and saved gateway header value, including invalid provider rows.
     pub fn secrets(&self) -> Vec<String> {
-        Vec::new()
+        let mut secrets: Vec<_> = self.agents.keys.values().cloned().collect();
+        // Invalid provider metadata must not hide otherwise valid saved gateway credentials.
+        if let Ok(mut statement) = self
+            .connection()
+            .prepare("SELECT extra_headers FROM providers")
+        {
+            if let Ok(headers) = statement.query_map([], |r| r.get::<_, String>(0)) {
+                for raw in headers.flatten() {
+                    if let Ok(headers) =
+                        serde_json::from_str::<std::collections::HashMap<String, String>>(&raw)
+                    {
+                        secrets.extend(headers.into_values());
+                    }
+                }
+            }
+        }
+        secrets
     }
 
     /// Node's `runtime.redact`.
@@ -661,78 +709,6 @@ impl Runtime {
         Ok(())
     }
 
-    /// Runs a batch of `steps` bars. While it runs the timer earns no credit. Batches never
-    /// overlap: they all run on this one task.
-    pub fn step_replay(&mut self, steps: u32) -> Result<(), ApiError> {
-        self.clock.begin_batch();
-        let result = self.do_steps(steps);
-        self.clock.end_batch();
-        result
-    }
-
-    /// Spend replay credit on one batch at a time and report failures without killing the actor.
-    fn on_replay_tick(&mut self) {
-        if let Some(steps) = self.clock.on_tick() {
-            // A failure has already paused the tape with a toast; the log is for the owner.
-            if let Err(error) = self.step_replay(steps) {
-                tracing::warn!(error = %error.message(), "replay batch failed");
-            }
-        }
-    }
-
-    /// Node's `doSteps`. An engine failure pauses the tape with a toast; the cursor is saved
-    /// and the batch's events go out either way.
-    fn do_steps(&mut self, steps: u32) -> Result<(), ApiError> {
-        let mut quotes = Vec::new();
-        if let Err(error) = self.advance(steps, &mut quotes) {
-            self.stop_replay_with(&error.to_string());
-        }
-        let position = lock(&self.replay).position();
-        if let Err(error) = set_setting(self.connection(), "replay.cursor", &position) {
-            // Node would reject the timer's promise unseen; here the owner is told and the tape
-            // stops, rather than playing on with a cursor that a restart would lose.
-            let error = self.api_error(error);
-            self.stop_replay_with(error.message());
-            return Err(error);
-        }
-        // One quote per symbol per batch, from its last step: the web app needs no more.
-        for quote in quotes {
-            self.emit(ServerEvent::Quote { quote });
-        }
-        if lock(&self.replay).at_end() {
-            self.set_playing(false);
-        }
-        self.emit(ServerEvent::Replay {
-            state: self.replay_state(),
-        });
-        self.invalidate(&[Topic::Accounts, Topic::Positions]);
-        Ok(())
-    }
-
-    /// Steps the tape and feeds every quote to the engine. `last` ends up holding the latest
-    /// step's quotes, even when that step failed, as in Node.
-    fn advance(&mut self, steps: u32, last: &mut Vec<Quote>) -> Result<(), EngineError> {
-        for _ in 0..steps {
-            let next = lock(&self.replay).step();
-            if next.is_empty() {
-                break;
-            }
-            *last = next;
-            for quote in last.iter() {
-                let result = self.engine.on_quote(quote);
-                self.handle_engine_events();
-                result?;
-            }
-            let now = lock(&self.replay).now();
-            if now - self.last_replay_equity_at >= REPLAY_EQUITY_EVERY_MS {
-                self.last_replay_equity_at = now;
-                self.record_equity(DataSource::Replay)?;
-                self.invalidate(&[Topic::Arena, Topic::Accounts]);
-            }
-        }
-        Ok(())
-    }
-
     /// Pauses the tape and says why: `Replay stopped: <message>`, secrets removed.
     fn stop_replay_with(&mut self, message: &str) {
         self.set_playing(false);
@@ -768,9 +744,14 @@ impl Runtime {
         self.events.emit_live_quote(quote);
     }
 
-    /// Node's `liveTick`, without the parts that need agents or OKX trading: an equity point
-    /// for live paper accounts every 60 s, the first one on the first tick.
+    /// Agent scheduling ticks each second; equity sampling has its own 60 s cadence.
     fn live_tick(&mut self) {
+        if let Err(error) = self.tick_agents(DataSource::Live) {
+            self.emit(ServerEvent::Toast {
+                level: ToastLevel::Error,
+                message: self.redact(error.message()),
+            });
+        }
         let now = Instant::now();
         if self
             .last_live_equity_at
@@ -792,12 +773,14 @@ impl Runtime {
     }
 
     /// Puts the runtime back in a usable state after work panicked: the engine's queued events
-    /// belong to a rolled-back transaction, so they are discarded, and a batch cut short must
-    /// not leave the timer believing one is still running.
+    /// belong to a rolled-back transaction, so they are discarded. An asynchronous replay
+    /// batch survives unrelated command failures and must keep blocking timer credit.
     fn recover_from_panic(&mut self, panic: &(dyn std::any::Any + Send)) {
         self.engine.discard_queued_events();
         lock(&self.engine_events).clear();
-        self.clock.end_batch();
+        if self.replay_batch.is_none() {
+            self.clock.end_batch();
+        }
         let text = match (panic.downcast_ref::<&str>(), panic.downcast_ref::<String>()) {
             (Some(text), _) => text.to_string(),
             (_, Some(text)) => text.clone(),
@@ -826,6 +809,7 @@ impl Runtime {
                 Topic::Arena,
             ]);
             if let EngineEvent::Liquidation { position } = event {
+                let _ = self.pause_account_agents(&position.account_id, "Paused after liquidation");
                 let name = match self.engine.store().get_account(&position.account_id) {
                     Ok(Some(account)) => account.name,
                     _ => "Account".to_string(),
@@ -858,6 +842,7 @@ enum Wake {
     LiveStatus(FeedStatus),
     LiveStatusesClosed,
     LiveTick,
+    Agent(Box<agent_cycle::Completion>),
 }
 
 /// What the live feed sends the runtime task.
@@ -889,6 +874,11 @@ async fn run(mut runtime: Runtime, mut inbox: mpsc::Receiver<Command>, mut live:
                 None => Wake::LiveStatusesClosed,
             },
             _ = live_tick.tick() => Wake::LiveTick,
+            Some(completion) = futures_util::StreamExt::next(&mut runtime.agents.pending), if !runtime.agents.pending.is_empty() => Wake::Agent(Box::new(completion)),
+        };
+        let cycle = match &wake {
+            Wake::Agent(completion) => Some(completion.identity()),
+            _ => None,
         };
         let work: Box<dyn FnOnce(&mut Runtime)> = match wake {
             Wake::HandlesDropped => break,
@@ -909,11 +899,22 @@ async fn run(mut runtime: Runtime, mut inbox: mpsc::Receiver<Command>, mut live:
                 Box::new(move |runtime| runtime.emit(ServerEvent::Feed { status }))
             }
             Wake::LiveTick => Box::new(Runtime::live_tick),
+            Wake::Agent(completion) => Box::new(move |r| r.complete_cycle(*completion)),
         };
         // A panic fails only this piece of work, as a thrown error fails one request in Node;
         // the task, and with it live paper trading, carries on. Unwind safety: the store rolls
         // its transaction back while unwinding, and `recover_from_panic` clears the rest.
         if let Err(panic) = catch_unwind(AssertUnwindSafe(|| work(&mut runtime))) {
+            // The completion owns the reply and is dropped on unwind. Release only its
+            // matching cycle so the replay barrier and later requests cannot be stranded.
+            if let Some((id, token)) = cycle {
+                if runtime.agents.active.get(&id) == Some(&token) {
+                    runtime.agents.active.remove(&id);
+                }
+            }
+            runtime.recover_from_panic(panic.as_ref());
+        }
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| runtime.pump_replay())) {
             runtime.recover_from_panic(panic.as_ref());
         }
         if let Some(done) = runtime.stopping.take() {
@@ -921,6 +922,8 @@ async fn run(mut runtime: Runtime, mut inbox: mpsc::Receiver<Command>, mut live:
             // runtime closes the database before `shutdown` returns.
             runtime.set_playing(false);
             runtime.live.stop();
+            // Mark shutdown before dropping pending reply senders.
+            inbox.close();
             drop(runtime);
             let _ = done.send(());
             return;

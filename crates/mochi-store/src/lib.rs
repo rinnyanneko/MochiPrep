@@ -1,6 +1,7 @@
 //! SQLite store shared with the Node backend: same pragmas, same migration files, same
 //! `schema_migrations` bookkeeping, so either backend can open a database the other created.
 
+mod ai;
 mod paper;
 pub mod rows;
 mod settings;

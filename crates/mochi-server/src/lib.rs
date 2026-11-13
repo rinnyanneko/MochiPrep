@@ -1,6 +1,7 @@
 //! The Rust HTTP backend: the same API as `apps/server` (Fastify), so the web app cannot tell
 //! which one it talks to. Node remains the default backend while this port is in progress.
 
+pub mod agent_parse;
 pub mod auth;
 pub mod config;
 pub mod error;

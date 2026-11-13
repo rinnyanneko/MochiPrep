@@ -61,6 +61,9 @@ import { apiScriptFixture } from './api-script.js';
 import { validationFixture } from './validation.js';
 import { okxPublicFixture } from './okx-public.js';
 import { newsFixture } from './news.js';
+import { aiFixture } from './ai.js';
+import { aiValidationFixture } from './ai-validation.js';
+import { aiStateFixture } from './ai-state.js';
 
 const ROUND_CASES = [
   0.5, 1.5, 2.5, -0.5, -1.5, -2.5, 2.4999999999999996, 0.49999999999999994, -0.49999999999999994,
@@ -74,6 +77,9 @@ const FIXED_CASES: Array<[number, number]> = [
   [-1e-7, 6], [12345.6789, 0],
   // Carry paths: rounding up must carry through a run of 9s.
   [0.5, 0], [9.5, 0], [99.5, 0], [9.875, 2], [1.5, 20],
+  // Mock analysis follows quote precision; JS toFixed supports up to 100 fractional digits.
+  [2 ** -22, 21], [-(2 ** -22), 21], [2 ** -101, 100], [-(2 ** -101), 100],
+  [1.005, 100], [9.999, 21], [Number.MIN_VALUE, 100],
 ];
 
 // toFixed inputs JSON can't carry as numbers (NaN, ±Infinity) or that toFixed hands to ToString
@@ -1541,6 +1547,9 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     'validation.json': await validationFixture(),
     'okx-public.json': await okxPublicFixture(),
     'news.json': newsFixture(),
+    'ai.json': await aiFixture(),
+    'ai-validation.json': aiValidationFixture(),
+    'ai-state.json': aiStateFixture(),
     // Last: it registers a pair in the module-global INSTRUMENTS while it runs.
     'api-script.json': await apiScriptFixture(),
   };

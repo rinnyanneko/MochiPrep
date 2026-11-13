@@ -36,6 +36,8 @@ async function postOnce(
       method: 'POST',
       headers: { ...extraHeaders, 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body),
+      // Arbitrary gateway credentials must stay on the configured endpoint.
+      redirect: 'manual',
       signal,
     });
   } catch (error) {
@@ -43,7 +45,7 @@ async function postOnce(
     throw new ProviderError('NETWORK', redactSecrets(`Could not reach the provider: ${(error as Error).message}`, secrets));
   }
   if (!response.ok) {
-    const text = redactSecrets((await response.text().catch(() => '')).slice(0, 400), secrets);
+    const text = redactSecrets(await response.text().catch(() => ''), secrets).slice(0, 400);
     const { status } = response;
     const code = status === 401 || status === 403 ? 'AUTH' : status === 429 ? 'RATE_LIMIT' : status >= 500 ? 'SERVER' : 'HTTP';
     throw new ProviderError(code, `Provider returned HTTP ${status}: ${text}`);
