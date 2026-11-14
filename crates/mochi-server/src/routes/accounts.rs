@@ -159,23 +159,27 @@ async fn positions(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let views = state
+    let account_id = id.clone();
+    let target = state
         .runtime
         .call(move |runtime| {
-            let account = runtime.require_account(&id)?;
-            // An exchange account with no session has no positions to show (Node's
-            // `positionsOf`); there are no sessions in this backend yet.
-            if account.venue != AccountVenue::Paper {
-                return Ok(json!([]));
+            let account = runtime.require_account(&account_id)?;
+            match runtime.execution(&account) {
+                Ok(target) => Ok(Some(target)),
+                // An exchange account with no session has no positions to show (Node's
+                // `positionsOf`).
+                Err(_) if account.venue != AccountVenue::Paper => Ok(None),
+                Err(error) => Err(error),
             }
-            let views = runtime
-                .engine()
-                .position_views(&id)
-                .map_err(|e| runtime.api_error(e))?;
-            serde_json::to_value(views).map_err(|e| runtime.api_error(e))
         })
         .await??;
-    Ok(Json(views))
+    let Some(target) = target else {
+        return Ok(Json(json!([])));
+    };
+    let views = state.runtime.engine_for(target).positions(id).await?;
+    Ok(Json(
+        serde_json::to_value(views).map_err(|e| ApiError::bad_request(e.to_string()))?,
+    ))
 }
 
 /// The shape of every `LimitQuery` read: the account first (404), then the query (400).

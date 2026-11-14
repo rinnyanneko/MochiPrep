@@ -3,6 +3,7 @@
 //! tests. Real money: see docs/OKX_TRADING.md.
 
 pub mod client;
+pub mod engine;
 #[cfg(feature = "fake")]
 pub mod fake;
 pub mod ids;

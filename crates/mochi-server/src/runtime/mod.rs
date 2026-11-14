@@ -9,6 +9,8 @@
 
 mod agent_cycle;
 mod agent_execution;
+mod execution;
+pub use execution::{ExecutionEngine, ExecutionTarget, OkxOptions, ProtectionMeta};
 mod ai_api;
 pub use agent_execution::effective_risk;
 pub mod agents;
@@ -90,6 +92,8 @@ pub struct RuntimeOptions {
     /// The scrypt cost for new password wraps. Tests use a cheap one; a stored wrap always
     /// carries its own cost, so this never affects unlocking.
     pub kdf: KdfParams,
+    /// How OKX private trading is reached.
+    pub okx: OkxOptions,
 }
 
 impl RuntimeOptions {
@@ -105,6 +109,7 @@ impl RuntimeOptions {
             news: NewsService::with_transport(Arc::new(OfflineNews), Arc::new(unix_ms)),
             provider_factory: None,
             kdf: DEFAULT_KDF,
+            okx: OkxOptions::default(),
         }
     }
 
@@ -122,6 +127,7 @@ impl RuntimeOptions {
             news: NewsService::new(),
             provider_factory: None,
             kdf: DEFAULT_KDF,
+            okx: OkxOptions::default(),
         }
     }
 }
@@ -176,6 +182,7 @@ impl RuntimeHandle {
             options.news,
             options.provider_factory,
             options.kdf,
+            options.okx,
         )?;
         let events = runtime.events.sender();
         let (commands, inbox) = mpsc::channel(COMMAND_QUEUE);
@@ -301,6 +308,9 @@ pub struct Runtime {
     /// Set by `shutdown`; the task stops after the current message.
     stopping: Option<oneshot::Sender<()>>,
     vault: vault::VaultState,
+    /// Connected exchange accounts by account id. Memory only: a restart forgets them.
+    exchanges: std::collections::HashMap<String, execution::ExchangeSession>,
+    okx: OkxOptions,
 }
 
 /// The data behind a poisoned lock is still consistent here: nothing panics halfway through
@@ -326,6 +336,7 @@ impl Runtime {
         news: NewsService,
         provider_factory: Option<agents::ProviderFactory>,
         kdf: KdfParams,
+        okx: OkxOptions,
     ) -> Result<Self, StartError> {
         let replay = Arc::new(Mutex::new(ReplayMarketData::new(replay_minutes)?));
         let engine_events: Arc<Mutex<Vec<EngineEvent>>> = Arc::default();
@@ -377,6 +388,8 @@ impl Runtime {
             last_live_equity_at: None,
             stopping: None,
             vault: vault::VaultState::new(kdf),
+            exchanges: Default::default(),
+            okx,
         };
 
         // The mock provider the demo needs, if this database does not have it yet.
@@ -561,15 +574,21 @@ impl Runtime {
             .ok_or_else(|| ApiError::not_found("Unknown account"))
     }
 
-    /// Node's `balanceOf`: a read model that never fails for a missing exchange session. An
-    /// exchange account has no session in this backend yet, so it shows its last equity point,
-    /// or its initial balance before it has one, exactly as Node does while disconnected.
+    /// Node's `balanceOf`: a read model that never fails for a missing exchange session. A
+    /// connected exchange account shows its last synced balance; otherwise it shows its last
+    /// equity point, or its initial balance before it has one, as Node does while disconnected.
     pub fn balance_of(&self, account: &PaperAccount) -> Result<AccountBalance, ApiError> {
         if account.venue == AccountVenue::Paper {
             return self
                 .engine
                 .balance_of(&account.id)
                 .map_err(|e| self.api_error(e));
+        }
+        if let Some(balance) = self
+            .exchange_session(&account.id)
+            .and_then(|session| session.engine.cached_balance())
+        {
+            return Ok(balance);
         }
         let point = self
             .engine

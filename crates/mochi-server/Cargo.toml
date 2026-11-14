@@ -16,6 +16,7 @@ mochi-core = { path = "../mochi-core" }
 mochi-decimal = { path = "../mochi-decimal" }
 mochi-domain = { path = "../mochi-domain" }
 mochi-market = { path = "../mochi-market" }
+mochi-okx = { path = "../mochi-okx" }
 mochi-store = { path = "../mochi-store" }
 mochi-vault = { path = "../mochi-vault" }
 rand = { workspace = true }
@@ -36,6 +37,8 @@ uuid = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+# The in-process fake OKX for the OKX trading tests.
+mochi-okx = { path = "../mochi-okx", features = ["fake"] }
 tempfile = { workspace = true }
 # Paused time for the timing tests; socket reads and writes for the SSE shutdown test.
 tokio = { workspace = true, features = ["test-util", "io-util"] }

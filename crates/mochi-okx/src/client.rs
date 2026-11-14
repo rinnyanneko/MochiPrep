@@ -684,7 +684,7 @@ fn text_of(value: &Value) -> Option<String> {
 }
 
 /// `value || fallback`: empty strings, zero and false fall through.
-fn truthy_text(value: Option<&Value>) -> Option<String> {
+pub(crate) fn truthy_text(value: Option<&Value>) -> Option<String> {
     let value = value?;
     let truthy = match value {
         Value::String(text) => !text.is_empty(),
@@ -700,7 +700,7 @@ fn truthy_text(value: Option<&Value>) -> Option<String> {
 }
 
 /// `value ?? fallback`: only absent and null fall through.
-fn nullish_text(value: Option<&Value>) -> Option<String> {
+pub(crate) fn nullish_text(value: Option<&Value>) -> Option<String> {
     value.and_then(text_of)
 }
 
