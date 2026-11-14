@@ -17,6 +17,7 @@ mochi-decimal = { path = "../mochi-decimal" }
 mochi-domain = { path = "../mochi-domain" }
 mochi-market = { path = "../mochi-market" }
 mochi-store = { path = "../mochi-store" }
+mochi-vault = { path = "../mochi-vault" }
 rand = { workspace = true }
 regex = { workspace = true }
 # The same rusqlite as mochi-store; the runtime takes its open connection.
@@ -32,6 +33,7 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "ansi"] }
 url = { workspace = true }
 uuid = { workspace = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -183,9 +183,13 @@ export class SqliteStore implements PaperStore, AgentStore {
   /**
    * Folds the WAL into the main file and empties it. With secure_delete on, this is what makes
    * deleted plaintext actually gone: until then old page images still sit in the WAL.
+   * Returns true when that did not happen: another reader held the WAL (SQLite reports it in
+   * the pragma's `busy` column rather than failing), or a transaction is still open.
    */
-  scrub() {
-    if (this.txDepth === 0) this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  scrub(): boolean {
+    if (this.txDepth > 0) return true;
+    const { busy } = this.db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() as { busy: number };
+    return busy !== 0;
   }
 
   transaction<T>(fn: () => T): T {

@@ -1,9 +1,9 @@
-//! Read models for decisions/arena and the remaining Plan 5 vault/OKX routes.
+//! Read models for decisions/arena and the remaining Plan 5 OKX routes.
 //!
 //! The web app refetches their lists every time its event stream opens, so their GETs answer
 //! with what the database really holds, exactly as Node reads it. Nothing is made up: a server
-//! without OKX sessions reports every exchange account as not connected, and a vault it cannot
-//! unlock as LOCKED. Vault and OKX writes answer 501 until Plan 5 ports them.
+//! without OKX sessions reports every exchange account as not connected. OKX writes answer 501
+//! until Plan 5 ports them.
 
 use axum::body::Bytes;
 use axum::extract::{RawQuery, State};
@@ -18,7 +18,6 @@ use mochi_domain::{default_live_limits, AccountVenue, DataSource, RiskSettings};
 use mochi_store::rows;
 use serde::Serialize;
 use serde_json::value::RawValue;
-use serde_json::{json, Value};
 
 use crate::error::ApiError;
 use crate::runtime::Runtime;
@@ -27,12 +26,6 @@ use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        // master password
-        .route("/api/vault", get(vault).post(not_available))
-        .route("/api/vault/unlock", post(not_available))
-        .route("/api/vault/password", post(not_available))
-        .route("/api/vault/disable", post(not_available))
-        .route("/api/vault/reset", post(not_available))
         // exchange accounts
         .route("/api/exchange/status", get(exchange_status))
         .route("/api/exchange/okx/connect", post(not_available))
@@ -84,14 +77,6 @@ async fn decisions(
             .map_err(|e| runtime.api_error(e))
     })
     .await
-}
-
-async fn vault(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let status = state
-        .runtime
-        .call(|runtime| runtime.vault_status())
-        .await??;
-    Ok(Json(json!({ "status": status })))
 }
 
 /// `ExchangeStatus`, keys in Node's order.

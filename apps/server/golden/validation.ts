@@ -9,6 +9,10 @@ import {
   ProtectionSchema,
   ReplayControlSchema,
   SymbolSchema,
+  VaultChangeSchema,
+  VaultCreateSchema,
+  VaultPasswordSchema,
+  VaultResetSchema,
   type ServerEvent,
 } from '@mochiprep/shared';
 import { ZodError, type ZodType } from 'zod';
@@ -30,6 +34,10 @@ const BODY_SCHEMAS: Record<string, ZodType> = {
   NewsSourceInput: NewsSourceInputSchema,
   NewsSourceToggle: NewsSourceToggleSchema,
   ReplayControl: ReplayControlSchema,
+  VaultCreate: VaultCreateSchema,
+  VaultPassword: VaultPasswordSchema,
+  VaultChange: VaultChangeSchema,
+  VaultReset: VaultResetSchema,
 };
 
 const QUERY_SCHEMAS: Record<string, ZodType> = {
@@ -248,6 +256,61 @@ const BODY_CASES: Record<string, unknown[]> = {
     { playing: null, speed: null, steps: null },
     { playing: true, reset: true },
     { speed: 1e300, steps: -1e300 },
+  ],
+  // Passwords are not trimmed or normalised here: the vault NFC-normalises them when deriving.
+  VaultCreate: [
+    { password: 'long-enough-password' },
+    { password: 'x'.repeat(10) },
+    { password: 'x'.repeat(9) },
+    { password: 'short' },
+    { password: '' },
+    { password: 'x'.repeat(200) },
+    { password: 'x'.repeat(201) },
+    // Code points: 10 emoji pass min(10), 201 fail max(200).
+    { password: '😀'.repeat(10) },
+    { password: '😀'.repeat(201) },
+    { password: '          ' },
+    { password: 1234567890 },
+    { password: null },
+    { password: ['a', 'b'] },
+    {},
+    { password: 'long-enough-password', extra: 1 },
+    null,
+    [],
+    'password',
+  ],
+  VaultPassword: [
+    { password: 'a' },
+    { password: '' },
+    { password: 'x'.repeat(200) },
+    { password: 'x'.repeat(201) },
+    { password: 12 },
+    {},
+    { password: 'a', current: 'b' },
+    null,
+  ],
+  VaultChange: [
+    { current: 'a', next: 'another-long-password' },
+    { current: '', next: 'short' },
+    { current: 'a', next: 'short' },
+    { current: 'x'.repeat(201), next: 'x'.repeat(201) },
+    { next: 'another-long-password' },
+    { current: 'a' },
+    {},
+    { current: 1, next: 2 },
+    { current: 'a', next: 'another-long-password', password: 'c' },
+    null,
+  ],
+  VaultReset: [
+    { confirmation: 'DELETE SAVED KEYS' },
+    { confirmation: 'nope' },
+    { confirmation: '' },
+    { confirmation: 'x'.repeat(100) },
+    { confirmation: 'x'.repeat(101) },
+    { confirmation: null },
+    {},
+    { confirmation: 'DELETE SAVED KEYS', force: true },
+    null,
   ],
 };
 

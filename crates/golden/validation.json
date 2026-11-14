@@ -1477,6 +1477,367 @@
    "response": {
     "error": "speed: Too big: expected int to be <=9007199254740991; speed: Too big: expected number to be <=600; steps: Too small: expected int to be >=-9007199254740991; steps: Too small: expected number to be >=1"
    }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":\"long-enough-password\"}",
+   "status": 200,
+   "response": {
+    "password": "long-enough-password"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":\"xxxxxxxxxx\"}",
+   "status": 200,
+   "response": {
+    "password": "xxxxxxxxxx"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":\"xxxxxxxxx\"}",
+   "status": 400,
+   "response": {
+    "error": "password: Use at least 10 characters"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":\"short\"}",
+   "status": 400,
+   "response": {
+    "error": "password: Use at least 10 characters"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":\"\"}",
+   "status": 400,
+   "response": {
+    "error": "password: Use at least 10 characters"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+   "status": 200,
+   "response": {
+    "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+   "status": 400,
+   "response": {
+    "error": "password: Too big: expected string to have <=200 characters"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":\"😀😀😀😀😀😀😀😀😀😀\"}",
+   "status": 200,
+   "response": {
+    "password": "😀😀😀😀😀😀😀😀😀😀"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\"}",
+   "status": 400,
+   "response": {
+    "error": "password: Too big: expected string to have <=200 characters"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":\"          \"}",
+   "status": 200,
+   "response": {
+    "password": "          "
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":1234567890}",
+   "status": 400,
+   "response": {
+    "error": "password: Invalid input: expected string, received number"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":null}",
+   "status": 400,
+   "response": {
+    "error": "password: Invalid input: expected string, received null"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":[\"a\",\"b\"]}",
+   "status": 400,
+   "response": {
+    "error": "password: Invalid input: expected string, received array; password: Use at least 10 characters"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{}",
+   "status": 400,
+   "response": {
+    "error": "password: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "{\"password\":\"long-enough-password\",\"extra\":1}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"extra\""
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "null",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received null"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "[]",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received array"
+   }
+  },
+  {
+   "schema": "VaultCreate",
+   "body": "\"password\"",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received string"
+   }
+  },
+  {
+   "schema": "VaultPassword",
+   "body": "{\"password\":\"a\"}",
+   "status": 200,
+   "response": {
+    "password": "a"
+   }
+  },
+  {
+   "schema": "VaultPassword",
+   "body": "{\"password\":\"\"}",
+   "status": 400,
+   "response": {
+    "error": "password: Too small: expected string to have >=1 characters"
+   }
+  },
+  {
+   "schema": "VaultPassword",
+   "body": "{\"password\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+   "status": 200,
+   "response": {
+    "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   }
+  },
+  {
+   "schema": "VaultPassword",
+   "body": "{\"password\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+   "status": 400,
+   "response": {
+    "error": "password: Too big: expected string to have <=200 characters"
+   }
+  },
+  {
+   "schema": "VaultPassword",
+   "body": "{\"password\":12}",
+   "status": 400,
+   "response": {
+    "error": "password: Invalid input: expected string, received number"
+   }
+  },
+  {
+   "schema": "VaultPassword",
+   "body": "{}",
+   "status": 400,
+   "response": {
+    "error": "password: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "VaultPassword",
+   "body": "{\"password\":\"a\",\"current\":\"b\"}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"current\""
+   }
+  },
+  {
+   "schema": "VaultPassword",
+   "body": "null",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received null"
+   }
+  },
+  {
+   "schema": "VaultChange",
+   "body": "{\"current\":\"a\",\"next\":\"another-long-password\"}",
+   "status": 200,
+   "response": {
+    "current": "a",
+    "next": "another-long-password"
+   }
+  },
+  {
+   "schema": "VaultChange",
+   "body": "{\"current\":\"\",\"next\":\"short\"}",
+   "status": 400,
+   "response": {
+    "error": "current: Too small: expected string to have >=1 characters; next: Use at least 10 characters"
+   }
+  },
+  {
+   "schema": "VaultChange",
+   "body": "{\"current\":\"a\",\"next\":\"short\"}",
+   "status": 400,
+   "response": {
+    "error": "next: Use at least 10 characters"
+   }
+  },
+  {
+   "schema": "VaultChange",
+   "body": "{\"current\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"next\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+   "status": 400,
+   "response": {
+    "error": "current: Too big: expected string to have <=200 characters; next: Too big: expected string to have <=200 characters"
+   }
+  },
+  {
+   "schema": "VaultChange",
+   "body": "{\"next\":\"another-long-password\"}",
+   "status": 400,
+   "response": {
+    "error": "current: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "VaultChange",
+   "body": "{\"current\":\"a\"}",
+   "status": 400,
+   "response": {
+    "error": "next: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "VaultChange",
+   "body": "{}",
+   "status": 400,
+   "response": {
+    "error": "current: Invalid input: expected string, received undefined; next: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "VaultChange",
+   "body": "{\"current\":1,\"next\":2}",
+   "status": 400,
+   "response": {
+    "error": "current: Invalid input: expected string, received number; next: Invalid input: expected string, received number"
+   }
+  },
+  {
+   "schema": "VaultChange",
+   "body": "{\"current\":\"a\",\"next\":\"another-long-password\",\"password\":\"c\"}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"password\""
+   }
+  },
+  {
+   "schema": "VaultChange",
+   "body": "null",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received null"
+   }
+  },
+  {
+   "schema": "VaultReset",
+   "body": "{\"confirmation\":\"DELETE SAVED KEYS\"}",
+   "status": 200,
+   "response": {
+    "confirmation": "DELETE SAVED KEYS"
+   }
+  },
+  {
+   "schema": "VaultReset",
+   "body": "{\"confirmation\":\"nope\"}",
+   "status": 200,
+   "response": {
+    "confirmation": "nope"
+   }
+  },
+  {
+   "schema": "VaultReset",
+   "body": "{\"confirmation\":\"\"}",
+   "status": 200,
+   "response": {
+    "confirmation": ""
+   }
+  },
+  {
+   "schema": "VaultReset",
+   "body": "{\"confirmation\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+   "status": 200,
+   "response": {
+    "confirmation": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   }
+  },
+  {
+   "schema": "VaultReset",
+   "body": "{\"confirmation\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+   "status": 400,
+   "response": {
+    "error": "confirmation: Too big: expected string to have <=100 characters"
+   }
+  },
+  {
+   "schema": "VaultReset",
+   "body": "{\"confirmation\":null}",
+   "status": 400,
+   "response": {
+    "error": "confirmation: Invalid input: expected string, received null"
+   }
+  },
+  {
+   "schema": "VaultReset",
+   "body": "{}",
+   "status": 400,
+   "response": {
+    "error": "confirmation: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "VaultReset",
+   "body": "{\"confirmation\":\"DELETE SAVED KEYS\",\"force\":true}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"force\""
+   }
+  },
+  {
+   "schema": "VaultReset",
+   "body": "null",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received null"
+   }
   }
  ],
  "parser": [

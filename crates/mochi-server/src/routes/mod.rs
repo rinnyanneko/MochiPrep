@@ -12,6 +12,7 @@ pub mod providers;
 pub mod replay;
 pub mod state;
 pub mod static_files;
+pub mod vault;
 
 use axum::extract::State;
 use axum::http::HeaderMap;
@@ -37,6 +38,7 @@ pub fn router() -> Router<AppState> {
         .merge(agents::router())
         .merge(providers::router())
         .merge(replay::router())
+        .merge(vault::router())
         .merge(later::router())
 }
 

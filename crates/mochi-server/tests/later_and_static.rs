@@ -1,4 +1,4 @@
-//! The remaining Plan 5 vault/OKX writes, persisted read models and the embedded web build.
+//! The remaining Plan 5 OKX writes, persisted read models and the embedded web build.
 //!
 //! Their reads against Node are byte-checked in `golden_api.rs`; this file covers what the Node
 //! script cannot show: every write answering 501, the read models in states the script never
@@ -99,13 +99,9 @@ async fn sql(state: &AppState, statements: &'static str) {
         .unwrap();
 }
 
-/// Every write of the later plans' areas, as `apps/server/src/app.ts` registers it.
+/// Every write of the later plans' areas, as `apps/server/src/app.ts` registers it. The vault
+/// writes are ported (`tests/vault.rs`).
 const LATER_WRITES: &[(&str, &str)] = &[
-    ("POST", "/api/vault"),
-    ("POST", "/api/vault/unlock"),
-    ("POST", "/api/vault/password"),
-    ("POST", "/api/vault/disable"),
-    ("POST", "/api/vault/reset"),
     ("POST", "/api/exchange/okx/connect"),
     ("POST", "/api/exchange/okx/acct_1/disconnect"),
     ("POST", "/api/exchange/okx/acct_1/arm"),

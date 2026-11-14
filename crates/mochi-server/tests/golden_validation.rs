@@ -9,7 +9,7 @@ use mochi_domain::{OrderRequest, ServerEvent};
 use mochi_server::validate::{
     self, AddInstrumentInput, CandleQuery, ClosePositionInput, CreateAccountInput, DecisionQuery,
     LimitQuery, NewsQuery, NewsSourceInput, NewsSourceToggle, ProtectionInput, ReplayControl,
-    Schema, SourceQuery,
+    Schema, SourceQuery, VaultChangeInput, VaultCreateInput, VaultPasswordInput, VaultResetInput,
 };
 use mochi_server::ApiError;
 use serde_json::{json, Value};
@@ -39,6 +39,10 @@ fn schema(name: &str) -> Schema {
         "LimitQuery" => Schema::LimitQuery,
         "DecisionQuery" => Schema::DecisionQuery,
         "NewsQuery" => Schema::NewsQuery,
+        "VaultCreate" => Schema::VaultCreate,
+        "VaultPassword" => Schema::VaultPassword,
+        "VaultChange" => Schema::VaultChange,
+        "VaultReset" => Schema::VaultReset,
         other => panic!("unknown schema {other}"),
     }
 }
@@ -113,6 +117,18 @@ fn typed_parse_succeeds(name: &str, value: &Value) {
         }
         Schema::ReplayControl => {
             validate::parse_body::<ReplayControl>(Schema::ReplayControl, value).is_ok()
+        }
+        Schema::VaultCreate => {
+            validate::parse_body::<VaultCreateInput>(Schema::VaultCreate, value).is_ok()
+        }
+        Schema::VaultPassword => {
+            validate::parse_body::<VaultPasswordInput>(Schema::VaultPassword, value).is_ok()
+        }
+        Schema::VaultChange => {
+            validate::parse_body::<VaultChangeInput>(Schema::VaultChange, value).is_ok()
+        }
+        Schema::VaultReset => {
+            validate::parse_body::<VaultResetInput>(Schema::VaultReset, value).is_ok()
         }
         _ => unreachable!(),
     };

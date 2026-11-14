@@ -49,6 +49,8 @@ const LIVE_EQUITY_EVERY_MS = 60_000;
 const DEFAULT_SPEED = 20;
 const EXCHANGE_SYNC_MS = 5_000;
 const PASSWORD_WRAP_ID = 'password';
+/** A reader kept the WAL from being truncated; SQLite checkpoints it again when it closes. */
+const SCRUB_BLOCKED = 'Deleted key data may stay in the database file until MochiPrep closes.';
 const providerContext = (id: string) => `provider-key:${id}`;
 const exchangeContext = (id: string) => `okx-credentials:${id}`;
 
@@ -648,9 +650,11 @@ export class Runtime {
         this.store.saveVaultKey(PASSWORD_WRAP_ID, 'PASSWORD', wrap);
         for (const [id, key] of this.store.getProviderKeys()) this.store.saveSealedProviderKey(id, seal(dataKey, key, providerContext(id)));
       });
-      this.store.scrub();
+      const blocked = this.store.scrub();
       this.dataKey = dataKey;
       this.invalidate('vault', 'providers', 'exchange');
+      // The keys are sealed either way; only the old plaintext pages outlive this call.
+      if (blocked) this.emit({ type: 'toast', level: 'warn', message: SCRUB_BLOCKED });
     });
   }
 

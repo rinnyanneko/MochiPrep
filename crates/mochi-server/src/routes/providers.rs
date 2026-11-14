@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
 };
 use mochi_ai::{redact_secrets, AiRequest, ProviderConfig, ProviderKind};
-use mochi_domain::{Topic, VaultStatus};
+use mochi_domain::Topic;
 use mochi_store::rows;
 
 use crate::{
@@ -47,8 +47,7 @@ pub(super) async fn body(
     }
 }
 fn views(r: &Runtime) -> Result<Vec<rows::ProviderView>, ApiError> {
-    rows::list_provider_views(r.connection(), r.vault_status()? != VaultStatus::Off)
-        .map_err(|e| r.api_error(e))
+    r.provider_views()
 }
 fn view(r: &Runtime, id: &str) -> Result<rows::ProviderView, ApiError> {
     views(r)?

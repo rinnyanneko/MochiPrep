@@ -20,7 +20,9 @@ use serde_json::{json, Map, Value};
 use crate::error::ApiError;
 
 mod ai;
+mod vault;
 pub use ai::{AgentInput, ProviderInput, ProviderKeyInput, ProviderTestInput};
+pub use vault::{VaultChangeInput, VaultCreateInput, VaultPasswordInput, VaultResetInput};
 
 /// Every message text, in one place so it can be audited against Zod and Fastify.
 mod msg {
@@ -89,6 +91,10 @@ pub enum Schema {
     NewsQuery,
     /// `SymbolSchema` on its own, for a `:symbol` path param.
     Symbol,
+    VaultCreate,
+    VaultPassword,
+    VaultChange,
+    VaultReset,
 }
 
 // ---- typed results ---------------------------------------------------------------------------
@@ -236,6 +242,10 @@ pub fn check(schema: Schema, input: Option<&Value>) -> Result<Value, ApiError> {
         Schema::DecisionQuery => decision_query(input),
         Schema::NewsQuery => news_query(input),
         Schema::Symbol => check_string(input, &SYMBOL),
+        Schema::VaultCreate => vault::vault_create(input),
+        Schema::VaultPassword => vault::vault_password(input),
+        Schema::VaultChange => vault::vault_change(input),
+        Schema::VaultReset => vault::vault_reset(input),
     };
     result.map_err(|issues| ApiError::bad_request(format_issues(&issues)))
 }
@@ -656,6 +666,8 @@ struct StringRule {
     /// In code points, as Zod v4 counts.
     min: Option<usize>,
     max: Option<usize>,
+    /// A custom `.min(n, message)` text, used in place of Zod's "Too small" wording.
+    min_message: Option<&'static str>,
 }
 
 impl StringRule {
@@ -665,6 +677,7 @@ impl StringRule {
         format: Format::None,
         min: None,
         max: None,
+        min_message: None,
     };
 
     /// `z.string().trim().min(1).max(max)`.
@@ -674,6 +687,15 @@ impl StringRule {
             format: Format::None,
             min: Some(1),
             max: Some(max),
+            min_message: None,
+        }
+    }
+
+    /// The "Too small" issue, or the schema's own text for it.
+    fn too_small(&self, origin: &str, min: usize) -> Issue {
+        match self.min_message {
+            Some(text) => Issue::new(text),
+            None => Issue::new(msg::bound("Too small", origin, &format!(">={min}"))),
         }
     }
 }
@@ -688,11 +710,7 @@ fn non_string_issues(input: Input, rule: &StringRule) -> Vec<Issue> {
     if let Some((length, origin)) = js_length(input) {
         if let Some(min) = rule.min {
             if length.is_nan() || length < min as f64 {
-                issues.push(Issue::new(msg::bound(
-                    "Too small",
-                    origin,
-                    &format!(">={min}"),
-                )));
+                issues.push(rule.too_small(origin, min));
             }
         }
         if let Some(max) = rule.max {
@@ -747,11 +765,7 @@ fn check_string(input: Input, rule: &StringRule) -> Checked {
     let length = value.chars().count();
     if let Some(min) = rule.min {
         if length < min {
-            issues.push(Issue::new(msg::bound(
-                "Too small",
-                "string",
-                &format!(">={min}"),
-            )));
+            issues.push(rule.too_small("string", min));
         }
     }
     if let Some(max) = rule.max {

@@ -1,7 +1,7 @@
 //! The runtime: one task that owns the paper engine, the replay tape, the live feed handle, the
-//! settings, agent futures, provider keys and the instrument registry. Slow analysis leaves
-//! the actor with owned snapshots and returns for current-state risk checks. OKX execution
-//! and vault mutation remain for Plan 5.
+//! settings, agent futures, provider keys, the master password's data key and the instrument
+//! registry. Slow analysis and key derivation leave the actor with owned snapshots and return
+//! to apply their result. OKX execution remains for Plan 5.
 //!
 //! Routes reach it through [`RuntimeHandle`]: every method sends a message to that one task and
 //! awaits the answer. The engine is synchronous and not `Sync`, so this way it is only ever used
@@ -19,6 +19,8 @@ pub mod redact;
 pub mod replay_clock;
 mod scheduling;
 pub use scheduling::DemoAction;
+mod vault;
+pub use vault::{UnlockOutcome, VAULT_RESET_PHRASE};
 
 use std::fmt::Display;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -41,6 +43,7 @@ use mochi_store::{
     delete_instrument, get_setting, has_vault, list_instruments, rows, save_instrument,
     set_setting, SqlitePaperStore, StoreError,
 };
+use mochi_vault::{KdfParams, DEFAULT_KDF};
 use rusqlite::Connection;
 use serde::{Serialize, Serializer};
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -84,6 +87,9 @@ pub struct RuntimeOptions {
     /// Headlines for `/api/news`, fetched outside the runtime task.
     pub news: NewsService,
     pub provider_factory: Option<agents::ProviderFactory>,
+    /// The scrypt cost for new password wraps. Tests use a cheap one; a stored wrap always
+    /// carries its own cost, so this never affects unlocking.
+    pub kdf: KdfParams,
 }
 
 impl RuntimeOptions {
@@ -98,6 +104,7 @@ impl RuntimeOptions {
             live_statuses: None,
             news: NewsService::with_transport(Arc::new(OfflineNews), Arc::new(unix_ms)),
             provider_factory: None,
+            kdf: DEFAULT_KDF,
         }
     }
 
@@ -114,6 +121,7 @@ impl RuntimeOptions {
             live_statuses,
             news: NewsService::new(),
             provider_factory: None,
+            kdf: DEFAULT_KDF,
         }
     }
 }
@@ -167,6 +175,7 @@ impl RuntimeHandle {
             options.live,
             options.news,
             options.provider_factory,
+            options.kdf,
         )?;
         let events = runtime.events.sender();
         let (commands, inbox) = mpsc::channel(COMMAND_QUEUE);
@@ -291,6 +300,7 @@ pub struct Runtime {
     last_live_equity_at: Option<Instant>,
     /// Set by `shutdown`; the task stops after the current message.
     stopping: Option<oneshot::Sender<()>>,
+    vault: vault::VaultState,
 }
 
 /// The data behind a poisoned lock is still consistent here: nothing panics halfway through
@@ -315,6 +325,7 @@ impl Runtime {
         live: Arc<dyn LiveFeed>,
         news: NewsService,
         provider_factory: Option<agents::ProviderFactory>,
+        kdf: KdfParams,
     ) -> Result<Self, StartError> {
         let replay = Arc::new(Mutex::new(ReplayMarketData::new(replay_minutes)?));
         let engine_events: Arc<Mutex<Vec<EngineEvent>>> = Arc::default();
@@ -365,6 +376,7 @@ impl Runtime {
             last_replay_equity_at: 0,
             last_live_equity_at: None,
             stopping: None,
+            vault: vault::VaultState::new(kdf),
         };
 
         // The mock provider the demo needs, if this database does not have it yet.
@@ -661,17 +673,6 @@ impl Runtime {
             detail: None,
         };
         vec![replay, self.live.status()]
-    }
-
-    /// Nothing in this backend unlocks a vault yet, so one that exists is LOCKED.
-    pub fn vault_status(&self) -> Result<VaultStatus, ApiError> {
-        Ok(
-            if has_vault(self.connection()).map_err(|e| self.api_error(e))? {
-                VaultStatus::Locked
-            } else {
-                VaultStatus::Off
-            },
-        )
     }
 
     /// Assemble state from the actor-owned database and feeds without inventing missing data.
