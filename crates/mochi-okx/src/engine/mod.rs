@@ -6,10 +6,12 @@
 //! piece of work at a time against the store (in the server, on the runtime task), so network calls
 //! never hold the store and the store never waits on the network.
 
+mod protection;
 mod refusal;
 mod sync;
 mod views;
 
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use mochi_core::paper::{DailyRisk, PaperStore, StoreFailure};
@@ -17,8 +19,11 @@ use mochi_decimal::Dec;
 use mochi_domain::{
     default_live_limits, AccountBalance, EntryOrderType, EquityPoint, Fill,
     InstrumentSpecification, Order, OrderRequest, OrderResult, OrderSide, OrderStatus, OrderType,
-    PaperAccount, PositionSide, PositionView, Quote, RiskSettings, TrailingKind, TrailingStopSpec,
+    PaperAccount, PositionSide, PositionView, Protection, Quote, RiskSettings, TrailingKind,
+    TrailingStopSpec,
 };
+
+use protection::{Miss, ProtectionMap};
 use tokio::sync::oneshot;
 
 use crate::client::{
@@ -148,6 +153,13 @@ pub enum EngineError {
     /// Node's plain `Error`s, such as `Unknown order <id>`.
     #[error("{0}")]
     Message(String),
+    /// Node's `ProtectionChangeError`: a protection change refused part-way. `after` is what is
+    /// in force, including legs already placed.
+    #[error("{message}")]
+    ProtectionChange {
+        message: String,
+        after: Box<Protection>,
+    },
     #[error(transparent)]
     Okx(#[from] OkxError),
     #[error(transparent)]
@@ -181,6 +193,15 @@ struct State {
     last_sync_at: Option<i64>,
     last_equity_at: i64,
     sync_error: Option<String>,
+    /// Our protection per symbol, as the last sync read it back from OKX.
+    protection: ProtectionMap,
+    /// The last failed algo cancel, until a sync finishes with every cancel accepted.
+    cancel_error: Option<String>,
+    /// Per instId: consecutive syncs that found our protection but no position.
+    missing_position: HashMap<String, Miss>,
+    /// instIds where the last sync saw our algos live with no position: leftovers still being
+    /// cancelled.
+    leftovers: HashSet<String>,
 }
 
 /// One account's OKX trading. Cheap to share: callers hold it in an `Arc`.
@@ -276,8 +297,14 @@ impl OkxEngine {
         self.state().last_sync_at
     }
 
+    /// The sync failure, else the last failed algo cancel. Only the first makes the account
+    /// unhealthy.
     pub fn error(&self) -> Option<String> {
-        self.state().sync_error.clone()
+        let state = self.state();
+        state
+            .sync_error
+            .clone()
+            .or_else(|| state.cancel_error.clone())
     }
 
     pub fn healthy(&self) -> bool {

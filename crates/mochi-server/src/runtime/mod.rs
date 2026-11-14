@@ -10,7 +10,9 @@
 mod agent_cycle;
 mod agent_execution;
 mod execution;
-pub use execution::{ExecutionEngine, ExecutionTarget, OkxOptions, ProtectionMeta};
+pub use execution::{
+    ExecutionEngine, ExecutionTarget, OkxOptions, ProtectionFailure, ProtectionMeta,
+};
 mod ai_api;
 pub use agent_execution::effective_risk;
 pub mod agents;

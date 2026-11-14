@@ -61,6 +61,7 @@ import { apiScriptFixture } from './api-script.js';
 import { validationFixture } from './validation.js';
 import { okxPublicFixture } from './okx-public.js';
 import { okxPrivateFixture } from './okx-private.js';
+import { protectionClassifyFixture } from './protection-classify.js';
 import { newsFixture } from './news.js';
 import { aiFixture } from './ai.js';
 import { aiValidationFixture } from './ai-validation.js';
@@ -1609,6 +1610,7 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     'validation.json': await validationFixture(),
     'okx-public.json': await okxPublicFixture(),
     'okx-private.json': await okxPrivateFixture(),
+    'protection-classify.json': protectionClassifyFixture(),
     'news.json': newsFixture(),
     'ai.json': await aiFixture(),
     'ai-validation.json': aiValidationFixture(),

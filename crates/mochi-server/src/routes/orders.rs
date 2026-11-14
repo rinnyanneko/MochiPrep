@@ -153,7 +153,8 @@ async fn protection(
     // A refusal reaches the client as a 400 with its reason.
     let result = engine
         .set_protection(account_id, symbol, protection, meta)
-        .await?;
+        .await
+        .map_err(|failure| failure.error)?;
     state
         .runtime
         .invalidate(&[Topic::Orders, Topic::Positions])

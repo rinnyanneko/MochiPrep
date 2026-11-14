@@ -1,13 +1,16 @@
 //! Bringing local rows and the cached account in line with OKX.
 
 use mochi_domain::jsnum::js_string_to_number;
-use mochi_domain::{EquityPoint, Fill, Liquidity, Order, OrderStatus};
+use std::collections::HashMap;
+
+use mochi_domain::{EquityPoint, Fill, Liquidity, Order, OrderStatus, PositionSide};
 use serde_json::Value;
 
+use super::protection::record_attached;
 use super::{
     dec, is_leg, EngineError, OkxEngine, Registry, EQUITY_EVERY_MS, NEVER_ARRIVED_AFTER_MS,
 };
-use crate::client::{nullish_text, truthy_text, Row};
+use crate::client::{nullish_text, truthy_text, PendingAlgoType, Row};
 use crate::ids::{to_cl_ord_id, to_inst_id};
 
 /// Node's `Number(value)` for an OKX field.
@@ -74,8 +77,13 @@ impl OkxEngine {
         let row = order.clone();
         // As in Node, the order is saved even when its fill then cannot be recorded.
         let fill = fill_of(order, &remote, &filled, at);
+        let attached =
+            row.status != OrderStatus::Open && filled.gt(&super::zero()) && !row.reduce_only;
         self.rows(move |rows| {
             rows.save_order(&row)?;
+            if attached {
+                record_attached(rows, &row, &filled, at)?;
+            }
             if let Some(fill) = fill {
                 if rows.list_fills_by_order(&row.id)?.is_empty() {
                     rows.insert_fill(&fill?)?;
@@ -108,15 +116,37 @@ impl OkxEngine {
             })
             .await?
         };
+        // Orders first, so an entry seen filling here has its protection rows before algos are
+        // matched.
         for mut order in open.into_iter().filter(|o| !is_leg(o)) {
             self.sync_order(&mut order, &registry).await?;
         }
         let client = &self.deps.client;
-        let (usdt, remote) = tokio::try_join!(client.get_usdt_balance(), client.get_positions())?;
+        let (usdt, remote, conditional, oco, trailing) = tokio::try_join!(
+            client.get_usdt_balance(),
+            client.get_positions(),
+            client.get_pending_algos(PendingAlgoType::Conditional),
+            client.get_pending_algos(PendingAlgoType::Oco),
+            client.get_pending_algos(PendingAlgoType::MoveOrderStop),
+        )?;
         let open: Vec<Row> = remote
             .into_iter()
             .filter(|p| js_number(p.get("pos")) != 0.0)
             .collect();
+        let held: HashMap<String, PositionSide> = open
+            .iter()
+            .map(|p| {
+                let side = if js_number(p.get("pos")) > 0.0 {
+                    PositionSide::Long
+                } else {
+                    PositionSide::Short
+                };
+                (nullish_text(p.get("instId")).unwrap_or_default(), side)
+            })
+            .collect();
+        let algos = conditional.into_iter().chain(oco).chain(trailing).collect();
+        let protection = self.reconcile_protection(algos, &held).await?;
+        self.state().protection = protection.clone();
         let (positions, balance) = {
             let account_id = account_id.clone();
             let now = self.now();
@@ -124,7 +154,14 @@ impl OkxEngine {
                 let registry = Registry(rows.instruments());
                 let mut positions = Vec::new();
                 for p in &open {
-                    positions.extend(Self::to_view(p, rows, &registry, &account_id, now)?);
+                    positions.extend(Self::to_view(
+                        p,
+                        rows,
+                        &registry,
+                        &account_id,
+                        now,
+                        &protection,
+                    )?);
                 }
                 let balance = Self::to_balance(usdt.as_ref(), rows, &account_id)?;
                 Ok((positions, balance))

@@ -2,8 +2,10 @@
 
 use mochi_domain::{
     AccountBalance, OrderStatus, Position, PositionSide, PositionStatus, PositionView,
+    TrailingStopView,
 };
 
+use super::protection::{effective_of, ProtectionMap};
 use super::sync::js_number;
 use super::{dec, zero, EngineError, LiveRows, OkxEngine, Registry};
 use crate::client::{nullish_text, truthy_text, Row};
@@ -27,12 +29,15 @@ impl OkxEngine {
         registry: &Registry,
         account_id: &str,
         now: i64,
+        protection: &ProtectionMap,
     ) -> Result<Vec<PositionView>, EngineError> {
         let inst_id = nullish_text(p.get("instId")).unwrap_or_default();
         let Some(spec) = registry.symbol_of_inst_id(&inst_id) else {
             return Ok(Vec::new());
         };
         let symbol = spec.symbol.clone();
+        let in_force = effective_of(protection, &symbol);
+        let read_back = protection.get(&symbol);
         let pos = nullish_text(p.get("pos")).unwrap_or_else(|| "undefined".into());
         let size = dec(&pos)?;
         let size = if size.is_negative() { size.neg() } else { size };
@@ -69,11 +74,15 @@ impl OkxEngine {
             },
             mark_price: truthy_text(p.get("markPx")),
             unrealized_pnl: truthy_text(p.get("upl")).unwrap_or_else(|| "0".into()),
-            // OKX holds the protection; reading it back is reconciliation's job.
-            stop_loss: None,
-            take_profit: None,
-            trailing_stop: None,
-            external_protection: Vec::new(),
+            stop_loss: in_force.stop_loss,
+            take_profit: in_force.take_profit,
+            // OKX does not report the tracked extreme, only the current trigger.
+            trailing_stop: in_force.trailing_stop.map(|spec| TrailingStopView {
+                spec,
+                extreme: None,
+                trigger_price: read_back.and_then(|e| e.trail_trigger.clone()),
+            }),
+            external_protection: read_back.map(|e| e.external.clone()).unwrap_or_default(),
         }])
     }
 

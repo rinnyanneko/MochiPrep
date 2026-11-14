@@ -7,6 +7,7 @@ use mochi_domain::jsnum::{js_number_string, js_to_fixed};
 use mochi_domain::{Order, OrderSide, OrderType, PositionSide, PositionView};
 
 use super::{day_start_equity, dec, is_leg, side_text, EngineError, OkxEngine, Prepared};
+use crate::ids::to_inst_id;
 
 impl OkxEngine {
     pub(super) fn pre_trade_refusal(
@@ -74,10 +75,11 @@ impl OkxEngine {
         }
         // The previous position's algos would otherwise count as the new one's protection, or
         // close it.
-        let leftover = prepared
-            .open_orders
-            .iter()
-            .any(|o| o.symbol == order.symbol && is_leg(o));
+        let leftover = self.state().leftovers.contains(&to_inst_id(&order.symbol))
+            || prepared
+                .open_orders
+                .iter()
+                .any(|o| o.symbol == order.symbol && is_leg(o));
         if leftover {
             return Ok(Some(
                 "PROTECTION_PENDING: protection from the previous position is still being cleaned up"

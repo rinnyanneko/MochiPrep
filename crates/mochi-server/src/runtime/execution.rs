@@ -7,7 +7,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use axum::http::StatusCode;
 use futures_util::future::BoxFuture;
 use mochi_core::paper::{DailyRisk, ProtectionResult};
 use mochi_domain::{
@@ -29,6 +28,20 @@ pub struct ProtectionMeta {
     pub decision_id: Option<String>,
 }
 
+/// A refused protection change. `after` is Node's `ProtectionChangeError.after`: set when the
+/// change was refused part-way, and then it is what is in force, including legs already placed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtectionFailure {
+    pub error: ApiError,
+    pub after: Option<Protection>,
+}
+
+impl ProtectionFailure {
+    fn refused(error: ApiError) -> Self {
+        ProtectionFailure { error, after: None }
+    }
+}
+
 /// One account's trading, as routes and agents see it. Errors are already the HTTP answer: a
 /// refusal is a 400 with its reason, secrets removed.
 pub trait ExecutionEngine: Send + Sync {
@@ -47,14 +60,16 @@ pub trait ExecutionEngine: Send + Sync {
     fn balance(&self, account_id: String) -> BoxFuture<'_, Result<AccountBalance, ApiError>>;
     /// Realized and unrealized change since 00:00 UTC, for the daily-loss limit.
     fn daily_risk(&self, account_id: String) -> BoxFuture<'_, Result<DailyRisk, ApiError>>;
-    /// Replaces the whole protection of an open position. A `None` leg removes that leg.
+    /// Replaces the whole protection of an open position. A `None` leg removes that leg. While
+    /// the result is `pending`, an exchange has not confirmed a placement and the old legs are
+    /// still in force.
     fn set_protection(
         &self,
         account_id: String,
         symbol: String,
         protection: Protection,
         meta: ProtectionMeta,
-    ) -> BoxFuture<'_, Result<ProtectionResult, ApiError>>;
+    ) -> BoxFuture<'_, Result<ProtectionResult, ProtectionFailure>>;
     /// The protection in force for a position, as the runner and risk engine see it.
     fn protection_of(
         &self,
@@ -299,15 +314,19 @@ impl ExecutionEngine for PaperExecution {
         symbol: String,
         protection: Protection,
         _meta: ProtectionMeta,
-    ) -> BoxFuture<'_, Result<ProtectionResult, ApiError>> {
+    ) -> BoxFuture<'_, Result<ProtectionResult, ProtectionFailure>> {
         Box::pin(async move {
-            self.runtime
+            // A paper change is one transaction: it is never refused part-way.
+            let result = self
+                .runtime
                 .call(move |r| {
                     r.engine_mut()
                         .set_protection(&account_id, &symbol, &protection)
                         .map_err(|e| r.api_error(e))
                 })
-                .await?
+                .await
+                .map_err(ProtectionFailure::refused)?;
+            result.map_err(ProtectionFailure::refused)
         })
     }
 
@@ -347,12 +366,6 @@ impl OkxExecution {
             Ok(value) => Ok(value),
             Err(error) => Err(self.refused(error).await),
         }
-    }
-
-    /// Protection on OKX is ported with its own rules; until then nothing can reach it, as no OKX
-    /// account can be connected.
-    fn protection_unavailable() -> ApiError {
-        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error")
     }
 }
 
@@ -402,20 +415,44 @@ impl ExecutionEngine for OkxExecution {
 
     fn set_protection(
         &self,
-        _account_id: String,
-        _symbol: String,
-        _protection: Protection,
-        _meta: ProtectionMeta,
-    ) -> BoxFuture<'_, Result<ProtectionResult, ApiError>> {
-        Box::pin(async { Err(Self::protection_unavailable()) })
+        account_id: String,
+        symbol: String,
+        protection: Protection,
+        meta: ProtectionMeta,
+    ) -> BoxFuture<'_, Result<ProtectionResult, ProtectionFailure>> {
+        Box::pin(async move {
+            let result = self
+                .engine
+                .set_protection(
+                    &account_id,
+                    &symbol,
+                    protection,
+                    meta.agent_id,
+                    meta.decision_id,
+                )
+                .await;
+            match result {
+                Ok(result) => Ok(result),
+                Err(error) => {
+                    let after = match &error {
+                        EngineError::ProtectionChange { after, .. } => Some((**after).clone()),
+                        _ => None,
+                    };
+                    Err(ProtectionFailure {
+                        error: self.refused(error).await,
+                        after,
+                    })
+                }
+            }
+        })
     }
 
     fn protection_of(
         &self,
         _account_id: String,
-        _symbol: String,
+        symbol: String,
     ) -> BoxFuture<'_, Result<Protection, ApiError>> {
-        Box::pin(async { Err(Self::protection_unavailable()) })
+        Box::pin(async move { Ok(self.engine.protection_of(&symbol)) })
     }
 }
 

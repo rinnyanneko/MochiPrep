@@ -18,7 +18,7 @@ use mochi_domain::{
 use mochi_okx::fake::{self, FakeOkx};
 use mochi_server::config::{config_from, Config};
 use mochi_server::runtime::agents::CycleTrigger;
-use mochi_server::runtime::{live_feed::FeedResult, LiveFeed, OkxOptions};
+use mochi_server::runtime::{live_feed::FeedResult, LiveFeed, OkxOptions, ProtectionMeta};
 use mochi_server::{app, AppState, RuntimeHandle, RuntimeOptions};
 use mochi_store::{open_in_memory, rows};
 use serde_json::{json, Value};
@@ -311,8 +311,26 @@ async fn a_lost_answer_stays_open_until_sync_resolves_it_and_is_never_resent() {
         None,
     )
     .await;
-    assert_eq!(orders[0]["status"], "FILLED");
-    assert_eq!(orders[0]["rejectReason"], Value::Null);
+    // The entry, and the stop row its fill created.
+    let entry = orders
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["id"] == pending["order"]["id"])
+        .unwrap();
+    assert_eq!(entry["status"], "FILLED");
+    assert_eq!(entry["rejectReason"], Value::Null);
+    let stop_row = orders
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["closePosition"] == true)
+        .unwrap();
+    assert_eq!(
+        stop_row["id"],
+        format!("{}:sl", pending["order"]["id"].as_str().unwrap())
+    );
+    assert_eq!(stop_row["status"], "OPEN");
     assert_eq!(w.okx.state().placed.len(), 1);
     w.state.runtime.shutdown().await;
 }
@@ -450,4 +468,195 @@ async fn keeps_exponent_notation_out_of_an_agent_order() {
         .unwrap();
     assert_eq!(placed.attached_stop_loss.as_deref(), Some("0.0000009"));
     runtime.shutdown().await;
+}
+
+// ---- protection on OKX, through the route and the trait ----------------------------------------
+
+fn stop(price: &str) -> mochi_domain::Protection {
+    mochi_domain::Protection {
+        stop_loss: Some(price.into()),
+        take_profit: None,
+        trailing_stop: None,
+    }
+}
+
+fn meta(id: &str) -> ProtectionMeta {
+    ProtectionMeta {
+        client_order_id: format!("protect:{id}"),
+        agent_id: Some("agent_1".into()),
+        decision_id: Some(id.into()),
+    }
+}
+
+/// A connected, armed account holding a long with a stop at 74000 attached on entry.
+async fn world_with_position() -> World {
+    let w = world(true).await;
+    let (_, filled) = send(&w.state, "POST", "/api/orders", Some(order("entry"))).await;
+    assert_eq!(filled["order"]["status"], "FILLED");
+    w.okx.state().calls.clear();
+    w
+}
+
+fn posts(w: &World) -> Vec<String> {
+    w.okx
+        .state()
+        .calls
+        .iter()
+        .filter(|c| c.starts_with("POST"))
+        .cloned()
+        .collect()
+}
+
+#[tokio::test]
+async fn api_protection_route_on_an_okx_account_goes_through_the_armed_gate() {
+    let w = world_with_position().await;
+    let path = format!("/api/positions/{ACCOUNT}/BTCUSDT/protection");
+    w.state
+        .runtime
+        .set_armed_for_test(ACCOUNT, false)
+        .await
+        .unwrap();
+    let (status, refused) = send(
+        &w.state,
+        "PUT",
+        &path,
+        Some(json!({ "stopLoss": "73000", "takeProfit": null })),
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert!(refused["error"]
+        .as_str()
+        .unwrap()
+        .contains("NOT_ARMED: this change increases risk"));
+    assert!(posts(&w).is_empty());
+
+    let (status, tightened) = send(
+        &w.state,
+        "PUT",
+        &path,
+        Some(json!({ "stopLoss": "74500", "takeProfit": null })),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(tightened["ok"], true);
+    assert_eq!(tightened["pending"], false);
+    assert_eq!(
+        tightened["after"],
+        json!({ "stopLoss": "74500", "takeProfit": null, "trailingStop": null })
+    );
+    assert_eq!(w.okx.state().algo_placed.len(), 1);
+
+    // The position view reads the new stop back from OKX.
+    let (_, positions) = send(
+        &w.state,
+        "GET",
+        &format!("/api/accounts/{ACCOUNT}/positions"),
+        None,
+    )
+    .await;
+    assert_eq!(positions[0]["stopLoss"], "74500");
+    assert_eq!(positions[0]["externalProtection"], json!([]));
+    w.state.runtime.shutdown().await;
+}
+
+/// What the runner will meet once it trades through the trait: a placement OKX did not answer is
+/// pending, with the old stop still in force.
+#[tokio::test]
+async fn the_trait_reports_an_unanswered_placement_as_pending() {
+    let w = world_with_position().await;
+    {
+        let mut okx = w.okx.state();
+        okx.lose_next_algo_response = true;
+        okx.algo_lookup_down = true;
+    }
+    let engine = w.state.runtime.execution(ACCOUNT).await.unwrap();
+    let result = engine
+        .set_protection(ACCOUNT.into(), "BTCUSDT".into(), stop("74500"), meta("d1"))
+        .await
+        .unwrap();
+    assert!(result.pending);
+    assert_eq!(result.before, stop("74000"));
+    assert_eq!(result.after, stop("74000"));
+    // A second change waits for the first to resolve.
+    let refused = engine
+        .set_protection(ACCOUNT.into(), "BTCUSDT".into(), stop("74600"), meta("d2"))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.error.status().as_u16(), 400);
+    assert_eq!(
+        refused.error.message(),
+        "PROTECTION_PENDING: an earlier protection change is awaiting confirmation from OKX"
+    );
+    assert_eq!(refused.after, None);
+    // The row carries who asked.
+    let row = w
+        .state
+        .runtime
+        .call(|r| {
+            r.engine()
+                .store()
+                .list_open_orders(ACCOUNT)
+                .unwrap()
+                .into_iter()
+                .find(|o| o.trigger_price.as_deref() == Some("74500"))
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(row.agent_id.as_deref(), Some("agent_1"));
+    assert_eq!(row.decision_id.as_deref(), Some("d1"));
+    w.state.runtime.shutdown().await;
+}
+
+/// A change refused part-way: the failure carries what is in force, including the leg placed.
+#[tokio::test]
+async fn the_trait_carries_what_is_in_force_after_a_part_way_refusal() {
+    let w = world_with_position().await;
+    w.okx.state().reject_algo_if = Some(Box::new(|body| body["ordType"] == "move_order_stop"));
+    let engine = w.state.runtime.execution(ACCOUNT).await.unwrap();
+    let target = mochi_domain::Protection {
+        trailing_stop: Some(mochi_domain::TrailingStopSpec {
+            kind: mochi_domain::TrailingKind::Ratio,
+            callback: "0.01".into(),
+            activation_price: None,
+        }),
+        ..stop("74500")
+    };
+    let failure = engine
+        .set_protection(ACCOUNT.into(), "BTCUSDT".into(), target, meta("d1"))
+        .await
+        .unwrap_err();
+    assert_eq!(failure.error.status().as_u16(), 400);
+    assert_eq!(failure.error.message(), "OKX 51000: Parameter error");
+    assert_eq!(failure.after, Some(stop("74500")));
+    assert_eq!(
+        engine
+            .protection_of(ACCOUNT.into(), "BTCUSDT".into())
+            .await
+            .unwrap(),
+        stop("74500")
+    );
+    w.state.runtime.shutdown().await;
+}
+
+/// The engine aligns prices to the tick, so a target that differs only off the tick comes back
+/// unchanged and sends nothing: the runner reads that as "already as requested".
+#[tokio::test]
+async fn the_trait_returns_an_unchanged_result_for_a_target_off_the_tick() {
+    let w = world_with_position().await;
+    let engine = w.state.runtime.execution(ACCOUNT).await.unwrap();
+    let result = engine
+        .set_protection(
+            ACCOUNT.into(),
+            "BTCUSDT".into(),
+            stop("74000.04"),
+            meta("d1"),
+        )
+        .await
+        .unwrap();
+    assert!(!result.pending);
+    assert_eq!(result.before, result.after);
+    assert_eq!(result.after, stop("74000"));
+    assert!(posts(&w).is_empty());
+    w.state.runtime.shutdown().await;
 }
