@@ -9,6 +9,7 @@ license.workspace = true
 mochi-ai = { path = "../mochi-ai" }
 mochi-core = { path = "../mochi-core" }
 mochi-domain = { path = "../mochi-domain" }
+mochi-vault = { path = "../mochi-vault" }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

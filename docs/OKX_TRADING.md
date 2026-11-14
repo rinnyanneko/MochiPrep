@@ -4,6 +4,8 @@
 
 > **Status: tested only against a simulated exchange.** The client follows OKX's published API, and its signature format was accepted by the real endpoint, but no order has ever been placed on OKX. Real money carries the risk of real loss, including from a bug in this code, and AI decisions can be wrong. You are responsible for every order.
 
+Both backends implement this: the Node server and the Rust server (`mochi-server`) follow the same rules. The Rust OKX paths have only been run against an in-process fake OKX, never against real OKX Demo or real money.
+
 ## Before your first real order
 
 Work through these in order, and stop at the first surprise.

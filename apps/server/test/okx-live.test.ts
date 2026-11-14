@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
 import { createHmac } from 'node:crypto';
 import type { AiProvider, AiRequest } from '@mochiprep/ai-providers';
 import { ProtectionChangeError } from '@mochiprep/core';
@@ -17,6 +17,7 @@ import {
   type OrderRequest,
   type Protection,
   type Quote,
+  type ServerEvent,
   type SymbolId,
 } from '@mochiprep/shared';
 import { buildApp } from '../src/app';
@@ -1210,6 +1211,31 @@ describe('OKX execution', () => {
       await runtime.unlock(PASSWORD);
       expect(runtime.vaultStatus()).toBe('UNLOCKED');
       expect(runtime.providerFor(config)).toBe(longDecision);
+    });
+
+    it('warns, and still succeeds, when another reader keeps the old plaintext in the WAL', async () => {
+      const events: ServerEvent[] = [];
+      runtime.subscribe((event) => events.push(event));
+      // A reader holding a snapshot pins the WAL, so the scrub's checkpoint cannot truncate it.
+      const reader = new DatabaseSync(dbPath);
+      reader.exec('BEGIN');
+      reader.prepare('SELECT COUNT(*) FROM providers').get();
+      try {
+        await runtime.enableVault(PASSWORD);
+      } finally {
+        reader.exec('COMMIT');
+        reader.close();
+      }
+      expect(runtime.vaultStatus()).toBe('UNLOCKED');
+      const toasts = events.filter((event) => event.type === 'toast');
+      expect(toasts).toEqual([{ type: 'toast', level: 'warn', message: 'Deleted key data may stay in the database file until MochiPrep closes.' }]);
+    });
+
+    it('does not warn when the scrub truncates the WAL', async () => {
+      const events: ServerEvent[] = [];
+      runtime.subscribe((event) => events.push(event));
+      await runtime.enableVault(PASSWORD);
+      expect(events.filter((event) => event.type === 'toast')).toEqual([]);
     });
 
     it('keys saved while unlocked are sealed too', async () => {

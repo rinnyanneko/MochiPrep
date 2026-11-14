@@ -15,7 +15,7 @@ pub use accounting::{
     Order, OrderRequest, OrderResult, OrderSide, OrderStatus, OrderType, PaperAccount,
     PaperAccountConfig, Position, PositionSide, PositionStatus, PositionView, Protection,
     RiskCheck, RiskResult, RiskSettings, SizedTrade, TrailingKind, TrailingLimits,
-    TrailingStopSpec, TrailingStopView, TRAILING_LIMITS,
+    TrailingStopSpec, TrailingStopView, CANCEL_PENDING_PREFIX, TRAILING_LIMITS,
 };
 pub use instruments::{
     default_instrument, default_instruments, InstrumentSpecification, DEFAULT_SYMBOLS,

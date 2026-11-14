@@ -1,7 +1,7 @@
-//! The remaining Plan 5 vault/OKX writes, persisted read models and the embedded web build.
+//! The exchange writes on an empty database, persisted read models and the embedded web build.
 //!
 //! Their reads against Node are byte-checked in `golden_api.rs`; this file covers what the Node
-//! script cannot show: every write answering 501, the read models in states the script never
+//! script cannot show: exchange writes refused before OKX, the read models in states the script never
 //! reaches (a locked vault, saved OKX keys, a zero balance), the startup seeding over a restart,
 //! and the static files.
 
@@ -99,43 +99,36 @@ async fn sql(state: &AppState, statements: &'static str) {
         .unwrap();
 }
 
-/// Every write of the later plans' areas, as `apps/server/src/app.ts` registers it.
-const LATER_WRITES: &[(&str, &str)] = &[
-    ("POST", "/api/vault"),
-    ("POST", "/api/vault/unlock"),
-    ("POST", "/api/vault/password"),
-    ("POST", "/api/vault/disable"),
-    ("POST", "/api/vault/reset"),
-    ("POST", "/api/exchange/okx/connect"),
-    ("POST", "/api/exchange/okx/acct_1/disconnect"),
-    ("POST", "/api/exchange/okx/acct_1/arm"),
-    ("POST", "/api/exchange/okx/acct_1/disarm"),
+/// The exchange writes, as `apps/server/src/app.ts` registers them. On an empty database none
+/// of them can reach OKX: the connect body fails its schema and the others have no account.
+const EXCHANGE_WRITES: &[(&str, &str, u16)] = &[
+    ("POST", "/api/exchange/okx/connect", 400),
+    ("POST", "/api/exchange/okx/acct_1/disconnect", 404),
+    ("POST", "/api/exchange/okx/acct_1/arm", 404),
+    ("POST", "/api/exchange/okx/acct_1/disarm", 404),
 ];
 
 #[tokio::test]
-async fn every_later_write_answers_501() {
+async fn exchange_writes_without_an_account_or_a_valid_body_are_refused() {
     let state = state();
-    let not_available = json!({ "error": "Not available in the Rust backend yet" });
-    for (method, path) in LATER_WRITES {
+    for (method, path, expected) in EXCHANGE_WRITES {
         for body in [
             None,
             Some("{}"),
             Some(r#"{"password":"long enough password"}"#),
         ] {
-            let answer = send(&state, method, path, body).await;
-            assert_eq!(
-                answer,
-                (501, not_available.clone()),
-                "{method} {path} {body:?}"
-            );
+            let (status, answer) = send(&state, method, path, body).await;
+            assert_eq!(status, *expected, "{method} {path} {body:?}: {answer}");
+            if *expected == 404 {
+                assert_eq!(answer, json!({ "error": "Unknown account" }));
+            }
         }
         // Fastify parses the body before any handler runs, so bad JSON is still Node's 400.
         let (status, body) = send(&state, method, path, Some("{")).await;
         assert_eq!(status, 400, "{method} {path}: {body}");
     }
-    // Nothing was written: the seeded mock provider is still the only one.
-    let providers = get(&state, "/api/providers").await;
-    assert_eq!(providers.as_array().unwrap().len(), 1);
+    // Nothing was written.
+    assert_eq!(get(&state, "/api/accounts").await, json!([]));
     state.runtime.shutdown().await;
 }
 

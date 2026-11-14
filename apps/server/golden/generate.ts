@@ -60,6 +60,8 @@ import { paperScenariosFixture, paperTrailingScenariosFixture } from './paper-sc
 import { apiScriptFixture } from './api-script.js';
 import { validationFixture } from './validation.js';
 import { okxPublicFixture } from './okx-public.js';
+import { okxPrivateFixture } from './okx-private.js';
+import { protectionClassifyFixture } from './protection-classify.js';
 import { newsFixture } from './news.js';
 import { aiFixture } from './ai.js';
 import { aiValidationFixture } from './ai-validation.js';
@@ -114,6 +116,65 @@ function schemaFixture() {
 }
 
 /**
+ * What Node's SqliteStore leaves in the vault tables (and the plaintext provider_keys table the
+ * sealing step edits) after each store call, plus what its readers return. Time is pinned per
+ * step through Date.now, so the rows are reproducible and Rust replays the same script with the
+ * same `now`. The wraps are fixed literals: the store treats `params` as opaque JSON.
+ */
+function vaultRowsFixture() {
+  const wrap = (salt: string, wrappedKey: string) => ({ salt, kdf: { N: 1024, r: 8, p: 1 }, wrappedKey });
+  const setup = [
+    "INSERT INTO providers (id,name,kind,base_url,default_model,input_price,output_price,created_at) VALUES ('prov_1','One','openai',NULL,'m',NULL,NULL,1),('prov_2','Two','openai',NULL,'m',NULL,NULL,2)",
+    "INSERT INTO accounts (id,name,source,is_demo,initial_balance,wallet_balance,used_margin,realized_pnl,fees_paid,funding_paid,config,created_at) VALUES ('acct_1','A','LIVE',0,'1','1','0','0','0','0','{}',1),('acct_2','B','LIVE',0,'1','1','0','0','0','0','{}',2)",
+  ];
+  type Op = { op: string; now: number; args: unknown[] };
+  const script: Op[] = [
+    { op: 'saveVaultKey', now: 1000, args: ['password', 'PASSWORD', wrap('c2FsdDE=', 'v1.aXYx.dGFnMQ==.Ym9keTE=')] },
+    // The upsert replaces params only: kind and created_at stay as first written.
+    { op: 'saveVaultKey', now: 2000, args: ['password', 'OTHER', wrap('c2FsdDI=', 'v1.aXYy.dGFnMg==.Ym9keTI=')] },
+    { op: 'saveProviderKey', now: 3000, args: ['prov_1', 'sk-plain-1'] },
+    { op: 'saveProviderKey', now: 3100, args: ['prov_2', 'sk-plain-2'] },
+    // Sealing prov_1 removes its plaintext row.
+    { op: 'saveSealedProviderKey', now: 4000, args: ['prov_1', 'v1.aXY=.dGFn.Ym9keQ=='] },
+    { op: 'saveSealedProviderKey', now: 5000, args: ['prov_1', 'v1.aXYz.dGFnMw==.Ym9keTM='] },
+    { op: 'saveSealedExchangeCredentials', now: 6000, args: ['acct_1', 'v1.b25l.dGFnMQ==.Y3JlZDE='] },
+    { op: 'saveSealedExchangeCredentials', now: 6100, args: ['acct_2', 'v1.dHdv.dGFnMg==.Y3JlZDI='] },
+    { op: 'saveSealedExchangeCredentials', now: 7000, args: ['acct_1', 'v1.b25l.dGFnMw==.Y3JlZDM='] },
+    { op: 'deleteSealedExchangeCredentials', now: 7100, args: ['acct_2'] },
+    // deleteVault leaves the plaintext provider_keys row of prov_2 alone.
+    { op: 'deleteVault', now: 8000, args: [] },
+  ];
+
+  const db = openDatabase(':memory:');
+  const realNow = Date.now;
+  try {
+    const store = new SqliteStore(db);
+    for (const sql of setup) db.exec(sql);
+    const tables = ['vault_keys', 'sealed_provider_keys', 'sealed_exchange_credentials', 'provider_keys'];
+    const snapshot = () => {
+      const rows: Record<string, unknown[]> = {};
+      for (const table of tables) rows[table] = db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all();
+      return rows;
+    };
+    const reads = () => ({
+      vaultKey: store.getVaultKey('password') ?? null,
+      sealedProviderKeys: [...store.getSealedProviderKeys()],
+      sealedExchangeCredentials: store.listSealedExchangeCredentials(),
+    });
+    const steps = script.map((step) => {
+      Date.now = () => step.now;
+      const call = store as unknown as Record<string, (...a: unknown[]) => unknown>;
+      call[step.op]!.apply(store, step.args);
+      return { ...step, rows: snapshot(), reads: reads() };
+    });
+    return { setup, steps };
+  } finally {
+    Date.now = realNow;
+    db.close();
+  }
+}
+
+/**
  * What Node's SqliteStore writes for the accounting tables, row by row, plus what its readers
  * return. `inputs` are the exact objects inserted (ids and timestamps made distinct so they fit
  * the table constraints), so the Rust tests insert the same data rather than re-deriving it.
@@ -124,7 +185,8 @@ function storeRowsFixture() {
   const account = samples.paperAccount[0]!; // LIVE source
   const replayAccount = { ...samples.paperAccount[1]!, id: 'acc-2' }; // REPLAY source
 
-  // Two accounts on different sources, so the market joins have something to filter out.
+  // Two accounts on different sources, so the market joins have something to filter out. acc-1 is
+  // an OKX account, so the LIVE market lists are empty: the simulator never touches its rows.
   // Orders share created_at on purpose (ord-2, ord-3, ord-5): ordering then falls to rowid.
   const order = (o: Partial<Order> & Pick<Order, 'id' | 'clientOrderId'>): Order => ({
     ...samples.order[1]!,
@@ -286,6 +348,39 @@ function storeRowsFixture() {
     store.deleteAccountData('acc-1', false);
     const afterDeletingRow = snapshot();
 
+    // saveAccountProfile, as an exchange connect writes it: live limits as JSON.stringify writes
+    // JS numbers (2.5, 1e-7, 0.30000000000000004, 1e+21), and no limits as NULL. On its own
+    // database, so the rows above stay as they are.
+    const profiles: PaperAccount[] = [
+      {
+        ...account,
+        name: 'Profiled',
+        initialBalance: '123.5',
+        walletBalance: '7',
+        liveLimits: {
+          maxLeverage: 2.5,
+          maxRiskPerTradePct: 1e-7,
+          maxDailyLossPct: 0.30000000000000004,
+          maxOpenPositions: 2,
+          requireStopLoss: false,
+          maxQuoteAgeSec: 10,
+          maxNotional: 1e21,
+        },
+      },
+      { ...replayAccount, name: 'No limits', initialBalance: '0', liveLimits: null },
+    ];
+    const profileDb = openDatabase(':memory:');
+    let profile;
+    try {
+      const profileStore = new SqliteStore(profileDb);
+      profileStore.insertAccount(account);
+      profileStore.insertAccount(replayAccount);
+      profiles.forEach((p) => profileStore.saveAccountProfile(p));
+      profile = { saves: profiles, accounts: profileDb.prepare('SELECT * FROM accounts ORDER BY rowid').all() };
+    } finally {
+      profileDb.close();
+    }
+
     return {
       inputs: {
         accounts: [account, replayAccount],
@@ -302,6 +397,7 @@ function storeRowsFixture() {
       afterSaves,
       afterKeepingRow,
       afterDeletingRow,
+      profile,
     };
   } finally {
     db.close();
@@ -1540,12 +1636,15 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     'replay.json': await replayFixture(),
     'schema.json': schemaFixture(),
     'store-rows.json': storeRowsFixture(),
+    'vault-rows.json': vaultRowsFixture(),
     'paper-scenarios.json': paperScenariosFixture(),
     'paper-trailing-scenarios.json': paperTrailingScenariosFixture(),
     'node-created.sqlite': nodeCreatedDatabase(),
     'vault.json': await vaultFixture(),
     'validation.json': await validationFixture(),
     'okx-public.json': await okxPublicFixture(),
+    'okx-private.json': await okxPrivateFixture(),
+    'protection-classify.json': protectionClassifyFixture(),
     'news.json': newsFixture(),
     'ai.json': await aiFixture(),
     'ai-validation.json': aiValidationFixture(),

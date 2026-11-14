@@ -8,6 +8,7 @@ pub mod ledger;
 pub mod paper;
 pub mod performance;
 pub mod perp;
+pub mod protection_change;
 pub mod risk;
 
 pub use error::CoreError;

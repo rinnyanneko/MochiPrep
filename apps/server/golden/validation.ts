@@ -1,14 +1,20 @@
 import fastify, { type InjectOptions } from 'fastify';
 import {
   AddInstrumentSchema,
+  ArmSchema,
   ClosePositionSchema,
   CreateAccountSchema,
   NewsSourceInputSchema,
   NewsSourceToggleSchema,
+  OkxConnectSchema,
   PlaceOrderSchema,
   ProtectionSchema,
   ReplayControlSchema,
   SymbolSchema,
+  VaultChangeSchema,
+  VaultCreateSchema,
+  VaultPasswordSchema,
+  VaultResetSchema,
   type ServerEvent,
 } from '@mochiprep/shared';
 import { ZodError, type ZodType } from 'zod';
@@ -30,6 +36,12 @@ const BODY_SCHEMAS: Record<string, ZodType> = {
   NewsSourceInput: NewsSourceInputSchema,
   NewsSourceToggle: NewsSourceToggleSchema,
   ReplayControl: ReplayControlSchema,
+  VaultCreate: VaultCreateSchema,
+  VaultPassword: VaultPasswordSchema,
+  VaultChange: VaultChangeSchema,
+  VaultReset: VaultResetSchema,
+  OkxConnect: OkxConnectSchema,
+  Arm: ArmSchema,
 };
 
 const QUERY_SCHEMAS: Record<string, ZodType> = {
@@ -52,7 +64,18 @@ const order = {
   quantity: '0.01',
   leverage: 5,
 };
-const without = (value: Record<string, unknown>, key: string) => {
+const okxKey = { apiKey: 'key', secretKey: 'secret', passphrase: 'pass' };
+/** Values JS writes in ways a naive float printer does not. */
+const exoticLimits = {
+  maxLeverage: 2.5,
+  maxRiskPerTradePct: 1e-7,
+  maxDailyLossPct: 0.30000000000000004,
+  maxOpenPositions: 2,
+  requireStopLoss: false,
+  maxQuoteAgeSec: 3600,
+  maxNotional: 1e21,
+};
+const without =(value: Record<string, unknown>, key: string) => {
   const copy = { ...value };
   delete copy[key];
   return copy;
@@ -248,6 +271,95 @@ const BODY_CASES: Record<string, unknown[]> = {
     { playing: null, speed: null, steps: null },
     { playing: true, reset: true },
     { speed: 1e300, steps: -1e300 },
+  ],
+  // Passwords are not trimmed or normalised here: the vault NFC-normalises them when deriving.
+  VaultCreate: [
+    { password: 'long-enough-password' },
+    { password: 'x'.repeat(10) },
+    { password: 'x'.repeat(9) },
+    { password: 'short' },
+    { password: '' },
+    { password: 'x'.repeat(200) },
+    { password: 'x'.repeat(201) },
+    // Code points: 10 emoji pass min(10), 201 fail max(200).
+    { password: '😀'.repeat(10) },
+    { password: '😀'.repeat(201) },
+    { password: '          ' },
+    { password: 1234567890 },
+    { password: null },
+    { password: ['a', 'b'] },
+    {},
+    { password: 'long-enough-password', extra: 1 },
+    null,
+    [],
+    'password',
+  ],
+  VaultPassword: [
+    { password: 'a' },
+    { password: '' },
+    { password: 'x'.repeat(200) },
+    { password: 'x'.repeat(201) },
+    { password: 12 },
+    {},
+    { password: 'a', current: 'b' },
+    null,
+  ],
+  VaultChange: [
+    { current: 'a', next: 'another-long-password' },
+    { current: '', next: 'short' },
+    { current: 'a', next: 'short' },
+    { current: 'x'.repeat(201), next: 'x'.repeat(201) },
+    { next: 'another-long-password' },
+    { current: 'a' },
+    {},
+    { current: 1, next: 2 },
+    { current: 'a', next: 'another-long-password', password: 'c' },
+    null,
+  ],
+  VaultReset: [
+    { confirmation: 'DELETE SAVED KEYS' },
+    { confirmation: 'nope' },
+    { confirmation: '' },
+    { confirmation: 'x'.repeat(100) },
+    { confirmation: 'x'.repeat(101) },
+    { confirmation: null },
+    {},
+    { confirmation: 'DELETE SAVED KEYS', force: true },
+    null,
+  ],
+  // The key fields are trimmed; limits default to DEFAULT_LIVE_LIMITS and remember to false.
+  OkxConnect: [
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE' },
+    { apiKey: '  k  ', secretKey: '\ts\n', passphrase: ' p ', name: ' Main ', environment: 'OKX_DEMO', remember: true },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', limits: exoticLimits },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', limits: { ...exoticLimits, maxLeverage: 0.5, maxOpenPositions: 1.5, maxNotional: 0 } },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', limits: { ...exoticLimits, extra: 1 } },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', limits: {} },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', limits: null },
+    { ...okxKey, name: 'OKX', environment: 'PAPER' },
+    { ...okxKey, name: 'OKX', environment: 'okx_live' },
+    { ...okxKey, name: '', environment: 'OKX_LIVE' },
+    { ...okxKey, name: 'x'.repeat(61), environment: 'OKX_LIVE' },
+    { ...okxKey, apiKey: '   ', name: 'OKX', environment: 'OKX_LIVE' },
+    { ...okxKey, secretKey: 's'.repeat(201), name: 'OKX', environment: 'OKX_LIVE' },
+    { ...okxKey, passphrase: 7, name: 'OKX', environment: 'OKX_LIVE' },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', remember: 'yes' },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', permissions: 'trade' },
+    { name: 'OKX', environment: 'OKX_LIVE' },
+    {},
+    null,
+    [],
+  ],
+  Arm: [
+    { confirmation: 'TRADE REAL MONEY' },
+    { confirmation: ' TRADE REAL MONEY ' },
+    { confirmation: '' },
+    { confirmation: 'x'.repeat(100) },
+    { confirmation: 'x'.repeat(101) },
+    { confirmation: 1 },
+    {},
+    { confirmation: 'TRADE REAL MONEY', force: true },
+    null,
   ],
 };
 

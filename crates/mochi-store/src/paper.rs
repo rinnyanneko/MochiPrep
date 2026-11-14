@@ -29,6 +29,20 @@ impl SqlitePaperStore {
         &self.conn
     }
 
+    /// Node's `saveAccountProfile`: the name, initial balance and live limits, the columns an
+    /// exchange connect changes. The limits are written as `JSON.stringify` writes them.
+    pub fn save_account_profile(&self, a: &PaperAccount) -> Result<(), StoreFailure> {
+        self.run(
+            "UPDATE accounts SET name=?, initial_balance=?, live_limits=? WHERE id=?",
+            params![
+                a.name,
+                a.initial_balance,
+                limits_text(&a.live_limits)?,
+                a.id
+            ],
+        )
+    }
+
     fn exec(&self, sql: &str) -> Result<(), StoreFailure> {
         self.conn.execute_batch(sql).map_err(failure)
     }
@@ -502,9 +516,10 @@ impl PaperStore for SqlitePaperStore {
         source: DataSource,
         symbol: &str,
     ) -> Result<Vec<Order>, StoreFailure> {
+        // Paper accounts only: an OKX account's OPEN rows are OKX's to settle, never the simulator's.
         self.query(
             "SELECT o.* FROM orders o JOIN accounts a ON a.id=o.account_id
-             WHERE o.status='OPEN' AND o.symbol=? AND a.source=? ORDER BY o.created_at, o.rowid",
+             WHERE o.status='OPEN' AND o.symbol=? AND a.source=? AND a.venue='PAPER' ORDER BY o.created_at, o.rowid",
             [symbol, enum_text(&source).as_str()],
             to_order,
         )
@@ -627,9 +642,10 @@ impl PaperStore for SqlitePaperStore {
         source: DataSource,
         symbol: &str,
     ) -> Result<Vec<Position>, StoreFailure> {
+        // Paper accounts only, as with orders: the simulator never funds or liquidates an OKX account.
         self.query(
             "SELECT p.* FROM positions p JOIN accounts a ON a.id=p.account_id
-             WHERE p.status='OPEN' AND p.symbol=? AND a.source=?",
+             WHERE p.status='OPEN' AND p.symbol=? AND a.source=? AND a.venue='PAPER'",
             [symbol, enum_text(&source).as_str()],
             to_position,
         )

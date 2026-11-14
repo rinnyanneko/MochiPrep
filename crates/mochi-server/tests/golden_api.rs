@@ -272,10 +272,11 @@ async fn new_account(state: &AppState) -> String {
     account["id"].as_str().unwrap().to_string()
 }
 
-fn not_available() -> (u16, Value) {
+/// Node's `execution(id)` for an exchange account with no OKX session.
+fn not_connected() -> (u16, Value) {
     (
-        501,
-        json!({ "error": "Not available in the Rust backend yet" }),
+        400,
+        json!({ "error": "Main is not connected to OKX. Enter its API key in Settings." }),
     )
 }
 
@@ -306,7 +307,7 @@ async fn an_account_that_agents_use_cannot_be_deleted() {
 }
 
 #[tokio::test]
-async fn exchange_accounts_read_but_do_not_trade_yet() {
+async fn exchange_accounts_without_a_session_read_but_cannot_trade() {
     let state = short_tape_state();
     let id = new_account(&state).await;
     let order = |client: &str, kind: &str, price: Value| {
@@ -362,10 +363,9 @@ async fn exchange_accounts_read_but_do_not_trade_yet() {
             format!("/api/positions/{id}/BTCUSDT/protection"),
             Some(json!({ "stopLoss": null, "takeProfit": null })),
         ),
-        ("DELETE", format!("/api/accounts/{id}"), None),
     ] {
         let answer = send(&state, method, &path, body).await;
-        assert_eq!(answer, not_available(), "{method} {path}");
+        assert_eq!(answer, not_connected(), "{method} {path}");
     }
 
     // Node's read models for a disconnected exchange account: no positions, no local audit,
@@ -398,6 +398,11 @@ async fn exchange_accounts_read_but_do_not_trade_yet() {
         answer,
         (400, json!({ "error": "Exchange accounts cannot be reset" }))
     );
+    // Deleting disconnects first (nothing to disconnect here), then removes its rows.
+    let answer = send(&state, "DELETE", &format!("/api/accounts/{id}"), None).await;
+    assert_eq!(answer, (200, json!({ "ok": true })));
+    let (_, accounts) = send(&state, "GET", "/api/accounts", None).await;
+    assert_eq!(accounts, json!([]));
     state.runtime.shutdown().await;
 }
 

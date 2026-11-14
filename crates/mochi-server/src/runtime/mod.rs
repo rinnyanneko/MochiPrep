@@ -1,7 +1,7 @@
 //! The runtime: one task that owns the paper engine, the replay tape, the live feed handle, the
-//! settings, agent futures, provider keys and the instrument registry. Slow analysis leaves
-//! the actor with owned snapshots and returns for current-state risk checks. OKX execution
-//! and vault mutation remain for Plan 5.
+//! settings, agent futures, provider keys, the master password's data key and the instrument
+//! registry, and the OKX sessions. Slow analysis, key derivation and OKX requests leave the actor
+//! with owned snapshots and return to apply their result.
 //!
 //! Routes reach it through [`RuntimeHandle`]: every method sends a message to that one task and
 //! awaits the answer. The engine is synchronous and not `Sync`, so this way it is only ever used
@@ -9,6 +9,13 @@
 
 mod agent_cycle;
 mod agent_execution;
+mod exchange;
+mod exchange_sync;
+mod execution;
+pub use exchange::{ExchangeStatus, ARM_PHRASE};
+pub use execution::{
+    ExecutionEngine, ExecutionTarget, OkxOptions, ProtectionFailure, ProtectionMeta,
+};
 mod ai_api;
 pub use agent_execution::effective_risk;
 pub mod agents;
@@ -19,6 +26,8 @@ pub mod redact;
 pub mod replay_clock;
 mod scheduling;
 pub use scheduling::DemoAction;
+mod vault;
+pub use vault::{UnlockOutcome, VAULT_RESET_PHRASE};
 
 use std::fmt::Display;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -41,6 +50,7 @@ use mochi_store::{
     delete_instrument, get_setting, has_vault, list_instruments, rows, save_instrument,
     set_setting, SqlitePaperStore, StoreError,
 };
+use mochi_vault::{KdfParams, DEFAULT_KDF};
 use rusqlite::Connection;
 use serde::{Serialize, Serializer};
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -84,6 +94,11 @@ pub struct RuntimeOptions {
     /// Headlines for `/api/news`, fetched outside the runtime task.
     pub news: NewsService,
     pub provider_factory: Option<agents::ProviderFactory>,
+    /// The scrypt cost for new password wraps. Tests use a cheap one; a stored wrap always
+    /// carries its own cost, so this never affects unlocking.
+    pub kdf: KdfParams,
+    /// How OKX private trading is reached.
+    pub okx: OkxOptions,
 }
 
 impl RuntimeOptions {
@@ -98,6 +113,8 @@ impl RuntimeOptions {
             live_statuses: None,
             news: NewsService::with_transport(Arc::new(OfflineNews), Arc::new(unix_ms)),
             provider_factory: None,
+            kdf: DEFAULT_KDF,
+            okx: OkxOptions::default(),
         }
     }
 
@@ -114,6 +131,8 @@ impl RuntimeOptions {
             live_statuses,
             news: NewsService::new(),
             provider_factory: None,
+            kdf: DEFAULT_KDF,
+            okx: OkxOptions::default(),
         }
     }
 }
@@ -161,20 +180,24 @@ impl RuntimeHandle {
             quotes: options.live_quotes,
             statuses: options.live_statuses,
         };
-        let runtime = Runtime::open(
+        let mut runtime = Runtime::open(
             options.db,
             options.replay_minutes,
             options.live,
             options.news,
             options.provider_factory,
+            options.kdf,
+            options.okx,
         )?;
         let events = runtime.events.sender();
         let (commands, inbox) = mpsc::channel(COMMAND_QUEUE);
+        let handle = RuntimeHandle { commands, events };
+        runtime.handle = Some(handle.downgrade());
         // After the added pairs are tracked, so the first subscribe covers them (Node's
         // `runtime.start()` after the constructor).
         runtime.live.start();
         tokio::spawn(run(runtime, inbox, live));
-        Ok(RuntimeHandle { commands, events })
+        Ok(handle)
     }
 
     /// Every event from now on. A receiver that falls behind skips the oldest events.
@@ -291,6 +314,19 @@ pub struct Runtime {
     last_live_equity_at: Option<Instant>,
     /// Set by `shutdown`; the task stops after the current message.
     stopping: Option<oneshot::Sender<()>>,
+    vault: vault::VaultState,
+    /// Connected exchange accounts by account id. Memory only: a restart forgets them.
+    exchanges: std::collections::HashMap<String, execution::ExchangeSession>,
+    okx: OkxOptions,
+    /// The task's own handle, weak so that work it owns never keeps it alive. Set by `start`.
+    handle: Option<execution::WeakRuntimeHandle>,
+    /// Work out on the network that ends with something for the task to run.
+    tasks:
+        futures_util::stream::FuturesUnordered<futures_util::future::BoxFuture<'static, Command>>,
+    /// When the live tick last synced the exchange accounts; `None` syncs on the first tick.
+    last_exchange_sync_at: Option<Instant>,
+    /// A live tick waiting on its exchange sync: later ticks are skipped until it is done.
+    live_ticking: bool,
 }
 
 /// The data behind a poisoned lock is still consistent here: nothing panics halfway through
@@ -315,6 +351,8 @@ impl Runtime {
         live: Arc<dyn LiveFeed>,
         news: NewsService,
         provider_factory: Option<agents::ProviderFactory>,
+        kdf: KdfParams,
+        okx: OkxOptions,
     ) -> Result<Self, StartError> {
         let replay = Arc::new(Mutex::new(ReplayMarketData::new(replay_minutes)?));
         let engine_events: Arc<Mutex<Vec<EngineEvent>>> = Arc::default();
@@ -365,6 +403,13 @@ impl Runtime {
             last_replay_equity_at: 0,
             last_live_equity_at: None,
             stopping: None,
+            vault: vault::VaultState::new(kdf),
+            exchanges: Default::default(),
+            okx,
+            handle: None,
+            tasks: Default::default(),
+            last_exchange_sync_at: None,
+            live_ticking: false,
         };
 
         // The mock provider the demo needs, if this database does not have it yet.
@@ -406,7 +451,8 @@ impl Runtime {
         self.engine.store().connection()
     }
 
-    /// Every loaded AI key and saved gateway header value, including invalid provider rows.
+    /// Every loaded AI key and saved gateway header value, including invalid provider rows, then
+    /// each OKX session's key, secret and passphrase (Node's `secrets()` order).
     pub fn secrets(&self) -> Vec<String> {
         let mut secrets: Vec<_> = self.agents.keys.values().cloned().collect();
         // Invalid provider metadata must not hide otherwise valid saved gateway credentials.
@@ -423,6 +469,9 @@ impl Runtime {
                     }
                 }
             }
+        }
+        for session in self.exchanges.values() {
+            secrets.extend(session.secrets.iter().map(|s| s.to_string()));
         }
         secrets
     }
@@ -493,8 +542,8 @@ impl Runtime {
         Ok(())
     }
 
-    /// Node's `removeInstrument`, refusals in its order. An exchange account has no session in
-    /// this backend, so, as in Node while disconnected, it has no positions to check.
+    /// Node's `removeInstrument`, refusals in its order. Positions are Node's `positionsOf`: a
+    /// connected exchange account's from its last sync, none for a disconnected one.
     pub fn remove_instrument(&mut self, symbol: &str) -> Result<(), ApiError> {
         if DEFAULT_SYMBOLS.contains(&symbol) {
             return Err(ApiError::bad_request(format!("{symbol} is built in")));
@@ -510,16 +559,26 @@ impl Runtime {
         }
         let store = self.engine.store();
         for account in store.list_accounts().map_err(|e| self.api_error(e))? {
-            if account.venue == AccountVenue::Paper {
-                let positions = store
+            let held = if account.venue == AccountVenue::Paper {
+                store
                     .list_open_positions(&account.id)
-                    .map_err(|e| self.api_error(e))?;
-                if positions.iter().any(|p| p.symbol == symbol) {
-                    return Err(ApiError::bad_request(format!(
-                        "{} has an open {symbol} position",
-                        account.name
-                    )));
-                }
+                    .map_err(|e| self.api_error(e))?
+                    .iter()
+                    .any(|p| p.symbol == symbol)
+            } else {
+                self.exchange_session(&account.id).is_some_and(|session| {
+                    session
+                        .engine
+                        .positions()
+                        .iter()
+                        .any(|p| p.position.symbol == symbol)
+                })
+            };
+            if held {
+                return Err(ApiError::bad_request(format!(
+                    "{} has an open {symbol} position",
+                    account.name
+                )));
             }
             let orders = store
                 .list_open_orders(&account.id)
@@ -549,15 +608,21 @@ impl Runtime {
             .ok_or_else(|| ApiError::not_found("Unknown account"))
     }
 
-    /// Node's `balanceOf`: a read model that never fails for a missing exchange session. An
-    /// exchange account has no session in this backend yet, so it shows its last equity point,
-    /// or its initial balance before it has one, exactly as Node does while disconnected.
+    /// Node's `balanceOf`: a read model that never fails for a missing exchange session. A
+    /// connected exchange account shows its last synced balance; otherwise it shows its last
+    /// equity point, or its initial balance before it has one, as Node does while disconnected.
     pub fn balance_of(&self, account: &PaperAccount) -> Result<AccountBalance, ApiError> {
         if account.venue == AccountVenue::Paper {
             return self
                 .engine
                 .balance_of(&account.id)
                 .map_err(|e| self.api_error(e));
+        }
+        if let Some(balance) = self
+            .exchange_session(&account.id)
+            .and_then(|session| session.engine.cached_balance())
+        {
+            return Ok(balance);
         }
         let point = self
             .engine
@@ -663,17 +728,6 @@ impl Runtime {
         vec![replay, self.live.status()]
     }
 
-    /// Nothing in this backend unlocks a vault yet, so one that exists is LOCKED.
-    pub fn vault_status(&self) -> Result<VaultStatus, ApiError> {
-        Ok(
-            if has_vault(self.connection()).map_err(|e| self.api_error(e))? {
-                VaultStatus::Locked
-            } else {
-                VaultStatus::Off
-            },
-        )
-    }
-
     /// Assemble state from the actor-owned database and feeds without inventing missing data.
     pub fn state(&self) -> Result<StateBody, ApiError> {
         let demo = get_setting::<serde_json::Value>(self.connection(), "demo.active")
@@ -744,8 +798,9 @@ impl Runtime {
         self.events.emit_live_quote(quote);
     }
 
-    /// Agent scheduling ticks each second; equity sampling has its own 60 s cadence.
-    fn live_tick(&mut self) {
+    /// The rest of the live tick, after any exchange sync: agent scheduling each second, and
+    /// equity sampling on its own 60 s cadence.
+    pub(super) fn after_live_sync(&mut self) {
         if let Err(error) = self.tick_agents(DataSource::Live) {
             self.emit(ServerEvent::Toast {
                 level: ToastLevel::Error,
@@ -843,6 +898,8 @@ enum Wake {
     LiveStatusesClosed,
     LiveTick,
     Agent(Box<agent_cycle::Completion>),
+    /// Network work done; what it returned runs on the task.
+    Task(Command),
 }
 
 /// What the live feed sends the runtime task.
@@ -875,6 +932,7 @@ async fn run(mut runtime: Runtime, mut inbox: mpsc::Receiver<Command>, mut live:
             },
             _ = live_tick.tick() => Wake::LiveTick,
             Some(completion) = futures_util::StreamExt::next(&mut runtime.agents.pending), if !runtime.agents.pending.is_empty() => Wake::Agent(Box::new(completion)),
+            Some(work) = futures_util::StreamExt::next(&mut runtime.tasks), if !runtime.tasks.is_empty() => Wake::Task(work),
         };
         let cycle = match &wake {
             Wake::Agent(completion) => Some(completion.identity()),
@@ -900,6 +958,7 @@ async fn run(mut runtime: Runtime, mut inbox: mpsc::Receiver<Command>, mut live:
             }
             Wake::LiveTick => Box::new(Runtime::live_tick),
             Wake::Agent(completion) => Box::new(move |r| r.complete_cycle(*completion)),
+            Wake::Task(work) => work,
         };
         // A panic fails only this piece of work, as a thrown error fails one request in Node;
         // the task, and with it live paper trading, carries on. Unwind safety: the store rolls

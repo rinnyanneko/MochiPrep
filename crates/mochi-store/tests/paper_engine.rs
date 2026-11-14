@@ -156,3 +156,84 @@ fn refuses_a_zero_funding_interval_instead_of_looping() {
         .recv_timeout(std::time::Duration::from_secs(20))
         .expect("engine looped or panicked on a zero funding interval");
 }
+
+/// An OKX account (source LIVE, as the connect path creates it) shares the paper tables, but its
+/// OPEN rows are OKX's to settle: a live quote through the paper engine must leave them alone.
+#[test]
+fn never_touches_the_open_orders_of_an_okx_account_on_a_live_quote() {
+    use mochi_core::paper::PaperStore;
+    use mochi_domain::{
+        default_account_config, default_live_limits, AccountVenue, Order, PaperAccount,
+    };
+
+    let mut engine = PaperExecutionEngine::new(PaperEngineDeps {
+        store: SqlitePaperStore::new(open_in_memory().unwrap()),
+        instruments: Instruments::with_defaults(),
+        get_quote: Box::new(|_, _| None),
+        now: Box::new(|_| 3_600_000),
+        new_id: Box::new(|prefix| format!("{prefix}_1")),
+        on_event: Box::new(|_| {}),
+    });
+    engine
+        .store()
+        .insert_account(&PaperAccount {
+            id: "acct_okx".into(),
+            name: "OKX".into(),
+            source: DataSource::Live,
+            venue: AccountVenue::OkxLive,
+            exchange_uid: Some("42".into()),
+            live_limits: Some(default_live_limits()),
+            is_demo: false,
+            initial_balance: "1000".into(),
+            wallet_balance: "0".into(),
+            used_margin: "0".into(),
+            realized_pnl: "0".into(),
+            fees_paid: "0".into(),
+            funding_paid: "0".into(),
+            config: default_account_config(),
+            created_at: 3_600_000,
+        })
+        .unwrap();
+    let row = |id: &str, fields: serde_json::Value| -> Order {
+        let mut base = json!({
+            "id": id, "accountId": "acct_okx", "clientOrderId": id, "symbol": "BTCUSDT",
+            "side": "BUY", "type": "LIMIT", "quantity": "0.001", "price": null,
+            "triggerPrice": null, "leverage": 3, "reduceOnly": false, "closePosition": false,
+            "status": "OPEN", "filledQuantity": "0", "avgFillPrice": null, "reservedMargin": "0",
+            "attachedStopLoss": null, "attachedTakeProfit": null, "trailingKind": null,
+            "trailingCallback": null, "trailingActivationPrice": null, "trailingExtreme": null,
+            "attachedTrailingStop": null, "rejectReason": null, "exchangeOrderId": null,
+            "agentId": null, "decisionId": null, "createdAt": 3_600_000, "updatedAt": 3_600_000,
+        });
+        for (key, value) in fields.as_object().unwrap() {
+            base[key] = value.clone();
+        }
+        serde_json::from_value(base).unwrap()
+    };
+    let store = engine.store();
+    store
+        .insert_order(&row("ord_limit", json!({ "price": "105" })))
+        .unwrap();
+    store
+        .insert_order(&row(
+            "ord_entry:sl",
+            json!({ "side": "SELL", "type": "STOP_MARKET", "triggerPrice": "90",
+                    "reduceOnly": true, "closePosition": true }),
+        ))
+        .unwrap();
+    let mut live = quote("BTCUSDT", "100");
+    live.source = DataSource::Live;
+    live.bid = "99".into();
+    live.ask = "101".into();
+    engine.on_quote(&live).unwrap();
+
+    let store = engine.store();
+    for id in ["ord_limit", "ord_entry:sl"] {
+        let order = store.get_order(id).unwrap().unwrap();
+        assert_eq!(order.status, OrderStatus::Open, "{id}");
+        assert_eq!(order.reject_reason, None, "{id}");
+    }
+    assert!(store.list_ledger("acct_okx", None).unwrap().is_empty());
+    assert!(store.list_fills("acct_okx", 10).unwrap().is_empty());
+    assert!(store.list_open_positions("acct_okx").unwrap().is_empty());
+}

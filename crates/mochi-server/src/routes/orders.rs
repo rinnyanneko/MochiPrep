@@ -1,6 +1,6 @@
 //! Orders and positions (`app.ts` "orders"). Node sends these through `runtime.execution(id)`,
-//! the paper engine or an OKX session; OKX trading is not ported, so an exchange account
-//! answers 501 at the point where Node would pick its OKX engine.
+//! the paper engine or an OKX session, and so does this: through the `ExecutionEngine` trait. An
+//! exchange account with no session says it is not connected, as Node does.
 //!
 //! An order the engine refuses is not an HTTP error: it comes back as a REJECTED order in the
 //! result, with the reason, as in Node.
@@ -17,11 +17,11 @@ use axum::http::HeaderMap;
 use axum::routing::{delete, post, put};
 use axum::{Json, Router};
 use mochi_core::paper::PaperStore;
-use mochi_domain::{AccountVenue, OrderRequest, PaperAccount, Topic};
+use mochi_domain::{OrderRequest, Topic};
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
-use crate::runtime::Runtime;
+use crate::runtime::ProtectionMeta;
 use crate::validate::{self, ClosePositionInput, ProtectionInput, Schema};
 use crate::AppState;
 
@@ -36,19 +36,6 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-/// Node's `runtime.execution(id)`: only paper accounts trade here for now.
-fn paper_only(account: &PaperAccount) -> Result<(), ApiError> {
-    if account.venue == AccountVenue::Paper {
-        Ok(())
-    } else {
-        Err(ApiError::not_available())
-    }
-}
-
-fn to_json(runtime: &Runtime, value: impl serde::Serialize) -> Result<Value, ApiError> {
-    serde_json::to_value(value).map_err(|e| runtime.api_error(e))
-}
-
 async fn place(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -56,26 +43,30 @@ async fn place(
 ) -> Result<Json<Value>, ApiError> {
     let body = validate::read_body(&headers, &body)?;
     let input: OrderRequest = validate::parse_input(Schema::PlaceOrder, body.as_ref())?;
-    let result = state
+    let (account_id, symbol) = (input.account_id.clone(), input.symbol.clone());
+    let target = state
         .runtime
         .call(move |runtime| {
-            let account = runtime.require_account(&input.account_id)?;
-            runtime.assert_tradable(&input.symbol, account.source)?;
-            paper_only(&account)?;
-            let result = runtime
-                .engine_mut()
-                .place_order(input)
-                .map_err(|e| runtime.api_error(e))?;
-            runtime.invalidate(&[
-                Topic::Accounts,
-                Topic::Orders,
-                Topic::Positions,
-                Topic::Arena,
-            ]);
-            to_json(runtime, result)
+            let account = runtime.require_account(&account_id)?;
+            runtime.assert_tradable(&symbol, account.source)?;
+            runtime.execution(&account)
         })
         .await??;
-    Ok(Json(result))
+    let result = state.runtime.engine_for(target).place_order(input).await?;
+    state.runtime.invalidate(TRADED).await?;
+    Ok(Json(to_json(result)?))
+}
+
+/// What an order, fill or close can change.
+const TRADED: &[Topic] = &[
+    Topic::Accounts,
+    Topic::Orders,
+    Topic::Positions,
+    Topic::Arena,
+];
+
+fn to_json(value: impl serde::Serialize) -> Result<Value, ApiError> {
+    serde_json::to_value(value).map_err(|e| ApiError::bad_request(e.to_string()))
 }
 
 async fn cancel(
@@ -85,28 +76,28 @@ async fn cancel(
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
     validate::read_body(&headers, &body)?;
-    state
+    let order_id = id.clone();
+    let target = state
         .runtime
         .call(move |runtime| {
             let order = runtime
                 .engine()
                 .store()
-                .get_order(&id)
+                .get_order(&order_id)
                 .map_err(|e| runtime.api_error(e))?
                 .ok_or_else(|| ApiError::not_found("Unknown order"))?;
             // Node's `execution()` says "Unknown account" (400) when the order's account is gone.
             let account = runtime
                 .require_account(&order.account_id)
                 .map_err(|e| ApiError::bad_request(e.message()))?;
-            paper_only(&account)?;
-            runtime
-                .engine_mut()
-                .cancel_order(&order.id)
-                .map_err(|e| runtime.api_error(e))?;
-            runtime.invalidate(&[Topic::Accounts, Topic::Orders]);
-            Ok::<_, ApiError>(())
+            runtime.execution(&account)
         })
         .await??;
+    state.runtime.engine_for(target).cancel_order(id).await?;
+    state
+        .runtime
+        .invalidate(&[Topic::Accounts, Topic::Orders])
+        .await?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -119,25 +110,12 @@ async fn close(
     let body = validate::read_body(&headers, &body)?;
     let input: ClosePositionInput = validate::parse_input(Schema::ClosePosition, body.as_ref())?;
     let symbol = validate::parse_symbol(&symbol)?;
-    let result = state
-        .runtime
-        .call(move |runtime| {
-            let account = runtime.require_account(&account_id)?;
-            paper_only(&account)?;
-            let result = runtime
-                .engine_mut()
-                .close_position(&account_id, &symbol, input.fraction, &input.client_order_id)
-                .map_err(|e| runtime.api_error(e))?;
-            runtime.invalidate(&[
-                Topic::Accounts,
-                Topic::Orders,
-                Topic::Positions,
-                Topic::Arena,
-            ]);
-            to_json(runtime, result)
-        })
-        .await??;
-    Ok(Json(result))
+    let engine = state.runtime.execution(&account_id).await?;
+    let result = engine
+        .close_position(account_id, symbol, input.fraction, input.client_order_id)
+        .await?;
+    state.runtime.invalidate(TRADED).await?;
+    Ok(Json(to_json(result)?))
 }
 
 async fn protection(
@@ -149,41 +127,41 @@ async fn protection(
     let body = validate::read_body(&headers, &body)?;
     let input: ProtectionInput = validate::parse_input(Schema::Protection, body.as_ref())?;
     let symbol = validate::parse_symbol(&symbol)?;
-    let answer = state
+    let engine = state.runtime.execution(&account_id).await?;
+    // An absent trailingStop keeps the current one, so a client that only edits SL/TP cannot
+    // drop it; an explicit null removes it.
+    let trailing_stop = match input.trailing_stop {
+        Some(trailing_stop) => trailing_stop,
+        None => {
+            engine
+                .protection_of(account_id.clone(), symbol.clone())
+                .await?
+                .trailing_stop
+        }
+    };
+    let protection = mochi_domain::Protection {
+        stop_loss: input.stop_loss,
+        take_profit: input.take_profit,
+        trailing_stop,
+    };
+    let meta = ProtectionMeta {
+        client_order_id: format!("manual:{}", uuid::Uuid::new_v4()),
+        agent_id: None,
+        decision_id: None,
+    };
+    // A refusal reaches the client as a 400 with its reason.
+    let result = engine
+        .set_protection(account_id, symbol, protection, meta)
+        .await
+        .map_err(|failure| failure.error)?;
+    state
         .runtime
-        .call(move |runtime| {
-            let account = runtime.require_account(&account_id)?;
-            paper_only(&account)?;
-            // An absent trailingStop keeps the current one, so a client that only edits SL/TP
-            // cannot drop it; an explicit null removes it.
-            let trailing_stop = match input.trailing_stop {
-                Some(trailing_stop) => trailing_stop,
-                None => {
-                    runtime
-                        .engine()
-                        .protection_of(&account_id, &symbol)
-                        .map_err(|e| runtime.api_error(e))?
-                        .trailing_stop
-                }
-            };
-            let protection = mochi_domain::Protection {
-                stop_loss: input.stop_loss,
-                take_profit: input.take_profit,
-                trailing_stop,
-            };
-            // A refusal reaches the client as a 400 with its reason.
-            let result = runtime
-                .engine_mut()
-                .set_protection(&account_id, &symbol, &protection)
-                .map_err(|e| runtime.api_error(e))?;
-            runtime.invalidate(&[Topic::Orders, Topic::Positions]);
-            Ok::<_, ApiError>(json!({
-                "ok": true,
-                "pending": result.pending,
-                "before": to_json(runtime, &result.before)?,
-                "after": to_json(runtime, &result.after)?,
-            }))
-        })
-        .await??;
-    Ok(Json(answer))
+        .invalidate(&[Topic::Orders, Topic::Positions])
+        .await?;
+    Ok(Json(json!({
+        "ok": true,
+        "pending": result.pending,
+        "before": to_json(&result.before)?,
+        "after": to_json(&result.after)?,
+    })))
 }

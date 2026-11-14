@@ -112,8 +112,8 @@ pub fn list_agents(conn: &Connection) -> Result<Vec<Agent>, StoreError> {
 }
 
 /// `providerViews()`. `has_vault` decides what "has a key" means: Node loads plaintext keys at
-/// start only when no master password is set, and this backend never unlocks one, so with a
-/// vault only the mock provider (which needs none) has a key.
+/// start only when no master password is set, so with a vault only the mock provider (which
+/// needs none) has a key here. While unlocked the runtime marks the keys it has loaded.
 pub fn list_provider_views(
     conn: &Connection,
     has_vault: bool,
