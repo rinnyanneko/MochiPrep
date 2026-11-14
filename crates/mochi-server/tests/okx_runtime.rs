@@ -1192,6 +1192,37 @@ async fn pauses_agents_and_refuses_orders_when_sync_with_okx_is_lost() {
     w.rt.shutdown().await;
 }
 
+#[tokio::test]
+async fn a_disarmed_real_account_can_still_exit_while_sync_with_okx_is_lost() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    assert_eq!(w.place(&account.id).await["order"]["status"], "FILLED");
+    w.rt.sync_exchanges().await.unwrap();
+    w.rt.call(|r| r.disarm(None)).await.unwrap();
+    // Only the sync's reads fail: OKX is back before the exit, but the engine stays unhealthy
+    // until the next sync succeeds.
+    w.okx.state().down = true;
+    w.rt.sync_exchanges().await.unwrap();
+    w.okx.state().down = false;
+    assert_eq!(w.statuses().await[0]["healthy"], false);
+    assert_eq!(w.statuses().await[0]["armed"], false);
+    let placed = w.placed();
+    let engine = w.rt.execution(&account.id).await.unwrap();
+    let result = engine
+        .close_position(account.id.clone(), "BTCUSDT".into(), 1.0, "exit-1".into())
+        .await
+        .unwrap();
+    let result = serde_json::to_value(result).unwrap();
+    assert_eq!(w.placed(), placed + 1, "{result}");
+    assert_eq!(result["order"]["status"], "FILLED", "{result}");
+    assert!(!result["order"]["rejectReason"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("EXCHANGE_NOT_SYNCED"));
+    w.rt.shutdown().await;
+}
+
 /// The live tick syncs every 5 s: a lost sync pauses agents without anyone calling it.
 #[tokio::test(start_paused = true)]
 async fn the_live_tick_syncs_every_five_seconds() {
@@ -1239,6 +1270,56 @@ async fn stop_all_disarms_real_accounts_through_the_api() {
     w.arm(&account.id, ARM_PHRASE).await.unwrap();
     let (status, _) = w.send("POST", "/api/agents/stop-all", None).await;
     assert_eq!(status, 200);
+    assert_eq!(w.statuses().await[0]["armed"], false);
+    w.rt.shutdown().await;
+}
+
+/// Makes every account read fail with a store error, then undoes it.
+async fn accounts_unreadable(w: &World, unreadable: bool) {
+    let sql = if unreadable {
+        "ALTER TABLE accounts RENAME TO accounts_unreadable"
+    } else {
+        "ALTER TABLE accounts_unreadable RENAME TO accounts"
+    };
+    w.rt.call(move |r| r.connection().execute_batch(sql).unwrap())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn disarm_needs_no_account_read_so_a_store_error_cannot_leave_real_money_armed() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    for wanted in [Some(account.id.clone()), None] {
+        w.arm(&account.id, ARM_PHRASE).await.unwrap();
+        accounts_unreadable(&w, true).await;
+        let probe = account.id.clone();
+        let read =
+            w.rt.call(move |r| r.engine().store().get_account(&probe).is_err())
+                .await
+                .unwrap();
+        assert!(
+            read,
+            "the account read must fail for this test to mean anything"
+        );
+        w.rt.call(move |r| r.disarm(wanted.as_deref()))
+            .await
+            .unwrap();
+        accounts_unreadable(&w, false).await;
+        assert_eq!(w.statuses().await[0]["armed"], false);
+    }
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn stop_all_disarms_real_accounts_even_when_the_account_read_fails() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    accounts_unreadable(&w, true).await;
+    let (status, body) = w.send("POST", "/api/agents/stop-all", None).await;
+    accounts_unreadable(&w, false).await;
+    assert_eq!(status, 200, "{body}");
     assert_eq!(w.statuses().await[0]["armed"], false);
     w.rt.shutdown().await;
 }

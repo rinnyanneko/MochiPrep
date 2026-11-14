@@ -368,11 +368,9 @@ impl Runtime {
             if account_id.is_some_and(|wanted| wanted != id) {
                 continue;
             }
-            let live = matches!(
-                self.engine().store().get_account(id),
-                Ok(Some(account)) if account.venue == AccountVenue::OkxLive
-            );
-            if live {
+            // The venue is fixed for the session's life, so this needs no store read: a read that
+            // failed would leave real money armed.
+            if session.engine.venue() == Venue::OkxLive {
                 session.armed.store(false, Ordering::SeqCst);
             }
         }

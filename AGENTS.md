@@ -28,7 +28,7 @@ Needs Node >= 22.13 (`node:sqlite`). Workspace packages export TypeScript source
 
 ## Rust backend (in progress)
 
-- Crates live under `crates/`: `mochi-decimal`, `mochi-domain`, `mochi-core`, `mochi-store`, `mochi-vault`, `mochi-market`, `mochi-ai`, `mochi-server`.
+- Crates live under `crates/`: `mochi-decimal`, `mochi-domain`, `mochi-core`, `mochi-store`, `mochi-vault`, `mochi-market`, `mochi-ai`, `mochi-okx` (the signed OKX client and `OkxEngine`, plus a fake OKX for tests behind the `fake` feature; real money: see docs/OKX_TRADING.md), `mochi-server`.
 - `mochi-server` is a Rust HTTP server with the Node API's auth, SSE `/api/events` and web UI. It serves paper trading, replay, market data (replay plus the live OKX public feed), instruments, news, AI providers, agents, suggestions, demo mode, the master-password vault (enable, unlock, change, disable, reset) and OKX trading (connect, arming, sync, exchange protection, reconnect on unlock). Run it with `cargo run -p mochi-server` (same `MOCHIPREP_*` variables and default port as Node; it embeds `apps/web/dist`, so `pnpm build` first if you want the UI). `pnpm test:e2e:rust` builds the release binary and runs Playwright against it.
 - It is NOT the default backend: `pnpm dev`, `pnpm start` and `pnpm test:e2e` still run Node. No route answers 501 any more. No Rust OKX path has run against real OKX Demo yet, only against an in-process fake OKX; the owner's Demo test of the UNCONFIRMED list in `docs/OKX_TRADING.md` comes before any switch-over.
 - `MOCHIPREP_OFFLINE=1` is Rust-only: no OKX public feed and no news fetching (the replay still runs). The e2e config sets it.

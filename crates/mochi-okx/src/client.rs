@@ -295,17 +295,26 @@ pub trait Transport: Send + Sync {
 /// The real network: rustls over the Mozilla root store, no proxy, 8 s per request.
 pub struct NetTransport {
     client: reqwest::Client,
+    timeout: Duration,
 }
 
 impl NetTransport {
     pub fn new() -> Self {
+        Self::with_timeout(Duration::from_millis(TIMEOUT_MS))
+    }
+
+    /// Tests shorten the deadline so a stalled loopback server fails fast.
+    pub(crate) fn with_timeout(timeout: Duration) -> Self {
         let client = reqwest::Client::builder()
             .use_preconfigured_tls(tls_config())
             // Node's fetch ignores proxy variables; so does this.
             .no_proxy()
+            // The OKX API never redirects, and a redirect must not carry the OK-ACCESS-* headers
+            // to another host.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("an HTTP client with a preconfigured TLS config always builds");
-        NetTransport { client }
+        NetTransport { client, timeout }
     }
 }
 
@@ -327,8 +336,9 @@ impl Transport for NetTransport {
             builder = builder.body(body.clone());
         }
         drop(request);
+        let timeout = self.timeout;
         Box::pin(async move {
-            let deadline = tokio::time::Instant::now() + Duration::from_millis(TIMEOUT_MS);
+            let deadline = tokio::time::Instant::now() + timeout;
             // Node's undici says only "fetch failed", and so does this: the cause can carry the
             // URL or a header, and the text must never carry a credential.
             let response = match tokio::time::timeout_at(deadline, builder.send()).await {
@@ -744,4 +754,114 @@ fn rows(data: Vec<Value>) -> Result<Vec<Row>, OkxError> {
             )),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod net_tests {
+    //! `NetTransport` against loopback servers only: these never contact OKX.
+
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    const SHORT: Duration = Duration::from_millis(300);
+    /// Far beyond `SHORT`, so a deadline that does not hold fails the test instead of hanging it.
+    const GUARD: Duration = Duration::from_secs(5);
+
+    fn client(base: String) -> OkxClient {
+        let transport = Arc::new(NetTransport::with_timeout(SHORT));
+        OkxClient::new(Credentials::new("k", "s", "p"), Venue::OkxLive, transport)
+            .with_base_url(base)
+    }
+
+    async fn read_request_head(socket: &mut TcpStream) {
+        let mut head = Vec::new();
+        let mut buffer = [0u8; 1024];
+        while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+            let read = socket.read(&mut buffer).await.expect("read the request");
+            assert!(read > 0, "the client closed before sending its request");
+            head.extend_from_slice(&buffer[..read]);
+        }
+    }
+
+    async fn get_config(base: String) -> Result<Row, OkxError> {
+        tokio::time::timeout(GUARD, client(base).get_config())
+            .await
+            .expect("the transport deadline must end the request")
+    }
+
+    #[tokio::test]
+    async fn a_body_that_never_ends_reads_as_an_answer_without_json() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            read_request_head(&mut socket).await;
+            let head = "HTTP/1.1 500 Internal Server Error\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n";
+            socket.write_all(head.as_bytes()).await.unwrap();
+            // A body that streams forever, until the client hangs up.
+            while socket.write_all(b"1\r\n[\r\n").await.is_ok() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+        let started = std::time::Instant::now();
+        let error = get_config(base).await.unwrap_err();
+        assert_eq!(
+            error,
+            OkxError::Unknown("OKX returned HTTP 500 without JSON".into())
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn a_request_without_any_answer_times_out() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            read_request_head(&mut socket).await;
+            // Hold the connection open and never answer.
+            let mut rest = Vec::new();
+            let _ = socket.read_to_end(&mut rest).await;
+        });
+        let error = get_config(base).await.unwrap_err();
+        assert_eq!(
+            error,
+            OkxError::Unknown(format!("No answer from OKX: {TIMEOUT_TEXT}"))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_redirect_is_not_followed() {
+        let elsewhere = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let elsewhere_addr = elsewhere.local_addr().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            read_request_head(&mut socket).await;
+            let reply = format!(
+                "HTTP/1.1 302 Found\r\nlocation: http://{elsewhere_addr}/api/v5/account/config\r\ncontent-length: 0\r\n\r\n"
+            );
+            socket.write_all(reply.as_bytes()).await.unwrap();
+            let mut rest = Vec::new();
+            let _ = socket.read_to_end(&mut rest).await;
+        });
+        let error = get_config(base).await.unwrap_err();
+        assert_eq!(
+            error,
+            OkxError::Unknown("OKX returned HTTP 302 without JSON".into())
+        );
+        let followed = tokio::time::timeout(Duration::from_millis(200), elsewhere.accept()).await;
+        assert!(
+            followed.is_err(),
+            "the redirect target must never be contacted"
+        );
+    }
+
+    #[test]
+    fn the_default_tls_client_builds() {
+        let transport = NetTransport::new();
+        assert_eq!(transport.timeout, Duration::from_millis(TIMEOUT_MS));
+    }
 }
