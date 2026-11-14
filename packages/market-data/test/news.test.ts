@@ -1,6 +1,13 @@
+import { EventEmitter } from 'node:events';
+import type { ClientRequest, RequestOptions } from 'node:http';
+import type { LookupAddress } from 'node:dns';
+import { createServer, type AddressInfo } from 'node:net';
+import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { NewsItem, NewsSource } from '@mochiprep/shared';
-import { mentionsCoin, NewsService, parseFeed, sanitizeHeadline, selectNews, validateFeedUrl } from '../src/index';
+import {
+  createFeedFetch, isPublicAddress, mentionsCoin, NewsService, parseFeed, sanitizeHeadline, selectNews, validateFeedUrl,
+} from '../src/index';
 
 const NOW = Date.parse('2026-11-07T06:00:00Z');
 const HOUR = 3_600_000;
@@ -97,8 +104,173 @@ describe('validateFeedUrl', () => {
     'https://192.168.1.1/x', 'https://172.16.0.1/x', 'https://169.254.169.254/latest', 'https://[::1]/x', 'https://router/x', 'https://nas.local/x',
     'https://localhost./x', 'https://localhost../x', 'https://app.localhost./x', 'https://nas.local./x', 'https://router./x',
     'https://localhost%2e/x', 'https://localhost。/x',
+    'https://user:pass@example.com/x', 'https://user@example.com/x', 'https://:pass@example.com/x',
+    'https://100.64.0.1/x', 'https://198.18.0.1/x', 'https://192.0.0.8/x', 'https://224.0.0.1/x', 'https://255.255.255.255/x',
   ])('refuses %s', (url) => {
     expect(validateFeedUrl(url)).not.toBeNull();
+  });
+});
+
+describe('isPublicAddress', () => {
+  it.each([
+    ['0.0.0.0', false], ['0.255.255.255', false], ['1.1.1.1', true], ['9.255.255.255', true], ['10.0.0.5', false],
+    ['11.0.0.1', true], ['100.63.255.255', true], ['100.64.0.1', false], ['100.127.255.255', false], ['100.128.0.0', true],
+    ['127.0.0.1', false], ['126.255.255.255', true], ['169.254.169.254', false], ['169.253.0.1', true], ['172.15.255.255', true],
+    ['172.16.0.1', false], ['172.31.255.255', false], ['172.32.0.0', true], ['192.0.0.8', false], ['192.0.1.1', true],
+    ['192.0.2.1', true], ['192.168.1.1', false], ['192.169.0.1', true], ['198.17.255.255', true], ['198.18.0.1', false],
+    ['198.19.255.255', false], ['198.20.0.0', true], ['223.255.255.255', true], ['224.0.0.1', false], ['239.255.255.255', false],
+    ['240.0.0.1', false], ['255.255.255.255', false], ['93.184.215.14', true],
+    ['::', false], ['::1', false], ['::2', false], ['2606:4700::1111', true], ['2001:db8::1', true], ['fc00::1', false],
+    ['fdff:ffff::1', false], ['fe80::1', false], ['febf::1', false], ['fec0::1', false], ['ff02::1', false], ['ff00::', false],
+    ['::ffff:192.168.1.1', false], ['::ffff:127.0.0.1', false], ['::ffff:8.8.8.8', true], ['::ffff:c0a8:101', false],
+    ['::ffff:0:0', false], ['64:ff9b::10.0.0.1', false], ['64:ff9b::8.8.8.8', true], ['64:ff9b::1:0:0:1', true],
+    ['2002:808:808::1', true], ['2002:a00:1::1', false], ['2002:7f00:1::', false], ['2001:ffff::1', true], ['2003::1', true],
+    ['::8.8.8.8', true], ['::10.0.0.1', false], ['::0.0.0.2', false], ['::1:808:808', true],
+    ['64:ff9b:1::', false], ['64:ff9b:1:ffff::8.8.8.8', false], ['64:ff9b:2::1', true], ['64:ff9b:0:1::1', true],
+    ['febf:ffff::1', false], ['fec0::', false], ['feff:ffff::1', false], ['fe7f::1', true],
+    ['not an address', false], ['', false], ['example.com', false],
+  ] as const)('%s is public: %s', (address, expected) => {
+    expect(isPublicAddress(address)).toBe(expected);
+  });
+});
+
+describe('createFeedFetch', () => {
+  interface Reply { status: number; headers?: Record<string, string>; body?: string | Buffer; endless?: boolean }
+  const init = (signal: AbortSignal = AbortSignal.timeout(8_000)): RequestInit => ({
+    headers: { 'user-agent': 'MochiPrep/0.1 (RSS reader)' }, redirect: 'manual', signal,
+  });
+
+  /**
+   * DNS answers by name, and a network that behaves as net.connect does: it resolves through the
+   * request's `lookup` option and connects only to the addresses that lookup handed back.
+   */
+  const fakeNet = (dns: Record<string, string[]>, replies: Record<string, Reply> = {}) => {
+    const lookups: string[] = [];
+    const connected: { url: string; addresses: string[] }[] = [];
+    const responses: Readable[] = [];
+    const sentHeaders: RequestOptions['headers'][] = [];
+    const lookupAll = async (host: string) => {
+      lookups.push(host);
+      const found = dns[host];
+      if (!found) throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: 'ENOTFOUND' });
+      return found.map((address) => ({ address, family: address.includes(':') ? 6 : 4 }));
+    };
+    const request = (url: URL, options: RequestOptions) => {
+      const req = Object.assign(new EventEmitter(), { destroy: () => req, end: () => {} });
+      sentHeaders.push(options.headers);
+      req.end = () => {
+        options.lookup!(url.hostname, { all: true }, (error, addresses) => {
+          if (error) {
+            req.emit('error', error);
+            return;
+          }
+          connected.push({ url: url.href, addresses: (addresses as LookupAddress[]).map((a) => a.address) });
+          const reply = replies[url.href] ?? { status: 404 };
+          // An endless body trickles one chunk and then never ends, as a hostile server can.
+          const stream = reply.endless
+            ? new Readable({ read() {} })
+            : Readable.from([Buffer.from(reply.body ?? '')]);
+          if (reply.endless) stream.push(Buffer.from('trickle'));
+          responses.push(stream);
+          const response = Object.assign(stream, {
+            statusCode: reply.status, headers: reply.headers ?? {},
+          });
+          req.emit('response', response);
+        });
+      };
+      return req as unknown as ClientRequest;
+    };
+    return { fetch: createFeedFetch({ lookupAll, request }), lookups, connected, sentHeaders, responses };
+  };
+
+  it.each([
+    ['127.0.0.1', ['127.0.0.1']], ['10.0.0.5', ['10.0.0.5']], ['::1', ['::1']], ['::ffff:192.168.1.1', ['::ffff:192.168.1.1']],
+    ['a mix of public and private', ['93.184.215.14', '10.0.0.5']], ['a public and a private IPv6', ['2606:4700::1111', 'fe80::1']],
+  ])('refuses a host resolving to %s without connecting', async (_label, addresses) => {
+    const net = fakeNet({ 'feed.test': addresses });
+    const error = await net.fetch('https://feed.test/rss', init()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('Feeds must be on a public host: https://feed.test/rss');
+    expect(net.lookups).toEqual(['feed.test']);
+    expect(net.connected).toEqual([]);
+  });
+
+  it('refuses through the real node:https stack too, before any connection', async () => {
+    const server = createServer((socket) => socket.destroy());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    let connections = 0;
+    server.on('connection', () => connections++);
+    const { port } = server.address() as AddressInfo;
+    const fetchReal = createFeedFetch({ lookupAll: async () => [{ address: '127.0.0.1', family: 4 }] });
+    const url = `https://feed.test:${port}/rss`;
+    const error = await fetchReal(url, init()).catch((e: unknown) => e);
+    server.close();
+    expect((error as Error).message).toBe(`Feeds must be on a public host: ${url}`);
+    expect(connections).toBe(0);
+  });
+
+  it('fetches a public-only host over exactly the addresses it checked', async () => {
+    const addresses = ['93.184.215.14', '2606:4700::1111'];
+    const net = fakeNet({ 'feed.test': addresses }, {
+      'https://feed.test/rss': { status: 200, headers: { 'content-type': 'application/rss+xml' }, body: 'hello' },
+    });
+    const response = await net.fetch('https://feed.test/rss', init());
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/rss+xml');
+    expect(await response.text()).toBe('hello');
+    expect(net.connected).toEqual([{ url: 'https://feed.test/rss', addresses }]);
+    expect(net.sentHeaders[0]).toMatchObject({ 'user-agent': 'MochiPrep/0.1 (RSS reader)' });
+  });
+
+  it('hands back a redirect without following it', async () => {
+    const net = fakeNet({ 'feed.test': ['93.184.215.14'] }, { 'https://feed.test/rss': { status: 301, headers: { location: '/next' } } });
+    const response = await net.fetch('https://feed.test/rss', init());
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('/next');
+    expect(net.connected).toHaveLength(1);
+  });
+
+  it.each([302, 500])('settles a %i whose body never ends at once and destroys its stream', async (status) => {
+    const net = fakeNet({ 'feed.test': ['93.184.215.14'] }, {
+      'https://feed.test/rss': { status, headers: { location: '/next' }, endless: true },
+    });
+    const response = await net.fetch('https://feed.test/rss', init());
+    expect(response.status).toBe(status);
+    expect(response.headers.get('location')).toBe('/next');
+    expect(net.responses[0]!.destroyed).toBe(true);
+  });
+
+  it('fails a DNS error as fetch does', async () => {
+    const net = fakeNet({});
+    const error = await net.fetch('https://gone.test/rss', init()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(TypeError);
+    expect((error as Error).message).toBe('fetch failed');
+  });
+
+  it('refuses a body past the feed size cap', async () => {
+    const net = fakeNet({ 'feed.test': ['93.184.215.14'] }, { 'https://feed.test/rss': { status: 200, body: Buffer.alloc(9_000_007, 0x78) } });
+    await expect(net.fetch('https://feed.test/rss', init())).rejects.toThrow('feed too large');
+  });
+
+  it('rejects with the abort reason when the signal fires', async () => {
+    const net = fakeNet({ 'feed.test': ['93.184.215.14'] });
+    const controller = new AbortController();
+    controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+    await expect(net.fetch('https://feed.test/rss', init(controller.signal))).rejects.toThrow('The operation was aborted due to timeout');
+    expect(net.lookups).toEqual([]);
+  });
+
+  it('checks every redirect hop at resolve time and refuses a private one there', async () => {
+    const net = fakeNet(
+      { 'a.test': ['93.184.215.14'], 'evil.test': ['10.0.0.5'] },
+      { 'https://a.test/feed': { status: 302, headers: { location: 'https://evil.test/rss' } } },
+    );
+    const sources = () => [{ id: 'a', name: 'a', url: 'https://a.test/feed', enabled: true, builtIn: true }];
+    const result = await new NewsService(sources, net.fetch, () => NOW).forSymbol('BTCUSDT', 'BTC');
+    expect(result.items).toEqual([]);
+    expect(result.error).toBe('Could not read: a');
+    expect(net.lookups).toEqual(['a.test', 'evil.test']);
+    expect(net.connected.map((c) => c.url)).toEqual(['https://a.test/feed']);
   });
 });
 

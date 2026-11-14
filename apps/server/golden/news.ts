@@ -1,5 +1,6 @@
-import { DEFAULT_NEWS_SOURCES, mentionsCoin, parseFeed, sanitizeHeadline, selectNews, validateFeedUrl } from '@mochiprep/market-data';
+import { DEFAULT_NEWS_SOURCES, isPublicAddress, mentionsCoin, parseFeed, sanitizeHeadline, selectNews, validateFeedUrl } from '@mochiprep/market-data';
 import type { NewsItem } from '@mochiprep/shared';
+import { readFileSync } from 'node:fs';
 
 /**
  * The news pipeline's pure functions over hostile input, for `crates/golden/news.json`. Feed text
@@ -205,12 +206,21 @@ const URL_CASES = [
   'HTTPS://Example.COM/Feed', 'https://LOCALHOST/x', 'https://localhost./x', 'https://localhost../x', 'https://localhost%2e/x', 'https://localhost。/x', 'https://app.localhost./x', 'https://router./x', 'https://example.com./rss', 'https://app.localhost/x',
   'https://0x7f.1/x', 'https://2130706433/x', 'https://0177.0.0.1/x', 'https://127.1/x', 'https://0.0.0.0/x',
   'https://172.15.0.1/x', 'https://172.32.0.1/x', 'https://172.31.255.255/x', 'https://172.2.0.1/x',
-  'https://[2001:db8::1]/x', 'https://[::ffff:127.0.0.1]/x', 'https://user:pass@example.com/x',
+  'https://[2001:db8::1]/x', 'https://[::ffff:127.0.0.1]/x', 'https://user:pass@example.com/x', 'https://user@example.com/x', 'https://:pass@example.com/x',
   'https://example.com:8443/x', 'https:example.com/x', ' https://example.com/x ', 'https://ex ample.com/x',
   'https://éxample.com/x', 'https://xn--xample-9ua.com/x', 'https://example.local./x', 'https://10.example.com/x',
   'https://127.0.0.1.nip.io/x', 'https://%31%32%37.0.0.1/x', 'https://example.com\\x', 'wss://example.com/x',
   'https://', 'https://.com/x', 'https://example..com/x', 'HtTpS://a.b', 'https://a.b#frag', 'https://a.b?x=<y>',
+  'https://100.64.0.1/x', 'https://100.128.0.1/x', 'https://198.18.0.1/x', 'https://198.20.0.1/x', 'https://192.0.0.8/x',
+  'https://192.0.2.1/x', 'https://224.0.0.1/x', 'https://240.0.0.1/x', 'https://255.255.255.255/x', 'https://8.8.8.8/x',
+  'https://0x64.0x40.0.1/x', 'https://3758096385/x',
 ];
+
+/**
+ * Resolved addresses for the connect-time check, at and either side of every range edge. Kept as
+ * data in address-cases.json: they are test inputs, not addresses this code ever connects to.
+ */
+const ADDRESS_CASES: string[] = JSON.parse(readFileSync(new URL('./address-cases.json', import.meta.url), 'utf8'));
 
 export function newsFixture() {
   const feeds = FEED_CASES.map(([xml, source]) => {
@@ -246,5 +256,6 @@ export function newsFixture() {
     },
     mentions: MENTION_CASES.map(([title, base]) => ({ title, base, result: mentionsCoin(title, base) })),
     urls: URL_CASES.map((url) => ({ url, problem: validateFeedUrl(url) })),
+    addresses: ADDRESS_CASES.map((address) => ({ address, public: isPublicAddress(address) })),
   };
 }

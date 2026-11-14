@@ -48,6 +48,8 @@ pub const REST_POLL_EVERY: Duration = Duration::from_secs(5);
 pub const CANDLE_CACHE: Duration = Duration::from_secs(3);
 pub const INSTRUMENT_CACHE: Duration = Duration::from_secs(300);
 pub const MAX_BACKOFF: Duration = Duration::from_secs(30);
+/// A socket not open by then is dropped and redialled; a hung handshake would never end itself.
+pub const HANDSHAKE_TIMEOUT_MS: u64 = 10_000;
 /// Node's `AbortSignal.timeout(8_000)` on every REST request, body included.
 pub const HTTP_TIMEOUT: Duration = Duration::from_secs(8);
 /// OKX's own page size for candles; the route allows 1000 but the feed returns at most this.
@@ -751,7 +753,7 @@ async fn run_connection(shared: Arc<Shared>) {
     loop {
         let reason = match open_socket(&shared).await {
             Ok(socket) => serve_socket(&shared, socket).await,
-            Err(()) => "WebSocket error".to_string(),
+            Err(reason) => reason.to_string(),
         };
         let delay = {
             let mut state = lock(&shared.state);
@@ -778,18 +780,25 @@ async fn run_connection(shared: Arc<Shared>) {
     }
 }
 
-async fn open_socket(shared: &Shared) -> Result<Socket, ()> {
-    let stream = shared
-        .transport
-        .dial(shared.ws_url.clone())
-        .await
-        .map_err(|_| ())?;
-    let connector = Connector::Rustls(shared.tls.clone());
-    let (socket, _response) =
-        client_async_tls_with_config(shared.ws_url.as_str(), stream, None, Some(connector))
+/// Dials and completes the handshake within [`HANDSHAKE_TIMEOUT_MS`], or says why not. On a
+/// timeout the half-open connection is dropped, which closes it.
+async fn open_socket(shared: &Shared) -> Result<Socket, &'static str> {
+    let open = async {
+        let stream = shared
+            .transport
+            .dial(shared.ws_url.clone())
             .await
-            .map_err(|_| ())?;
-    Ok(socket)
+            .map_err(|_| "WebSocket error")?;
+        let connector = Connector::Rustls(shared.tls.clone());
+        let (socket, _response) =
+            client_async_tls_with_config(shared.ws_url.as_str(), stream, None, Some(connector))
+                .await
+                .map_err(|_| "WebSocket error")?;
+        Ok(socket)
+    };
+    timeout(Duration::from_millis(HANDSHAKE_TIMEOUT_MS), open)
+        .await
+        .unwrap_or(Err("WebSocket handshake timed out"))
 }
 
 /// Runs an open socket until it closes, fails or falls silent. Returns why it ended.

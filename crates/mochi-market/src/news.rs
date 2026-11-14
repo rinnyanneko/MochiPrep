@@ -14,6 +14,8 @@
 //! `Date.parse` is ported from V8's date parser. One part is not: a date without a zone is local
 //! time in Node, and this port reads it as UTC (see [`JsDate::local`]).
 
+use std::io;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -45,6 +47,9 @@ const MAX_TITLE_CHARS: usize = 200;
 const MAX_URL_CHARS: usize = 500;
 const MAX_AGE_MS: i64 = 24 * 3_600_000;
 const PER_SOURCE_LIMIT: usize = 3;
+
+/// What [`validate_feed_url`] says of a private host; a resolve-time refusal reads the same.
+pub const PUBLIC_HOST_PROBLEM: &str = "Feeds must be on a public host";
 
 /// What fetch's `AbortSignal.timeout` rejects with.
 const TIMEOUT_TEXT: &str = "The operation was aborted due to timeout";
@@ -466,15 +471,86 @@ pub fn parse_feed(xml: &str, source: &str) -> Vec<NewsItem> {
         .collect()
 }
 
+fn ipv4_public(ip: Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    // This net, private, loopback, and multicast and reserved (255.255.255.255 included).
+    let special = a == 0 || a == 10 || a == 127 || a >= 224;
+    let refused = special
+        // 100.64/10 carrier-grade NAT
+        || (a == 100 && b & 0xc0 == 64)
+        // link-local, cloud metadata
+        || (a == 169 && b == 254)
+        || (a == 172 && b & 0xf0 == 16)
+        || (a == 192 && b == 168)
+        // 192.0.0/24 protocol assignments
+        || (a == 192 && b == 0 && c == 0)
+        // 198.18/15 benchmarking
+        || (a == 198 && b & 0xfe == 18);
+    !refused
+}
+
+/// Whether a feed may be fetched from this address. The backend runs on the owner's machine, so
+/// anything that reaches it, its LAN, a cloud metadata service or a multicast group is refused.
+/// `isPublicAddress` in packages/market-data/src/public-address.ts; `crates/golden/news.json`
+/// holds what Node answers for a corpus of addresses.
+pub fn is_public_address(ip: IpAddr) -> bool {
+    let ip = match ip {
+        IpAddr::V4(v4) => return ipv4_public(v4),
+        IpAddr::V6(v6) => v6,
+    };
+    let g = ip.segments();
+    // :: and ::1
+    if g == [0; 8] || g == [0, 0, 0, 0, 0, 0, 0, 1] {
+        return false;
+    }
+    // fc00::/7 unique local, fe80::/10 link-local, fec0::/10 site-local (deprecated, still
+    // routable inside a site), ff00::/8 multicast
+    if g[0] & 0xfe00 == 0xfc00
+        || g[0] & 0xffc0 == 0xfe80
+        || g[0] & 0xffc0 == 0xfec0
+        || g[0] & 0xff00 == 0xff00
+    {
+        return false;
+    }
+    // ::ffff:0:0/96 (IPv4-mapped) and 64:ff9b::/96 (NAT64) carry an IPv4 address in the last 32
+    // bits, and a connection to one reaches that IPv4 address, so it is judged by the IPv4 rules.
+    let mapped = g[..5] == [0; 5] && g[5] == 0xffff;
+    let nat64 = g[0] == 0x64 && g[1] == 0xff9b && g[2..6] == [0; 4];
+    if mapped || nat64 {
+        let [.., a, b, c, d] = ip.octets();
+        return ipv4_public(Ipv4Addr::new(a, b, c, d));
+    }
+    // 64:ff9b:1::/48 local-use NAT64
+    if g[0] == 0x64 && g[1] == 0xff9b && g[2] == 1 {
+        return false;
+    }
+    // IPv4-compatible ::/96 (deprecated) holds an IPv4 address in its low 32 bits; :: and ::1
+    // were refused above.
+    if g[..6] == [0; 6] {
+        let [.., a, b, c, d] = ip.octets();
+        return ipv4_public(Ipv4Addr::new(a, b, c, d));
+    }
+    // 6to4 2002::/16 tunnels to the IPv4 address in bits 16-48.
+    if g[0] == 0x2002 {
+        let [_, _, a, b, c, d, ..] = ip.octets();
+        return ipv4_public(Ipv4Addr::new(a, b, c, d));
+    }
+    true
+}
+
 /// Refuses anything but public https, because the backend fetches this URL on the user's
-/// machine. A text-only check, as in Node: a public name that resolves to a private address is
-/// not caught here.
+/// machine. Only the text is checked here; [`NetFeedTransport`] checks what the name resolves to
+/// when it connects.
 pub fn validate_feed_url(text: &str) -> Option<&'static str> {
     let Ok(url) = url::Url::parse(text) else {
         return Some("Not a valid URL");
     };
     if url.scheme() != "https" {
         return Some("Feeds must use https");
+    }
+    // Credentials in a feed URL would be sent to whichever host it points at.
+    if !url.username().is_empty() || url.password().is_some() {
+        return Some("Feeds must not include a username or password");
     }
     let lowered = url.host_str().unwrap_or("").to_lowercase();
     // `.replace(/^\[|\]$/g, '')`
@@ -499,8 +575,11 @@ pub fn validate_feed_url(text: &str) -> Option<&'static str> {
             .iter()
             .any(|prefix| host.starts_with(prefix))
         || private_172
-        || host.contains(':');
-    is_private.then_some("Feeds must be on a public host")
+        || host.contains(':')
+        // The URL parser writes every IPv4 form (hex, octal, a bare number) as a dotted quad. An
+        // IP literal is never resolved, so this is the only check it gets.
+        || host.parse::<Ipv4Addr>().is_ok_and(|ip| !ipv4_public(ip));
+    is_private.then_some(PUBLIC_HOST_PROBLEM)
 }
 
 /// Whether `word` occurs in `hay` with no `is_word` byte right before or after it. A byte of a
@@ -1349,13 +1428,84 @@ pub struct FeedReply {
 
 /// How the news service reaches a feed.
 pub trait FeedTransport: Send + Sync {
-    /// One anonymous GET of exactly `url`, sending [`USER_AGENT`] and [`ACCEPT`]: no cookies,
-    /// no proxy, and never a redirect followed, because each hop must be checked first. Errors
-    /// are the text a failed `fetch` gives in Node.
+    /// One GET of exactly `url`, sending [`USER_AGENT`] and [`ACCEPT`]: no cookies, no proxy,
+    /// and never a redirect followed, because each hop must be checked first. It is anonymous
+    /// because [`validate_feed_url`] refuses a URL with a username or password before any hop
+    /// gets here. Only a 2xx body is read; any other reply is dropped unread, which closes its
+    /// connection. Errors are the text a failed `fetch` gives in Node.
     fn get(&self, url: String) -> BoxFuture<'static, Result<FeedReply, String>>;
 }
 
-/// The real network, with rustls over the Mozilla root store, as the OKX feed uses.
+/// Resolves a host name to its addresses: the system resolver, or a fake in tests.
+pub type HostLookup =
+    Arc<dyn Fn(String) -> BoxFuture<'static, io::Result<Vec<IpAddr>>> + Send + Sync>;
+
+/// Why [`PublicOnlyResolver`] refused a name; found again among the request error's sources.
+#[derive(Debug)]
+struct NonPublicAddress;
+
+impl std::fmt::Display for NonPublicAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(PUBLIC_HOST_PROBLEM)
+    }
+}
+
+impl std::error::Error for NonPublicAddress {}
+
+/// The news client's resolver. It refuses the whole name if any address it resolves to is not
+/// public, and otherwise hands back only addresses it checked. reqwest connects to exactly what
+/// this returns, with no second lookup, so a DNS answer that changes between the check and the
+/// connection (rebinding) cannot reach a private address.
+///
+/// An IP-literal host never reaches a resolver. That is fine: [`validate_feed_url`], which runs
+/// on every hop before the transport does, refuses every IPv6 literal and every non-public IPv4
+/// literal.
+struct PublicOnlyResolver {
+    lookup: HostLookup,
+}
+
+impl reqwest::dns::Resolve for PublicOnlyResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let found = (self.lookup)(name.as_str().to_string());
+        Box::pin(async move {
+            let ips = found.await?;
+            if ips.iter().any(|ip| !is_public_address(*ip)) {
+                return Err(Box::new(NonPublicAddress) as Box<dyn std::error::Error + Send + Sync>);
+            }
+            if ips.is_empty() {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "no addresses").into());
+            }
+            // Port 0: reqwest puts in the URL's port.
+            let addrs: reqwest::dns::Addrs =
+                Box::new(ips.into_iter().map(|ip| SocketAddr::new(ip, 0)));
+            Ok(addrs)
+        })
+    }
+}
+
+fn system_lookup() -> HostLookup {
+    Arc::new(|host: String| {
+        Box::pin(async move {
+            let addrs = tokio::net::lookup_host((host.as_str(), 0)).await?;
+            Ok(addrs.map(|addr| addr.ip()).collect())
+        })
+    })
+}
+
+/// Whether a request failed because the resolver refused a non-public address.
+fn refused_non_public(error: &reqwest::Error) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(current) = source {
+        if current.is::<NonPublicAddress>() {
+            return true;
+        }
+        source = current.source();
+    }
+    false
+}
+
+/// The real network, with rustls over the Mozilla root store, as the OKX feed uses, connecting
+/// only to public addresses (see [`PublicOnlyResolver`]).
 pub struct NetFeedTransport {
     client: reqwest::Client,
 }
@@ -1369,7 +1519,13 @@ impl Default for NetFeedTransport {
 impl NetFeedTransport {
     /// Build an HTTP client with automatic redirects disabled so each hop is validated.
     pub fn new() -> Self {
+        Self::with_lookup(system_lookup())
+    }
+
+    /// As [`NetFeedTransport::new`], resolving names through `lookup`; tests pass a fake DNS.
+    pub fn with_lookup(lookup: HostLookup) -> Self {
         let client = reqwest::Client::builder()
+            .dns_resolver(PublicOnlyResolver { lookup })
             .use_preconfigured_tls((*tls_config()).clone())
             // Node's fetch ignores proxy variables; so does this.
             .no_proxy()
@@ -1386,15 +1542,19 @@ impl FeedTransport for NetFeedTransport {
     fn get(&self, url: String) -> BoxFuture<'static, Result<FeedReply, String>> {
         let request = self
             .client
-            .get(url)
+            .get(&url)
             .header(reqwest::header::USER_AGENT, USER_AGENT)
             .header(reqwest::header::ACCEPT, ACCEPT);
         Box::pin(async move {
-            // Node's undici says only "fetch failed".
-            let mut response = request
-                .send()
-                .await
-                .map_err(|_| "fetch failed".to_string())?;
+            // Node's undici says only "fetch failed". A refused address reads as the text
+            // check's refusal does.
+            let mut response = request.send().await.map_err(|error| {
+                if refused_non_public(&error) {
+                    format!("{PUBLIC_HOST_PROBLEM}: {url}")
+                } else {
+                    "fetch failed".to_string()
+                }
+            })?;
             let status = response.status().as_u16();
             let locations: Vec<String> = response
                 .headers()
@@ -1645,4 +1805,128 @@ async fn refresh(inner: Arc<Inner>, sources: Vec<NewsSource>) {
     cache.last_error =
         (!failed.is_empty()).then(|| format!("Could not read: {}", failed.join(", ")));
     cache.fetched_at = (inner.now)();
+}
+
+#[cfg(test)]
+mod resolve_tests {
+    use std::net::{IpAddr, SocketAddr};
+    use std::str::FromStr;
+
+    use reqwest::dns::{Name, Resolve};
+
+    use super::*;
+
+    fn resolver(answer: &[&str]) -> PublicOnlyResolver {
+        let ips: Vec<IpAddr> = answer.iter().map(|ip| ip.parse().unwrap()).collect();
+        PublicOnlyResolver {
+            lookup: Arc::new(move |_name: String| {
+                let ips = ips.clone();
+                Box::pin(async move { Ok(ips) })
+            }),
+        }
+    }
+
+    async fn resolve(answer: &[&str]) -> Result<Vec<SocketAddr>, String> {
+        let name = Name::from_str("feed.test").unwrap();
+        match resolver(answer).resolve(name).await {
+            Ok(addrs) => Ok(addrs.collect()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    #[test]
+    fn public_address_table() {
+        for (address, public) in [
+            ("0.0.0.0", false),
+            ("1.1.1.1", true),
+            ("10.0.0.5", false),
+            ("100.63.255.255", true),
+            ("100.64.0.1", false),
+            ("100.127.255.255", false),
+            ("100.128.0.0", true),
+            ("127.0.0.1", false),
+            ("169.254.169.254", false),
+            ("172.15.255.255", true),
+            ("172.16.0.1", false),
+            ("172.31.255.255", false),
+            ("172.32.0.0", true),
+            ("192.0.0.8", false),
+            ("192.0.2.1", true),
+            ("192.168.1.1", false),
+            ("198.17.255.255", true),
+            ("198.18.0.1", false),
+            ("198.19.255.255", false),
+            ("198.20.0.0", true),
+            ("224.0.0.1", false),
+            ("240.0.0.1", false),
+            ("255.255.255.255", false),
+            ("93.184.215.14", true),
+            ("::", false),
+            ("::1", false),
+            ("::2", false),
+            ("2606:4700::1111", true),
+            ("fc00::1", false),
+            ("fdff::1", false),
+            ("fe80::1", false),
+            ("febf::1", false),
+            ("fec0::1", false),
+            ("ff02::1", false),
+            ("::ffff:192.168.1.1", false),
+            ("::ffff:8.8.8.8", true),
+            ("64:ff9b::10.0.0.1", false),
+            ("64:ff9b::8.8.8.8", true),
+            ("2002:808:808::1", true),
+            ("2002:a00:1::1", false),
+            ("2002:7f00:1::", false),
+            ("2003::1", true),
+            ("::8.8.8.8", true),
+            ("::10.0.0.1", false),
+            ("::1:808:808", true),
+            ("64:ff9b:1::", false),
+            ("64:ff9b:2::1", true),
+            ("fec0::", false),
+            ("feff:ffff::1", false),
+            ("fe7f::1", true),
+        ] {
+            let ip: IpAddr = address.parse().unwrap();
+            assert_eq!(is_public_address(ip), public, "{address}");
+        }
+    }
+
+    #[tokio::test]
+    async fn any_non_public_address_refuses_the_name() {
+        for answer in [
+            &["127.0.0.1"][..],
+            &["10.0.0.5"],
+            &["::1"],
+            &["::ffff:192.168.1.1"],
+            &["93.184.215.14", "10.0.0.5"],
+        ] {
+            assert_eq!(
+                resolve(answer).await.unwrap_err(),
+                PUBLIC_HOST_PROBLEM,
+                "{answer:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_public_only_name_resolves_to_exactly_the_checked_addresses() {
+        let addrs = resolve(&["93.184.215.14", "2606:4700::1111"])
+            .await
+            .unwrap();
+        assert_eq!(
+            addrs,
+            [
+                "93.184.215.14:0".parse::<SocketAddr>().unwrap(),
+                "[2606:4700::1111]:0".parse().unwrap()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_answer_is_a_dns_failure_not_a_refusal() {
+        let error = resolve(&[]).await.unwrap_err();
+        assert_ne!(error, PUBLIC_HOST_PROBLEM);
+    }
 }

@@ -1,4 +1,7 @@
+import { isIPv4 } from 'node:net';
 import type { NewsItem, NewsSource, SymbolId } from '@mochiprep/shared';
+import { feedFetch, PUBLIC_HOST_PROBLEM } from './feed-fetch';
+import { isPublicAddress } from './public-address';
 
 export const DEFAULT_NEWS_SOURCES: NewsSource[] = [
   { id: 'coindesk', name: 'CoinDesk', url: 'https://www.coindesk.com/arc/outboundfeeds/rss', enabled: true, builtIn: true },
@@ -85,12 +88,17 @@ export function validateFeedUrl(text: string): string | null {
     return 'Not a valid URL';
   }
   if (url.protocol !== 'https:') return 'Feeds must use https';
+  // Credentials in a feed URL would be sent to whichever host it points at.
+  if (url.username || url.password) return 'Feeds must not include a username or password';
   // A DNS root dot must not let local names evade the same checks as their undotted form.
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
   const isPrivate = host === 'localhost' || host.endsWith('.local') || host.endsWith('.localhost') || !host.includes('.')
     || /^(127|10|0)\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-    || host.includes(':');
-  return isPrivate ? 'Feeds must be on a public host' : null;
+    || host.includes(':')
+    // The URL parser writes every IPv4 form (hex, octal, a bare number) as a dotted quad. An IP
+    // literal is never resolved, so this is the only check it gets.
+    || (isIPv4(host) && !isPublicAddress(host));
+  return isPrivate ? PUBLIC_HOST_PROBLEM : null;
 }
 
 export function mentionsCoin(title: string, baseCurrency: string): boolean {
@@ -135,7 +143,8 @@ export class NewsService {
 
   constructor(
     private readonly sources: () => NewsSource[],
-    private readonly fetchImpl: typeof fetch = fetch,
+    // Connects only to public addresses; see createFeedFetch. Injectable for tests.
+    private readonly fetchImpl: typeof fetch = feedFetch,
     private readonly now: () => number = Date.now,
   ) {}
 
@@ -144,7 +153,10 @@ export class NewsService {
     this.fetchedAt = 0;
   }
 
-  /** Follows redirects by hand: each hop must pass the same check as the URL the user entered. */
+  /**
+   * Follows redirects by hand: each hop must pass the same check as the URL the user entered, and
+   * the default fetch checks again at connect time that the name resolves only to public addresses.
+   */
   private async fetchFollowing(start: string): Promise<Response> {
     let url = start;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {

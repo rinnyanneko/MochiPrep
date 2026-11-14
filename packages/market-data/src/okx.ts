@@ -19,6 +19,8 @@ const SILENCE_LIMIT_MS = 30_000;
 const REST_POLL_MS = 5_000;
 const CANDLE_CACHE_MS = 3_000;
 const MAX_BACKOFF_MS = 30_000;
+/** A socket not open by then is closed and redialled; a hung handshake would never end itself. */
+export const HANDSHAKE_TIMEOUT_MS = 10_000;
 
 export const toInstId = (symbol: SymbolId) => `${symbol.replace(/USDT$/, '')}-USDT-SWAP`;
 
@@ -137,6 +139,7 @@ export class OkxMarketData implements MarketDataProvider {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
   private pollTimer: NodeJS.Timeout | null = null;
+  private handshakeTimer: NodeJS.Timeout | null = null;
 
   constructor(options: OkxOptions = {}) {
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -158,8 +161,8 @@ export class OkxMarketData implements MarketDataProvider {
 
   stop() {
     this.running = false;
-    for (const timer of [this.reconnectTimer, this.pingTimer, this.pollTimer]) if (timer) clearInterval(timer);
-    this.reconnectTimer = this.pingTimer = this.pollTimer = null;
+    for (const timer of [this.reconnectTimer, this.pingTimer, this.pollTimer, this.handshakeTimer]) if (timer) clearInterval(timer);
+    this.reconnectTimer = this.pingTimer = this.pollTimer = this.handshakeTimer = null;
     this.socket?.close();
     this.socket = null;
     this.setConnection('DISCONNECTED', 'Feed stopped');
@@ -180,7 +183,17 @@ export class OkxMarketData implements MarketDataProvider {
       return;
     }
     this.socket = socket;
+    this.handshakeTimer = setTimeout(() => {
+      this.handshakeTimer = null;
+      // Detached first: closing a CONNECTING socket fires error and close, and neither may
+      // replace the reason or schedule a second redial.
+      socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null;
+      socket.close();
+      if (this.socket === socket) this.socket = null;
+      this.scheduleReconnect('WebSocket handshake timed out');
+    }, HANDSHAKE_TIMEOUT_MS);
     socket.onopen = () => {
+      this.clearHandshakeTimer();
       this.attempts = 0;
       this.lastMessageAt = Date.now();
       socket.send(JSON.stringify({ op: 'subscribe', args: [...this.symbols].flatMap(channels) }));
@@ -189,14 +202,24 @@ export class OkxMarketData implements MarketDataProvider {
     };
     socket.onmessage = (event) => this.handleMessage(String(event.data));
     socket.onerror = () => {
+      if (this.socket !== socket) return;
       this.detail = 'WebSocket error';
     };
     socket.onclose = () => {
+      // A replaced socket's late close must not touch the active connection's timers or status,
+      // nor schedule a second reconnect.
+      if (this.socket !== socket) return;
+      this.socket = null;
+      this.clearHandshakeTimer();
       if (this.pingTimer) clearInterval(this.pingTimer);
       this.pingTimer = null;
-      if (this.socket === socket) this.socket = null;
       if (this.running) this.scheduleReconnect(this.detail ?? 'Connection closed');
     };
+  }
+
+  private clearHandshakeTimer() {
+    if (this.handshakeTimer) clearTimeout(this.handshakeTimer);
+    this.handshakeTimer = null;
   }
 
   private heartbeat(socket: WebSocket) {

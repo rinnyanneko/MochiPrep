@@ -269,17 +269,17 @@ async fn silence_30s_degrades_polls_rest_and_reconnects() {
         .collect();
     assert_eq!(pings, [22.5]);
 
-    // The reconnect dials 1 s later; the test lets it hang in the handshake until 58.5 s.
-    // Meanwhile REST polls every 5 s, and its quotes keep coming.
-    sleep_until_secs(t0, 58.5).await;
+    // The reconnect dials 1 s later; the test lets it hang in the handshake until 52.5 s, inside
+    // the 10 s handshake limit. Meanwhile REST polls every 5 s, and its quotes keep coming.
+    sleep_until_secs(t0, 52.5).await;
     assert_eq!(secs(t0, &fake.dial_times()), [0.0, 43.5]);
     assert_eq!(feed.status().state, FeedState::Connecting);
-    assert_eq!(ticker_gets(&fake, t0), [0.0, 45.0, 50.0, 55.0]);
+    assert_eq!(ticker_gets(&fake, t0), [0.0, 45.0, 50.0]);
     let degraded = drain(&mut quotes);
     let from_rest = degraded
         .iter()
         .filter(|q| q.symbol == "BTCUSDT" && q.last == "200");
-    assert_eq!(from_rest.count(), 3);
+    assert_eq!(from_rest.count(), 2);
 
     // Connected again: quotes from the socket, and REST polling stops.
     let mut server = accept(&mut sockets).await;
@@ -308,7 +308,7 @@ async fn silence_30s_degrades_polls_rest_and_reconnects() {
         ]
     );
     sleep_until_secs(t0, 75.0).await;
-    assert_eq!(ticker_gets(&fake, t0), [0.0, 45.0, 50.0, 55.0]);
+    assert_eq!(ticker_gets(&fake, t0), [0.0, 45.0, 50.0]);
     feed.stop();
 }
 
@@ -563,4 +563,60 @@ async fn rest_failures_and_timeouts_have_nodes_texts() {
     assert_eq!(started.elapsed(), Duration::from_secs(8));
     let error = feed.list_instruments(true).await.unwrap_err();
     assert_eq!(error, "OKX error 50011: Too Many Requests");
+}
+
+const HANDSHAKE_DETAIL: &str =
+    "WebSocket handshake timed out; reconnecting, REST polling meanwhile";
+
+#[tokio::test(start_paused = true)]
+async fn a_hung_handshake_times_out_at_10s_and_redials_with_the_backoff() {
+    let t0 = Instant::now();
+    // The fake accepts every dial but the test never completes a handshake.
+    let (feed, fake, mut sockets, _quotes, mut statuses) = started_feed();
+
+    sleep_until_secs(t0, 9.9).await;
+    assert_eq!(feed.status().state, FeedState::Connecting);
+    let first = sockets.recv().await.expect("the feed dials");
+    sleep_until_secs(t0, 10.0).await;
+    let status = feed.status();
+    assert_eq!(status.state, FeedState::Degraded);
+    assert_eq!(status.detail.as_deref(), Some(HANDSHAKE_DETAIL));
+    assert!(drain_statuses(&mut statuses)
+        .contains(&(FeedState::Degraded, Some(HANDSHAKE_DETAIL.to_string()))));
+    // The timed-out connection was dropped: its other end reads end of stream.
+    let mut first = first;
+    let mut buf = Vec::new();
+    tokio::io::AsyncReadExt::read_to_end(&mut first, &mut buf)
+        .await
+        .unwrap();
+
+    // Backoff 1 s for attempt 0, then the next hung handshake times out 10 s later and the
+    // attempt count, never reset, makes the next wait 2 s.
+    sleep_until_secs(t0, 10.9).await;
+    assert_eq!(secs(t0, &fake.dial_times()), [0.0]);
+    sleep_until_secs(t0, 11.0).await;
+    assert_eq!(secs(t0, &fake.dial_times()), [0.0, 11.0]);
+    assert_eq!(feed.status().state, FeedState::Connecting);
+    sleep_until_secs(t0, 21.0).await;
+    assert_eq!(feed.status().detail.as_deref(), Some(HANDSHAKE_DETAIL));
+    sleep_until_secs(t0, 22.9).await;
+    assert_eq!(fake.dial_times().len(), 2);
+    sleep_until_secs(t0, 23.0).await;
+    assert_eq!(secs(t0, &fake.dial_times()), [0.0, 11.0, 23.0]);
+    feed.stop();
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_handshake_completed_in_time_never_times_out() {
+    let t0 = Instant::now();
+    let (feed, fake, mut sockets, _quotes, _statuses) = started_feed();
+    sleep_until_secs(t0, 9.0).await;
+    let mut server = accept(&mut sockets).await;
+    next_text(&mut server).await;
+    settle().await;
+    assert_eq!(feed.status().state, FeedState::Connected);
+    sleep_until_secs(t0, 25.0).await;
+    assert_eq!(feed.status().state, FeedState::Connected);
+    assert_eq!(fake.dial_times().len(), 1);
+    feed.stop();
 }
