@@ -1384,70 +1384,7 @@
     "updatedAt": 1700000001600
    }
   ],
-  "listOpenOrdersForMarketLive": [
-   {
-    "id": "ord-2",
-    "accountId": "acc-1",
-    "clientOrderId": "cli-2",
-    "symbol": "BTCUSDT",
-    "side": "SELL",
-    "type": "STOP_MARKET",
-    "quantity": "0.5",
-    "price": null,
-    "triggerPrice": null,
-    "leverage": 3,
-    "reduceOnly": false,
-    "closePosition": true,
-    "status": "OPEN",
-    "filledQuantity": "0.5",
-    "avgFillPrice": null,
-    "reservedMargin": "0",
-    "attachedStopLoss": null,
-    "attachedTakeProfit": null,
-    "trailingKind": null,
-    "trailingCallback": null,
-    "trailingActivationPrice": null,
-    "trailingExtreme": null,
-    "attachedTrailingStop": null,
-    "rejectReason": null,
-    "exchangeOrderId": null,
-    "agentId": null,
-    "decisionId": null,
-    "createdAt": 1700000000500,
-    "updatedAt": 1700000001500
-   },
-   {
-    "id": "ord-3",
-    "accountId": "acc-1",
-    "clientOrderId": "cli-3",
-    "symbol": "BTCUSDT",
-    "side": "SELL",
-    "type": "STOP_MARKET",
-    "quantity": "0.5",
-    "price": null,
-    "triggerPrice": null,
-    "leverage": 3,
-    "reduceOnly": false,
-    "closePosition": true,
-    "status": "OPEN",
-    "filledQuantity": "0.5",
-    "avgFillPrice": null,
-    "reservedMargin": "0",
-    "attachedStopLoss": null,
-    "attachedTakeProfit": null,
-    "trailingKind": null,
-    "trailingCallback": null,
-    "trailingActivationPrice": null,
-    "trailingExtreme": null,
-    "attachedTrailingStop": null,
-    "rejectReason": null,
-    "exchangeOrderId": null,
-    "agentId": null,
-    "decisionId": null,
-    "createdAt": 1700000000500,
-    "updatedAt": 1700000001600
-   }
-  ],
+  "listOpenOrdersForMarketLive": [],
   "listOpenOrdersForMarketReplay": [
    {
     "id": "ord-5",
@@ -1935,28 +1872,7 @@
     "closedAt": null
    }
   ],
-  "listOpenPositionsForMarketLive": [
-   {
-    "id": "pos-2",
-    "accountId": "acc-1",
-    "symbol": "ETHUSDT",
-    "side": "SHORT",
-    "quantity": "0.5",
-    "entryPrice": "67000.5",
-    "leverage": 3,
-    "margin": "11166.75",
-    "liquidationPrice": "45000.1",
-    "status": "OPEN",
-    "realizedPnl": "-5",
-    "feesPaid": "20.1",
-    "fundingPaid": "1.5",
-    "maxQuantity": "0.75",
-    "exitPrice": null,
-    "lastFundingTime": 1700000003000,
-    "openedAt": 1700000000000,
-    "closedAt": null
-   }
-  ],
+  "listOpenPositionsForMarketLive": [],
   "listOpenPositionsForMarketReplay": [
    {
     "id": "pos-6",

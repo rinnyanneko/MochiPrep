@@ -184,7 +184,8 @@ function storeRowsFixture() {
   const account = samples.paperAccount[0]!; // LIVE source
   const replayAccount = { ...samples.paperAccount[1]!, id: 'acc-2' }; // REPLAY source
 
-  // Two accounts on different sources, so the market joins have something to filter out.
+  // Two accounts on different sources, so the market joins have something to filter out. acc-1 is
+  // an OKX account, so the LIVE market lists are empty: the simulator never touches its rows.
   // Orders share created_at on purpose (ord-2, ord-3, ord-5): ordering then falls to rowid.
   const order = (o: Partial<Order> & Pick<Order, 'id' | 'clientOrderId'>): Order => ({
     ...samples.order[1]!,
