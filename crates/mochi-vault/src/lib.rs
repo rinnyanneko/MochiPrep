@@ -13,7 +13,10 @@ use base64::Engine;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use subtle::ConstantTimeEq;
 use unicode_normalization::UnicodeNormalization;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 const VERSION: &str = "v1";
 const IV_LEN: usize = 12;
@@ -23,8 +26,41 @@ const SALT_LEN: usize = 16;
 /// Authenticated context for the wrapped data key.
 pub const WRAP_CONTEXT: &str = "mochiprep:vault-key";
 
-/// The AES-256 data key that seals every secret.
-pub type DataKey = [u8; 32];
+/// The AES-256 data key that seals every secret. A newtype so it can zeroize on drop and so
+/// `Debug` can never print it.
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+pub struct DataKey([u8; 32]);
+
+impl DataKey {
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl fmt::Debug for DataKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("DataKey(…)")
+    }
+}
+
+impl PartialEq for DataKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.ct_eq(&other.0).into()
+    }
+}
+
+impl Eq for DataKey {}
+
+/// scrypt cost ceilings. Node writes 2^17/8/1 (and tests 2^10/8/1); a stored `kdf` from anywhere
+/// else is untrusted input, and an unchecked N would let it demand gigabytes before failing.
+const MAX_N: u32 = 1 << 20;
+const MAX_R: u32 = 16;
+const MAX_P: u32 = 16;
+const MAX_MEMORY: u64 = 1 << 30;
 
 /// scrypt cost. The serde names match the JSON Node stores in `vault_keys.params`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,7 +111,9 @@ pub fn exchange_context(account_id: &str) -> String {
 pub fn new_data_key() -> DataKey {
     let mut key = [0u8; 32];
     OsRng.fill_bytes(&mut key);
-    key
+    let data_key = DataKey::from_bytes(key);
+    key.zeroize();
+    data_key
 }
 
 /// AES-256-GCM. `context` is authenticated but not stored: a ciphertext copied into another row
@@ -83,7 +121,7 @@ pub fn new_data_key() -> DataKey {
 pub fn seal(key: &DataKey, plaintext: &str, context: &str) -> String {
     let mut iv = [0u8; IV_LEN];
     OsRng.fill_bytes(&mut iv);
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key.as_bytes()));
     let payload = Payload {
         msg: plaintext.as_bytes(),
         aad: context.as_bytes(),
@@ -120,7 +158,7 @@ pub fn open(key: &DataKey, sealed: &str, context: &str) -> Result<String, VaultE
 
     let mut ciphertext = body;
     ciphertext.extend_from_slice(&tag);
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key.as_bytes()));
     let payload = Payload {
         msg: &ciphertext,
         aad: context.as_bytes(),
@@ -132,16 +170,21 @@ pub fn open(key: &DataKey, sealed: &str, context: &str) -> Result<String, VaultE
 }
 
 /// CPU- and memory-heavy (about 128 MiB at the default cost): call from a blocking thread.
-fn derive(password: &str, salt: &[u8], kdf: KdfParams) -> Result<DataKey, VaultError> {
+fn derive(password: &str, salt: &[u8], kdf: KdfParams) -> Result<Zeroizing<[u8; 32]>, VaultError> {
     if !kdf.n.is_power_of_two() || kdf.n < 2 {
+        return Err(VaultError::Kdf);
+    }
+    // Checked before `Params::new` and the allocation: scrypt needs 128 * N * r bytes.
+    let memory = 128u64 * u64::from(kdf.n) * u64::from(kdf.r);
+    if kdf.n > MAX_N || kdf.r > MAX_R || kdf.p > MAX_P || memory > MAX_MEMORY {
         return Err(VaultError::Kdf);
     }
     let log_n = u8::try_from(kdf.n.trailing_zeros()).map_err(|_| VaultError::Kdf)?;
     let params = scrypt::Params::new(log_n, kdf.r, kdf.p, 32).map_err(|_| VaultError::Kdf)?;
-    let mut derived = [0u8; 32];
+    let mut derived = Zeroizing::new([0u8; 32]);
     // NFC first, as Node does, so the same typed password derives the same key on every platform.
-    let password: String = password.nfc().collect();
-    scrypt::scrypt(password.as_bytes(), salt, &params, &mut derived)
+    let password: Zeroizing<String> = Zeroizing::new(password.nfc().collect());
+    scrypt::scrypt(password.as_bytes(), salt, &params, &mut *derived)
         .map_err(|_| VaultError::Kdf)?;
     Ok(derived)
 }
@@ -157,7 +200,9 @@ pub fn wrap_with_password(
     OsRng.fill_bytes(&mut salt);
     let kek = derive(password, &salt, kdf)?;
     // Node wraps the base64 text of the key, not the raw bytes; keep that for compatibility.
-    let wrapped_key = seal(&kek, &STANDARD.encode(data_key), WRAP_CONTEXT);
+    let kek = DataKey::from_bytes(*kek);
+    let encoded = Zeroizing::new(STANDARD.encode(data_key.as_bytes()));
+    let wrapped_key = seal(&kek, &encoded, WRAP_CONTEXT);
     Ok(PasswordWrap {
         salt: STANDARD.encode(salt),
         kdf,
@@ -172,13 +217,20 @@ pub fn unwrap_with_password(wrap: &PasswordWrap, password: &str) -> Result<DataK
         .decode(&wrap.salt)
         .map_err(|_| VaultError::Malformed)?;
     let kek = derive(password, &salt, wrap.kdf)?;
-    let encoded_key = match open(&kek, &wrap.wrapped_key, WRAP_CONTEXT) {
-        Ok(text) => text,
-        Err(VaultError::Decrypt) => return Err(VaultError::WrongPassword),
-        Err(other) => return Err(other),
-    };
-    let bytes = STANDARD
-        .decode(encoded_key)
-        .map_err(|_| VaultError::Malformed)?;
-    bytes.try_into().map_err(|_| VaultError::Malformed)
+    let kek = DataKey::from_bytes(*kek);
+    // Node answers every failure past this point with "Wrong master password": the tag is the
+    // password check, and a wrapped key that is garbled after a good derivation is no better.
+    let encoded_key = Zeroizing::new(
+        open(&kek, &wrap.wrapped_key, WRAP_CONTEXT).map_err(|_| VaultError::WrongPassword)?,
+    );
+    let bytes = Zeroizing::new(
+        STANDARD
+            .decode(encoded_key.as_bytes())
+            .map_err(|_| VaultError::WrongPassword)?,
+    );
+    let key: [u8; 32] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| VaultError::WrongPassword)?;
+    Ok(DataKey::from_bytes(key))
 }
