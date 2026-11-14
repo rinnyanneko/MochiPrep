@@ -1,8 +1,8 @@
-//! Node's `ExecutionEngine` seam: routes trade through one trait, whichever engine is behind the
-//! account. The paper engine runs synchronously on the runtime task, one `call` per operation. An
-//! OKX engine runs its network work off the task, in its account's own queue, and reaches the
-//! database only through short `call`s back to the task, so it never holds the runtime while it
-//! waits on OKX.
+//! Node's `ExecutionEngine` seam: routes and agents trade through one trait, whichever engine is
+//! behind the account. The paper engine runs synchronously on the runtime task, one `call` per
+//! operation. An OKX engine runs its network work off the task, in its account's own queue, and
+//! reaches the database only through short `call`s back to the task, so it never holds the
+//! runtime while it waits on OKX.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -16,8 +16,9 @@ use mochi_domain::{
 use mochi_okx::engine::{EngineError, OkxEngine, OkxEngineDeps, Rows, StoreAccess, StoreWork};
 use mochi_okx::{Clock, Credentials, NetTransport, OkxClient, Transport, Venue};
 use tokio::sync::{broadcast, mpsc};
+use zeroize::Zeroizing;
 
-use super::{unix_ms, Command, Runtime, RuntimeHandle};
+use super::{stopped, unix_ms, Command, LiveFeed, Runtime, RuntimeHandle};
 use crate::error::ApiError;
 
 /// Who asked for a protection change, as Node's `setProtection` meta.
@@ -107,10 +108,20 @@ impl Default for OkxOptions {
 }
 
 impl OkxOptions {
-    pub(super) fn transport(&self) -> Arc<dyn Transport> {
+    fn transport(&self) -> Arc<dyn Transport> {
         self.transport
             .clone()
             .unwrap_or_else(|| Arc::new(NetTransport::new()))
+    }
+
+    /// A signed client for this key, on the venue's host unless a test overrides it.
+    pub(super) fn client(&self, credentials: Credentials, venue: Venue) -> OkxClient {
+        let mut client = OkxClient::new(credentials, venue, self.transport());
+        if let Some(base) = &self.base_url {
+            client = client.with_base_url(base.clone());
+        }
+        let now = self.now.clone();
+        client.with_clock(move || now())
     }
 }
 
@@ -118,6 +129,50 @@ impl OkxOptions {
 pub(super) struct ExchangeSession {
     pub engine: Arc<OkxEngine>,
     pub armed: Arc<AtomicBool>,
+    /// The key, secret and passphrase (Node's `session.secrets`), so every text that leaves the
+    /// runtime has them removed. Wiped when the session goes.
+    pub secrets: [Zeroizing<String>; 3],
+    /// Whether the last sync succeeded: only the change to unhealthy pauses agents.
+    pub was_healthy: bool,
+}
+
+impl ExchangeSession {
+    /// The engine reads arming through this flag. Node's engine reads the account's current
+    /// session, so an engine whose session was replaced or removed is never armed; clearing the
+    /// flag keeps that for anything still holding the old engine.
+    pub(super) fn retire(&self) {
+        self.armed.store(false, Ordering::SeqCst);
+    }
+}
+
+/// The venue an exchange account trades on.
+pub(super) fn okx_venue(venue: AccountVenue) -> Option<Venue> {
+    match venue {
+        AccountVenue::OkxDemo => Some(Venue::OkxDemo),
+        AccountVenue::OkxLive => Some(Venue::OkxLive),
+        AccountVenue::Paper => None,
+    }
+}
+
+/// Node's `new OkxExecutionEngine({...})` for one account. Arming is read through `armed`.
+pub(super) fn okx_engine(
+    runtime: WeakRuntimeHandle,
+    account_id: &str,
+    client: OkxClient,
+    options: &OkxOptions,
+    live: Arc<dyn LiveFeed>,
+    armed: Arc<AtomicBool>,
+) -> Arc<OkxEngine> {
+    OkxEngine::new(OkxEngineDeps {
+        account_id: account_id.to_string(),
+        venue: client.venue(),
+        client,
+        store: Arc::new(ActorStore { runtime }),
+        get_quote: Arc::new(move |symbol: &str| live.get_quote(symbol)),
+        now: options.now.clone(),
+        is_armed: Arc::new(move || armed.load(Ordering::SeqCst)),
+        new_id: Arc::new(|prefix: &str| format!("{prefix}_{}", uuid::Uuid::new_v4())),
+    })
 }
 
 impl Runtime {
@@ -128,27 +183,49 @@ impl Runtime {
         }
         match self.exchanges.get(&account.id) {
             Some(session) => Ok(ExecutionTarget::Okx(session.engine.clone())),
-            // Connecting is not ported yet, so this is where Node would say "not connected".
-            None => Err(ApiError::not_available()),
+            None => Err(ApiError::bad_request(format!(
+                "{} is not connected to OKX. Enter its API key in Settings.",
+                account.name
+            ))),
         }
+    }
+
+    /// `execution(accountId)` by id. A missing account is Node's plain `Unknown account` (400).
+    pub fn execution_target(&self, account_id: &str) -> Result<ExecutionTarget, ApiError> {
+        let account = self
+            .require_account(account_id)
+            .map_err(|e| ApiError::bad_request(e.message()))?;
+        self.execution(&account)
     }
 
     pub(super) fn exchange_session(&self, account_id: &str) -> Option<&ExchangeSession> {
         self.exchanges.get(account_id)
     }
+
+    /// The engine behind a target, for work that runs off the task (agent cycles). It holds no
+    /// strong handle, so it never keeps a stopped runtime alive.
+    pub(super) fn engine_for(&self, target: ExecutionTarget) -> Arc<dyn ExecutionEngine> {
+        let runtime = self
+            .handle
+            .clone()
+            .expect("the handle is set before the task starts");
+        execution_engine(runtime, target)
+    }
+}
+
+fn execution_engine(
+    runtime: WeakRuntimeHandle,
+    target: ExecutionTarget,
+) -> Arc<dyn ExecutionEngine> {
+    match target {
+        ExecutionTarget::Paper => Arc::new(PaperExecution { runtime }),
+        ExecutionTarget::Okx(engine) => Arc::new(OkxExecution { engine, runtime }),
+    }
 }
 
 impl RuntimeHandle {
     pub fn engine_for(&self, target: ExecutionTarget) -> Arc<dyn ExecutionEngine> {
-        match target {
-            ExecutionTarget::Paper => Arc::new(PaperExecution {
-                runtime: self.clone(),
-            }),
-            ExecutionTarget::Okx(engine) => Arc::new(OkxExecution {
-                engine,
-                runtime: self.clone(),
-            }),
-        }
+        execution_engine(self.downgrade(), target)
     }
 
     /// Resolves the engine for an account (404 `Unknown account` when it is gone).
@@ -176,16 +253,27 @@ impl RuntimeHandle {
 /// See [`RuntimeHandle::downgrade`].
 #[derive(Clone)]
 pub(super) struct WeakRuntimeHandle {
-    commands: mpsc::WeakSender<Command>,
-    events: broadcast::Sender<mochi_domain::ServerEvent>,
+    pub(super) commands: mpsc::WeakSender<Command>,
+    pub(super) events: broadcast::Sender<mochi_domain::ServerEvent>,
 }
 
 impl WeakRuntimeHandle {
-    fn upgrade(&self) -> Option<RuntimeHandle> {
+    pub(super) fn upgrade(&self) -> Option<RuntimeHandle> {
         Some(RuntimeHandle {
             commands: self.commands.upgrade()?,
             events: self.events.clone(),
         })
+    }
+
+    /// Runs `work` on the task, or answers 503 when the runtime has stopped.
+    async fn call<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&mut Runtime) -> T + Send + 'static,
+    ) -> Result<T, ApiError> {
+        match self.upgrade() {
+            Some(runtime) => runtime.call(work).await,
+            None => Err(stopped()),
+        }
     }
 }
 
@@ -214,7 +302,7 @@ impl StoreAccess for ActorStore {
 }
 
 struct PaperExecution {
-    runtime: RuntimeHandle,
+    runtime: WeakRuntimeHandle,
 }
 
 impl ExecutionEngine for PaperExecution {
@@ -349,11 +437,12 @@ impl ExecutionEngine for PaperExecution {
 
 struct OkxExecution {
     engine: Arc<OkxEngine>,
-    runtime: RuntimeHandle,
+    runtime: WeakRuntimeHandle,
 }
 
 impl OkxExecution {
-    /// A thrown engine error, as Node's handler answers it: 400, secrets removed on the task.
+    /// A thrown engine error, as Node's handler answers it: 400, secrets removed on the task,
+    /// the exchange keys included.
     async fn refused(&self, error: EngineError) -> ApiError {
         let text = error.to_string();
         match self.runtime.call(move |r| r.api_error(text)).await {
@@ -456,9 +545,12 @@ impl ExecutionEngine for OkxExecution {
     }
 }
 
+/// Seams for this crate's own tests, behind the `test-seams` feature so a production build has
+/// no way to a session that skipped the connect checks.
+#[cfg(feature = "test-seams")]
 impl RuntimeHandle {
     /// Builds an OKX session for an existing exchange account and runs its first full sync, with
-    /// none of the connect checks: the test seam until connecting is ported.
+    /// none of the connect checks.
     #[doc(hidden)]
     pub async fn attach_okx_for_test(
         &self,
@@ -470,56 +562,46 @@ impl RuntimeHandle {
         let (venue, options, live) = self
             .call(move |r| {
                 let account = r.require_account(&id)?;
-                let venue = match account.venue {
-                    AccountVenue::OkxDemo => Venue::OkxDemo,
-                    AccountVenue::OkxLive => Venue::OkxLive,
-                    AccountVenue::Paper => {
-                        return Err(ApiError::bad_request("Not an exchange account"))
-                    }
-                };
+                let venue = okx_venue(account.venue)
+                    .ok_or_else(|| ApiError::bad_request("Not an exchange account"))?;
                 Ok((venue, r.okx.clone(), r.live()))
             })
             .await??;
-        let mut client = OkxClient::new(credentials, venue, options.transport());
-        if let Some(base) = &options.base_url {
-            client = client.with_base_url(base.clone());
-        }
-        let now = options.now.clone();
-        let client = client.with_clock(move || now());
+        let secrets = [
+            Zeroizing::new(credentials.api_key().to_string()),
+            Zeroizing::new(credentials.secret_key().to_string()),
+            Zeroizing::new(credentials.passphrase().to_string()),
+        ];
+        let client = options.client(credentials, venue);
         let flag = Arc::new(AtomicBool::new(armed));
-        let engine = OkxEngine::new(OkxEngineDeps {
-            account_id: account_id.to_string(),
-            venue,
+        let engine = okx_engine(
+            self.downgrade(),
+            account_id,
             client,
-            store: Arc::new(ActorStore {
-                runtime: self.downgrade(),
-            }),
-            get_quote: Arc::new(move |symbol: &str| live.get_quote(symbol)),
-            now: options.now.clone(),
-            is_armed: {
-                let flag = flag.clone();
-                Arc::new(move || flag.load(Ordering::SeqCst))
-            },
-            new_id: Arc::new(|prefix: &str| format!("{prefix}_{}", uuid::Uuid::new_v4())),
-        });
+            &options,
+            live,
+            flag.clone(),
+        );
         if let Err(error) = engine.sync().await {
             let text = error.to_string();
             return Err(self.call(move |r| r.api_error(text)).await?);
         }
         let id = account_id.to_string();
         self.call(move |r| {
-            r.exchanges.insert(
-                id,
-                ExchangeSession {
-                    engine,
-                    armed: flag,
-                },
-            );
+            let session = ExchangeSession {
+                engine,
+                armed: flag,
+                secrets,
+                was_healthy: true,
+            };
+            if let Some(old) = r.exchanges.insert(id, session) {
+                old.retire();
+            }
         })
         .await
     }
 
-    /// Arms or disarms a session without the phrase: the test seam until arming is ported.
+    /// Arms or disarms a session without the phrase.
     #[doc(hidden)]
     pub async fn set_armed_for_test(&self, account_id: &str, armed: bool) -> Result<(), ApiError> {
         let id = account_id.to_string();
@@ -531,8 +613,7 @@ impl RuntimeHandle {
         .await
     }
 
-    /// Runs one full OKX sync for a connected account: the test seam until the sync loop is
-    /// ported.
+    /// Runs one full OKX sync for a connected account, outside the sync loop.
     #[doc(hidden)]
     pub async fn sync_okx_for_test(&self, account_id: &str) -> Result<(), ApiError> {
         let id = account_id.to_string();

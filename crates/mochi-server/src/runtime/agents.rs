@@ -6,7 +6,7 @@ use mochi_ai::{
     AiProvider, MockProvider, ProviderConfig, ProviderError, ProviderErrorCode, ProviderKind,
     RemoteProvider,
 };
-use mochi_domain::{AccountVenue, DataSource, Topic, VaultStatus};
+use mochi_domain::{DataSource, Topic, VaultStatus};
 use mochi_store::rows;
 use mochi_vault::{provider_context, seal};
 use serde::{Deserialize, Serialize};
@@ -44,10 +44,6 @@ impl RuntimeHandle {
             .await??;
         done.await.map_err(|_| self.reply_error())?
     }
-    pub async fn execute_signal(&self, id: impl Into<String>) -> Result<Value, ApiError> {
-        let id = id.into();
-        self.call(move |r| r.execute_signal(&id)).await?
-    }
 }
 impl Runtime {
     pub fn require_agent(&self, id: &str) -> Result<rows::Agent, ApiError> {
@@ -62,16 +58,6 @@ impl Runtime {
     }
     pub fn is_agent_busy(&self, id: &str) -> bool {
         self.agents.active.contains_key(id)
-    }
-    pub fn assert_can_run(&self, agent: &rows::Agent) -> Result<(), ApiError> {
-        let a = self.require_account(&agent.account_id)?;
-        if a.venue != AccountVenue::Paper {
-            return Err(ApiError::bad_request(format!(
-                "{} is not connected to OKX",
-                a.name
-            )));
-        }
-        Ok(())
     }
     pub fn start_agent(&mut self, id: &str) -> Result<(), ApiError> {
         let mut a = self.require_agent(id)?;

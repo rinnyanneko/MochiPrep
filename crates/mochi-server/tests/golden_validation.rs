@@ -7,9 +7,10 @@ use std::path::PathBuf;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use mochi_domain::{OrderRequest, ServerEvent};
 use mochi_server::validate::{
-    self, AddInstrumentInput, CandleQuery, ClosePositionInput, CreateAccountInput, DecisionQuery,
-    LimitQuery, NewsQuery, NewsSourceInput, NewsSourceToggle, ProtectionInput, ReplayControl,
-    Schema, SourceQuery, VaultChangeInput, VaultCreateInput, VaultPasswordInput, VaultResetInput,
+    self, AddInstrumentInput, ArmInput, CandleQuery, ClosePositionInput, CreateAccountInput,
+    DecisionQuery, LimitQuery, NewsQuery, NewsSourceInput, NewsSourceToggle, OkxConnectInput,
+    ProtectionInput, ReplayControl, Schema, SourceQuery, VaultChangeInput, VaultCreateInput,
+    VaultPasswordInput, VaultResetInput,
 };
 use mochi_server::ApiError;
 use serde_json::{json, Value};
@@ -43,6 +44,8 @@ fn schema(name: &str) -> Schema {
         "VaultPassword" => Schema::VaultPassword,
         "VaultChange" => Schema::VaultChange,
         "VaultReset" => Schema::VaultReset,
+        "OkxConnect" => Schema::OkxConnect,
+        "Arm" => Schema::Arm,
         other => panic!("unknown schema {other}"),
     }
 }
@@ -130,6 +133,10 @@ fn typed_parse_succeeds(name: &str, value: &Value) {
         Schema::VaultReset => {
             validate::parse_body::<VaultResetInput>(Schema::VaultReset, value).is_ok()
         }
+        Schema::OkxConnect => {
+            validate::parse_body::<OkxConnectInput>(Schema::OkxConnect, value).is_ok()
+        }
+        Schema::Arm => validate::parse_body::<ArmInput>(Schema::Arm, value).is_ok(),
         _ => unreachable!(),
     };
     assert!(ok, "typed parse of {name} {value}");

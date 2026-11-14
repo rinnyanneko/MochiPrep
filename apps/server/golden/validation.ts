@@ -1,10 +1,12 @@
 import fastify, { type InjectOptions } from 'fastify';
 import {
   AddInstrumentSchema,
+  ArmSchema,
   ClosePositionSchema,
   CreateAccountSchema,
   NewsSourceInputSchema,
   NewsSourceToggleSchema,
+  OkxConnectSchema,
   PlaceOrderSchema,
   ProtectionSchema,
   ReplayControlSchema,
@@ -38,6 +40,8 @@ const BODY_SCHEMAS: Record<string, ZodType> = {
   VaultPassword: VaultPasswordSchema,
   VaultChange: VaultChangeSchema,
   VaultReset: VaultResetSchema,
+  OkxConnect: OkxConnectSchema,
+  Arm: ArmSchema,
 };
 
 const QUERY_SCHEMAS: Record<string, ZodType> = {
@@ -60,7 +64,18 @@ const order = {
   quantity: '0.01',
   leverage: 5,
 };
-const without = (value: Record<string, unknown>, key: string) => {
+const okxKey = { apiKey: 'key', secretKey: 'secret', passphrase: 'pass' };
+/** Values JS writes in ways a naive float printer does not. */
+const exoticLimits = {
+  maxLeverage: 2.5,
+  maxRiskPerTradePct: 1e-7,
+  maxDailyLossPct: 0.30000000000000004,
+  maxOpenPositions: 2,
+  requireStopLoss: false,
+  maxQuoteAgeSec: 3600,
+  maxNotional: 1e21,
+};
+const without =(value: Record<string, unknown>, key: string) => {
   const copy = { ...value };
   delete copy[key];
   return copy;
@@ -310,6 +325,40 @@ const BODY_CASES: Record<string, unknown[]> = {
     { confirmation: null },
     {},
     { confirmation: 'DELETE SAVED KEYS', force: true },
+    null,
+  ],
+  // The key fields are trimmed; limits default to DEFAULT_LIVE_LIMITS and remember to false.
+  OkxConnect: [
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE' },
+    { apiKey: '  k  ', secretKey: '\ts\n', passphrase: ' p ', name: ' Main ', environment: 'OKX_DEMO', remember: true },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', limits: exoticLimits },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', limits: { ...exoticLimits, maxLeverage: 0.5, maxOpenPositions: 1.5, maxNotional: 0 } },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', limits: { ...exoticLimits, extra: 1 } },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', limits: {} },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', limits: null },
+    { ...okxKey, name: 'OKX', environment: 'PAPER' },
+    { ...okxKey, name: 'OKX', environment: 'okx_live' },
+    { ...okxKey, name: '', environment: 'OKX_LIVE' },
+    { ...okxKey, name: 'x'.repeat(61), environment: 'OKX_LIVE' },
+    { ...okxKey, apiKey: '   ', name: 'OKX', environment: 'OKX_LIVE' },
+    { ...okxKey, secretKey: 's'.repeat(201), name: 'OKX', environment: 'OKX_LIVE' },
+    { ...okxKey, passphrase: 7, name: 'OKX', environment: 'OKX_LIVE' },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', remember: 'yes' },
+    { ...okxKey, name: 'OKX', environment: 'OKX_LIVE', permissions: 'trade' },
+    { name: 'OKX', environment: 'OKX_LIVE' },
+    {},
+    null,
+    [],
+  ],
+  Arm: [
+    { confirmation: 'TRADE REAL MONEY' },
+    { confirmation: ' TRADE REAL MONEY ' },
+    { confirmation: '' },
+    { confirmation: 'x'.repeat(100) },
+    { confirmation: 'x'.repeat(101) },
+    { confirmation: 1 },
+    {},
+    { confirmation: 'TRADE REAL MONEY', force: true },
     null,
   ],
 };

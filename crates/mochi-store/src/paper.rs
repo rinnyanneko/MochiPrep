@@ -29,6 +29,20 @@ impl SqlitePaperStore {
         &self.conn
     }
 
+    /// Node's `saveAccountProfile`: the name, initial balance and live limits, the columns an
+    /// exchange connect changes. The limits are written as `JSON.stringify` writes them.
+    pub fn save_account_profile(&self, a: &PaperAccount) -> Result<(), StoreFailure> {
+        self.run(
+            "UPDATE accounts SET name=?, initial_balance=?, live_limits=? WHERE id=?",
+            params![
+                a.name,
+                a.initial_balance,
+                limits_text(&a.live_limits)?,
+                a.id
+            ],
+        )
+    }
+
     fn exec(&self, sql: &str) -> Result<(), StoreFailure> {
         self.conn.execute_batch(sql).map_err(failure)
     }

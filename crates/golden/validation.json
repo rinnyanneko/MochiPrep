@@ -1838,6 +1838,280 @@
    "response": {
     "error": "input: Invalid input: expected object, received null"
    }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"secret\",\"passphrase\":\"pass\",\"name\":\"OKX\",\"environment\":\"OKX_LIVE\"}",
+   "status": 200,
+   "response": {
+    "apiKey": "key",
+    "secretKey": "secret",
+    "passphrase": "pass",
+    "name": "OKX",
+    "environment": "OKX_LIVE",
+    "limits": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 10,
+     "maxNotional": 100
+    },
+    "remember": false
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"  k  \",\"secretKey\":\"\\ts\\n\",\"passphrase\":\" p \",\"name\":\" Main \",\"environment\":\"OKX_DEMO\",\"remember\":true}",
+   "status": 200,
+   "response": {
+    "apiKey": "k",
+    "secretKey": "s",
+    "passphrase": "p",
+    "name": "Main",
+    "environment": "OKX_DEMO",
+    "limits": {
+     "maxLeverage": 3,
+     "maxRiskPerTradePct": 0.5,
+     "maxDailyLossPct": 2,
+     "maxOpenPositions": 2,
+     "requireStopLoss": true,
+     "maxQuoteAgeSec": 10,
+     "maxNotional": 100
+    },
+    "remember": true
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"secret\",\"passphrase\":\"pass\",\"name\":\"OKX\",\"environment\":\"OKX_LIVE\",\"limits\":{\"maxLeverage\":2.5,\"maxRiskPerTradePct\":1e-7,\"maxDailyLossPct\":0.30000000000000004,\"maxOpenPositions\":2,\"requireStopLoss\":false,\"maxQuoteAgeSec\":3600,\"maxNotional\":1e+21}}",
+   "status": 200,
+   "response": {
+    "apiKey": "key",
+    "secretKey": "secret",
+    "passphrase": "pass",
+    "name": "OKX",
+    "environment": "OKX_LIVE",
+    "limits": {
+     "maxLeverage": 2.5,
+     "maxRiskPerTradePct": 1e-7,
+     "maxDailyLossPct": 0.30000000000000004,
+     "maxOpenPositions": 2,
+     "requireStopLoss": false,
+     "maxQuoteAgeSec": 3600,
+     "maxNotional": 1e+21
+    },
+    "remember": false
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"secret\",\"passphrase\":\"pass\",\"name\":\"OKX\",\"environment\":\"OKX_LIVE\",\"limits\":{\"maxLeverage\":0.5,\"maxRiskPerTradePct\":1e-7,\"maxDailyLossPct\":0.30000000000000004,\"maxOpenPositions\":1.5,\"requireStopLoss\":false,\"maxQuoteAgeSec\":3600,\"maxNotional\":0}}",
+   "status": 400,
+   "response": {
+    "error": "limits.maxLeverage: Too small: expected number to be >=1; limits.maxOpenPositions: Invalid input: expected int, received number; limits.maxNotional: Too small: expected number to be >0"
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"secret\",\"passphrase\":\"pass\",\"name\":\"OKX\",\"environment\":\"OKX_LIVE\",\"limits\":{\"maxLeverage\":2.5,\"maxRiskPerTradePct\":1e-7,\"maxDailyLossPct\":0.30000000000000004,\"maxOpenPositions\":2,\"requireStopLoss\":false,\"maxQuoteAgeSec\":3600,\"maxNotional\":1e+21,\"extra\":1}}",
+   "status": 400,
+   "response": {
+    "error": "limits: Unrecognized key: \"extra\""
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"secret\",\"passphrase\":\"pass\",\"name\":\"OKX\",\"environment\":\"OKX_LIVE\",\"limits\":{}}",
+   "status": 400,
+   "response": {
+    "error": "limits.maxLeverage: Invalid input: expected number, received undefined; limits.maxRiskPerTradePct: Invalid input: expected number, received undefined; limits.maxDailyLossPct: Invalid input: expected number, received undefined; limits.maxOpenPositions: Invalid input: expected number, received undefined; limits.requireStopLoss: Invalid input: expected boolean, received undefined; limits.maxQuoteAgeSec: Invalid input: expected number, received undefined; limits.maxNotional: Invalid input: expected number, received undefined"
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"secret\",\"passphrase\":\"pass\",\"name\":\"OKX\",\"environment\":\"OKX_LIVE\",\"limits\":null}",
+   "status": 400,
+   "response": {
+    "error": "limits: Invalid input: expected object, received null"
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"secret\",\"passphrase\":\"pass\",\"name\":\"OKX\",\"environment\":\"PAPER\"}",
+   "status": 400,
+   "response": {
+    "error": "environment: Invalid option: expected one of \"OKX_DEMO\"|\"OKX_LIVE\""
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"secret\",\"passphrase\":\"pass\",\"name\":\"OKX\",\"environment\":\"okx_live\"}",
+   "status": 400,
+   "response": {
+    "error": "environment: Invalid option: expected one of \"OKX_DEMO\"|\"OKX_LIVE\""
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"secret\",\"passphrase\":\"pass\",\"name\":\"\",\"environment\":\"OKX_LIVE\"}",
+   "status": 400,
+   "response": {
+    "error": "name: Too small: expected string to have >=1 characters"
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"secret\",\"passphrase\":\"pass\",\"name\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"environment\":\"OKX_LIVE\"}",
+   "status": 400,
+   "response": {
+    "error": "name: Too big: expected string to have <=60 characters"
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"   \",\"secretKey\":\"secret\",\"passphrase\":\"pass\",\"name\":\"OKX\",\"environment\":\"OKX_LIVE\"}",
+   "status": 400,
+   "response": {
+    "error": "apiKey: Too small: expected string to have >=1 characters"
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss\",\"passphrase\":\"pass\",\"name\":\"OKX\",\"environment\":\"OKX_LIVE\"}",
+   "status": 400,
+   "response": {
+    "error": "secretKey: Too big: expected string to have <=200 characters"
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"secret\",\"passphrase\":7,\"name\":\"OKX\",\"environment\":\"OKX_LIVE\"}",
+   "status": 400,
+   "response": {
+    "error": "passphrase: Invalid input: expected string, received number"
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"secret\",\"passphrase\":\"pass\",\"name\":\"OKX\",\"environment\":\"OKX_LIVE\",\"remember\":\"yes\"}",
+   "status": 400,
+   "response": {
+    "error": "remember: Invalid input: expected boolean, received string"
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"apiKey\":\"key\",\"secretKey\":\"secret\",\"passphrase\":\"pass\",\"name\":\"OKX\",\"environment\":\"OKX_LIVE\",\"permissions\":\"trade\"}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"permissions\""
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{\"name\":\"OKX\",\"environment\":\"OKX_LIVE\"}",
+   "status": 400,
+   "response": {
+    "error": "apiKey: Invalid input: expected string, received undefined; secretKey: Invalid input: expected string, received undefined; passphrase: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "{}",
+   "status": 400,
+   "response": {
+    "error": "apiKey: Invalid input: expected string, received undefined; secretKey: Invalid input: expected string, received undefined; passphrase: Invalid input: expected string, received undefined; name: Invalid input: expected string, received undefined; environment: Invalid option: expected one of \"OKX_DEMO\"|\"OKX_LIVE\""
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "null",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received null"
+   }
+  },
+  {
+   "schema": "OkxConnect",
+   "body": "[]",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received array"
+   }
+  },
+  {
+   "schema": "Arm",
+   "body": "{\"confirmation\":\"TRADE REAL MONEY\"}",
+   "status": 200,
+   "response": {
+    "confirmation": "TRADE REAL MONEY"
+   }
+  },
+  {
+   "schema": "Arm",
+   "body": "{\"confirmation\":\" TRADE REAL MONEY \"}",
+   "status": 200,
+   "response": {
+    "confirmation": " TRADE REAL MONEY "
+   }
+  },
+  {
+   "schema": "Arm",
+   "body": "{\"confirmation\":\"\"}",
+   "status": 200,
+   "response": {
+    "confirmation": ""
+   }
+  },
+  {
+   "schema": "Arm",
+   "body": "{\"confirmation\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+   "status": 200,
+   "response": {
+    "confirmation": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   }
+  },
+  {
+   "schema": "Arm",
+   "body": "{\"confirmation\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+   "status": 400,
+   "response": {
+    "error": "confirmation: Too big: expected string to have <=100 characters"
+   }
+  },
+  {
+   "schema": "Arm",
+   "body": "{\"confirmation\":1}",
+   "status": 400,
+   "response": {
+    "error": "confirmation: Invalid input: expected string, received number"
+   }
+  },
+  {
+   "schema": "Arm",
+   "body": "{}",
+   "status": 400,
+   "response": {
+    "error": "confirmation: Invalid input: expected string, received undefined"
+   }
+  },
+  {
+   "schema": "Arm",
+   "body": "{\"confirmation\":\"TRADE REAL MONEY\",\"force\":true}",
+   "status": 400,
+   "response": {
+    "error": "input: Unrecognized key: \"force\""
+   }
+  },
+  {
+   "schema": "Arm",
+   "body": "null",
+   "status": 400,
+   "response": {
+    "error": "input: Invalid input: expected object, received null"
+   }
   }
  ],
  "parser": [

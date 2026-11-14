@@ -381,7 +381,21 @@ impl OkxEngine {
         let equity = self
             .rows(move |rows| Ok(rows.list_equity(&account_id, 2000)?))
             .await?;
-        let base = day_start_equity(&equity, self.now(), &balance.equity);
+        self.daily_risk_of(&balance, &equity)
+    }
+
+    /// [`Self::daily_risk`] over equity points the caller already read (the latest 2000), for a
+    /// caller that owns the store and cannot wait on it.
+    pub fn daily_risk_from(&self, equity: &[EquityPoint]) -> Result<DailyRisk, EngineError> {
+        self.daily_risk_of(&self.balance()?, equity)
+    }
+
+    fn daily_risk_of(
+        &self,
+        balance: &AccountBalance,
+        equity: &[EquityPoint],
+    ) -> Result<DailyRisk, EngineError> {
+        let base = day_start_equity(equity, self.now(), &balance.equity);
         Ok(DailyRisk {
             daily_pnl: dec(&balance.equity)?.sub(&dec(&base)?).to_fixed(),
             day_start_equity: base,

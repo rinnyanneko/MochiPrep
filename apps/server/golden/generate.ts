@@ -348,6 +348,39 @@ function storeRowsFixture() {
     store.deleteAccountData('acc-1', false);
     const afterDeletingRow = snapshot();
 
+    // saveAccountProfile, as an exchange connect writes it: live limits as JSON.stringify writes
+    // JS numbers (2.5, 1e-7, 0.30000000000000004, 1e+21), and no limits as NULL. On its own
+    // database, so the rows above stay as they are.
+    const profiles: PaperAccount[] = [
+      {
+        ...account,
+        name: 'Profiled',
+        initialBalance: '123.5',
+        walletBalance: '7',
+        liveLimits: {
+          maxLeverage: 2.5,
+          maxRiskPerTradePct: 1e-7,
+          maxDailyLossPct: 0.30000000000000004,
+          maxOpenPositions: 2,
+          requireStopLoss: false,
+          maxQuoteAgeSec: 10,
+          maxNotional: 1e21,
+        },
+      },
+      { ...replayAccount, name: 'No limits', initialBalance: '0', liveLimits: null },
+    ];
+    const profileDb = openDatabase(':memory:');
+    let profile;
+    try {
+      const profileStore = new SqliteStore(profileDb);
+      profileStore.insertAccount(account);
+      profileStore.insertAccount(replayAccount);
+      profiles.forEach((p) => profileStore.saveAccountProfile(p));
+      profile = { saves: profiles, accounts: profileDb.prepare('SELECT * FROM accounts ORDER BY rowid').all() };
+    } finally {
+      profileDb.close();
+    }
+
     return {
       inputs: {
         accounts: [account, replayAccount],
@@ -364,6 +397,7 @@ function storeRowsFixture() {
       afterSaves,
       afterKeepingRow,
       afterDeletingRow,
+      profile,
     };
   } finally {
     db.close();

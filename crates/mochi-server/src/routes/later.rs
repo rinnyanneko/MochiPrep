@@ -1,20 +1,16 @@
-//! Read models for decisions/arena and the remaining Plan 5 OKX routes.
+//! Read models for suggestions, decisions and the arena.
 //!
 //! The web app refetches their lists every time its event stream opens, so their GETs answer
-//! with what the database really holds, exactly as Node reads it. Nothing is made up: a server
-//! without OKX sessions reports every exchange account as not connected. OKX writes answer 501
-//! until Plan 5 ports them.
+//! with what the database really holds, exactly as Node reads it.
 
-use axum::body::Bytes;
 use axum::extract::{RawQuery, State};
-use axum::http::HeaderMap;
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{Json, Router};
 use mochi_core::paper::PaperStore;
 use mochi_core::performance::{max_drawdown_pct, win_rate_pct};
 use mochi_decimal::Dec;
 use mochi_domain::jsnum::js_number_raw;
-use mochi_domain::{default_live_limits, AccountVenue, DataSource, RiskSettings};
+use mochi_domain::{AccountVenue, DataSource};
 use mochi_store::rows;
 use serde::Serialize;
 use serde_json::value::RawValue;
@@ -26,25 +22,9 @@ use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        // exchange accounts
-        .route("/api/exchange/status", get(exchange_status))
-        .route("/api/exchange/okx/connect", post(not_available))
-        .route("/api/exchange/okx/{id}/disconnect", post(not_available))
-        .route("/api/exchange/okx/{id}/arm", post(not_available))
-        .route("/api/exchange/okx/{id}/disarm", post(not_available))
-        // suggestions, decisions, arena
         .route("/api/signals", get(signals))
         .route("/api/decisions", get(decisions))
         .route("/api/arena", get(arena))
-}
-
-/// A write this backend cannot do yet. Fastify parses the body before any handler, so a body
-/// it cannot parse is still Node's 400 (or 415) first.
-async fn not_available(headers: HeaderMap, body: Bytes) -> ApiError {
-    match validate::read_body(&headers, &body) {
-        Ok(_) => ApiError::not_available(),
-        Err(error) => error,
-    }
 }
 
 /// A store read on the runtime task, its failure as Node's 400.
@@ -75,58 +55,6 @@ async fn decisions(
         let agent_id = agent_id.filter(|id| !id.is_empty());
         rows::list_decisions(runtime.connection(), agent_id.as_deref(), limit)
             .map_err(|e| runtime.api_error(e))
-    })
-    .await
-}
-
-/// `ExchangeStatus`, keys in Node's order.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExchangeStatus {
-    account_id: String,
-    name: String,
-    venue: AccountVenue,
-    connected: bool,
-    saved: bool,
-    armed: bool,
-    healthy: bool,
-    last_sync_at: Option<i64>,
-    error: Option<String>,
-    limits: RiskSettings,
-}
-
-/// `exchangeStatuses()` for a backend with no OKX sessions: every exchange account is
-/// disconnected and disarmed, which is the truth here.
-async fn exchange_status(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<ExchangeStatus>>, ApiError> {
-    read(&state, |runtime| {
-        let accounts = runtime
-            .engine()
-            .store()
-            .list_accounts()
-            .map_err(|e| runtime.api_error(e))?;
-        let mut statuses = Vec::new();
-        for account in accounts {
-            if account.venue == AccountVenue::Paper {
-                continue;
-            }
-            let saved = rows::has_sealed_exchange_credentials(runtime.connection(), &account.id)
-                .map_err(|e| runtime.api_error(e))?;
-            statuses.push(ExchangeStatus {
-                account_id: account.id,
-                name: account.name,
-                venue: account.venue,
-                connected: false,
-                saved,
-                armed: false,
-                healthy: false,
-                last_sync_at: None,
-                error: None,
-                limits: account.live_limits.unwrap_or_else(default_live_limits),
-            });
-        }
-        Ok(statuses)
     })
     .await
 }

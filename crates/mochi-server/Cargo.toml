@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# Test-only ways to an OKX session that skip the connect checks. Only this crate's own tests
+# enable it (the dev-dependency on itself below), so a real connect always runs every check.
+test-seams = []
+
 [dependencies]
 axum = { workspace = true }
 # Streams for the SSE body; axum's own Sse is built on the same crate.
@@ -37,6 +42,7 @@ uuid = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+mochi-server = { path = ".", features = ["test-seams"] }
 # The in-process fake OKX for the OKX trading tests.
 mochi-okx = { path = "../mochi-okx", features = ["fake"] }
 tempfile = { workspace = true }

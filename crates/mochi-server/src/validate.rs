@@ -20,8 +20,10 @@ use serde_json::{json, Map, Value};
 use crate::error::ApiError;
 
 mod ai;
+mod exchange;
 mod vault;
 pub use ai::{AgentInput, ProviderInput, ProviderKeyInput, ProviderTestInput};
+pub use exchange::{ArmInput, OkxConnectInput};
 pub use vault::{VaultChangeInput, VaultCreateInput, VaultPasswordInput, VaultResetInput};
 
 /// Every message text, in one place so it can be audited against Zod and Fastify.
@@ -95,6 +97,8 @@ pub enum Schema {
     VaultPassword,
     VaultChange,
     VaultReset,
+    OkxConnect,
+    Arm,
 }
 
 // ---- typed results ---------------------------------------------------------------------------
@@ -246,6 +250,8 @@ pub fn check(schema: Schema, input: Option<&Value>) -> Result<Value, ApiError> {
         Schema::VaultPassword => vault::vault_password(input),
         Schema::VaultChange => vault::vault_change(input),
         Schema::VaultReset => vault::vault_reset(input),
+        Schema::OkxConnect => exchange::okx_connect(input),
+        Schema::Arm => exchange::arm(input),
     };
     result.map_err(|issues| ApiError::bad_request(format_issues(&issues)))
 }

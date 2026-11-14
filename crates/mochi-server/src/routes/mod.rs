@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod agents;
 pub mod events;
+pub mod exchange;
 pub mod instruments;
 pub mod later;
 pub mod market;
@@ -39,6 +40,7 @@ pub fn router() -> Router<AppState> {
         .merge(providers::router())
         .merge(replay::router())
         .merge(vault::router())
+        .merge(exchange::router())
         .merge(later::router())
 }
 

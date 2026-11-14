@@ -118,17 +118,15 @@ async fn remove(
     state
         .runtime
         .call(move |runtime| {
-            let account = runtime.require_account(&id)?;
+            runtime.require_account(&id)?;
             if has_agents(runtime, &id)? {
                 return Err(ApiError::bad_request(
                     "Delete the agents using this account first",
                 ));
             }
-            // Node also disconnects an exchange account here (its session, saved keys and
-            // agents), which comes with OKX trading.
-            if account.venue != AccountVenue::Paper {
-                return Err(ApiError::not_available());
-            }
+            // Its OKX session and saved keys go first, as in Node (for a paper account there
+            // are none).
+            runtime.disconnect_exchange(&id)?;
             let store = runtime.engine().store();
             store
                 .transaction(|| -> Result<(), StoreFailure> {

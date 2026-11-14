@@ -1004,6 +1004,7 @@ dependencies = [
  "mochi-domain",
  "mochi-market",
  "mochi-okx",
+ "mochi-server",
  "mochi-store",
  "mochi-vault",
  "rand 0.8.8",

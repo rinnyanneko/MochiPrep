@@ -1,6 +1,6 @@
 //! Orders and positions on an OKX account reach the OKX engine through the `ExecutionEngine`
-//! trait, against the in-process fake OKX with an injected clock. Connecting is not ported yet,
-//! so the session comes from the runtime's test seam; the paper paths keep their own tests.
+//! trait, against the in-process fake OKX with an injected clock. The session comes from the
+//! `test-seams` feature, so each test sets its own account; connecting is in `okx_runtime.rs`.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -336,7 +336,7 @@ async fn a_lost_answer_stays_open_until_sync_resolves_it_and_is_never_resent() {
 }
 
 #[tokio::test]
-async fn an_exchange_account_without_a_session_still_answers_501() {
+async fn an_exchange_account_without_a_session_is_not_connected() {
     let w = world(true).await;
     w.state
         .runtime
@@ -349,8 +349,14 @@ async fn an_exchange_account_without_a_session_still_answers_501() {
         .unwrap();
     let mut request = order("x");
     request["accountId"] = json!("acct_other");
-    let (status, _) = send(&w.state, "POST", "/api/orders", Some(request)).await;
-    assert_eq!(status, 501);
+    let answer = send(&w.state, "POST", "/api/orders", Some(request)).await;
+    assert_eq!(
+        answer,
+        (
+            400,
+            json!({ "error": "OKX is not connected to OKX. Enter its API key in Settings." })
+        )
+    );
     w.state.runtime.shutdown().await;
 }
 

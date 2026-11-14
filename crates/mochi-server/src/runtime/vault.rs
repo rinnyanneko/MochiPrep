@@ -151,18 +151,13 @@ impl RuntimeHandle {
             let data_key = off_actor(move || unwrap_with_password(&wrap, &password)).await?;
             let loaded = data_key.clone();
             handle.call(move |r| r.apply_unlock(loaded)).await??;
-            let failed = handle.reconnect_saved_okx(&data_key).await;
+            // Reconnecting runs every check a manual connect does, one account at a time.
+            let failed = handle.reconnect_saved_okx(&data_key).await?;
             let status = handle.call(|r| r.vault_status()).await??;
             drop(guard);
             Ok(UnlockOutcome { status, failed })
         })
         .await
-    }
-
-    /// Reconnecting saved OKX accounts needs the OKX client, which this backend does not have
-    /// yet, so there is nothing to reconnect and nothing has failed.
-    async fn reconnect_saved_okx(&self, _data_key: &DataKey) -> Vec<String> {
-        Vec::new()
     }
 
     /// Node's `changePassword`: rewraps the same data key, so nothing sealed changes. Works

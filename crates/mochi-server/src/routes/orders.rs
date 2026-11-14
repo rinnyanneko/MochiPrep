@@ -1,7 +1,6 @@
 //! Orders and positions (`app.ts` "orders"). Node sends these through `runtime.execution(id)`,
-//! the paper engine or an OKX session, and so does this: through the `ExecutionEngine` trait.
-//! An exchange account that is not connected answers 501 where Node would pick its engine,
-//! until connecting is ported.
+//! the paper engine or an OKX session, and so does this: through the `ExecutionEngine` trait. An
+//! exchange account with no session says it is not connected, as Node does.
 //!
 //! An order the engine refuses is not an HTTP error: it comes back as a REJECTED order in the
 //! result, with the reason, as in Node.

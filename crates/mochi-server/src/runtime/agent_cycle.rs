@@ -1,8 +1,13 @@
 //! A cycle crosses the actor boundary only with owned snapshots. Every execution returns to
 //! the actor and rechecks ownership, lifecycle, prices, balances and protection.
+//!
+//! A cycle trades through the engine its account had when it began (Node's `execution()` at
+//! the start of `analyzeAndAct`). On an exchange, cancelling stale entries and the final order
+//! or protection change go out off the actor and come back as completions.
 use super::{
-    agent_execution::{same_protection, settle, target_protection},
+    agent_execution::{same_protection, settle, settle_acted, target_protection, Acted, Outgoing},
     agents::{CycleReply, CycleTrigger},
+    execution::ExecutionTarget,
     Runtime,
 };
 use crate::{agent_parse::parse_decision, error::ApiError};
@@ -31,11 +36,17 @@ pub(super) struct Cycle {
     stale: bool,
     critical_error: Option<String>,
     secrets: Vec<String>,
+    /// The engine this cycle trades through; `None` only before it is resolved.
+    target: Option<ExecutionTarget>,
 }
 pub(super) enum Completion {
     Candles(Cycle, Result<Vec<Candle>, String>),
+    /// An exchange cancelled the agent's unfilled entries from its last cycle.
+    Cancelled(Cycle, Vec<Candle>, Result<(), ApiError>),
     News(Cycle, Box<MarketContext>),
     Model(Cycle, Result<AiResponse, ProviderError>),
+    /// An exchange answered the decision's order or protection change.
+    Acted(Cycle, Box<Acted>),
 }
 impl Cycle {
     fn clean(&self, text: &str) -> String {
@@ -52,11 +63,21 @@ impl Cycle {
         };
         settle(&mut self.record, "AI_ERROR", Some(display));
     }
+
+    fn target(&self) -> ExecutionTarget {
+        self.target
+            .clone()
+            .expect("the engine is resolved before any work leaves the actor")
+    }
 }
 impl Completion {
     pub(super) fn identity(&self) -> (String, String) {
         let c = match self {
-            Self::Candles(c, _) | Self::News(c, _) | Self::Model(c, _) => c,
+            Self::Candles(c, _)
+            | Self::Cancelled(c, _, _)
+            | Self::News(c, _)
+            | Self::Model(c, _)
+            | Self::Acted(c, _) => c,
         };
         (c.agent.id.clone(), c.record["id"].as_str().unwrap().into())
     }
@@ -145,13 +166,18 @@ impl Runtime {
             stale: false,
             critical_error: None,
             secrets: self.secrets(),
+            target: None,
         };
         self.agents.active.insert(id.into(), token);
-        if let Err(e) = self.assert_can_run(&c.agent) {
-            let detail = c.clean(e.message());
-            settle(&mut c.record, "DATA_ERROR", Some(detail));
-            self.finish_cycle(c);
-            return Ok(());
+        // Node's `execution(accountId)`: an exchange account without a session cannot trade.
+        match self.execution(&account) {
+            Ok(target) => c.target = Some(target),
+            Err(e) => {
+                let detail = c.clean(e.message());
+                settle(&mut c.record, "DATA_ERROR", Some(detail));
+                self.finish_cycle(c);
+                return Ok(());
+            }
         }
         let Some(quote) = self.market_quote(c.source, &c.agent.symbol) else {
             settle(
@@ -187,60 +213,124 @@ impl Runtime {
     }
     pub(super) fn complete_cycle(&mut self, completion: Completion) {
         match completion {
-            Completion::Candles(mut c, candles) => match self.prepare_model(&mut c, candles) {
-                Ok(Some(mut context)) => {
-                    if c.agent.use_news && c.source == DataSource::Live {
-                        let news = self.news.clone();
-                        let sources = self.news_sources();
-                        let base = self.news_base_currency(&c.agent.symbol);
-                        self.agents.pending.push(Box::pin(async move {
-                            match sources {
-                                Ok(sources) => match std::panic::AssertUnwindSafe(news.for_symbol(
-                                    sources,
-                                    &base,
-                                    mochi_market::news::DEFAULT_NEWS_LIMIT,
-                                ))
-                                .catch_unwind()
-                                .await
-                                {
-                                    Ok(n) => {
-                                        c.record["news"] = json!(n.items);
-                                        c.record["newsError"] = json!(n.error);
-                                        context.news = Some(n.items);
-                                    }
-                                    Err(_) => {
-                                        c.record["news"] = json!([]);
-                                        c.record["newsError"] = json!("Could not load news");
-                                        context.news = Some(vec![]);
-                                    }
-                                },
-                                Err(e) => {
-                                    c.record["news"] = json!([]);
-                                    c.record["newsError"] = json!(c.clean(e.message()));
-                                    context.news = Some(vec![]);
-                                }
-                            }
-                            Completion::News(c, Box::new(context))
-                        }));
-                    } else {
-                        self.begin_model(c, context);
-                    }
-                }
+            Completion::Candles(mut c, candles) => match self.closed_candles(&mut c, candles) {
+                Ok(Some(closed)) => self.cancel_stale_entries(c, closed),
                 Ok(None) => self.finish_cycle(c),
-                Err(e) => {
-                    let detail = c.clean(e.message());
-                    settle(&mut c.record, "DATA_ERROR", Some(detail));
-                    self.finish_cycle(c);
-                }
+                Err(e) => self.data_error(c, &e),
             },
+            Completion::Cancelled(c, _, Err(e)) => {
+                let e =
+                    ApiError::bad_request(format!("Could not read the account: {}", e.message()));
+                self.data_error(c, &e)
+            }
+            Completion::Cancelled(c, closed, Ok(())) => self.read_account(c, closed),
             Completion::News(c, context) => self.begin_model(c, *context),
-            Completion::Model(mut c, response) => {
-                if let Err(e) = self.complete_model(&mut c, response) {
-                    let detail = c.clean(e.message());
-                    settle(&mut c.record, "DATA_ERROR", Some(detail));
+            Completion::Model(mut c, response) => match self.complete_model(&mut c, response) {
+                Ok(None) => self.finish_cycle(c),
+                Ok(Some((engine, act))) => {
+                    self.agents.pending.push(Box::pin(async move {
+                        let acted = act.run(engine).await;
+                        Completion::Acted(c, Box::new(acted))
+                    }));
                 }
+                Err(e) => self.data_error(c, &e),
+            },
+            Completion::Acted(mut c, acted) => {
+                settle_acted(&mut c.record, *acted);
                 self.finish_cycle(c);
             }
+        }
+    }
+    fn data_error(&mut self, mut c: Cycle, e: &ApiError) {
+        let detail = c.clean(e.message());
+        settle(&mut c.record, "DATA_ERROR", Some(detail));
+        self.finish_cycle(c);
+    }
+    /// Unfilled entries from the agent's last cycle expire here. A paper account cancels them
+    /// on the actor; an exchange cancels them off it, and the cycle carries on when it answers.
+    fn cancel_stale_entries(&mut self, c: Cycle, closed: Vec<Candle>) {
+        let target = c.target();
+        let stale = match self.venue_open_orders(&target, &c.agent.account_id) {
+            Ok(orders) => orders
+                .into_iter()
+                .filter(|order| {
+                    order.agent_id.as_deref() == Some(&c.agent.id)
+                        && order.order_type == OrderType::Limit
+                        && !order.reduce_only
+                })
+                .map(|order| order.id)
+                .collect::<Vec<_>>(),
+            Err(e) => return self.data_error(c, &e),
+        };
+        match target {
+            ExecutionTarget::Paper => {
+                for id in stale {
+                    if let Err(e) = self.engine.cancel_order(&id) {
+                        let e = self.api_error(e);
+                        return self.data_error(c, &e);
+                    }
+                }
+                self.read_account(c, closed);
+            }
+            ExecutionTarget::Okx(_) if stale.is_empty() => self.read_account(c, closed),
+            ExecutionTarget::Okx(_) => {
+                let engine = self.engine_for(target);
+                self.agents.pending.push(Box::pin(async move {
+                    let mut result = Ok(());
+                    for id in stale {
+                        result = engine.cancel_order(id).await;
+                        if result.is_err() {
+                            break;
+                        }
+                    }
+                    Completion::Cancelled(c, closed, result)
+                }));
+            }
+        }
+    }
+    /// The account state the model is shown, then news or the model itself.
+    fn read_account(&mut self, mut c: Cycle, closed: Vec<Candle>) {
+        match self.prepare_model(&mut c, closed) {
+            Ok(Some(mut context)) => {
+                if c.agent.use_news && c.source == DataSource::Live {
+                    let news = self.news.clone();
+                    let sources = self.news_sources();
+                    let base = self.news_base_currency(&c.agent.symbol);
+                    self.agents.pending.push(Box::pin(async move {
+                        match sources {
+                            Ok(sources) => match std::panic::AssertUnwindSafe(news.for_symbol(
+                                sources,
+                                &base,
+                                mochi_market::news::DEFAULT_NEWS_LIMIT,
+                            ))
+                            .catch_unwind()
+                            .await
+                            {
+                                Ok(n) => {
+                                    c.record["news"] = json!(n.items);
+                                    c.record["newsError"] = json!(n.error);
+                                    context.news = Some(n.items);
+                                }
+                                Err(_) => {
+                                    c.record["news"] = json!([]);
+                                    c.record["newsError"] = json!("Could not load news");
+                                    context.news = Some(vec![]);
+                                }
+                            },
+                            Err(e) => {
+                                c.record["news"] = json!([]);
+                                c.record["newsError"] = json!(c.clean(e.message()));
+                                context.news = Some(vec![]);
+                            }
+                        }
+                        Completion::News(c, Box::new(context))
+                    }));
+                } else {
+                    self.begin_model(c, context);
+                }
+            }
+            Ok(None) => self.finish_cycle(c),
+            Err(e) => self.data_error(c, &e),
         }
     }
     fn begin_model(&mut self, mut c: Cycle, context: MarketContext) {
@@ -285,11 +375,12 @@ impl Runtime {
             Completion::Model(c, response)
         }));
     }
-    fn prepare_model(
+    /// The closed candles the model is shown, or `None` once the record is settled.
+    fn closed_candles(
         &mut self,
         c: &mut Cycle,
         candles: Result<Vec<Candle>, String>,
-    ) -> Result<Option<MarketContext>, ApiError> {
+    ) -> Result<Option<Vec<Candle>>, ApiError> {
         if !self.cycle_owned(c)? {
             return Ok(None);
         }
@@ -309,28 +400,17 @@ impl Runtime {
             );
             return Ok(None);
         }
-        for order in self
-            .engine
-            .open_orders(&c.agent.account_id)
-            .map_err(|e| self.api_error(e))?
-        {
-            if order.agent_id.as_deref() == Some(&c.agent.id)
-                && order.order_type == OrderType::Limit
-                && !order.reduce_only
-            {
-                self.engine
-                    .cancel_order(&order.id)
-                    .map_err(|e| self.api_error(e))?;
-            }
-        }
-        let balance = self
-            .engine
-            .balance_of(&c.agent.account_id)
-            .map_err(|e| self.api_error(e))?;
+        Ok(Some(closed))
+    }
+    fn prepare_model(
+        &mut self,
+        c: &mut Cycle,
+        closed: Vec<Candle>,
+    ) -> Result<Option<MarketContext>, ApiError> {
+        let target = c.target();
+        let balance = self.venue_balance(&target, &c.agent.account_id)?;
         let position = self
-            .engine
-            .position_views(&c.agent.account_id)
-            .map_err(|e| self.api_error(e))?
+            .venue_positions(&target, &c.agent.account_id)?
             .into_iter()
             .find(|p| p.position.symbol == c.agent.symbol);
         let risk: RiskSettings =
@@ -373,12 +453,12 @@ impl Runtime {
         &mut self,
         c: &mut Cycle,
         response: Result<AiResponse, ProviderError>,
-    ) -> Result<(), ApiError> {
+    ) -> Result<Option<Outgoing>, ApiError> {
         let response = match response {
             Ok(r) => r,
             Err(e) => {
                 c.provider_error(e);
-                return Ok(());
+                return Ok(None);
             }
         };
         c.secrets.extend(self.secrets());
@@ -390,22 +470,22 @@ impl Runtime {
                 let detail = c.clean(&e);
                 c.record["validationError"] = json!(detail);
                 settle(&mut c.record, "INVALID_OUTPUT", Some(detail));
-                return Ok(());
+                return Ok(None);
             }
         };
         c.record["decision"] = json!(d);
         if !self.cycle_owned(c)? {
-            return Ok(());
+            return Ok(None);
         }
         let a = self.require_account(&c.agent.account_id)?;
-        self.assert_can_run(&c.agent)?;
-        let protection = self.current_protection(&c.agent)?;
+        let target = c.target();
+        let protection = self.current_protection(&c.agent, &target)?;
         let quote = if c.stale {
             None
         } else {
             self.market_quote(c.source, &c.agent.symbol)
         };
-        let risk = self.assess(&c.agent, &a, &d, quote, protection.clone())?;
+        let risk = self.assess(&c.agent, &a, &d, quote, protection.clone(), &target)?;
         c.record["risk"] = json!(risk);
         if c.record["trigger"] == "ANALYZE" {
             settle(
@@ -413,7 +493,7 @@ impl Runtime {
                 "ANALYSIS_ONLY",
                 Some("Analyze Now never places orders".into()),
             );
-            return Ok(());
+            return Ok(None);
         }
         if !risk.approved {
             settle(
@@ -421,11 +501,11 @@ impl Runtime {
                 "RISK_REJECTED",
                 Some(risk.rejection_reasons.join(" | ")),
             );
-            return Ok(());
+            return Ok(None);
         }
         if d.action == AiAction::Hold {
             settle(&mut c.record, "HOLD", None);
-            return Ok(());
+            return Ok(None);
         }
         if d.action == AiAction::Protect {
             let p = protection.ok_or_else(|| {
@@ -437,7 +517,7 @@ impl Runtime {
                     "HOLD",
                     Some("Protection already as requested".into()),
                 );
-                return Ok(());
+                return Ok(None);
             }
             c.record["protectionBefore"] = json!(p);
         }
@@ -450,7 +530,7 @@ impl Runtime {
                 "ANALYSIS_ONLY",
                 Some("Agent was stopped before execution".into()),
             );
-            return Ok(());
+            return Ok(None);
         }
         if c.agent.execution_mode == "SIGNAL" {
             let expiry = self
@@ -467,12 +547,12 @@ impl Runtime {
                 "SIGNAL",
                 Some("Waiting for you to accept or dismiss".into()),
             );
-            return Ok(());
+            return Ok(None);
         }
         let mut a = latest;
         a.status = "EXECUTING".into();
         self.save_agent(&a)?;
-        self.execute_decision(&c.agent, &d, &mut c.record)
+        self.execute_decision(&c.agent, &d, &mut c.record, &target)
     }
     fn cycle_owned(&self, c: &Cycle) -> Result<bool, ApiError> {
         let Some(a) =
