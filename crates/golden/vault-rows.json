@@ -1,0 +1,568 @@
+{
+ "setup": [
+  "INSERT INTO providers (id,name,kind,base_url,default_model,input_price,output_price,created_at) VALUES ('prov_1','One','openai',NULL,'m',NULL,NULL,1),('prov_2','Two','openai',NULL,'m',NULL,NULL,2)",
+  "INSERT INTO accounts (id,name,source,is_demo,initial_balance,wallet_balance,used_margin,realized_pnl,fees_paid,funding_paid,config,created_at) VALUES ('acct_1','A','LIVE',0,'1','1','0','0','0','0','{}',1),('acct_2','B','LIVE',0,'1','1','0','0','0','0','{}',2)"
+ ],
+ "steps": [
+  {
+   "op": "saveVaultKey",
+   "now": 1000,
+   "args": [
+    "password",
+    "PASSWORD",
+    {
+     "salt": "c2FsdDE=",
+     "kdf": {
+      "N": 1024,
+      "r": 8,
+      "p": 1
+     },
+     "wrappedKey": "v1.aXYx.dGFnMQ==.Ym9keTE="
+    }
+   ],
+   "rows": {
+    "vault_keys": [
+     {
+      "id": "password",
+      "kind": "PASSWORD",
+      "params": "{\"salt\":\"c2FsdDE=\",\"kdf\":{\"N\":1024,\"r\":8,\"p\":1},\"wrappedKey\":\"v1.aXYx.dGFnMQ==.Ym9keTE=\"}",
+      "created_at": 1000
+     }
+    ],
+    "sealed_provider_keys": [],
+    "sealed_exchange_credentials": [],
+    "provider_keys": []
+   },
+   "reads": {
+    "vaultKey": {
+     "salt": "c2FsdDE=",
+     "kdf": {
+      "N": 1024,
+      "r": 8,
+      "p": 1
+     },
+     "wrappedKey": "v1.aXYx.dGFnMQ==.Ym9keTE="
+    },
+    "sealedProviderKeys": [],
+    "sealedExchangeCredentials": []
+   }
+  },
+  {
+   "op": "saveVaultKey",
+   "now": 2000,
+   "args": [
+    "password",
+    "OTHER",
+    {
+     "salt": "c2FsdDI=",
+     "kdf": {
+      "N": 1024,
+      "r": 8,
+      "p": 1
+     },
+     "wrappedKey": "v1.aXYy.dGFnMg==.Ym9keTI="
+    }
+   ],
+   "rows": {
+    "vault_keys": [
+     {
+      "id": "password",
+      "kind": "PASSWORD",
+      "params": "{\"salt\":\"c2FsdDI=\",\"kdf\":{\"N\":1024,\"r\":8,\"p\":1},\"wrappedKey\":\"v1.aXYy.dGFnMg==.Ym9keTI=\"}",
+      "created_at": 1000
+     }
+    ],
+    "sealed_provider_keys": [],
+    "sealed_exchange_credentials": [],
+    "provider_keys": []
+   },
+   "reads": {
+    "vaultKey": {
+     "salt": "c2FsdDI=",
+     "kdf": {
+      "N": 1024,
+      "r": 8,
+      "p": 1
+     },
+     "wrappedKey": "v1.aXYy.dGFnMg==.Ym9keTI="
+    },
+    "sealedProviderKeys": [],
+    "sealedExchangeCredentials": []
+   }
+  },
+  {
+   "op": "saveProviderKey",
+   "now": 3000,
+   "args": [
+    "prov_1",
+    "sk-plain-1"
+   ],
+   "rows": {
+    "vault_keys": [
+     {
+      "id": "password",
+      "kind": "PASSWORD",
+      "params": "{\"salt\":\"c2FsdDI=\",\"kdf\":{\"N\":1024,\"r\":8,\"p\":1},\"wrappedKey\":\"v1.aXYy.dGFnMg==.Ym9keTI=\"}",
+      "created_at": 1000
+     }
+    ],
+    "sealed_provider_keys": [],
+    "sealed_exchange_credentials": [],
+    "provider_keys": [
+     {
+      "provider_id": "prov_1",
+      "api_key": "sk-plain-1",
+      "updated_at": 3000
+     }
+    ]
+   },
+   "reads": {
+    "vaultKey": {
+     "salt": "c2FsdDI=",
+     "kdf": {
+      "N": 1024,
+      "r": 8,
+      "p": 1
+     },
+     "wrappedKey": "v1.aXYy.dGFnMg==.Ym9keTI="
+    },
+    "sealedProviderKeys": [],
+    "sealedExchangeCredentials": []
+   }
+  },
+  {
+   "op": "saveProviderKey",
+   "now": 3100,
+   "args": [
+    "prov_2",
+    "sk-plain-2"
+   ],
+   "rows": {
+    "vault_keys": [
+     {
+      "id": "password",
+      "kind": "PASSWORD",
+      "params": "{\"salt\":\"c2FsdDI=\",\"kdf\":{\"N\":1024,\"r\":8,\"p\":1},\"wrappedKey\":\"v1.aXYy.dGFnMg==.Ym9keTI=\"}",
+      "created_at": 1000
+     }
+    ],
+    "sealed_provider_keys": [],
+    "sealed_exchange_credentials": [],
+    "provider_keys": [
+     {
+      "provider_id": "prov_1",
+      "api_key": "sk-plain-1",
+      "updated_at": 3000
+     },
+     {
+      "provider_id": "prov_2",
+      "api_key": "sk-plain-2",
+      "updated_at": 3100
+     }
+    ]
+   },
+   "reads": {
+    "vaultKey": {
+     "salt": "c2FsdDI=",
+     "kdf": {
+      "N": 1024,
+      "r": 8,
+      "p": 1
+     },
+     "wrappedKey": "v1.aXYy.dGFnMg==.Ym9keTI="
+    },
+    "sealedProviderKeys": [],
+    "sealedExchangeCredentials": []
+   }
+  },
+  {
+   "op": "saveSealedProviderKey",
+   "now": 4000,
+   "args": [
+    "prov_1",
+    "v1.aXY=.dGFn.Ym9keQ=="
+   ],
+   "rows": {
+    "vault_keys": [
+     {
+      "id": "password",
+      "kind": "PASSWORD",
+      "params": "{\"salt\":\"c2FsdDI=\",\"kdf\":{\"N\":1024,\"r\":8,\"p\":1},\"wrappedKey\":\"v1.aXYy.dGFnMg==.Ym9keTI=\"}",
+      "created_at": 1000
+     }
+    ],
+    "sealed_provider_keys": [
+     {
+      "provider_id": "prov_1",
+      "sealed": "v1.aXY=.dGFn.Ym9keQ==",
+      "updated_at": 4000
+     }
+    ],
+    "sealed_exchange_credentials": [],
+    "provider_keys": [
+     {
+      "provider_id": "prov_2",
+      "api_key": "sk-plain-2",
+      "updated_at": 3100
+     }
+    ]
+   },
+   "reads": {
+    "vaultKey": {
+     "salt": "c2FsdDI=",
+     "kdf": {
+      "N": 1024,
+      "r": 8,
+      "p": 1
+     },
+     "wrappedKey": "v1.aXYy.dGFnMg==.Ym9keTI="
+    },
+    "sealedProviderKeys": [
+     [
+      "prov_1",
+      "v1.aXY=.dGFn.Ym9keQ=="
+     ]
+    ],
+    "sealedExchangeCredentials": []
+   }
+  },
+  {
+   "op": "saveSealedProviderKey",
+   "now": 5000,
+   "args": [
+    "prov_1",
+    "v1.aXYz.dGFnMw==.Ym9keTM="
+   ],
+   "rows": {
+    "vault_keys": [
+     {
+      "id": "password",
+      "kind": "PASSWORD",
+      "params": "{\"salt\":\"c2FsdDI=\",\"kdf\":{\"N\":1024,\"r\":8,\"p\":1},\"wrappedKey\":\"v1.aXYy.dGFnMg==.Ym9keTI=\"}",
+      "created_at": 1000
+     }
+    ],
+    "sealed_provider_keys": [
+     {
+      "provider_id": "prov_1",
+      "sealed": "v1.aXYz.dGFnMw==.Ym9keTM=",
+      "updated_at": 5000
+     }
+    ],
+    "sealed_exchange_credentials": [],
+    "provider_keys": [
+     {
+      "provider_id": "prov_2",
+      "api_key": "sk-plain-2",
+      "updated_at": 3100
+     }
+    ]
+   },
+   "reads": {
+    "vaultKey": {
+     "salt": "c2FsdDI=",
+     "kdf": {
+      "N": 1024,
+      "r": 8,
+      "p": 1
+     },
+     "wrappedKey": "v1.aXYy.dGFnMg==.Ym9keTI="
+    },
+    "sealedProviderKeys": [
+     [
+      "prov_1",
+      "v1.aXYz.dGFnMw==.Ym9keTM="
+     ]
+    ],
+    "sealedExchangeCredentials": []
+   }
+  },
+  {
+   "op": "saveSealedExchangeCredentials",
+   "now": 6000,
+   "args": [
+    "acct_1",
+    "v1.b25l.dGFnMQ==.Y3JlZDE="
+   ],
+   "rows": {
+    "vault_keys": [
+     {
+      "id": "password",
+      "kind": "PASSWORD",
+      "params": "{\"salt\":\"c2FsdDI=\",\"kdf\":{\"N\":1024,\"r\":8,\"p\":1},\"wrappedKey\":\"v1.aXYy.dGFnMg==.Ym9keTI=\"}",
+      "created_at": 1000
+     }
+    ],
+    "sealed_provider_keys": [
+     {
+      "provider_id": "prov_1",
+      "sealed": "v1.aXYz.dGFnMw==.Ym9keTM=",
+      "updated_at": 5000
+     }
+    ],
+    "sealed_exchange_credentials": [
+     {
+      "account_id": "acct_1",
+      "sealed": "v1.b25l.dGFnMQ==.Y3JlZDE=",
+      "updated_at": 6000
+     }
+    ],
+    "provider_keys": [
+     {
+      "provider_id": "prov_2",
+      "api_key": "sk-plain-2",
+      "updated_at": 3100
+     }
+    ]
+   },
+   "reads": {
+    "vaultKey": {
+     "salt": "c2FsdDI=",
+     "kdf": {
+      "N": 1024,
+      "r": 8,
+      "p": 1
+     },
+     "wrappedKey": "v1.aXYy.dGFnMg==.Ym9keTI="
+    },
+    "sealedProviderKeys": [
+     [
+      "prov_1",
+      "v1.aXYz.dGFnMw==.Ym9keTM="
+     ]
+    ],
+    "sealedExchangeCredentials": [
+     {
+      "accountId": "acct_1",
+      "sealed": "v1.b25l.dGFnMQ==.Y3JlZDE="
+     }
+    ]
+   }
+  },
+  {
+   "op": "saveSealedExchangeCredentials",
+   "now": 6100,
+   "args": [
+    "acct_2",
+    "v1.dHdv.dGFnMg==.Y3JlZDI="
+   ],
+   "rows": {
+    "vault_keys": [
+     {
+      "id": "password",
+      "kind": "PASSWORD",
+      "params": "{\"salt\":\"c2FsdDI=\",\"kdf\":{\"N\":1024,\"r\":8,\"p\":1},\"wrappedKey\":\"v1.aXYy.dGFnMg==.Ym9keTI=\"}",
+      "created_at": 1000
+     }
+    ],
+    "sealed_provider_keys": [
+     {
+      "provider_id": "prov_1",
+      "sealed": "v1.aXYz.dGFnMw==.Ym9keTM=",
+      "updated_at": 5000
+     }
+    ],
+    "sealed_exchange_credentials": [
+     {
+      "account_id": "acct_1",
+      "sealed": "v1.b25l.dGFnMQ==.Y3JlZDE=",
+      "updated_at": 6000
+     },
+     {
+      "account_id": "acct_2",
+      "sealed": "v1.dHdv.dGFnMg==.Y3JlZDI=",
+      "updated_at": 6100
+     }
+    ],
+    "provider_keys": [
+     {
+      "provider_id": "prov_2",
+      "api_key": "sk-plain-2",
+      "updated_at": 3100
+     }
+    ]
+   },
+   "reads": {
+    "vaultKey": {
+     "salt": "c2FsdDI=",
+     "kdf": {
+      "N": 1024,
+      "r": 8,
+      "p": 1
+     },
+     "wrappedKey": "v1.aXYy.dGFnMg==.Ym9keTI="
+    },
+    "sealedProviderKeys": [
+     [
+      "prov_1",
+      "v1.aXYz.dGFnMw==.Ym9keTM="
+     ]
+    ],
+    "sealedExchangeCredentials": [
+     {
+      "accountId": "acct_1",
+      "sealed": "v1.b25l.dGFnMQ==.Y3JlZDE="
+     },
+     {
+      "accountId": "acct_2",
+      "sealed": "v1.dHdv.dGFnMg==.Y3JlZDI="
+     }
+    ]
+   }
+  },
+  {
+   "op": "saveSealedExchangeCredentials",
+   "now": 7000,
+   "args": [
+    "acct_1",
+    "v1.b25l.dGFnMw==.Y3JlZDM="
+   ],
+   "rows": {
+    "vault_keys": [
+     {
+      "id": "password",
+      "kind": "PASSWORD",
+      "params": "{\"salt\":\"c2FsdDI=\",\"kdf\":{\"N\":1024,\"r\":8,\"p\":1},\"wrappedKey\":\"v1.aXYy.dGFnMg==.Ym9keTI=\"}",
+      "created_at": 1000
+     }
+    ],
+    "sealed_provider_keys": [
+     {
+      "provider_id": "prov_1",
+      "sealed": "v1.aXYz.dGFnMw==.Ym9keTM=",
+      "updated_at": 5000
+     }
+    ],
+    "sealed_exchange_credentials": [
+     {
+      "account_id": "acct_1",
+      "sealed": "v1.b25l.dGFnMw==.Y3JlZDM=",
+      "updated_at": 7000
+     },
+     {
+      "account_id": "acct_2",
+      "sealed": "v1.dHdv.dGFnMg==.Y3JlZDI=",
+      "updated_at": 6100
+     }
+    ],
+    "provider_keys": [
+     {
+      "provider_id": "prov_2",
+      "api_key": "sk-plain-2",
+      "updated_at": 3100
+     }
+    ]
+   },
+   "reads": {
+    "vaultKey": {
+     "salt": "c2FsdDI=",
+     "kdf": {
+      "N": 1024,
+      "r": 8,
+      "p": 1
+     },
+     "wrappedKey": "v1.aXYy.dGFnMg==.Ym9keTI="
+    },
+    "sealedProviderKeys": [
+     [
+      "prov_1",
+      "v1.aXYz.dGFnMw==.Ym9keTM="
+     ]
+    ],
+    "sealedExchangeCredentials": [
+     {
+      "accountId": "acct_1",
+      "sealed": "v1.b25l.dGFnMw==.Y3JlZDM="
+     },
+     {
+      "accountId": "acct_2",
+      "sealed": "v1.dHdv.dGFnMg==.Y3JlZDI="
+     }
+    ]
+   }
+  },
+  {
+   "op": "deleteSealedExchangeCredentials",
+   "now": 7100,
+   "args": [
+    "acct_2"
+   ],
+   "rows": {
+    "vault_keys": [
+     {
+      "id": "password",
+      "kind": "PASSWORD",
+      "params": "{\"salt\":\"c2FsdDI=\",\"kdf\":{\"N\":1024,\"r\":8,\"p\":1},\"wrappedKey\":\"v1.aXYy.dGFnMg==.Ym9keTI=\"}",
+      "created_at": 1000
+     }
+    ],
+    "sealed_provider_keys": [
+     {
+      "provider_id": "prov_1",
+      "sealed": "v1.aXYz.dGFnMw==.Ym9keTM=",
+      "updated_at": 5000
+     }
+    ],
+    "sealed_exchange_credentials": [
+     {
+      "account_id": "acct_1",
+      "sealed": "v1.b25l.dGFnMw==.Y3JlZDM=",
+      "updated_at": 7000
+     }
+    ],
+    "provider_keys": [
+     {
+      "provider_id": "prov_2",
+      "api_key": "sk-plain-2",
+      "updated_at": 3100
+     }
+    ]
+   },
+   "reads": {
+    "vaultKey": {
+     "salt": "c2FsdDI=",
+     "kdf": {
+      "N": 1024,
+      "r": 8,
+      "p": 1
+     },
+     "wrappedKey": "v1.aXYy.dGFnMg==.Ym9keTI="
+    },
+    "sealedProviderKeys": [
+     [
+      "prov_1",
+      "v1.aXYz.dGFnMw==.Ym9keTM="
+     ]
+    ],
+    "sealedExchangeCredentials": [
+     {
+      "accountId": "acct_1",
+      "sealed": "v1.b25l.dGFnMw==.Y3JlZDM="
+     }
+    ]
+   }
+  },
+  {
+   "op": "deleteVault",
+   "now": 8000,
+   "args": [],
+   "rows": {
+    "vault_keys": [],
+    "sealed_provider_keys": [],
+    "sealed_exchange_credentials": [],
+    "provider_keys": [
+     {
+      "provider_id": "prov_2",
+      "api_key": "sk-plain-2",
+      "updated_at": 3100
+     }
+    ]
+   },
+   "reads": {
+    "vaultKey": null,
+    "sealedProviderKeys": [],
+    "sealedExchangeCredentials": []
+   }
+  }
+ ]
+}

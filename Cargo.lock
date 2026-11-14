@@ -1004,6 +1004,7 @@ dependencies = [
  "mochi-ai",
  "mochi-core",
  "mochi-domain",
+ "mochi-vault",
  "rusqlite",
  "serde",
  "serde_json",
