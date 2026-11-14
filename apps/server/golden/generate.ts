@@ -60,6 +60,7 @@ import { paperScenariosFixture, paperTrailingScenariosFixture } from './paper-sc
 import { apiScriptFixture } from './api-script.js';
 import { validationFixture } from './validation.js';
 import { okxPublicFixture } from './okx-public.js';
+import { okxPrivateFixture } from './okx-private.js';
 import { newsFixture } from './news.js';
 import { aiFixture } from './ai.js';
 import { aiValidationFixture } from './ai-validation.js';
@@ -1606,6 +1607,7 @@ export async function buildGolden(): Promise<Record<string, unknown>> {
     'vault.json': await vaultFixture(),
     'validation.json': await validationFixture(),
     'okx-public.json': await okxPublicFixture(),
+    'okx-private.json': await okxPrivateFixture(),
     'news.json': newsFixture(),
     'ai.json': await aiFixture(),
     'ai-validation.json': aiValidationFixture(),

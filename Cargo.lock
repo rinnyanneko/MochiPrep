@@ -966,6 +966,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "mochi-okx"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "hmac",
+ "indexmap",
+ "mochi-decimal",
+ "mochi-okx",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+ "tokio",
+ "url",
+ "webpki-roots 1.0.11",
+ "zeroize",
+]
+
+[[package]]
 name = "mochi-server"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,30 @@
+[package]
+name = "mochi-okx"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+# An in-memory OKX for tests, here and in mochi-server's dev-dependencies.
+fake = ["dep:indexmap", "dep:mochi-decimal", "dep:url"]
+
+[dependencies]
+base64 = "0.22"
+hmac = { workspace = true }
+indexmap = { version = "2", features = ["serde"], optional = true }
+mochi-decimal = { path = "../mochi-decimal", optional = true }
+reqwest = { workspace = true }
+rustls = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+url = { workspace = true, optional = true }
+webpki-roots = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+mochi-okx = { path = ".", features = ["fake"] }
+tokio = { workspace = true, features = ["test-util"] }
