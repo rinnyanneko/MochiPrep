@@ -397,9 +397,28 @@ impl OkxEngine {
         agent_id: Option<String>,
         decision_id: Option<String>,
     ) -> Result<ProtectionResult, EngineError> {
+        self.set_protection_with(account_id, symbol, protection, false, agent_id, decision_id)
+            .await
+    }
+
+    /// [`Self::set_protection`], except that with `keep_trailing` the trailing stop in force is
+    /// kept and `protection.trailing_stop` ignored. The trailing stop is read in the same queued
+    /// step as the change, so a trailing edit queued in between is never undone.
+    pub async fn set_protection_with(
+        self: &Arc<Self>,
+        account_id: &str,
+        symbol: &str,
+        mut protection: Protection,
+        keep_trailing: bool,
+        agent_id: Option<String>,
+        decision_id: Option<String>,
+    ) -> Result<ProtectionResult, EngineError> {
         let (account_id, symbol) = (account_id.to_string(), symbol.to_string());
         self.queued(move |engine| {
             Box::pin(async move {
+                if keep_trailing {
+                    protection.trailing_stop = engine.protection_of(&symbol).trailing_stop;
+                }
                 engine
                     .apply_protection(account_id, symbol, protection, agent_id, decision_id)
                     .await
@@ -802,11 +821,34 @@ impl OkxEngine {
                 .into_iter()
                 .filter(|r| is_leg(r) && !open_ids.contains(&r.id)),
         );
-        let ours: HashMap<String, usize> = rows
+        let mut ours: HashMap<String, usize> = rows
             .iter()
             .enumerate()
             .map(|(i, row)| (to_algo_cl_ord_id(&row.id), i))
             .collect();
+        // A live algo with a client id but no row in that window may be ours from further back,
+        // most often a cancel OKX refused and newer orders have since pushed out. It is looked up
+        // by algoId, so it is still cancelled rather than shown as someone else's.
+        let unmatched: Vec<String> = algos
+            .iter()
+            .filter(|algo| {
+                truthy_text(algo.get("algoClOrdId")).is_some_and(|id| !ours.contains_key(&id))
+            })
+            .filter_map(|algo| truthy_text(algo.get("algoId")))
+            .collect();
+        if !unmatched.is_empty() {
+            let account_id = self.deps.account_id.clone();
+            let older = self
+                .rows(move |rows| Ok(rows.find_orders_by_exchange_ids(&account_id, &unmatched)?))
+                .await?;
+            for row in older.into_iter().filter(is_leg) {
+                let key = to_algo_cl_ord_id(&row.id);
+                if let std::collections::hash_map::Entry::Vacant(slot) = ours.entry(key) {
+                    slot.insert(rows.len());
+                    rows.push(row);
+                }
+            }
+        }
 
         let mut result = ProtectionMap::new();
         let mut alive: Vec<(usize, Row)> = Vec::new();
@@ -919,7 +961,8 @@ impl OkxEngine {
 
         // A closed row whose algo is still live: cancel it again, unless it is the only stop for
         // that leg. A row closed with its position, or one for the other side, never protects a
-        // later position.
+        // later position: those are marked POSITION_CLOSED, so a cancel that fails again cannot
+        // let a later same-side position take the algo up.
         for (i, algo) in strays {
             rows[i].exchange_order_id = nullish_text(algo.get("algoId"));
             let key = key_of(&rows[i]);
@@ -930,9 +973,11 @@ impl OkxEngine {
             );
             if !is_held(row) {
                 if position_gone(row) {
-                    cancel.push((i, algo, None));
+                    cancel.push((i, algo, Some(POSITION_CLOSED)));
                 }
-            } else if closed_for_good || other_side(row) || groups.iter().any(|(k, _)| *k == key) {
+            } else if other_side(row) {
+                cancel.push((i, algo, Some(POSITION_CLOSED)));
+            } else if closed_for_good || groups.iter().any(|(k, _)| *k == key) {
                 cancel.push((i, algo, None));
             } else {
                 let mut row = row.clone();

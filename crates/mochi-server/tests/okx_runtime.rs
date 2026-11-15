@@ -1645,3 +1645,66 @@ async fn turning_it_off_deletes_saved_okx_keys() {
     );
     w.rt.shutdown().await;
 }
+
+#[tokio::test]
+async fn a_connect_still_out_on_okx_when_the_account_is_disconnected_leaves_it_disconnected() {
+    let w = World::new().await;
+    enable(&w).await;
+    let account = w.connect_with("OKX_DEMO", true).await.unwrap();
+    let hold = w.okx.hold_next("GET", "/account/config");
+    let (again, ()) = tokio::join!(w.connect_with("OKX_DEMO", true), async {
+        hold.reached().await;
+        let id = account.id.clone();
+        w.rt.call(move |r| r.disconnect_exchange(&id).unwrap())
+            .await
+            .unwrap();
+        hold.release();
+    });
+    assert!(again
+        .unwrap_err()
+        .message()
+        .contains("was disconnected while connecting"));
+    let status = &w.statuses().await[0];
+    assert_eq!(
+        (status["connected"].clone(), status["saved"].clone()),
+        (json!(false), json!(false))
+    );
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn accounts_disconnected_during_the_unlock_reconnect_stay_disconnected_and_forgotten() {
+    let mut w = World::new().await;
+    enable(&w).await;
+    let live = w.connect_with("OKX_LIVE", true).await.unwrap();
+    let demo = w.connect_with("OKX_DEMO", true).await.unwrap();
+    w.restart().await;
+    let mut events = w.rt.subscribe();
+    // The first reconnect is held on OKX while the owner disconnects both accounts: the one in
+    // flight, and the one still waiting its turn.
+    let hold = w.okx.hold_next("GET", "/account/config");
+    let (outcome, ()) = tokio::join!(w.rt.unlock(PASSWORD.into()), async {
+        hold.reached().await;
+        for id in [live.id.clone(), demo.id.clone()] {
+            w.rt.call(move |r| r.disconnect_exchange(&id).unwrap())
+                .await
+                .unwrap();
+        }
+        hold.release();
+    });
+    let outcome = outcome.unwrap();
+    assert_eq!(outcome.status, VaultStatus::Unlocked);
+    assert!(outcome.failed.is_empty());
+    for status in w.statuses().await {
+        assert_eq!(
+            (status["connected"].clone(), status["saved"].clone()),
+            (json!(false), json!(false)),
+            "{}",
+            status["venue"]
+        );
+    }
+    assert!(toasts(&mut events)
+        .iter()
+        .all(|(_, message)| !message.contains("could not reconnect")));
+    w.rt.shutdown().await;
+}

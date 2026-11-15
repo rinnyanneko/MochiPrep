@@ -77,16 +77,24 @@ impl RuntimeHandle {
             })
             .await??;
         let mut failed = Vec::new();
-        for (account_id, sealed) in saved {
+        for (account_id, _) in saved {
             let id = account_id.clone();
-            let account = self
+            // The saved key is read again here, with the disconnect count, in one step: an
+            // account disconnected while an earlier one reconnected has no key left to use.
+            let current = self
                 .call(move |r| {
                     let account = r.engine().store().get_account(&id).ok().flatten();
-                    account.filter(|_| r.exchange_session(&id).is_none())
+                    let account = account.filter(|_| r.exchange_session(&id).is_none())?;
+                    let sealed = mochi_store::list_sealed_exchange_credentials(r.connection())
+                        .ok()?
+                        .into_iter()
+                        .find(|(saved_id, _)| *saved_id == id)?
+                        .1;
+                    Some((account, sealed, r.disconnect_seq))
                 })
                 .await?;
-            // Gone, or already connected by hand: nothing to reconnect.
-            let Some(account) = account else {
+            // Gone, forgotten, or already connected by hand: nothing to reconnect.
+            let Some((account, sealed, epoch)) = current else {
                 continue;
             };
             let result = match read_saved(data_key, &sealed, &account_id) {
@@ -103,23 +111,34 @@ impl RuntimeHandle {
                             .unwrap_or_else(default_live_limits),
                         remember: true,
                     };
-                    self.connect_now(input, Some(account_id)).await.map(|_| ())
+                    self.connect_now(input, Some(account_id.clone()), Some(epoch))
+                        .await
+                        .map(|_| ())
                 }
                 Err(text) => Err(ApiError::bad_request(text)),
             };
             if let Err(error) = result {
                 let name = account.name.clone();
                 let text = error.message().to_string();
-                self.call(move |r| {
-                    let message =
-                        format!("{name}: could not reconnect to OKX. {}", r.redact(&text));
-                    r.emit(ServerEvent::Toast {
-                        level: ToastLevel::Error,
-                        message,
-                    });
-                })
-                .await?;
-                failed.push(account.name);
+                let id = account_id.clone();
+                // Disconnected by the owner meanwhile: that is not a failure to report.
+                let reported = self
+                    .call(move |r| {
+                        if r.disconnected_since(&id, epoch) {
+                            return false;
+                        }
+                        let message =
+                            format!("{name}: could not reconnect to OKX. {}", r.redact(&text));
+                        r.emit(ServerEvent::Toast {
+                            level: ToastLevel::Error,
+                            message,
+                        });
+                        true
+                    })
+                    .await?;
+                if reported {
+                    failed.push(account.name);
+                }
             }
         }
         Ok(failed)

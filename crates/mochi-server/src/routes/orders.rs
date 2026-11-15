@@ -129,25 +129,19 @@ async fn protection(
     let symbol = validate::parse_symbol(&symbol)?;
     let engine = state.runtime.execution(&account_id).await?;
     // An absent trailingStop keeps the current one, so a client that only edits SL/TP cannot
-    // drop it; an explicit null removes it.
-    let trailing_stop = match input.trailing_stop {
-        Some(trailing_stop) => trailing_stop,
-        None => {
-            engine
-                .protection_of(account_id.clone(), symbol.clone())
-                .await?
-                .trailing_stop
-        }
-    };
+    // drop it; an explicit null removes it. The engine reads the current one in the same
+    // serialized step as the change, so a trailing edit landing in between is not undone.
+    let keep_trailing = input.trailing_stop.is_none();
     let protection = mochi_domain::Protection {
         stop_loss: input.stop_loss,
         take_profit: input.take_profit,
-        trailing_stop,
+        trailing_stop: input.trailing_stop.flatten(),
     };
     let meta = ProtectionMeta {
         client_order_id: format!("manual:{}", uuid::Uuid::new_v4()),
         agent_id: None,
         decision_id: None,
+        keep_trailing,
     };
     // A refusal reaches the client as a 400 with its reason.
     let result = match engine

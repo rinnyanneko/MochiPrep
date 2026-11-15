@@ -533,6 +533,22 @@ impl PaperStore for SqlitePaperStore {
         )
     }
 
+    fn find_orders_by_exchange_ids(
+        &self,
+        account_id: &str,
+        exchange_order_ids: &[String],
+    ) -> Result<Vec<Order>, StoreFailure> {
+        let mut found = Vec::new();
+        for id in exchange_order_ids {
+            found.extend(self.query(
+                "SELECT * FROM orders WHERE account_id=? AND exchange_order_id=? ORDER BY created_at, rowid",
+                [account_id, id.as_str()],
+                to_order,
+            )?);
+        }
+        Ok(found)
+    }
+
     fn insert_fill(&self, f: &Fill) -> Result<(), StoreFailure> {
         self.run(
             "INSERT INTO fills (id,order_id,account_id,symbol,side,quantity,price,fee,realized_pnl,liquidity,ts) VALUES (?,?,?,?,?,?,?,?,?,?,?)",

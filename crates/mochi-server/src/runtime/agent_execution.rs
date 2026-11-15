@@ -429,6 +429,7 @@ impl Runtime {
                     client_order_id: format!("protect:{}", r["id"].as_str().unwrap_or_default()),
                     agent_id: Some(a.id.clone()),
                     decision_id,
+                    keep_trailing: false,
                 },
             });
         }

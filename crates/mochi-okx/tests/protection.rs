@@ -1052,10 +1052,7 @@ async fn a_position_on_the_other_side_never_shows_the_old_algos_as_in_force_and_
     h.okx.state().cancel_fails = true;
     // A short opened in the OKX app within the cleanup window: the old SELL stop does not close
     // it.
-    h.okx.state().position = Some(row(json!({
-        "instId": "BTC-USDT-SWAP", "pos": "-0.1", "avgPx": "75000", "markPx": "75000", "upl": "0",
-        "lever": "3", "liqPx": "90000", "margin": "10", "mgnMode": "isolated",
-    })));
+    h.okx.state().position = Some(short_position());
     h.sync().await;
     assert_eq!(h.engine.protection_of("BTCUSDT"), none());
     let closed = h.order_row(&old.id);
@@ -1310,4 +1307,94 @@ async fn a_full_size_stop_with_an_unknown_outcome_is_resolved_by_lookup_never_re
     assert_eq!(h.algo_placed().len(), 1);
     assert_eq!(live_stops(&h), [("0.2".to_string(), "74200".to_string())]);
     assert_eq!(h.canceled().len(), 2);
+}
+
+fn short_position() -> Row {
+    row(json!({
+        "instId": "BTC-USDT-SWAP", "pos": "-0.1", "avgPx": "75000", "markPx": "75000", "upl": "0",
+        "lever": "3", "liqPx": "90000", "margin": "10", "mgnMode": "isolated",
+    }))
+}
+
+/// A replaced stop whose cancel keeps failing is retired for good once its position closes: a
+/// later same-side position never takes it up.
+#[tokio::test]
+async fn a_replaced_stop_retired_with_its_closed_position_is_never_taken_up_again() {
+    let h = Harness::with_position().await;
+    let old = h.protection_rows().remove(0);
+    h.okx.state().cancel_fails = true;
+    h.set(stop("74500")).await.unwrap();
+    assert_eq!(
+        h.order_row(&old.id).reject_reason.as_deref(),
+        Some("Replaced")
+    );
+    h.close().await;
+    h.advance(10_000);
+    h.sync().await;
+    let retired = h.order_row(&old.id);
+    assert_eq!(retired.status, OrderStatus::Canceled);
+    assert_eq!(retired.reject_reason.as_deref(), Some("Position closed"));
+    assert_eq!(h.algo_state(&old.id), "live");
+
+    // Reopened in the OKX app, same side, while both cancels still fail.
+    h.okx.state().position = Some(long_position());
+    h.sync().await;
+    assert_eq!(h.engine.protection_of("BTCUSDT"), none());
+    assert_eq!(h.order_row(&old.id).status, OrderStatus::Canceled);
+}
+
+/// The same for a replaced stop retired because the position flipped to the other side.
+#[tokio::test]
+async fn a_replaced_stop_retired_by_a_flip_is_never_taken_up_by_the_next_same_side_position() {
+    let h = Harness::with_position().await;
+    let old = h.protection_rows().remove(0);
+    h.okx.state().cancel_fails = true;
+    h.set(stop("74500")).await.unwrap();
+    h.okx.state().position = Some(short_position());
+    h.sync().await;
+    assert_eq!(
+        h.order_row(&old.id).reject_reason.as_deref(),
+        Some("Position closed")
+    );
+    h.okx.state().position = Some(long_position());
+    h.sync().await;
+    assert_eq!(h.engine.protection_of("BTCUSDT"), none());
+    assert_eq!(h.order_row(&old.id).status, OrderStatus::Canceled);
+}
+
+/// A cancel OKX refused is still retried once 500 newer orders have pushed its row out of the
+/// recent window: the live algo is matched to its row by algoId, never read as external.
+#[tokio::test]
+async fn a_refused_cancel_is_still_retried_after_its_row_leaves_the_recent_window() {
+    let h = Harness::with_position().await;
+    let old = h.protection_rows().remove(0);
+    h.okx.state().cancel_fails = true;
+    h.set(stop("74500")).await.unwrap();
+    let entry = h
+        .store(|s| s.list_orders(ACCOUNT, 100).unwrap())
+        .into_iter()
+        .find(|o| !o.close_position)
+        .unwrap();
+    let now = h.clock.load(Ordering::SeqCst);
+    h.store(|s| {
+        for i in 0..500 {
+            let filler = Order {
+                id: format!("filler_{i}"),
+                client_order_id: format!("filler_{i}"),
+                created_at: now + 1 + i,
+                updated_at: now + 1 + i,
+                ..entry.clone()
+            };
+            s.insert_order(&filler).unwrap();
+        }
+    });
+    let attempts = h.count("POST /api/v5/trade/cancel-algos");
+    h.sync().await;
+    assert_eq!(h.count("POST /api/v5/trade/cancel-algos"), attempts + 1);
+    assert_eq!(h.view().external_protection, [cancel_pending("74000")]);
+    assert_eq!(h.engine.protection_of("BTCUSDT"), stop("74500"));
+
+    h.okx.state().cancel_fails = false;
+    h.sync().await;
+    assert_eq!(h.algo_state(&old.id), "canceled");
 }

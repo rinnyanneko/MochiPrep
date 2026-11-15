@@ -142,28 +142,33 @@ impl RuntimeHandle {
         expected_account_id: Option<String>,
     ) -> Result<PaperAccount, ApiError> {
         let handle = self.clone();
-        tokio::spawn(async move { handle.connect_now(input, expected_account_id).await })
+        tokio::spawn(async move { handle.connect_now(input, expected_account_id, None).await })
             .await
             .unwrap_or_else(|_| Err(internal_error()))
     }
 
+    /// `epoch` is the disconnect count the connect counts from (see `Runtime::disconnect_seq`);
+    /// `None` takes the current one in step 1. A reconnect passes the one it read its saved key
+    /// under, so a disconnect after that read is never undone.
     pub(super) async fn connect_now(
         &self,
         input: OkxConnectInput,
         expected_account_id: Option<String>,
+        epoch: Option<u64>,
     ) -> Result<PaperAccount, ApiError> {
         let venue = okx_venue(input.environment)
             .ok_or_else(|| ApiError::bad_request("Not an exchange environment"))?;
         let remember = input.remember;
         // 1. Before any network call.
-        let (options, live, specs) = self
+        let (options, live, specs, epoch) = self
             .call(move |r| {
                 if remember && r.vault_status()? != VaultStatus::Unlocked {
                     return Err(ApiError::bad_request(
                         "Set a master password and unlock it to save OKX keys",
                     ));
                 }
-                Ok((r.okx.clone(), r.live(), r.instruments().to_vec()))
+                let epoch = epoch.unwrap_or(r.disconnect_seq);
+                Ok((r.okx.clone(), r.live(), r.instruments().to_vec(), epoch))
             })
             .await??;
         let secrets = secrets_of(&input);
@@ -213,7 +218,7 @@ impl RuntimeHandle {
             pause_pending: false,
         };
         // 10-12. Register, save or forget the key, and take the first balance.
-        self.call(move |r| r.register_session(account, session, remember, &saved))
+        self.call(move |r| r.register_session(account, session, remember, &saved, epoch))
             .await?
     }
 
@@ -285,15 +290,31 @@ impl Runtime {
         }
     }
 
+    /// Whether `account_id` was disconnected after a connect counting from `epoch` started.
+    pub(super) fn disconnected_since(&self, account_id: &str, epoch: u64) -> bool {
+        self.disconnected_at
+            .get(account_id)
+            .is_some_and(|&at| at > epoch)
+    }
+
     /// Steps 10-12, once the first sync succeeded. A new session replaces the old one, which
-    /// resets arming to the venue's default.
+    /// resets arming to the venue's default. A connect whose account was disconnected while it
+    /// was out registers nothing and saves nothing: the disconnect stands.
     fn register_session(
         &mut self,
         mut account: PaperAccount,
         session: ExchangeSession,
         remember: bool,
         saved: &str,
+        epoch: u64,
     ) -> Result<PaperAccount, ApiError> {
+        if self.disconnected_since(&account.id, epoch) {
+            session.retire();
+            return Err(ApiError::bad_request(format!(
+                "{} was disconnected while connecting to OKX. Connect it again if you want it.",
+                account.name
+            )));
+        }
         let engine = session.engine.clone();
         if let Some(old) = self.exchanges.insert(account.id.clone(), session) {
             old.retire();
@@ -334,6 +355,10 @@ impl Runtime {
     /// Node's `disconnectExchange`. Also forgets saved credentials, so a disconnected account
     /// does not return on the next unlock.
     pub fn disconnect_exchange(&mut self, account_id: &str) -> Result<(), ApiError> {
+        // First, before anything fallible: a connect still out must not undo this.
+        self.disconnect_seq += 1;
+        self.disconnected_at
+            .insert(account_id.to_string(), self.disconnect_seq);
         if let Some(old) = self.exchanges.remove(account_id) {
             old.retire();
         }

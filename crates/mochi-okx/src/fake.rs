@@ -89,6 +89,8 @@ pub struct FakeState {
     pub rest_limit_orders: bool,
     /// Resting limit orders, as sent, oldest first.
     resting: Vec<Row>,
+    /// Requests to hold at the transport, each once; see [`FakeOkx::hold_next`].
+    holds: Vec<Arc<Hold>>,
     algo_seq: u64,
 }
 
@@ -123,6 +125,7 @@ impl Default for FakeState {
             algo_lookup_down: false,
             rest_limit_orders: false,
             resting: Vec::new(),
+            holds: Vec::new(),
             algo_seq: 0,
         }
     }
@@ -159,6 +162,27 @@ impl FakeState {
     }
 }
 
+/// One request held at the transport until the test releases it, so a test can act while the
+/// request is out, deterministically. The fake answers it from its state at release time.
+pub struct Hold {
+    method: &'static str,
+    path_suffix: String,
+    reached: tokio::sync::Notify,
+    released: tokio::sync::Notify,
+}
+
+impl Hold {
+    /// Resolves once the held request has arrived.
+    pub async fn reached(&self) {
+        self.reached.notified().await;
+    }
+
+    /// Lets the held request through.
+    pub fn release(&self) {
+        self.released.notify_one();
+    }
+}
+
 /// The fake exchange. Share it as an `Arc`; inspect and set knobs through [`FakeOkx::state`].
 #[derive(Default)]
 pub struct FakeOkx {
@@ -179,6 +203,30 @@ impl FakeOkx {
     /// See [`FakeState::add_algo`].
     pub fn add_algo(&self, fields: Row) -> Row {
         self.state().add_algo(fields)
+    }
+
+    /// Holds the next `method` request whose path ends with `path_suffix` until
+    /// [`Hold::release`]. Later matching requests pass, unless held again.
+    pub fn hold_next(&self, method: &'static str, path_suffix: &str) -> Arc<Hold> {
+        let hold = Arc::new(Hold {
+            method,
+            path_suffix: path_suffix.to_string(),
+            reached: tokio::sync::Notify::new(),
+            released: tokio::sync::Notify::new(),
+        });
+        self.state().holds.push(hold.clone());
+        hold
+    }
+
+    /// The hold this request meets, taken so it holds only once.
+    fn take_hold(&self, request: &HttpRequest) -> Option<Arc<Hold>> {
+        let path = url::Url::parse(&request.url).ok()?.path().to_string();
+        let mut state = self.state();
+        let at = state
+            .holds
+            .iter()
+            .position(|h| h.method == request.method && path.ends_with(&h.path_suffix))?;
+        Some(state.holds.remove(at))
     }
 
     /// A transport that plugs into `OkxClient::new`.
@@ -350,6 +398,14 @@ struct FakeTransport(Arc<FakeOkx>);
 
 impl Transport for FakeTransport {
     fn send(&self, request: HttpRequest) -> BoxFuture<'static, Result<HttpReply, String>> {
+        if let Some(hold) = self.0.take_hold(&request) {
+            let fake = self.0.clone();
+            return Box::pin(async move {
+                hold.reached.notify_one();
+                hold.released.notified().await;
+                fake.handle(&request)
+            });
+        }
         let reply = self.0.handle(&request);
         Box::pin(async move { reply })
     }

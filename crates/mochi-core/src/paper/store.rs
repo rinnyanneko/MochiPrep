@@ -69,6 +69,12 @@ pub trait PaperStore {
         symbol: &str,
     ) -> Result<Vec<Order>, StoreFailure>;
     fn list_orders(&self, account_id: &str, limit: usize) -> Result<Vec<Order>, StoreFailure>;
+    /// The account's orders carrying any of these exchange order ids, however old.
+    fn find_orders_by_exchange_ids(
+        &self,
+        account_id: &str,
+        exchange_order_ids: &[String],
+    ) -> Result<Vec<Order>, StoreFailure>;
 
     fn insert_fill(&self, fill: &Fill) -> Result<(), StoreFailure>;
     fn list_fills_by_order(&self, order_id: &str) -> Result<Vec<Fill>, StoreFailure>;

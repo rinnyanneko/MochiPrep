@@ -75,21 +75,30 @@ impl OkxEngine {
             _ => {}
         }
         let row = order.clone();
-        // As in Node, the order is saved even when its fill then cannot be recorded.
-        let fill = fill_of(order, &remote, &filled, at);
         let attached =
             row.status != OrderStatus::Open && filled.gt(&super::zero()) && !row.reduce_only;
+        // As in Node, the order is saved even when its fill then cannot be built.
+        let (fill, unbuilt) = match fill_of(order, &remote, &filled, at) {
+            Some(Ok(fill)) => (Some(fill), None),
+            Some(Err(error)) => (None, Some(error)),
+            None => (None, None),
+        };
+        // One transaction: a final status saved without its fill or protection rows would never
+        // be looked at again, since only OPEN orders are synced.
         self.rows(move |rows| {
-            rows.save_order(&row)?;
-            if attached {
-                record_attached(rows, &row, &filled, at)?;
-            }
-            if let Some(fill) = fill {
-                if rows.list_fills_by_order(&row.id)?.is_empty() {
-                    rows.insert_fill(&fill?)?;
+            rows.transaction(&mut || {
+                rows.save_order(&row)?;
+                if attached {
+                    record_attached(rows, &row, &filled, at)?;
                 }
-            }
-            Ok(())
+                if let Some(fill) = &fill {
+                    if rows.list_fills_by_order(&row.id)?.is_empty() {
+                        rows.insert_fill(fill)?;
+                    }
+                }
+                Ok(())
+            })?;
+            unbuilt.map_or(Ok(()), Err)
         })
         .await
     }

@@ -40,6 +40,11 @@ const EQUITY_EVERY_MS: i64 = 60_000;
 /// The rows the engine reads and writes, which are the paper tables. `list_open_orders` must return
 /// the account's OPEN orders oldest first (creation time, then insertion order).
 pub trait LiveRows {
+    /// Runs `work` atomically: an `Err` rolls back everything it wrote.
+    fn transaction(
+        &self,
+        work: &mut dyn FnMut() -> Result<(), EngineError>,
+    ) -> Result<(), EngineError>;
     fn get_account(&self, id: &str) -> Result<Option<PaperAccount>, StoreFailure>;
     fn insert_order(&self, order: &Order) -> Result<(), StoreFailure>;
     fn save_order(&self, order: &Order) -> Result<(), StoreFailure>;
@@ -51,6 +56,12 @@ pub trait LiveRows {
     ) -> Result<Option<Order>, StoreFailure>;
     fn list_open_orders(&self, account_id: &str) -> Result<Vec<Order>, StoreFailure>;
     fn list_orders(&self, account_id: &str, limit: usize) -> Result<Vec<Order>, StoreFailure>;
+    /// The account's orders carrying any of these exchange order ids, however old.
+    fn find_orders_by_exchange_ids(
+        &self,
+        account_id: &str,
+        exchange_order_ids: &[String],
+    ) -> Result<Vec<Order>, StoreFailure>;
     fn insert_fill(&self, fill: &Fill) -> Result<(), StoreFailure>;
     fn list_fills_by_order(&self, order_id: &str) -> Result<Vec<Fill>, StoreFailure>;
     fn list_fills(&self, account_id: &str, limit: usize) -> Result<Vec<Fill>, StoreFailure>;
@@ -69,6 +80,12 @@ pub struct Rows<'a, S: PaperStore> {
 }
 
 impl<S: PaperStore> LiveRows for Rows<'_, S> {
+    fn transaction(
+        &self,
+        work: &mut dyn FnMut() -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        self.store.transaction(work)
+    }
     fn get_account(&self, id: &str) -> Result<Option<PaperAccount>, StoreFailure> {
         self.store.get_account(id)
     }
@@ -94,6 +111,14 @@ impl<S: PaperStore> LiveRows for Rows<'_, S> {
     }
     fn list_orders(&self, account_id: &str, limit: usize) -> Result<Vec<Order>, StoreFailure> {
         self.store.list_orders(account_id, limit)
+    }
+    fn find_orders_by_exchange_ids(
+        &self,
+        account_id: &str,
+        exchange_order_ids: &[String],
+    ) -> Result<Vec<Order>, StoreFailure> {
+        self.store
+            .find_orders_by_exchange_ids(account_id, exchange_order_ids)
     }
     fn insert_fill(&self, fill: &Fill) -> Result<(), StoreFailure> {
         self.store.insert_fill(fill)
@@ -411,7 +436,8 @@ impl OkxEngine {
     }
 
     /// Reduce-only market close of a fraction. Works even when disarmed: exits must always be
-    /// possible.
+    /// possible. The fraction is sized inside the account's queue from the position as it is
+    /// then, so two overlapping half closes leave a quarter, not nothing.
     pub async fn close_position(
         self: &Arc<Self>,
         account_id: &str,
@@ -419,6 +445,29 @@ impl OkxEngine {
         fraction: f64,
         client_order_id: &str,
     ) -> Result<OrderResult, EngineError> {
+        let (account_id, symbol, client_order_id) = (
+            account_id.to_string(),
+            symbol.to_string(),
+            client_order_id.to_string(),
+        );
+        self.queued(move |engine| {
+            Box::pin(async move {
+                let request = engine
+                    .close_request(account_id, symbol, fraction, client_order_id)
+                    .await?;
+                engine.submit(request).await
+            })
+        })
+        .await
+    }
+
+    async fn close_request(
+        &self,
+        account_id: String,
+        symbol: String,
+        fraction: f64,
+        client_order_id: String,
+    ) -> Result<OrderRequest, EngineError> {
         let position = self
             .positions()
             .into_iter()
@@ -430,15 +479,15 @@ impl OkxEngine {
             held
         } else {
             let registry = self.registry().await?;
-            let step = dec(&registry.get(symbol)?.quantity_step)?;
+            let step = dec(&registry.get(&symbol)?.quantity_step)?;
             held.mul(&Dec::from_js_number(fraction))
                 .floor_to_step(&step)
                 .map_err(|_| EngineError::message("Invalid quantity step"))?
         };
-        self.place_order(OrderRequest {
-            account_id: account_id.to_string(),
-            client_order_id: client_order_id.to_string(),
-            symbol: symbol.to_string(),
+        Ok(OrderRequest {
+            account_id,
+            client_order_id,
+            symbol,
             side: match position.side {
                 PositionSide::Long => OrderSide::Sell,
                 PositionSide::Short => OrderSide::Buy,
@@ -454,7 +503,6 @@ impl OkxEngine {
             agent_id: None,
             decision_id: None,
         })
-        .await
     }
 
     pub async fn cancel_order(self: &Arc<Self>, order_id: &str) -> Result<(), EngineError> {

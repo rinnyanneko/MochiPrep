@@ -27,6 +27,9 @@ pub struct ProtectionMeta {
     pub client_order_id: String,
     pub agent_id: Option<String>,
     pub decision_id: Option<String>,
+    /// Keep the trailing stop in force and ignore the one in the change. The engine reads it in
+    /// the same serialized step as the change, so a concurrent trailing edit is never undone.
+    pub keep_trailing: bool,
 }
 
 /// A refused protection change. `after` is Node's `ProtectionChangeError.after`: set when the
@@ -402,14 +405,22 @@ impl ExecutionEngine for PaperExecution {
         &self,
         account_id: String,
         symbol: String,
-        protection: Protection,
-        _meta: ProtectionMeta,
+        mut protection: Protection,
+        meta: ProtectionMeta,
     ) -> BoxFuture<'_, Result<ProtectionResult, ProtectionFailure>> {
         Box::pin(async move {
-            // A paper change is one transaction: it is never refused part-way.
+            // A paper change is one transaction: it is never refused part-way. A kept trailing
+            // stop is read in the same runtime step.
             let result = self
                 .runtime
                 .call(move |r| {
+                    if meta.keep_trailing {
+                        protection.trailing_stop = r
+                            .engine()
+                            .protection_of(&account_id, &symbol)
+                            .map_err(|e| r.api_error(e))?
+                            .trailing_stop;
+                    }
                     r.engine_mut()
                         .set_protection(&account_id, &symbol, &protection)
                         .map_err(|e| r.api_error(e))
@@ -514,10 +525,11 @@ impl ExecutionEngine for OkxExecution {
         Box::pin(async move {
             let result = self
                 .engine
-                .set_protection(
+                .set_protection_with(
                     &account_id,
                     &symbol,
                     protection,
+                    meta.keep_trailing,
                     meta.agent_id,
                     meta.decision_id,
                 )

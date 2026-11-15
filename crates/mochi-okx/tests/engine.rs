@@ -582,6 +582,82 @@ async fn closes_a_fraction_of_the_position_while_disarmed() {
     assert_eq!(error.to_string(), "No open ETHUSDT position");
 }
 
+/// Two half closes that overlap: the second is sized from what the first left, inside the
+/// account's queue, so a quarter remains rather than nothing.
+#[tokio::test]
+async fn overlapping_fractional_closes_each_size_from_the_position_they_meet() {
+    let h = connect_default().await;
+    h.arm();
+    let mut request = order();
+    request.quantity = "0.0012".into();
+    h.engine.place_order(request).await.unwrap();
+    let hold = h.okx.hold_next("POST", "/trade/order");
+    let first = {
+        let engine = h.engine.clone();
+        tokio::spawn(async move {
+            engine
+                .close_position(ACCOUNT, "BTCUSDT", 0.5, "close-a")
+                .await
+        })
+    };
+    hold.reached().await;
+    // The second close is started (polled once) while the first is out on OKX.
+    let mut second = Box::pin(h.engine.close_position(ACCOUNT, "BTCUSDT", 0.5, "close-b"));
+    std::future::poll_fn(|cx| {
+        assert!(std::future::Future::poll(second.as_mut(), cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    hold.release();
+    assert_eq!(
+        first.await.unwrap().unwrap().order.status,
+        OrderStatus::Filled
+    );
+    assert_eq!(second.await.unwrap().order.status, OrderStatus::Filled);
+    // 0.12 contracts: half is 0.06, half of the 0.06 left is 0.03.
+    let sizes: Vec<Value> = h.placed()[1..].iter().map(|o| o["sz"].clone()).collect();
+    assert_eq!(sizes, [json!("0.06"), json!("0.03")]);
+    assert_eq!(h.okx.state().position.as_ref().unwrap()["pos"], "0.03");
+}
+
+/// A fill that cannot be written rolls back the final status with it, so the order stays OPEN
+/// and a later sync records the fill and the stop rows, instead of a FILLED order with neither.
+#[tokio::test]
+async fn a_failed_fill_write_leaves_the_order_open_for_the_next_sync() {
+    let h = connect_default().await;
+    h.arm();
+    let fail_fills = |on: bool| {
+        h.store(|s| {
+            s.connection()
+                .execute_batch(if on {
+                    "CREATE TRIGGER no_fills BEFORE INSERT ON fills BEGIN SELECT RAISE(ABORT,'disk full'); END"
+                } else {
+                    "DROP TRIGGER no_fills"
+                })
+                .unwrap()
+        })
+    };
+    fail_fills(true);
+    let result = h.engine.place_order(order()).await.unwrap();
+    assert_eq!(result.order.status, OrderStatus::Open);
+    assert!(result.fills.is_empty());
+    let id = result.order.id.clone();
+    let legs = |h: &Harness| {
+        h.store(|s| s.list_orders(ACCOUNT, 100).unwrap())
+            .into_iter()
+            .filter(|o| o.close_position)
+            .count()
+    };
+    assert_eq!(legs(&h), 0);
+
+    fail_fills(false);
+    h.engine.sync().await.unwrap();
+    let order = h.store(|s| s.get_order(&id).unwrap()).unwrap();
+    assert_eq!(order.status, OrderStatus::Filled);
+    assert_eq!(h.store(|s| s.list_fills_by_order(&id).unwrap()).len(), 1);
+    assert_eq!(legs(&h), 1);
+}
+
 // ---- added pairs ------------------------------------------------------------------------------
 
 #[tokio::test]

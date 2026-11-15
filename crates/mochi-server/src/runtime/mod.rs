@@ -317,6 +317,12 @@ pub struct Runtime {
     vault: vault::VaultState,
     /// Connected exchange accounts by account id. Memory only: a restart forgets them.
     exchanges: std::collections::HashMap<String, execution::ExchangeSession>,
+    /// Counts disconnects. A connect notes it when it starts and is refused at registration if
+    /// its account was disconnected after that, so a connect still out on OKX when the owner
+    /// disconnects never leaves the account connected or its key saved.
+    disconnect_seq: u64,
+    /// The `disconnect_seq` of each account's last disconnect.
+    disconnected_at: std::collections::HashMap<String, u64>,
     okx: OkxOptions,
     /// The task's own handle, weak so that work it owns never keeps it alive. Set by `start`.
     handle: Option<execution::WeakRuntimeHandle>,
@@ -405,6 +411,8 @@ impl Runtime {
             stopping: None,
             vault: vault::VaultState::new(kdf),
             exchanges: Default::default(),
+            disconnect_seq: 0,
+            disconnected_at: Default::default(),
             okx,
             handle: None,
             tasks: Default::default(),

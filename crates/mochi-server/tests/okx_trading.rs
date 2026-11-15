@@ -491,6 +491,7 @@ fn meta(id: &str) -> ProtectionMeta {
         client_order_id: format!("protect:{id}"),
         agent_id: Some("agent_1".into()),
         decision_id: Some(id.into()),
+        keep_trailing: false,
     }
 }
 
@@ -562,6 +563,46 @@ async fn api_protection_route_on_an_okx_account_goes_through_the_armed_gate() {
     .await;
     assert_eq!(positions[0]["stopLoss"], "74500");
     assert_eq!(positions[0]["externalProtection"], json!([]));
+    w.state.runtime.shutdown().await;
+}
+
+/// An SL-only edit (no trailingStop) racing a trailing-stop edit: the trailing stop it keeps is
+/// read inside the engine's queue, after the trailing edit, so it is not undone.
+#[tokio::test]
+async fn an_sl_only_edit_overlapping_a_trailing_edit_keeps_the_new_trailing_stop() {
+    let w = world_with_position().await;
+    let path = format!("/api/positions/{ACCOUNT}/BTCUSDT/protection");
+    let hold = w.okx.hold_next("POST", "/trade/order-algo");
+    let trail = {
+        let (state, path) = (w.state.clone(), path.clone());
+        tokio::spawn(async move {
+            let body = json!({
+                "stopLoss": "74000", "takeProfit": null,
+                "trailingStop": {"kind": "RATIO", "callback": "0.01", "activationPrice": null},
+            });
+            send(&state, "PUT", &path, Some(body)).await
+        })
+    };
+    // The trailing edit is in the account's queue, out on OKX.
+    hold.reached().await;
+    let edit = {
+        let (state, path) = (w.state.clone(), path.clone());
+        tokio::spawn(async move {
+            let body = json!({ "stopLoss": "74500", "takeProfit": null });
+            send(&state, "PUT", &path, Some(body)).await
+        })
+    };
+    // Round trips through the runtime let the SL edit run up to the engine's queue.
+    for _ in 0..10 {
+        w.state.runtime.call(|_| ()).await.unwrap();
+    }
+    hold.release();
+    let (status, _) = trail.await.unwrap();
+    assert_eq!(status, 200);
+    let (status, edited) = edit.await.unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(edited["after"]["stopLoss"], "74500");
+    assert_eq!(edited["after"]["trailingStop"]["callback"], "0.01");
     w.state.runtime.shutdown().await;
 }
 
