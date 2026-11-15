@@ -42,3 +42,46 @@ fn an_unreadable_price_is_an_error_not_a_verdict() {
     };
     assert!(classify_protection_change(PositionSide::Long, &before, &after).is_err());
 }
+
+#[test]
+fn tightening_one_leg_cannot_mask_increased_risk_in_another() {
+    // Each leg must be independently safe, even when the other legs reduce risk.
+    for (side, old_stop, safer_stop, looser_stop) in [
+        (PositionSide::Long, "95", "96", "94"),
+        (PositionSide::Short, "105", "104", "106"),
+    ] {
+        let before: Protection = serde_json::from_value(serde_json::json!({
+            "stopLoss": old_stop,
+            "takeProfit": "120",
+            "trailingStop": { "kind": "RATIO", "callback": "0.02", "activationPrice": "110" }
+        }))
+        .unwrap();
+        let tighter = serde_json::json!({
+            "stopLoss": safer_stop,
+            "takeProfit": "120.00",
+            "trailingStop": { "kind": "RATIO", "callback": "0.01", "activationPrice": "110.0" }
+        });
+        let after: Protection = serde_json::from_value(tighter.clone()).unwrap();
+        assert_eq!(
+            classify_protection_change(side, &before, &after).unwrap(),
+            ProtectionChangeClass::ReducesRisk
+        );
+
+        for (pointer, value) in [
+            ("/stopLoss", looser_stop),
+            ("/takeProfit", "121"),
+            ("/trailingStop/callback", "0.03"),
+            ("/trailingStop/kind", "SPREAD"),
+            ("/trailingStop/activationPrice", "111"),
+        ] {
+            let mut changed = tighter.clone();
+            *changed.pointer_mut(pointer).unwrap() = Value::String(value.into());
+            let after: Protection = serde_json::from_value(changed).unwrap();
+            assert_eq!(
+                classify_protection_change(side, &before, &after).unwrap(),
+                ProtectionChangeClass::NeedsArmed,
+                "{side:?}: {pointer}"
+            );
+        }
+    }
+}

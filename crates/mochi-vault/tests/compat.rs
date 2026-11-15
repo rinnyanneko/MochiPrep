@@ -316,3 +316,74 @@ fn node_default_and_test_kdfs_are_accepted() {
         assert_eq!(unwrap_with_password(&wrap, PASSWORD).unwrap(), key);
     }
 }
+
+#[test]
+fn untrusted_stored_kdf_is_rejected_before_opening_the_wrapped_key() {
+    // The read path must enforce the same resource caps as password creation.
+    for kdf in [
+        KdfParams {
+            n: 0,
+            r: 8,
+            p: 1,
+        },
+        KdfParams {
+            n: 1,
+            r: 8,
+            p: 1,
+        },
+        KdfParams {
+            n: 1024,
+            r: 0,
+            p: 1,
+        },
+        KdfParams {
+            n: 1024,
+            r: 8,
+            p: 0,
+        },
+        KdfParams {
+            n: 1 << 31,
+            r: 1 << 31,
+            p: 1,
+        },
+        KdfParams {
+            n: 1 << 20,
+            r: 16,
+            p: 1,
+        },
+        KdfParams {
+            n: 1024,
+            r: 8,
+            p: 17,
+        },
+    ] {
+        let wrap = PasswordWrap {
+            salt: base64_encode(&[0u8; 16]),
+            kdf,
+            wrapped_key: "garbage".into(),
+        };
+        assert_eq!(unwrap_with_password(&wrap, PASSWORD), Err(VaultError::Kdf));
+    }
+}
+
+#[test]
+fn changing_the_password_preserves_secrets_and_invalidates_the_old_password() {
+    let key = new_data_key();
+    let secret = seal(&key, "synthetic-api-key", &provider_context("provider"));
+    let old = wrap_with_password(&key, PASSWORD, FAST).unwrap();
+    let recovered = unwrap_with_password(&old, PASSWORD).unwrap();
+    let next = wrap_with_password(&recovered, "new master password", FAST).unwrap();
+    assert_eq!(
+        unwrap_with_password(&next, PASSWORD),
+        Err(VaultError::WrongPassword)
+    );
+    let reopened = unwrap_with_password(&next, "new master password").unwrap();
+    assert_eq!(
+        open(&reopened, &secret, &provider_context("provider")).unwrap(),
+        "synthetic-api-key"
+    );
+    assert_eq!(
+        open(&reopened, &secret, &exchange_context("provider")),
+        Err(VaultError::Decrypt)
+    );
+}

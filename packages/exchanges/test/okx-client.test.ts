@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OkxClient, OkxRejection, OkxUnknownOutcome, sign, toAlgoClOrdId, toClOrdId, type AlgoOrderBody } from '../src/index';
 
 // Expected values come from openssl, not from this codebase, so a wrong prehash cannot agree with itself.
@@ -128,5 +128,52 @@ describe('algo orders', () => {
     const live = fake(ok([{ algoId: 'A1', sCode: '0', sMsg: '' }]));
     await live.client.placeAlgo(trailing);
     expect((live.calls[0]!.init.headers as Record<string, string>)['x-simulated-trading']).toBeUndefined();
+  });
+});
+
+describe('OKX request clock', () => {
+  afterEach(() => vi.useRealTimers());
+
+  const credentials = { apiKey: 'key', secretKey: 'test-secret', passphrase: 'pass' };
+  function capture(now?: () => number) {
+    const calls: RequestInit[] = [];
+    const fetchImpl = (async (_url: unknown, init: RequestInit) => {
+      calls.push(init);
+      return new Response(JSON.stringify({ code: '0', data: [] }));
+    }) as typeof fetch;
+    return { calls, client: new OkxClient(credentials, 'OKX_DEMO', { fetchImpl, now }) };
+  }
+
+  it('uses the injected timestamp in the header and GET signature including the query', async () => {
+    const { calls, client } = capture(() => Date.parse('2020-12-08T09:08:57.715Z'));
+    await client.getUsdtBalance();
+    expect(calls[0]!.headers).toMatchObject({
+      'OK-ACCESS-TIMESTAMP': '2020-12-08T09:08:57.715Z',
+      'OK-ACCESS-SIGN': 'Yt2R9ATAX6Jz6+ud53rCYenVK09+CEpafaWGadqhybE=',
+    });
+    expect(calls[0]!.body).toBeUndefined();
+  });
+
+  it('reads the injected clock once per request, including epoch zero', async () => {
+    const now = vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(1_000);
+    const { calls, client } = capture(now);
+    await client.getPositions();
+    await client.getPositions();
+    expect(now).toHaveBeenCalledTimes(2);
+    expect(calls.map((call) => (call.headers as Record<string, string>)['OK-ACCESS-TIMESTAMP']))
+      .toEqual(['1970-01-01T00:00:00.000Z', '1970-01-01T00:00:01.000Z']);
+    expect((calls[0]!.headers as Record<string, string>)['OK-ACCESS-SIGN'])
+      .not.toBe((calls[1]!.headers as Record<string, string>)['OK-ACCESS-SIGN']);
+  });
+
+  it('uses the current system clock on each request when no hook is supplied', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-02-29T23:59:59.999Z'));
+    const { calls, client } = capture();
+    await client.getPositions();
+    vi.setSystemTime(new Date('2024-03-01T00:00:00.000Z'));
+    await client.getPositions();
+    expect(calls.map((call) => (call.headers as Record<string, string>)['OK-ACCESS-TIMESTAMP']))
+      .toEqual(['2024-02-29T23:59:59.999Z', '2024-03-01T00:00:00.000Z']);
   });
 });

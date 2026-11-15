@@ -94,6 +94,30 @@ describe('PaperExecutionEngine with SQLite', () => {
     expect(store.listOpenPositions('acct_okx')).toEqual([]);
   });
 
+  it.each(['OKX_LIVE', 'OKX_DEMO'] as const)('market queries exclude %s positions and orders while retaining matching paper rows', (venue) => {
+    const entry = engine.placeOrderSync(request({ clientOrderId: 'seed' })).order;
+    const position = store.getOpenPosition(accountId, 'BTCUSDT')!;
+    const account = store.getAccount(accountId)!;
+    for (const [id, source, accountVenue] of [
+      ['paper-live', 'LIVE', 'PAPER'],
+      ['exchange-live', 'LIVE', venue],
+      ['exchange-replay', 'REPLAY', venue],
+    ] as const) {
+      store.insertAccount({ ...account, id, source, venue: accountVenue });
+      store.insertOrder({ ...entry, id: id + '-order', clientOrderId: id, accountId: id, status: 'OPEN' });
+      store.insertPosition({ ...position, id: id + '-position', accountId: id });
+    }
+    store.insertOrder({ ...entry, id: 'paper-replay-order', clientOrderId: 'paper-replay', status: 'OPEN' });
+    store.insertOrder({ ...entry, id: 'other-symbol', clientOrderId: 'other-symbol', symbol: 'ETHUSDT', status: 'OPEN' });
+    expect(store.listOpenOrdersForMarket('LIVE', 'BTCUSDT').map((o) => o.id)).toEqual(['paper-live-order']);
+    expect(store.listOpenPositionsForMarket('LIVE', 'BTCUSDT').map((p) => p.id)).toEqual(['paper-live-position']);
+    expect(store.listOpenOrdersForMarket('REPLAY', 'BTCUSDT').map((o) => o.id)).toEqual(['paper-replay-order']);
+    expect(store.listOpenPositionsForMarket('REPLAY', 'BTCUSDT').map((p) => p.id)).toEqual([position.id]);
+    // The exchange rows remain available to their execution engine.
+    expect(store.listOpenOrders('exchange-live')).toHaveLength(1);
+    expect(store.listOpenPositions('exchange-live')).toHaveLength(1);
+  });
+
   it('is idempotent by clientOrderId and does not duplicate a fill', () => {
     const first = engine.placeOrderSync(request({ clientOrderId: 'same' }));
     const second = engine.placeOrderSync(request({ clientOrderId: 'same' }));
