@@ -79,8 +79,8 @@ impl RuntimeHandle {
         let mut failed = Vec::new();
         for (account_id, _) in saved {
             let id = account_id.clone();
-            // The saved key is read again here, with the disconnect count, in one step: an
-            // account disconnected while an earlier one reconnected has no key left to use.
+            // The saved key is read again here, with the session count, in one step: an account
+            // disconnected while an earlier one reconnected has no key left to use.
             let current = self
                 .call(move |r| {
                     let account = r.engine().store().get_account(&id).ok().flatten();
@@ -90,7 +90,7 @@ impl RuntimeHandle {
                         .into_iter()
                         .find(|(saved_id, _)| *saved_id == id)?
                         .1;
-                    Some((account, sealed, r.disconnect_seq))
+                    Some((account, sealed, r.session_seq))
                 })
                 .await?;
             // Gone, forgotten, or already connected by hand: nothing to reconnect.
@@ -121,10 +121,12 @@ impl RuntimeHandle {
                 let name = account.name.clone();
                 let text = error.message().to_string();
                 let id = account_id.clone();
-                // Disconnected by the owner meanwhile: that is not a failure to report.
+                // Disconnected, connected by hand or forgotten by the owner meanwhile: that is not
+                // a failure to report.
                 let reported = self
                     .call(move |r| {
-                        if r.disconnected_since(&id, epoch) {
+                        if r.session_changed_since(&id, epoch) || r.exchange_session(&id).is_some()
+                        {
                             return false;
                         }
                         let message =

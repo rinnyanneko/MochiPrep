@@ -609,6 +609,7 @@ impl RuntimeHandle {
                 was_healthy: true,
                 pause_pending: false,
             };
+            r.bump_session(&id);
             if let Some(old) = r.exchanges.insert(id, session) {
                 old.retire();
             }

@@ -1393,9 +1393,12 @@ async fn stop_all_disarms_even_when_stopping_agents_fails() {
     })
     .await
     .unwrap();
+    w.rt.call(|r| r.set_playing(true)).await.unwrap();
     let (status, _) = w.send("POST", "/api/agents/stop-all", None).await;
     assert_ne!(status, 200);
     assert_eq!(w.statuses().await[0]["armed"], false);
+    // The replay stops too.
+    assert!(!w.rt.call(|r| r.replay_state().playing).await.unwrap());
     w.rt.shutdown().await;
 }
 
@@ -1663,7 +1666,7 @@ async fn a_connect_still_out_on_okx_when_the_account_is_disconnected_leaves_it_d
     assert!(again
         .unwrap_err()
         .message()
-        .contains("was disconnected while connecting"));
+        .contains("disconnected or had its saved key changed while connecting to OKX"));
     let status = &w.statuses().await[0];
     assert_eq!(
         (status["connected"].clone(), status["saved"].clone()),
@@ -1706,5 +1709,90 @@ async fn accounts_disconnected_during_the_unlock_reconnect_stay_disconnected_and
     assert!(toasts(&mut events)
         .iter()
         .all(|(_, message)| !message.contains("could not reconnect")));
+    w.rt.shutdown().await;
+}
+
+/// The owner connects by hand and arms while the unlock reconnect of the same account is held on
+/// OKX. The reconnect then finishes, but never replaces the owner's session (which would reset
+/// the arming) or brings back the saved key the owner chose to forget.
+#[tokio::test]
+async fn a_manual_connect_and_arm_during_the_unlock_reconnect_keep_the_owners_session_and_key() {
+    for remember in [false, true] {
+        let mut w = World::new().await;
+        enable(&w).await;
+        let live = w.connect_with("OKX_LIVE", true).await.unwrap();
+        w.restart().await;
+        let mut events = w.rt.subscribe();
+        let hold = w.okx.hold_next("GET", "/account/config");
+        let (outcome, ()) = tokio::join!(w.rt.unlock(PASSWORD.into()), async {
+            hold.reached().await;
+            w.connect_with("OKX_LIVE", remember).await.unwrap();
+            w.arm(&live.id, ARM_PHRASE).await.unwrap();
+            hold.release();
+        });
+        let outcome = outcome.unwrap();
+        assert!(outcome.failed.is_empty(), "remember {remember}");
+        let status = &w.statuses().await[0];
+        assert_eq!(status["connected"], true, "remember {remember}");
+        assert_eq!(status["armed"], true, "remember {remember}");
+        assert_eq!(status["saved"], remember, "remember {remember}");
+        assert!(toasts(&mut events)
+            .iter()
+            .all(|(_, message)| !message.contains("could not reconnect")));
+        w.rt.shutdown().await;
+    }
+}
+
+/// A connect refused at registration, because the owner disconnected the account during its
+/// first sync, leaves the account's limits as they were.
+#[tokio::test]
+async fn a_connect_refused_at_registration_leaves_the_accounts_limits_as_they_were() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    let id = account.id.clone();
+    w.rt.call(move |r| r.disconnect_exchange(&id).unwrap())
+        .await
+        .unwrap();
+    let limits = |rt: RuntimeHandle| {
+        let id = account.id.clone();
+        async move {
+            rt.call(move |r| {
+                r.engine()
+                    .store()
+                    .get_account(&id)
+                    .unwrap()
+                    .unwrap()
+                    .live_limits
+                    .unwrap()
+            })
+            .await
+            .unwrap()
+        }
+    };
+    let before = limits(w.rt.clone()).await;
+    let mut input: OkxConnectInput = validate::parse_body(
+        Schema::OkxConnect,
+        &json!({
+            "apiKey": API_KEY, "secretKey": SECRET_KEY, "passphrase": PASSPHRASE,
+            "name": "OKX", "environment": "OKX_LIVE", "remember": false,
+        }),
+    )
+    .unwrap();
+    input.limits.max_quote_age_sec = before.max_quote_age_sec + 1.0;
+    let hold = w.okx.hold_next("GET", "/account/balance");
+    let (again, ()) = tokio::join!(w.rt.connect_okx(input, None), async {
+        hold.reached().await;
+        let id = account.id.clone();
+        w.rt.call(move |r| r.disconnect_exchange(&id).unwrap())
+            .await
+            .unwrap();
+        hold.release();
+    });
+    assert!(again
+        .unwrap_err()
+        .message()
+        .contains("while connecting to OKX"));
+    assert_eq!(limits(w.rt.clone()).await, before);
+    assert_eq!(w.statuses().await[0]["connected"], false);
     w.rt.shutdown().await;
 }

@@ -352,6 +352,7 @@ impl Runtime {
 
     fn apply_disable(&mut self, data_key: &DataKey) -> Result<VaultStatus, ApiError> {
         let keys = self.open_sealed_keys(data_key)?;
+        self.forget_saved_okx()?;
         let now = unix_ms();
         let store = self.engine.store();
         store
@@ -370,6 +371,17 @@ impl Runtime {
         Ok(VaultStatus::Off)
     }
 
+    /// Notes every saved OKX key as forgotten before the vault deletes them, so an unlock
+    /// reconnect still out on OKX cannot register it or save it again.
+    fn forget_saved_okx(&mut self) -> Result<(), ApiError> {
+        let saved = mochi_store::list_sealed_exchange_credentials(self.connection())
+            .map_err(|e| self.api_error(e))?;
+        for (account_id, _) in saved {
+            self.bump_session(&account_id);
+        }
+        Ok(())
+    }
+
     /// Node's `resetVault`. Nothing sealed can be recovered, so all of it is deleted. Checks the
     /// busy flag but does not take it: it derives nothing.
     pub fn reset_vault(&mut self, confirmation: &str) -> Result<(), ApiError> {
@@ -386,6 +398,7 @@ impl Runtime {
         }
         let sealed =
             mochi_store::sealed_provider_keys(self.connection()).map_err(|e| self.api_error(e))?;
+        self.forget_saved_okx()?;
         let store = self.engine.store();
         store
             .transaction(|| -> Result<(), StoreFailure> {

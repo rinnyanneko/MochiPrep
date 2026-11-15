@@ -159,11 +159,12 @@ async fn stop_all(
     Ok(Json(
         call(&state, |r| {
             // Stop All must leave nothing able to trade real money by accident. Done first so a
-            // storage failure while stopping agents cannot leave an account armed.
+            // storage failure while stopping agents cannot leave an account armed, and the replay
+            // is stopped whether or not stopping the agents failed.
             r.disarm(None);
-            let stopped = r.stop_all_agents()?;
+            let stopped = r.stop_all_agents();
             r.set_playing(false);
-            Ok(json!({"stopped":stopped}))
+            Ok(json!({"stopped":stopped?}))
         })
         .await?,
     ))

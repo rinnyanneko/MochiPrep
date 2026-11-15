@@ -147,9 +147,9 @@ impl RuntimeHandle {
             .unwrap_or_else(|_| Err(internal_error()))
     }
 
-    /// `epoch` is the disconnect count the connect counts from (see `Runtime::disconnect_seq`);
-    /// `None` takes the current one in step 1. A reconnect passes the one it read its saved key
-    /// under, so a disconnect after that read is never undone.
+    /// `epoch` is the session count the connect counts from (see `Runtime::session_seq`); `None`
+    /// takes the current one in step 1. A reconnect passes the one it read its saved key under,
+    /// so a disconnect, manual connect or forgotten key after that read is never undone.
     pub(super) async fn connect_now(
         &self,
         input: OkxConnectInput,
@@ -167,7 +167,7 @@ impl RuntimeHandle {
                         "Set a master password and unlock it to save OKX keys",
                     ));
                 }
-                let epoch = epoch.unwrap_or(r.disconnect_seq);
+                let epoch = epoch.unwrap_or(r.session_seq);
                 Ok((r.okx.clone(), r.live(), r.instruments().to_vec(), epoch))
             })
             .await??;
@@ -190,15 +190,26 @@ impl RuntimeHandle {
             Err(text) => return Err(self.refused(text, &secrets).await),
         };
 
-        // 7. The account row, written before the first sync as Node writes it.
+        // 7. The account row. A new one is written before the first sync, as Node writes it; an
+        // existing one keeps its limits until registration, so a connect refused there leaves
+        // them as they were.
         let (name, environment, limits) =
             (input.name.clone(), input.environment, input.limits.clone());
+        let reconnect = expected_account_id.is_some();
         let account = self
-            .call(move |r| r.okx_account(name, environment, uid, limits, expected_account_id))
+            .call(move |r| {
+                let account = r.okx_account(name, environment, uid, limits, expected_account_id)?;
+                // Checked before the first sync too, so a connect that will be refused does not
+                // reconcile an account the owner has just disconnected or connected anew.
+                r.registration_refusal(&account, reconnect, epoch)?;
+                Ok::<_, ApiError>(account)
+            })
             .await??;
 
-        // 8-9. Trading is only possible once a full reconciliation has succeeded.
-        let armed = Arc::new(AtomicBool::new(venue == Venue::OkxDemo));
+        // 8-9. Trading is only possible once a full reconciliation has succeeded. The session is
+        // unarmed until it is registered, so its first sync places nothing a protection change
+        // would need arming for.
+        let armed = Arc::new(AtomicBool::new(false));
         let engine = okx_engine(
             self.downgrade(),
             &account.id,
@@ -218,7 +229,7 @@ impl RuntimeHandle {
             pause_pending: false,
         };
         // 10-12. Register, save or forget the key, and take the first balance.
-        self.call(move |r| r.register_session(account, session, remember, &saved, epoch))
+        self.call(move |r| r.register_session(account, session, remember, &saved, reconnect, epoch))
             .await?
     }
 
@@ -232,7 +243,8 @@ impl RuntimeHandle {
 }
 
 impl Runtime {
-    /// Step 7: the account this key belongs to, by venue and OKX uid, or a new one.
+    /// Step 7: the account this key belongs to, by venue and OKX uid, or a new one. An existing
+    /// account's limits are written at registration.
     fn okx_account(
         &mut self,
         name: String,
@@ -258,9 +270,6 @@ impl Runtime {
             Some(mut account) => {
                 // The name stays: only the limits come from the connect.
                 account.live_limits = Some(limits);
-                store
-                    .save_account_profile(&account)
-                    .map_err(|e| self.api_error(e))?;
                 Ok(account)
             }
             None => {
@@ -290,32 +299,72 @@ impl Runtime {
         }
     }
 
-    /// Whether `account_id` was disconnected after a connect counting from `epoch` started.
-    pub(super) fn disconnected_since(&self, account_id: &str, epoch: u64) -> bool {
-        self.disconnected_at
+    /// Whether `account_id`'s session or saved key changed (a session registered, a disconnect,
+    /// a key forgotten) after a connect counting from `epoch` started.
+    pub(super) fn session_changed_since(&self, account_id: &str, epoch: u64) -> bool {
+        self.session_changed_at
             .get(account_id)
             .is_some_and(|&at| at > epoch)
     }
 
-    /// Steps 10-12, once the first sync succeeded. A new session replaces the old one, which
-    /// resets arming to the venue's default. A connect whose account was disconnected while it
-    /// was out registers nothing and saves nothing: the disconnect stands.
+    /// Notes a change to `account_id`'s session or saved key, so a connect still out on OKX
+    /// cannot undo it.
+    pub(super) fn bump_session(&mut self, account_id: &str) {
+        self.session_seq += 1;
+        self.session_changed_at
+            .insert(account_id.to_string(), self.session_seq);
+    }
+
+    /// Why a connect counting from `epoch` may not register: its account changed meanwhile, or,
+    /// for an unlock reconnect, the account is already connected (by hand, so the owner's session
+    /// and arming stand).
+    fn registration_refusal(
+        &self,
+        account: &PaperAccount,
+        reconnect: bool,
+        epoch: u64,
+    ) -> Result<(), ApiError> {
+        if self.session_changed_since(&account.id, epoch) {
+            return Err(ApiError::bad_request(format!(
+                "{} was connected, disconnected or had its saved key changed while connecting to OKX. Connect it again if you want it.",
+                account.name
+            )));
+        }
+        if reconnect && self.exchanges.contains_key(&account.id) {
+            return Err(ApiError::bad_request(format!(
+                "{} is already connected.",
+                account.name
+            )));
+        }
+        Ok(())
+    }
+
+    /// Steps 10-12, once the first sync succeeded. A new manual session replaces the old one,
+    /// which resets arming to the venue's default. A connect whose account changed while it was
+    /// out (see [`Self::registration_refusal`]) registers nothing and saves nothing.
     fn register_session(
         &mut self,
         mut account: PaperAccount,
         session: ExchangeSession,
         remember: bool,
         saved: &str,
+        reconnect: bool,
         epoch: u64,
     ) -> Result<PaperAccount, ApiError> {
-        if self.disconnected_since(&account.id, epoch) {
+        if let Err(error) = self.registration_refusal(&account, reconnect, epoch) {
             session.retire();
-            return Err(ApiError::bad_request(format!(
-                "{} was disconnected while connecting to OKX. Connect it again if you want it.",
-                account.name
-            )));
+            return Err(error);
         }
+        // The limits this connect brought, written only now that it is registering.
+        if let Err(error) = self.engine().store().save_account_profile(&account) {
+            session.retire();
+            return Err(self.api_error(error));
+        }
+        self.bump_session(&account.id);
         let engine = session.engine.clone();
+        session
+            .armed
+            .store(engine.venue() == Venue::OkxDemo, Ordering::SeqCst);
         if let Some(old) = self.exchanges.insert(account.id.clone(), session) {
             old.retire();
         }
@@ -356,9 +405,7 @@ impl Runtime {
     /// does not return on the next unlock.
     pub fn disconnect_exchange(&mut self, account_id: &str) -> Result<(), ApiError> {
         // First, before anything fallible: a connect still out must not undo this.
-        self.disconnect_seq += 1;
-        self.disconnected_at
-            .insert(account_id.to_string(), self.disconnect_seq);
+        self.bump_session(account_id);
         if let Some(old) = self.exchanges.remove(account_id) {
             old.retire();
         }

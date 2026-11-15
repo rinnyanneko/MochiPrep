@@ -150,12 +150,13 @@ async fn protection(
     {
         Ok(result) => result,
         Err(failure) => {
-            // A part-way refusal has already changed legs on OKX: views must not stay stale.
+            // A part-way refusal has already changed legs on OKX: views must not stay stale. The
+            // refusal is what the caller needs, so a failed invalidation never replaces it.
             if failure.after.is_some() {
-                state
+                let _ = state
                     .runtime
                     .invalidate(&[Topic::Orders, Topic::Positions])
-                    .await?;
+                    .await;
             }
             return Err(failure.error);
         }
