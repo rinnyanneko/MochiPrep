@@ -177,7 +177,7 @@ impl Runtime {
                     }
                     Err(_) => {}
                 }
-                retry_pause = session.pause_pending;
+                retry_pause = self.pause_owed.contains(account_id);
             }
         }
         if lost.is_none() && !retry_pause {
@@ -190,8 +190,10 @@ impl Runtime {
         if let Err(error) = &paused {
             tracing::warn!(error = %error.message(), "could not pause agents after a lost sync");
         }
-        if let Some(session) = self.exchanges.get_mut(account_id) {
-            session.pause_pending = paused.is_err();
+        if paused.is_ok() {
+            self.pause_owed.remove(account_id);
+        } else {
+            self.pause_owed.insert(account_id.to_string());
         }
         if let Some(text) = lost {
             let name = self

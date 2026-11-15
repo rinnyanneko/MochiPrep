@@ -325,6 +325,10 @@ pub struct Runtime {
     session_seq: u64,
     /// The `session_seq` of each account's last change.
     session_changed_at: std::collections::HashMap<String, u64>,
+    /// Accounts owing a lost-sync pause that did not complete. Kept per account, not per
+    /// session, so a reconnect does not drop it: retried on every sync until it succeeds, and
+    /// until then the account's agents are not scheduled.
+    pause_owed: std::collections::HashSet<String>,
     okx: OkxOptions,
     /// The task's own handle, weak so that work it owns never keeps it alive. Set by `start`.
     handle: Option<execution::WeakRuntimeHandle>,
@@ -415,6 +419,7 @@ impl Runtime {
             exchanges: Default::default(),
             session_seq: 0,
             session_changed_at: Default::default(),
+            pause_owed: Default::default(),
             okx,
             handle: None,
             tasks: Default::default(),

@@ -240,9 +240,7 @@ impl Runtime {
         for a in rows::list_agents(self.connection()).map_err(|e| self.api_error(e))? {
             // An agent whose lost-sync pause is still owed stays unscheduled until the pause
             // lands: it was reported paused, so it must not trade meanwhile.
-            let pause_owed = self
-                .exchange_session(&a.account_id)
-                .is_some_and(|session| session.pause_pending);
+            let pause_owed = self.pause_owed.contains(&a.account_id);
             if a.running
                 && !pause_owed
                 && a.next_run_at.is_some_and(|at| at <= now)

@@ -242,7 +242,6 @@ impl RuntimeHandle {
             armed,
             secrets,
             was_healthy: true,
-            pause_pending: false,
             link,
         };
         // 10-12. Register, save or forget the key, and take the first balance.
@@ -434,6 +433,8 @@ impl Runtime {
         mochi_store::delete_sealed_exchange_credentials(self.connection(), account_id)
             .map_err(|e| self.api_error(e))?;
         self.pause_account_agents(account_id, "OKX disconnected")?;
+        // Every running agent is paused now, so no lost-sync pause is owed any more.
+        self.pause_owed.remove(account_id);
         self.invalidate(&[Topic::Accounts, Topic::Exchange]);
         Ok(())
     }

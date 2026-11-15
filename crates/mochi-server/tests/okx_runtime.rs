@@ -1502,6 +1502,57 @@ async fn an_agent_whose_lost_sync_pause_is_still_owed_is_not_scheduled() {
     w.rt.shutdown().await;
 }
 
+/// The owed pause belongs to the account, not the session: connecting the account anew and
+/// arming it again does not let the agent that was never paused trade.
+#[tokio::test(start_paused = true)]
+async fn an_owed_lost_sync_pause_survives_connecting_the_account_anew() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    let agent = w.agent_on(&account.id, "AUTO").await;
+    let id = agent.clone();
+    w.rt.call(move |r| {
+        r.start_agent(&id).unwrap();
+        r.connection()
+            .execute(
+                "UPDATE agents SET next_run_at=? WHERE id=?",
+                rusqlite::params![i64::MAX, id],
+            )
+            .unwrap();
+        r.connection()
+            .execute_batch(
+                "CREATE TRIGGER refuse_pause BEFORE UPDATE ON agents WHEN NEW.running=0
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END",
+            )
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    w.okx.state().down = true;
+    w.rt.sync_exchanges().await.unwrap();
+    w.okx.state().down = false;
+    w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    assert!(w.agent(&agent).await.running);
+
+    let placed = w.placed();
+    let id = agent.clone();
+    w.rt.call(move |r| {
+        r.connection()
+            .execute(
+                "UPDATE agents SET next_run_at=0 WHERE id=?",
+                rusqlite::params![id],
+            )
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(3500)).await;
+    w.rt.call(|_| ()).await.unwrap();
+    assert_eq!(w.placed(), placed);
+    w.rt.shutdown().await;
+}
+
 // ---- restart ----------------------------------------------------------------------------------
 
 #[tokio::test]
@@ -1896,6 +1947,11 @@ async fn a_sync_of_a_replaced_session_never_writes_over_the_new_sessions_orders(
     let engine = w.rt.execution(&account.id).await.unwrap();
     let placed = engine.place_order(request).await.unwrap();
     assert_eq!(placed.order.status, mochi_domain::OrderStatus::Open);
+    let agent = w.agent_on(&account.id, "SIGNAL").await;
+    let id = agent.clone();
+    w.rt.call(move |r| r.start_agent(&id).unwrap())
+        .await
+        .unwrap();
     let resting = {
         let state = w.okx.state();
         let (key, row) = state.orders.iter().last().unwrap();
@@ -1903,6 +1959,7 @@ async fn a_sync_of_a_replaced_session_never_writes_over_the_new_sessions_orders(
     };
 
     let hold = w.okx.hold_next("GET", "/trade/order");
+    let mut events = w.rt.subscribe();
     let (synced, ()) = tokio::join!(w.rt.sync_exchanges(), async {
         hold.reached().await;
         w.okx.state().fill_resting();
@@ -1921,5 +1978,12 @@ async fn a_sync_of_a_replaced_session_never_writes_over_the_new_sessions_orders(
             .await
             .unwrap();
     assert_eq!(row.status, mochi_domain::OrderStatus::Filled);
+    // The old session's refused sync is not the new session's: its agents keep running, and
+    // nothing says sync was lost.
+    assert!(w.agent(&agent).await.running);
+    assert_eq!(w.statuses().await[0]["healthy"], true);
+    assert!(toasts(&mut events)
+        .iter()
+        .all(|(_, message)| !message.contains("lost sync")));
     w.rt.shutdown().await;
 }

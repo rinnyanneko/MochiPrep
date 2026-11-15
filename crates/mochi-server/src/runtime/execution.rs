@@ -137,8 +137,6 @@ pub(super) struct ExchangeSession {
     pub secrets: [Zeroizing<String>; 3],
     /// Whether the last sync succeeded: only the change to unhealthy pauses agents.
     pub was_healthy: bool,
-    /// A lost-sync pause that did not complete: retried on every sync until it does.
-    pub pause_pending: bool,
     /// What its engine's store writes are checked against.
     pub link: Arc<SessionLink>,
 }
@@ -659,7 +657,6 @@ impl RuntimeHandle {
                 armed: flag,
                 secrets,
                 was_healthy: true,
-                pause_pending: false,
                 link: link.clone(),
             };
             r.bump_session(&id);
