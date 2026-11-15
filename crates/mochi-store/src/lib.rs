@@ -5,10 +5,16 @@ mod ai;
 mod paper;
 pub mod rows;
 mod settings;
+mod vault;
 
 pub use paper::SqlitePaperStore;
 pub use settings::{
     delete_instrument, get_setting, has_vault, list_instruments, save_instrument, set_setting,
+};
+pub use vault::{
+    delete_sealed_exchange_credentials, delete_vault, list_sealed_exchange_credentials,
+    save_sealed_exchange_credentials, save_sealed_provider_key, save_vault_key,
+    sealed_provider_keys, vault_key,
 };
 
 use rusqlite::Connection;

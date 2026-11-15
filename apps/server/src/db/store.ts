@@ -183,9 +183,13 @@ export class SqliteStore implements PaperStore, AgentStore {
   /**
    * Folds the WAL into the main file and empties it. With secure_delete on, this is what makes
    * deleted plaintext actually gone: until then old page images still sit in the WAL.
+   * Returns true when that did not happen: another reader held the WAL (SQLite reports it in
+   * the pragma's `busy` column rather than failing), or a transaction is still open.
    */
-  scrub() {
-    if (this.txDepth === 0) this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  scrub(): boolean {
+    if (this.txDepth > 0) return true;
+    const { busy } = this.db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() as { busy: number };
+    return busy !== 0;
   }
 
   transaction<T>(fn: () => T): T {
@@ -270,9 +274,10 @@ export class SqliteStore implements PaperStore, AgentStore {
     return this.all("SELECT * FROM orders WHERE account_id=? AND status='OPEN' ORDER BY created_at, rowid", accountId).map(toOrder);
   }
   listOpenOrdersForMarket(source: DataSource, symbol: SymbolId) {
+    // Paper accounts only: an OKX account's OPEN rows are OKX's to settle, never the simulator's.
     return this.all(
       `SELECT o.* FROM orders o JOIN accounts a ON a.id=o.account_id
-       WHERE o.status='OPEN' AND o.symbol=? AND a.source=? ORDER BY o.created_at, o.rowid`,
+       WHERE o.status='OPEN' AND o.symbol=? AND a.source=? AND a.venue='PAPER' ORDER BY o.created_at, o.rowid`,
       symbol, source,
     ).map(toOrder);
   }
@@ -319,9 +324,10 @@ export class SqliteStore implements PaperStore, AgentStore {
     return this.all("SELECT * FROM positions WHERE account_id=? AND status='OPEN' ORDER BY opened_at", accountId).map(toPosition);
   }
   listOpenPositionsForMarket(source: DataSource, symbol: SymbolId) {
+    // Paper accounts only, as with orders: the simulator never funds or liquidates an OKX account.
     return this.all(
       `SELECT p.* FROM positions p JOIN accounts a ON a.id=p.account_id
-       WHERE p.status='OPEN' AND p.symbol=? AND a.source=?`,
+       WHERE p.status='OPEN' AND p.symbol=? AND a.source=? AND a.venue='PAPER'`,
       symbol, source,
     ).map(toPosition);
   }

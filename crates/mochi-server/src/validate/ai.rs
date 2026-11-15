@@ -210,7 +210,7 @@ fn extra_headers(input: Input) -> Checked {
         Err(issues)
     }
 }
-fn risk(input: Input) -> Checked {
+pub(super) fn risk(input: Input) -> Checked {
     let mut f = Fields::new(input)?;
     f.required("maxLeverage", |v| number(v, 1.0, 100.0));
     f.required("maxRiskPerTradePct", |v| {

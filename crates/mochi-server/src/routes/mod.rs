@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod agents;
 pub mod events;
+pub mod exchange;
 pub mod instruments;
 pub mod later;
 pub mod market;
@@ -12,6 +13,7 @@ pub mod providers;
 pub mod replay;
 pub mod state;
 pub mod static_files;
+pub mod vault;
 
 use axum::extract::State;
 use axum::http::HeaderMap;
@@ -37,6 +39,8 @@ pub fn router() -> Router<AppState> {
         .merge(agents::router())
         .merge(providers::router())
         .merge(replay::router())
+        .merge(vault::router())
+        .merge(exchange::router())
         .merge(later::router())
 }
 

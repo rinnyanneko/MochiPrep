@@ -6,8 +6,9 @@ use mochi_ai::{
     AiProvider, MockProvider, ProviderConfig, ProviderError, ProviderErrorCode, ProviderKind,
     RemoteProvider,
 };
-use mochi_domain::{AccountVenue, DataSource, Topic};
-use mochi_store::{has_vault, rows};
+use mochi_domain::{DataSource, Topic, VaultStatus};
+use mochi_store::rows;
+use mochi_vault::{provider_context, seal};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc};
@@ -43,10 +44,6 @@ impl RuntimeHandle {
             .await??;
         done.await.map_err(|_| self.reply_error())?
     }
-    pub async fn execute_signal(&self, id: impl Into<String>) -> Result<Value, ApiError> {
-        let id = id.into();
-        self.call(move |r| r.execute_signal(&id)).await?
-    }
 }
 impl Runtime {
     pub fn require_agent(&self, id: &str) -> Result<rows::Agent, ApiError> {
@@ -61,16 +58,6 @@ impl Runtime {
     }
     pub fn is_agent_busy(&self, id: &str) -> bool {
         self.agents.active.contains_key(id)
-    }
-    pub fn assert_can_run(&self, agent: &rows::Agent) -> Result<(), ApiError> {
-        let a = self.require_account(&agent.account_id)?;
-        if a.venue != AccountVenue::Paper {
-            return Err(ApiError::bad_request(format!(
-                "{} is not connected to OKX",
-                a.name
-            )));
-        }
-        Ok(())
     }
     pub fn start_agent(&mut self, id: &str) -> Result<(), ApiError> {
         let mut a = self.require_agent(id)?;
@@ -123,21 +110,33 @@ impl Runtime {
         Ok(count)
     }
     pub fn pause_account_agents(&mut self, account: &str, detail: &str) -> Result<(), ApiError> {
+        let mut first_error = None;
         for a in rows::list_agents(self.connection()).map_err(|e| self.api_error(e))? {
             if a.account_id == account && a.running {
-                self.pause_agent(&a.id, Some(detail.into()))?;
+                // One agent failing to pause must not leave the others trading: try them all.
+                if let Err(error) = self.pause_agent(&a.id, Some(detail.into())) {
+                    first_error.get_or_insert(error);
+                }
             }
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
+    /// Node's `setKey`: sealed while unlocked, refused while locked, plaintext while OFF.
     pub fn set_key(&mut self, id: &str, key: &str) -> Result<(), ApiError> {
-        if has_vault(self.connection()).map_err(|e| self.api_error(e))? {
-            return Err(ApiError::bad_request(
-                "Unlock MochiPrep with your master password first",
-            ));
-        }
-        rows::save_provider_key(self.connection(), id, key, super::unix_ms())
-            .map_err(|e| self.api_error(e))?;
+        let now = super::unix_ms();
+        let saved = match (self.vault_status()?, self.data_key()) {
+            (VaultStatus::Locked, _) => {
+                return Err(ApiError::bad_request(
+                    "Unlock MochiPrep with your master password first",
+                ))
+            }
+            (VaultStatus::Unlocked, Some(data_key)) => {
+                let sealed = seal(data_key, key, &provider_context(id));
+                mochi_store::save_sealed_provider_key(self.connection(), id, &sealed, now)
+            }
+            _ => rows::save_provider_key(self.connection(), id, key, now),
+        };
+        saved.map_err(|e| self.api_error(e))?;
         self.agents.keys.insert(id.into(), key.into());
         self.invalidate(&[Topic::Providers]);
         Ok(())
@@ -154,6 +153,19 @@ impl Runtime {
         self.agents.keys.remove(id);
         self.invalidate(&[Topic::Providers]);
         Ok(())
+    }
+    /// Node's `providerViews()`: a provider has a key when its key is loaded. While unlocked
+    /// that includes sealed keys, which the plaintext table no longer holds.
+    pub fn provider_views(&self) -> Result<Vec<rows::ProviderView>, ApiError> {
+        let status = self.vault_status()?;
+        let mut views = rows::list_provider_views(self.connection(), status != VaultStatus::Off)
+            .map_err(|e| self.api_error(e))?;
+        if status == VaultStatus::Unlocked {
+            for view in &mut views {
+                view.has_key = !view.requires_key || self.agents.keys.contains_key(&view.id);
+            }
+        }
+        Ok(views)
     }
     pub(super) fn resolve_provider(
         &self,
@@ -182,7 +194,11 @@ impl Runtime {
         if c.kind != ProviderKind::Mock && key.is_empty() {
             return Err(ProviderError::new(
                 ProviderErrorCode::NoKey,
-                if has_vault(self.connection()).map_err(|e| fail(e.to_string()))? {
+                if self
+                    .vault_status()
+                    .map_err(|e| fail(e.message().to_string()))?
+                    == VaultStatus::Locked
+                {
                     format!(
                         "Unlock MochiPrep with your master password to load the key for \"{}\".",
                         c.name
@@ -222,7 +238,11 @@ impl Runtime {
         self.expire_signals(source)?;
         let now = self.market_now(source);
         for a in rows::list_agents(self.connection()).map_err(|e| self.api_error(e))? {
+            // An agent whose lost-sync pause is still owed stays unscheduled until the pause
+            // lands: it was reported paused, so it must not trade meanwhile.
+            let pause_owed = self.pause_owed.contains(&a.account_id);
             if a.running
+                && !pause_owed
                 && a.next_run_at.is_some_and(|at| at <= now)
                 && self.require_account(&a.account_id)?.source == source
             {

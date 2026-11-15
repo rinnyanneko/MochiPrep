@@ -89,6 +89,10 @@ pub enum ExternalProtectionKind {
     Trailing,
 }
 
+/// Starts the detail of an external entry that is really MochiPrep's own algo whose cancel has
+/// not gone through yet, so the model and the UI can tell the two apart.
+pub const CANCEL_PENDING_PREFIX: &str = "ours, cancel pending:";
+
 /// A protective order that lives on the exchange but was not placed through MochiPrep.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

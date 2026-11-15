@@ -4,6 +4,8 @@
 
 > **Status: tested only against a simulated exchange.** The client follows OKX's published API, and its signature format was accepted by the real endpoint, but no order has ever been placed on OKX. Real money carries the risk of real loss, including from a bug in this code, and AI decisions can be wrong. You are responsible for every order.
 
+Both backends implement this: the Node server and the Rust server (`mochi-server`) follow the same rules. The Rust OKX paths have only been run against an in-process fake OKX, never against real OKX Demo or real money.
+
 ## Before your first real order
 
 Work through these in order, and stop at the first surprise.
@@ -80,6 +82,9 @@ Protection belongs to a position only if its side closes it: a sell for a long, 
 5. **Algos when a position closes.** What OKX does with reduce-only algos once the position closes is not confirmed. MochiPrep cancels its own after the cleanup wait above, and does not touch External ones.
 6. **Which price trailing tracks.** Whether OKX trails the last, mark or index price is not confirmed. On OKX, MochiPrep shows the trigger price OKX reports and no extreme of its own.
 7. **Fixed size.** Protection algos are sent with a fixed `sz`, the position size when they were placed. If you add to the position in the OKX app, MochiPrep's stop covers only the original size until the protection is changed again.
+8. **Attached stop size (Rust backend).** Whether OKX reports an attached stop's `sz` as the size of the entry that filled is not confirmed. When two entries fill into one position, the Rust backend never lets the newest entry's stop retire the older ones, since OKX's position list can lag behind the fills. Older stops are retired only by a stop sized to the whole position (a full-position stop or a protection change), and only when the smaller of OKX's `sz` and the size MochiPrep recorded covers the position. For an attached stop, the recorded size is the filled size.
+9. **Extra full-position stop (Rust backend).** Whether OKX accepts one more reduce-only stop sized to the whole position beside the stops attached to each entry is not confirmed. When armed, the Rust backend places one such stop loss or take-profit before cancelling the per-entry ones, at the most protective level among them (the one closest to the price), so no entry's level is loosened. It is sized to the larger of the position OKX lists and the per-entry stops added together, so a position list that lags behind the fills cannot make it too small. It covers only what those two show: contracts added in the OKX app that the position list does not show yet stay uncovered until a later sync lists them (see item 7). It first runs the market checks a protection change gets: a recent sync, a fresh quote, and the level on the right side of the price. If those fail, nothing is sent and the per-entry orders stay until a later sync. If OKX refuses it, it is not retried, and the per-entry stops stay in force. Trailing stops are never replaced this way: each entry keeps its own.
+10. **Oversized reduce-only stop at trigger (Rust backend).** Whether OKX trims or rejects a triggered reduce-only stop that is larger than the remaining position is not confirmed. After stacked entries, the full-position stop and the per-entry stops can sit at the same level and trigger together, and after a partial close the full-position stop is larger than the position. If OKX rejects rather than trims, part of the position may stay open after its stop triggers.
 
 ## Trading pairs
 

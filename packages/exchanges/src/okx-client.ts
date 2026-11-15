@@ -124,19 +124,25 @@ type Row = Record<string, string>;
 export class OkxClient {
   private readonly base: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly now: (() => number) | undefined;
 
+  /**
+   * `now` is a test hook: a fixed clock makes the signed timestamp, and so every signature,
+   * reproducible for the Rust golden. Without it the time is read exactly as before.
+   */
   constructor(
     private readonly credentials: OkxCredentials,
     private readonly venue: Exclude<AccountVenue, 'PAPER'>,
-    options: { fetchImpl?: typeof fetch; baseUrl?: string } = {},
+    options: { fetchImpl?: typeof fetch; baseUrl?: string; now?: () => number } = {},
   ) {
     this.base = options.baseUrl ?? REST[venue];
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.now = options.now;
   }
 
   private async request<T>(method: 'GET' | 'POST', path: string, payload?: unknown): Promise<T[]> {
     const body = payload === undefined ? '' : JSON.stringify(payload);
-    const timestamp = new Date().toISOString();
+    const timestamp = (this.now ? new Date(this.now()) : new Date()).toISOString();
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.base}${path}`, {

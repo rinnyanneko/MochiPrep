@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
-import { AgentInputSchema, DEFAULT_RISK_SETTINGS, ProtectionSchema, type OrderRequest, type Quote } from '@mochiprep/shared';
+import { AgentInputSchema, DEFAULT_ACCOUNT_CONFIG, DEFAULT_LIVE_LIMITS, DEFAULT_RISK_SETTINGS, ProtectionSchema, type Order, type OrderRequest, type Quote } from '@mochiprep/shared';
 import { advanceExtreme, auditLedger, d, PaperExecutionEngine, trailingTrigger, validateTrailing } from '@mochiprep/core';
 import { openDatabase } from '../src/db/database';
 import { SqliteStore } from '../src/db/store';
@@ -68,6 +68,54 @@ describe('PaperExecutionEngine with SQLite', () => {
     expect(after.liquidationPrice).toBe(before.liquidationPrice);
     expect(after.liquidationPrice).toBe('76.255');
     expect(engine.balanceOf(accountId).usedMargin).toBe('37.875');
+  });
+
+  it('never touches the open orders of an OKX account on a live quote', () => {
+    // Created the way the OKX connect path creates it: source LIVE, an exchange venue.
+    store.insertAccount({
+      id: 'acct_okx', name: 'OKX', source: 'LIVE', venue: 'OKX_LIVE', exchangeUid: '42', liveLimits: DEFAULT_LIVE_LIMITS, isDemo: false,
+      initialBalance: '1000', walletBalance: '0', usedMargin: '0', realizedPnl: '0', feesPaid: '0', fundingPaid: '0',
+      config: DEFAULT_ACCOUNT_CONFIG, createdAt: now,
+    });
+    const row = (id: string, fields: Partial<Order>): Order => ({
+      id, accountId: 'acct_okx', clientOrderId: id, symbol: 'BTCUSDT', side: 'BUY', type: 'LIMIT', quantity: '0.001', price: null,
+      triggerPrice: null, leverage: 3, reduceOnly: false, closePosition: false, status: 'OPEN', filledQuantity: '0', avgFillPrice: null,
+      reservedMargin: '0', attachedStopLoss: null, attachedTakeProfit: null, trailingKind: null, trailingCallback: null,
+      trailingActivationPrice: null, trailingExtreme: null, attachedTrailingStop: null, rejectReason: null, exchangeOrderId: null,
+      agentId: null, decisionId: null, createdAt: now, updatedAt: now, ...fields,
+    });
+    store.insertOrder(row('ord_limit', { price: '105' }));
+    store.insertOrder(row('ord_entry:sl', { side: 'SELL', type: 'STOP_MARKET', triggerPrice: '90', reduceOnly: true, closePosition: true }));
+    engine.onQuote({ ...makeQuote(now), source: 'LIVE' });
+    expect(store.getOrder('ord_limit')).toMatchObject({ status: 'OPEN', rejectReason: null });
+    expect(store.getOrder('ord_entry:sl')).toMatchObject({ status: 'OPEN', rejectReason: null });
+    expect(store.listLedger('acct_okx')).toEqual([]);
+    expect(store.listFills('acct_okx', 10)).toEqual([]);
+    expect(store.listOpenPositions('acct_okx')).toEqual([]);
+  });
+
+  it.each(['OKX_LIVE', 'OKX_DEMO'] as const)('market queries exclude %s positions and orders while retaining matching paper rows', (venue) => {
+    const entry = engine.placeOrderSync(request({ clientOrderId: 'seed' })).order;
+    const position = store.getOpenPosition(accountId, 'BTCUSDT')!;
+    const account = store.getAccount(accountId)!;
+    for (const [id, source, accountVenue] of [
+      ['paper-live', 'LIVE', 'PAPER'],
+      ['exchange-live', 'LIVE', venue],
+      ['exchange-replay', 'REPLAY', venue],
+    ] as const) {
+      store.insertAccount({ ...account, id, source, venue: accountVenue });
+      store.insertOrder({ ...entry, id: id + '-order', clientOrderId: id, accountId: id, status: 'OPEN' });
+      store.insertPosition({ ...position, id: id + '-position', accountId: id });
+    }
+    store.insertOrder({ ...entry, id: 'paper-replay-order', clientOrderId: 'paper-replay', status: 'OPEN' });
+    store.insertOrder({ ...entry, id: 'other-symbol', clientOrderId: 'other-symbol', symbol: 'ETHUSDT', status: 'OPEN' });
+    expect(store.listOpenOrdersForMarket('LIVE', 'BTCUSDT').map((o) => o.id)).toEqual(['paper-live-order']);
+    expect(store.listOpenPositionsForMarket('LIVE', 'BTCUSDT').map((p) => p.id)).toEqual(['paper-live-position']);
+    expect(store.listOpenOrdersForMarket('REPLAY', 'BTCUSDT').map((o) => o.id)).toEqual(['paper-replay-order']);
+    expect(store.listOpenPositionsForMarket('REPLAY', 'BTCUSDT').map((p) => p.id)).toEqual([position.id]);
+    // The exchange rows remain available to their execution engine.
+    expect(store.listOpenOrders('exchange-live')).toHaveLength(1);
+    expect(store.listOpenPositions('exchange-live')).toHaveLength(1);
   });
 
   it('is idempotent by clientOrderId and does not duplicate a fill', () => {

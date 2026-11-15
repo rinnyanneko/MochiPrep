@@ -247,10 +247,10 @@ Real findings that nothing in Plan 1 builds on. The plan named for each must pic
 | 3 | `js_round` returns +0 where JS gives -0 for results in (-0.5, 0); decide before it reaches API output |
 | 3 | `ReplayMarketData::new`: validate `minutes > WARMUP_MINUTES`, return `Result`; test a short tape stepped to its last index (Runtime passes `replayMinutes`, Node tests use 5_800) |
 | 3 | `Tape` public columns can diverge in length; `candle()` indexes unchecked |
-| 5 | `unwrap_with_password` maps malformed wrap data to `Malformed`; Node maps every post-derivation failure to `WrongPasswordError` (HTTP 403). Make the API responses identical |
-| 5 | `DataKey` is a bare `[u8; 32]`, so `Debug` prints key bytes: make it a newtype with a redacting `Debug`, add `zeroize` for password copies and derived keys |
-| 5 | Cap the scrypt cost read from stored params (a tampered DB could abort on a huge allocation); accept every value Node can write |
-| 5 | Tamper tests assert only `is_err()`: assert the variant; comment that `open` is deliberately stricter than Node |
+| 5 (done: Plan 5 Task 1, `dd9cf7f`; every post-derivation failure is `WrongPassword`, HTTP 403) | `unwrap_with_password` maps malformed wrap data to `Malformed`; Node maps every post-derivation failure to `WrongPasswordError` (HTTP 403). Make the API responses identical |
+| 5 (done: Plan 5 Task 1, `dd9cf7f`; redacting newtype, zeroized) | `DataKey` is a bare `[u8; 32]`, so `Debug` prints key bytes: make it a newtype with a redacting `Debug`, add `zeroize` for password copies and derived keys |
+| 5 (done: Plan 5 Task 1, `dd9cf7f`) | Cap the scrypt cost read from stored params (a tampered DB could abort on a huge allocation); accept every value Node can write |
+| 5 (done: Plan 5 Task 1, `dd9cf7f`) | Tamper tests assert only `is_err()`: assert the variant; comment that `open` is deliberately stricter than Node |
 | 7 | Pin `rust-toolchain.toml` to an exact version when CI lands (`clippy -D warnings` breaks on new lints) |
 | 7 | CI: regenerate `rust-vault.json` (`MOCHI_UPDATE_GOLDEN=1 cargo test -p mochi-vault`) before the Node golden test; make the writer test `#[ignore]` + `--ignored` |
 | 7 | Run the Unix permission tests (`new_database_files_are_private`, `sqlite_gives_wal_and_shm_the_main_file_mode`) on Linux and macOS CI. They passed once on Linux (WSL) when added; the 0700 data-directory path and macOS are still unexercised |

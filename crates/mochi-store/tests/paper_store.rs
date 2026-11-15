@@ -103,6 +103,24 @@ fn assert_tables(store: &SqlitePaperStore, expected: &Value, label: &str) {
     }
 }
 
+/// `saveAccountProfile` writes the name, initial balance and live limits only, the limits in
+/// `JSON.stringify`'s text for JS numbers (`1e-7`, `0.30000000000000004`, `1e+21`).
+#[test]
+fn save_account_profile_writes_node_bytes() {
+    let g = golden();
+    let store = new_store();
+    for account in g["inputs"]["accounts"].as_array().unwrap() {
+        store.insert_account(&one(account)).unwrap();
+    }
+    for profile in g["profile"]["saves"].as_array().unwrap() {
+        store.save_account_profile(&one(profile)).unwrap();
+    }
+    assert_eq!(
+        Value::Array(raw_rows(&store, "accounts")),
+        g["profile"]["accounts"]
+    );
+}
+
 #[test]
 fn writes_the_same_rows_as_node() {
     let g = golden();

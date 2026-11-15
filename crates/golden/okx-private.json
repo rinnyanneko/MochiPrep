@@ -1,0 +1,8296 @@
+{
+ "credentials": {
+  "apiKey": "golden-api-key-0123",
+  "secretKey": "golden-secret-key-4567",
+  "passphrase": "golden-passphrase-89"
+ },
+ "base": "https://okx.test",
+ "now": 1767323045067,
+ "sign": [
+  {
+   "secretKey": "test-secret",
+   "timestamp": "2020-12-08T09:08:57.715Z",
+   "method": "POST",
+   "path": "/api/v5/trade/order",
+   "body": "{\"instId\":\"BTC-USDT-SWAP\"}",
+   "sign": "pTcfOssGhm9sSvJrX7EenxdYrhHiqBkSG5mJc6vZoQg="
+  },
+  {
+   "secretKey": "test-secret",
+   "timestamp": "2020-12-08T09:08:57.715Z",
+   "method": "GET",
+   "path": "/api/v5/account/balance?ccy=USDT",
+   "body": "",
+   "sign": "Yt2R9ATAX6Jz6+ud53rCYenVK09+CEpafaWGadqhybE="
+  },
+  {
+   "secretKey": "",
+   "timestamp": "2026-01-02T03:04:05.067Z",
+   "method": "GET",
+   "path": "/api/v5/account/config",
+   "body": "",
+   "sign": "VX1sXzHZe1q9lw2ZdaJxueHoEatPDBDZzPBmvLANzdE="
+  },
+  {
+   "secretKey": "sëcret-ünicode",
+   "timestamp": "2026-01-02T03:04:05.067Z",
+   "method": "POST",
+   "path": "/api/v5/trade/cancel-algos",
+   "body": "[{\"instId\":\"ETH-USDT-SWAP\",\"algoId\":\"1\"}]",
+   "sign": "w8+X/W+WEZrPxmw/NIWlhGafFggnCDz/KX3fSzTp21c="
+  },
+  {
+   "secretKey": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+   "timestamp": "1999-12-31T23:59:59.999Z",
+   "method": "POST",
+   "path": "/api/v5/trade/order-algo",
+   "body": "{\"note\":\"é\\n\\u0001\"}",
+   "sign": "2oFSLDJ3SbMlOLQPQ5q7jAMJ2WVjDnIRg0We7ayzPsE="
+  }
+ ],
+ "instIds": [
+  {
+   "symbol": "BTCUSDT",
+   "instId": "BTC-USDT-SWAP"
+  },
+  {
+   "symbol": "ETHUSDT",
+   "instId": "ETH-USDT-SWAP"
+  },
+  {
+   "symbol": "PEPEUSDT",
+   "instId": "PEPE-USDT-SWAP"
+  },
+  {
+   "symbol": "1000SATSUSDT",
+   "instId": "1000SATS-USDT-SWAP"
+  },
+  {
+   "symbol": "USDTUSDT",
+   "instId": "USDT-USDT-SWAP"
+  },
+  {
+   "symbol": "BTCUSDTX",
+   "instId": "BTCUSDTX-USDT-SWAP"
+  },
+  {
+   "symbol": "USDT",
+   "instId": "-USDT-SWAP"
+  },
+  {
+   "symbol": "",
+   "instId": "-USDT-SWAP"
+  }
+ ],
+ "ids": [
+  {
+   "id": "",
+   "clOrdId": "e3b0c44298fc1c149afbf4c8996fb924",
+   "algoClOrdId": "189f3b89101cf9f4aac79c8a6c8f83d2"
+  },
+  {
+   "id": "agent:agent_123:dec_456",
+   "clOrdId": "47e2f254429813ad15facfa708e6f3fb",
+   "algoClOrdId": "20fbbad50a6d65c4da1371f669a4df6f"
+  },
+  {
+   "id": "ord_1",
+   "clOrdId": "341fb35e2c016788d2106af198a41b2e",
+   "algoClOrdId": "4de344902f00f6fed13b354a14e4d768"
+  },
+  {
+   "id": "ord_1:sl",
+   "clOrdId": "9300799999852eecffc9ab91f758f466",
+   "algoClOrdId": "94b6f2ae27ea89359d787cc1651f767b"
+  },
+  {
+   "id": "ord_1:trail",
+   "clOrdId": "37e2bab819fe6ed1c9d40b5462658fd8",
+   "algoClOrdId": "ab4b3cd8153d611f647efaaba54c5067"
+  },
+  {
+   "id": "manual:ü",
+   "clOrdId": "da62762013f1e13f4903e3452bce0d14",
+   "algoClOrdId": "54a948b9abe4aeff93c842d94455707a"
+  },
+  {
+   "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "clOrdId": "0d4e2ca9e9cbced7a7a5380eb29e1a37",
+   "algoClOrdId": "8fe529ee41d8f4b867636296750e3ebd"
+  }
+ ],
+ "isoTimes": [
+  {
+   "ms": 0,
+   "iso": "1970-01-01T00:00:00.000Z"
+  },
+  {
+   "ms": 1767323045067,
+   "iso": "2026-01-02T03:04:05.067Z"
+  },
+  {
+   "ms": 951782400000,
+   "iso": "2000-02-29T00:00:00.000Z"
+  },
+  {
+   "ms": 4102444799999,
+   "iso": "2099-12-31T23:59:59.999Z"
+  },
+  {
+   "ms": 1767225600123,
+   "iso": "2026-01-01T00:00:00.123Z"
+  }
+ ],
+ "replies": {
+  "empty": [
+   200,
+   "{\"code\":\"0\",\"msg\":\"\",\"data\":[]}"
+  ],
+  "noData": [
+   200,
+   "{\"code\":\"0\",\"msg\":\"\"}"
+  ],
+  "nullData": [
+   200,
+   "{\"code\":\"0\",\"msg\":\"\",\"data\":null}"
+  ],
+  "refusedWithRow": [
+   200,
+   "{\"code\":\"1\",\"msg\":\"Operation failed\",\"data\":[{\"sCode\":\"51008\",\"sMsg\":\"Insufficient margin\"}]}"
+  ],
+  "refusedNoRow": [
+   200,
+   "{\"code\":\"50113\",\"msg\":\"Invalid Sign\",\"data\":[]}"
+  ],
+  "refusedEmptyMsg": [
+   200,
+   "{\"code\":\"50000\",\"msg\":\"\",\"data\":[]}"
+  ],
+  "refusedEmptyRow": [
+   200,
+   "{\"code\":\"1\",\"msg\":\"All operations failed\",\"data\":[{\"sCode\":\"\",\"sMsg\":\"\"}]}"
+  ],
+  "refusedNoCode": [
+   200,
+   "{\"msg\":\"\",\"data\":[]}"
+  ],
+  "notFound": [
+   200,
+   "{\"code\":\"51603\",\"msg\":\"Order does not exist\",\"data\":[]}"
+  ],
+  "notFoundOnRow": [
+   200,
+   "{\"code\":\"1\",\"msg\":\"\",\"data\":[{\"sCode\":\"51603\",\"sMsg\":\"Order does not exist\"}]}"
+  ],
+  "rowRefusedInSuccess": [
+   200,
+   "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"ordId\":\"\",\"algoId\":\"\",\"sCode\":\"51000\",\"sMsg\":\"Parameter error\"}]}"
+  ],
+  "rowWithoutSCode": [
+   200,
+   "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"ordId\":\"9\",\"algoId\":\"9\"}]}"
+  ],
+  "rowSCodeWithoutMsg": [
+   200,
+   "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"sCode\":\"51000\"}]}"
+  ],
+  "rowEmptySCode": [
+   200,
+   "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"ordId\":\"9\",\"sCode\":\"\",\"sMsg\":\"\"}]}"
+  ],
+  "partlyCancelled": [
+   200,
+   "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"sCode\":\"0\",\"sMsg\":\"\"},{\"algoId\":\"682\",\"sCode\":\"51400\",\"sMsg\":\"Cancellation failed\"}]}"
+  ],
+  "http500Json": [
+   500,
+   "{\"code\":\"0\",\"msg\":\"\",\"data\":[]}"
+  ],
+  "http503Refusal": [
+   503,
+   "{\"code\":\"50001\",\"msg\":\"Service temporarily unavailable\",\"data\":[]}"
+  ],
+  "http502Html": [
+   502,
+   "<html>Bad Gateway</html>"
+  ],
+  "http200Text": [
+   200,
+   "not json"
+  ],
+  "http200Empty": [
+   200,
+   ""
+  ],
+  "http401Json": [
+   401,
+   "{\"code\":\"50111\",\"msg\":\"Invalid OK-ACCESS-KEY\",\"data\":[]}"
+  ],
+  "http429NoCode": [
+   429,
+   "{\"msg\":\"Too Many Requests\"}"
+  ],
+  "jsonNull": [
+   200,
+   "null"
+  ],
+  "jsonNumber": [
+   200,
+   "5"
+  ],
+  "network": [
+   200,
+   null
+  ]
+ },
+ "requests": [
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"uid\":\"42\",\"acctLv\":\"2\",\"posMode\":\"net_mode\",\"perm\":\"read_only,trade\",\"autoLoan\":false}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/account/config",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "EwvPe7j/W8OdKy013T1VgwKCgQgVWrYbKC23CtsDRAY="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": {
+     "uid": "42",
+     "acctLv": "2",
+     "posMode": "net_mode",
+     "perm": "read_only,trade",
+     "autoLoan": false
+    }
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"instId\":\"BTC-USDT-SWAP\",\"ctVal\":\"0.01\",\"lotSz\":\"0.01\",\"tickSz\":\"0.1\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/public/instruments?instType=SWAP&instId=BTC-USDT-SWAP",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "CYixZJZRRX1V5gOnQWU0fqamgWOvLTIYfCxmCsKqWe0="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": {
+     "ctVal": "0.01",
+     "lotSz": "0.01"
+    }
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"totalEq\":\"1000\",\"details\":[{\"ccy\":\"BTC\",\"eq\":\"0.1\"},{\"ccy\":\"USDT\",\"eq\":\"1000.5\",\"availEq\":\"900\",\"upl\":\"-2.5\"}]}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/account/balance?ccy=USDT",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "DzNWUc6Dcn1dLoQMEusQnIe/dMTrX+7i69XnP8S+fu8="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": {
+     "ccy": "USDT",
+     "eq": "1000.5",
+     "availEq": "900",
+     "upl": "-2.5"
+    }
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"instId\":\"BTC-USDT-SWAP\",\"pos\":\"-2\",\"avgPx\":\"75000\",\"markPx\":\"74900\",\"upl\":\"2\",\"lever\":\"3\",\"liqPx\":\"99000\",\"margin\":\"50\",\"mgnMode\":\"isolated\"},{\"instId\":\"ETH-USDT-SWAP\",\"pos\":\"0\",\"avgPx\":\"\",\"markPx\":\"3000\",\"upl\":\"0\",\"lever\":\"5\",\"liqPx\":\"\",\"margin\":\"0\",\"mgnMode\":\"isolated\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/account/positions?instType=SWAP",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "86Bm7zK6eyCWpB32dszx/SRc/WDpkhrp56RCkDuF/5Q="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "pos": "-2",
+      "avgPx": "75000",
+      "markPx": "74900",
+      "upl": "2",
+      "lever": "3",
+      "liqPx": "99000",
+      "margin": "50",
+      "mgnMode": "isolated"
+     },
+     {
+      "instId": "ETH-USDT-SWAP",
+      "pos": "0",
+      "avgPx": "",
+      "markPx": "3000",
+      "upl": "0",
+      "lever": "5",
+      "liqPx": "",
+      "margin": "0",
+      "mgnMode": "isolated"
+     }
+    ]
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"instId\":\"BTC-USDT-SWAP\",\"lever\":\"3\",\"mgnMode\":\"isolated\",\"posSide\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/account/set-leverage",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "v8rNBeJUVcimtTzi0fFaEgD1QaCcYlT1x2JL8e4eWAg="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": "{\"instId\":\"BTC-USDT-SWAP\",\"lever\":\"3\",\"mgnMode\":\"isolated\"}"
+    }
+   ],
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"ordId\":\"312269865356374016\",\"clOrdId\":\"c1\",\"tag\":\"\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "O/eBWjPa6sGsydG+NiayiI19FvymiZf/h38ITQcUMTY="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": "{\"instId\":\"BTC-USDT-SWAP\",\"tdMode\":\"isolated\",\"side\":\"buy\",\"ordType\":\"market\",\"sz\":\"12\",\"clOrdId\":\"44ba634553891b6b03721fea5ed99eb0\",\"attachAlgoOrds\":[{\"attachAlgoClOrdId\":\"94b6f2ae27ea89359d787cc1651f767b\",\"slTriggerPx\":\"74250.5\",\"slOrdPx\":\"-1\"},{\"attachAlgoClOrdId\":\"fc52bbdfc60163e1c5a2a13db474fa17\",\"tpTriggerPx\":\"76500\",\"tpOrdPx\":\"-1\"},{\"attachAlgoClOrdId\":\"ab4b3cd8153d611f647efaaba54c5067\",\"callbackRatio\":\"0.02\",\"activePx\":\"75500\"}]}"
+    }
+   ],
+   "outcome": {
+    "result": "312269865356374016"
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order-algo",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "Ubdy5yk/GcsprB8XsYMVnXbAIDiV7XhOXZGJHsg2pHQ="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": "{\"instId\":\"BTC-USDT-SWAP\",\"tdMode\":\"isolated\",\"side\":\"sell\",\"algoClOrdId\":\"2ce5b3afb07401378ce220166eb413dc\",\"sz\":\"12\",\"reduceOnly\":true,\"ordType\":\"conditional\",\"slTriggerPx\":\"74000\",\"slOrdPx\":\"-1\"}"
+    }
+   ],
+   "outcome": {
+    "result": "681"
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"sCode\":\"0\",\"sMsg\":\"\"},{\"algoId\":\"682\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/cancel-algos",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "UyTEs316pTX3YHUwLl3wyQECjpS0xxr5hBBWlqZiNEw="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": "[{\"instId\":\"BTC-USDT-SWAP\",\"algoId\":\"681\"},{\"instId\":\"ETH-USDT-SWAP\",\"algoId\":\"682\"}]"
+    }
+   ],
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"instId\":\"BTC-USDT-SWAP\",\"ordType\":\"conditional\",\"state\":\"live\",\"side\":\"sell\",\"sz\":\"12\",\"slTriggerPx\":\"74000\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/orders-algo-pending?ordType=conditional&instType=SWAP",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "TrHKSGur1oQDYvMPyIbusSxBcb5U0vieZeiFl1rjr/M="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": [
+     {
+      "algoId": "681",
+      "algoClOrdId": "a1",
+      "instId": "BTC-USDT-SWAP",
+      "ordType": "conditional",
+      "state": "live",
+      "side": "sell",
+      "sz": "12",
+      "slTriggerPx": "74000"
+     }
+    ]
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"instId\":\"BTC-USDT-SWAP\",\"ordType\":\"move_order_stop\",\"state\":\"effective\",\"side\":\"sell\",\"sz\":\"12\",\"callbackRatio\":\"0.015\",\"moveTriggerPx\":\"74100\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order-algo?algoClOrdId=2ce5b3afb07401378ce220166eb413dc",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "SRDwgNiAOxuL1FtTxtKHiZ1FF06VkieMUXR+qXkC+RA="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": {
+     "algoId": "681",
+     "algoClOrdId": "a1",
+     "instId": "BTC-USDT-SWAP",
+     "ordType": "move_order_stop",
+     "state": "effective",
+     "side": "sell",
+     "sz": "12",
+     "callbackRatio": "0.015",
+     "moveTriggerPx": "74100"
+    }
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"ordId\":\"312269865356374016\",\"clOrdId\":\"c1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/cancel-order",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "HqUm0k6irrixIIf95T9tMGSeZv5DVvHgbOWxFHo19C0="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": "{\"instId\":\"BTC-USDT-SWAP\",\"clOrdId\":\"44ba634553891b6b03721fea5ed99eb0\"}"
+    }
+   ],
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"ordId\":\"312269865356374016\",\"clOrdId\":\"c1\",\"state\":\"filled\",\"accFillSz\":\"12\",\"avgPx\":\"75000\",\"fee\":\"-0.05\",\"pnl\":\"0\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order?instId=BTC-USDT-SWAP&clOrdId=44ba634553891b6b03721fea5ed99eb0",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "PzTo23QXArt1nbKAS+kaLJAff5jHLquBp1Hho/7PHvw="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": {
+     "ordId": "312269865356374016",
+     "clOrdId": "c1",
+     "state": "filled",
+     "accFillSz": "12",
+     "avgPx": "75000",
+     "fee": "-0.05",
+     "pnl": "0"
+    }
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "PEPEUSDT"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"instId\":\"BTC-USDT-SWAP\",\"ctVal\":\"0.01\",\"lotSz\":\"0.01\",\"tickSz\":\"0.1\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/public/instruments?instType=SWAP&instId=PEPE-USDT-SWAP",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "h8IZbYC7P/+jJ/LxSUH9KNgtjvDY2glA1Mb0u2SNBdk="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": {
+     "ctVal": "0.01",
+     "lotSz": "0.01"
+    }
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "PEPE-USDT-SWAP",
+     20
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"instId\":\"BTC-USDT-SWAP\",\"lever\":\"3\",\"mgnMode\":\"isolated\",\"posSide\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/account/set-leverage",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "JSqr+Un6bO+TlnE+OOhsM07iPi00YORh1zX16n148QM="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": "{\"instId\":\"PEPE-USDT-SWAP\",\"lever\":\"20\",\"mgnMode\":\"isolated\"}"
+    }
+   ],
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "PEPE-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "ordType": "limit",
+      "sz": "0.3",
+      "clOrdId": "d65b311f7a339b8c36efb74f25a46a9f",
+      "px": "0.0000123456",
+      "reduceOnly": true
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"ordId\":\"312269865356374016\",\"clOrdId\":\"c1\",\"tag\":\"\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "J8Q+FmG5I1QVVyv59UO0pLY96BVF2MJjTBSetBDTns8="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": "{\"instId\":\"PEPE-USDT-SWAP\",\"tdMode\":\"isolated\",\"side\":\"sell\",\"ordType\":\"limit\",\"sz\":\"0.3\",\"clOrdId\":\"d65b311f7a339b8c36efb74f25a46a9f\",\"px\":\"0.0000123456\",\"reduceOnly\":true}"
+    }
+   ],
+   "outcome": {
+    "result": "312269865356374016"
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "ETH-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "algoClOrdId": "d985b9f9ac6293e6e9dc7071aa63b3fa",
+      "sz": "4",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "tpTriggerPx": "3100.25",
+      "tpOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order-algo",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "kAVpFdWlhPBCjiF15pYVmnlt73MAAZUOBivoiWP0UY8="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": "{\"instId\":\"ETH-USDT-SWAP\",\"tdMode\":\"isolated\",\"side\":\"buy\",\"algoClOrdId\":\"d985b9f9ac6293e6e9dc7071aa63b3fa\",\"sz\":\"4\",\"reduceOnly\":true,\"ordType\":\"conditional\",\"tpTriggerPx\":\"3100.25\",\"tpOrdPx\":\"-1\"}"
+    }
+   ],
+   "outcome": {
+    "result": "681"
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "4484947d33ade4f58f40473884e3c541",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "move_order_stop",
+      "callbackRatio": "0.015",
+      "activePx": "76000"
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order-algo",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "UhixZyQM/4xYYqj2b7elZn4qDxSBJvA+b0va4s2/h4k="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": "{\"instId\":\"BTC-USDT-SWAP\",\"tdMode\":\"isolated\",\"side\":\"sell\",\"algoClOrdId\":\"4484947d33ade4f58f40473884e3c541\",\"sz\":\"12\",\"reduceOnly\":true,\"ordType\":\"move_order_stop\",\"callbackRatio\":\"0.015\",\"activePx\":\"76000\"}"
+    }
+   ],
+   "outcome": {
+    "result": "681"
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "SOL-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "algoClOrdId": "609a69b8c1a0c18b7b37fb0bea3081e1",
+      "sz": "7",
+      "reduceOnly": true,
+      "ordType": "move_order_stop",
+      "callbackSpread": "1.5"
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order-algo",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "pY+wQW0451xIdL3BYwrX3q8sP2XbW5A5rIa24qUqi5k="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": "{\"instId\":\"SOL-USDT-SWAP\",\"tdMode\":\"isolated\",\"side\":\"buy\",\"algoClOrdId\":\"609a69b8c1a0c18b7b37fb0bea3081e1\",\"sz\":\"7\",\"reduceOnly\":true,\"ordType\":\"move_order_stop\",\"callbackSpread\":\"1.5\"}"
+    }
+   ],
+   "outcome": {
+    "result": "681"
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "6d0654bb45e5a93f9e7b06f24155d681",
+      "sz": "1",
+      "reduceOnly": true,
+      "ordType": "move_order_stop"
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [],
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "A trailing stop needs exactly one of callbackRatio or callbackSpread"
+    }
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "SOL-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "algoClOrdId": "609a69b8c1a0c18b7b37fb0bea3081e1",
+      "sz": "7",
+      "reduceOnly": true,
+      "ordType": "move_order_stop",
+      "callbackSpread": "1.5",
+      "callbackRatio": "0.01"
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [],
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "A trailing stop needs exactly one of callbackRatio or callbackSpread"
+    }
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     []
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"sCode\":\"0\",\"sMsg\":\"\"},{\"algoId\":\"682\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [],
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "700"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "701"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "702"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "703"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "704"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "705"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "706"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "707"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "708"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "709"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "710"
+      }
+     ]
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"sCode\":\"0\",\"sMsg\":\"\"},{\"algoId\":\"682\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [],
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "OKX cancels at most 10 algo orders per call"
+    }
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "move_order_stop"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"instId\":\"BTC-USDT-SWAP\",\"ordType\":\"conditional\",\"state\":\"live\",\"side\":\"sell\",\"sz\":\"12\",\"slTriggerPx\":\"74000\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/orders-algo-pending?ordType=move_order_stop&instType=SWAP",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "t1IR3WSXdrVhR7Jb78GvDO659G0io8mndSAfIrsgGAY="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": [
+     {
+      "algoId": "681",
+      "algoClOrdId": "a1",
+      "instId": "BTC-USDT-SWAP",
+      "ordType": "conditional",
+      "state": "live",
+      "side": "sell",
+      "sz": "12",
+      "slTriggerPx": "74000"
+     }
+    ]
+   }
+  },
+  {
+   "venue": "OKX_LIVE",
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "oco"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"instId\":\"BTC-USDT-SWAP\",\"ordType\":\"conditional\",\"state\":\"live\",\"side\":\"sell\",\"sz\":\"12\",\"slTriggerPx\":\"74000\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/orders-algo-pending?ordType=oco&instType=SWAP",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "mfmtYujJ7OUNCPdq+VOh5wAEMH8SuUrrFDDmwyPkUlE="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": [
+     {
+      "algoId": "681",
+      "algoClOrdId": "a1",
+      "instId": "BTC-USDT-SWAP",
+      "ordType": "conditional",
+      "state": "live",
+      "side": "sell",
+      "sz": "12",
+      "slTriggerPx": "74000"
+     }
+    ]
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"uid\":\"42\",\"acctLv\":\"2\",\"posMode\":\"net_mode\",\"perm\":\"read_only,trade\",\"autoLoan\":false}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/account/config",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "EwvPe7j/W8OdKy013T1VgwKCgQgVWrYbKC23CtsDRAY="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": {
+     "uid": "42",
+     "acctLv": "2",
+     "posMode": "net_mode",
+     "perm": "read_only,trade",
+     "autoLoan": false
+    }
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"instId\":\"BTC-USDT-SWAP\",\"ctVal\":\"0.01\",\"lotSz\":\"0.01\",\"tickSz\":\"0.1\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/public/instruments?instType=SWAP&instId=BTC-USDT-SWAP",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "CYixZJZRRX1V5gOnQWU0fqamgWOvLTIYfCxmCsKqWe0="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": {
+     "ctVal": "0.01",
+     "lotSz": "0.01"
+    }
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"totalEq\":\"1000\",\"details\":[{\"ccy\":\"BTC\",\"eq\":\"0.1\"},{\"ccy\":\"USDT\",\"eq\":\"1000.5\",\"availEq\":\"900\",\"upl\":\"-2.5\"}]}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/account/balance?ccy=USDT",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "DzNWUc6Dcn1dLoQMEusQnIe/dMTrX+7i69XnP8S+fu8="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": {
+     "ccy": "USDT",
+     "eq": "1000.5",
+     "availEq": "900",
+     "upl": "-2.5"
+    }
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"instId\":\"BTC-USDT-SWAP\",\"pos\":\"-2\",\"avgPx\":\"75000\",\"markPx\":\"74900\",\"upl\":\"2\",\"lever\":\"3\",\"liqPx\":\"99000\",\"margin\":\"50\",\"mgnMode\":\"isolated\"},{\"instId\":\"ETH-USDT-SWAP\",\"pos\":\"0\",\"avgPx\":\"\",\"markPx\":\"3000\",\"upl\":\"0\",\"lever\":\"5\",\"liqPx\":\"\",\"margin\":\"0\",\"mgnMode\":\"isolated\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/account/positions?instType=SWAP",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "86Bm7zK6eyCWpB32dszx/SRc/WDpkhrp56RCkDuF/5Q="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "pos": "-2",
+      "avgPx": "75000",
+      "markPx": "74900",
+      "upl": "2",
+      "lever": "3",
+      "liqPx": "99000",
+      "margin": "50",
+      "mgnMode": "isolated"
+     },
+     {
+      "instId": "ETH-USDT-SWAP",
+      "pos": "0",
+      "avgPx": "",
+      "markPx": "3000",
+      "upl": "0",
+      "lever": "5",
+      "liqPx": "",
+      "margin": "0",
+      "mgnMode": "isolated"
+     }
+    ]
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"instId\":\"BTC-USDT-SWAP\",\"lever\":\"3\",\"mgnMode\":\"isolated\",\"posSide\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/account/set-leverage",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "v8rNBeJUVcimtTzi0fFaEgD1QaCcYlT1x2JL8e4eWAg="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": "{\"instId\":\"BTC-USDT-SWAP\",\"lever\":\"3\",\"mgnMode\":\"isolated\"}"
+    }
+   ],
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"ordId\":\"312269865356374016\",\"clOrdId\":\"c1\",\"tag\":\"\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "O/eBWjPa6sGsydG+NiayiI19FvymiZf/h38ITQcUMTY="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": "{\"instId\":\"BTC-USDT-SWAP\",\"tdMode\":\"isolated\",\"side\":\"buy\",\"ordType\":\"market\",\"sz\":\"12\",\"clOrdId\":\"44ba634553891b6b03721fea5ed99eb0\",\"attachAlgoOrds\":[{\"attachAlgoClOrdId\":\"94b6f2ae27ea89359d787cc1651f767b\",\"slTriggerPx\":\"74250.5\",\"slOrdPx\":\"-1\"},{\"attachAlgoClOrdId\":\"fc52bbdfc60163e1c5a2a13db474fa17\",\"tpTriggerPx\":\"76500\",\"tpOrdPx\":\"-1\"},{\"attachAlgoClOrdId\":\"ab4b3cd8153d611f647efaaba54c5067\",\"callbackRatio\":\"0.02\",\"activePx\":\"75500\"}]}"
+    }
+   ],
+   "outcome": {
+    "result": "312269865356374016"
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order-algo",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "Ubdy5yk/GcsprB8XsYMVnXbAIDiV7XhOXZGJHsg2pHQ="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": "{\"instId\":\"BTC-USDT-SWAP\",\"tdMode\":\"isolated\",\"side\":\"sell\",\"algoClOrdId\":\"2ce5b3afb07401378ce220166eb413dc\",\"sz\":\"12\",\"reduceOnly\":true,\"ordType\":\"conditional\",\"slTriggerPx\":\"74000\",\"slOrdPx\":\"-1\"}"
+    }
+   ],
+   "outcome": {
+    "result": "681"
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"sCode\":\"0\",\"sMsg\":\"\"},{\"algoId\":\"682\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/cancel-algos",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "UyTEs316pTX3YHUwLl3wyQECjpS0xxr5hBBWlqZiNEw="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": "[{\"instId\":\"BTC-USDT-SWAP\",\"algoId\":\"681\"},{\"instId\":\"ETH-USDT-SWAP\",\"algoId\":\"682\"}]"
+    }
+   ],
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"instId\":\"BTC-USDT-SWAP\",\"ordType\":\"conditional\",\"state\":\"live\",\"side\":\"sell\",\"sz\":\"12\",\"slTriggerPx\":\"74000\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/orders-algo-pending?ordType=conditional&instType=SWAP",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "TrHKSGur1oQDYvMPyIbusSxBcb5U0vieZeiFl1rjr/M="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": [
+     {
+      "algoId": "681",
+      "algoClOrdId": "a1",
+      "instId": "BTC-USDT-SWAP",
+      "ordType": "conditional",
+      "state": "live",
+      "side": "sell",
+      "sz": "12",
+      "slTriggerPx": "74000"
+     }
+    ]
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"instId\":\"BTC-USDT-SWAP\",\"ordType\":\"move_order_stop\",\"state\":\"effective\",\"side\":\"sell\",\"sz\":\"12\",\"callbackRatio\":\"0.015\",\"moveTriggerPx\":\"74100\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order-algo?algoClOrdId=2ce5b3afb07401378ce220166eb413dc",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "SRDwgNiAOxuL1FtTxtKHiZ1FF06VkieMUXR+qXkC+RA="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": {
+     "algoId": "681",
+     "algoClOrdId": "a1",
+     "instId": "BTC-USDT-SWAP",
+     "ordType": "move_order_stop",
+     "state": "effective",
+     "side": "sell",
+     "sz": "12",
+     "callbackRatio": "0.015",
+     "moveTriggerPx": "74100"
+    }
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"ordId\":\"312269865356374016\",\"clOrdId\":\"c1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/cancel-order",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "HqUm0k6irrixIIf95T9tMGSeZv5DVvHgbOWxFHo19C0="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": "{\"instId\":\"BTC-USDT-SWAP\",\"clOrdId\":\"44ba634553891b6b03721fea5ed99eb0\"}"
+    }
+   ],
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"ordId\":\"312269865356374016\",\"clOrdId\":\"c1\",\"state\":\"filled\",\"accFillSz\":\"12\",\"avgPx\":\"75000\",\"fee\":\"-0.05\",\"pnl\":\"0\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order?instId=BTC-USDT-SWAP&clOrdId=44ba634553891b6b03721fea5ed99eb0",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "PzTo23QXArt1nbKAS+kaLJAff5jHLquBp1Hho/7PHvw="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": {
+     "ordId": "312269865356374016",
+     "clOrdId": "c1",
+     "state": "filled",
+     "accFillSz": "12",
+     "avgPx": "75000",
+     "fee": "-0.05",
+     "pnl": "0"
+    }
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "PEPEUSDT"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"instId\":\"BTC-USDT-SWAP\",\"ctVal\":\"0.01\",\"lotSz\":\"0.01\",\"tickSz\":\"0.1\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/public/instruments?instType=SWAP&instId=PEPE-USDT-SWAP",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "h8IZbYC7P/+jJ/LxSUH9KNgtjvDY2glA1Mb0u2SNBdk="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": {
+     "ctVal": "0.01",
+     "lotSz": "0.01"
+    }
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "PEPE-USDT-SWAP",
+     20
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"instId\":\"BTC-USDT-SWAP\",\"lever\":\"3\",\"mgnMode\":\"isolated\",\"posSide\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/account/set-leverage",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "JSqr+Un6bO+TlnE+OOhsM07iPi00YORh1zX16n148QM="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": "{\"instId\":\"PEPE-USDT-SWAP\",\"lever\":\"20\",\"mgnMode\":\"isolated\"}"
+    }
+   ],
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "PEPE-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "ordType": "limit",
+      "sz": "0.3",
+      "clOrdId": "d65b311f7a339b8c36efb74f25a46a9f",
+      "px": "0.0000123456",
+      "reduceOnly": true
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"ordId\":\"312269865356374016\",\"clOrdId\":\"c1\",\"tag\":\"\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "J8Q+FmG5I1QVVyv59UO0pLY96BVF2MJjTBSetBDTns8="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": "{\"instId\":\"PEPE-USDT-SWAP\",\"tdMode\":\"isolated\",\"side\":\"sell\",\"ordType\":\"limit\",\"sz\":\"0.3\",\"clOrdId\":\"d65b311f7a339b8c36efb74f25a46a9f\",\"px\":\"0.0000123456\",\"reduceOnly\":true}"
+    }
+   ],
+   "outcome": {
+    "result": "312269865356374016"
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "ETH-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "algoClOrdId": "d985b9f9ac6293e6e9dc7071aa63b3fa",
+      "sz": "4",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "tpTriggerPx": "3100.25",
+      "tpOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order-algo",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "kAVpFdWlhPBCjiF15pYVmnlt73MAAZUOBivoiWP0UY8="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": "{\"instId\":\"ETH-USDT-SWAP\",\"tdMode\":\"isolated\",\"side\":\"buy\",\"algoClOrdId\":\"d985b9f9ac6293e6e9dc7071aa63b3fa\",\"sz\":\"4\",\"reduceOnly\":true,\"ordType\":\"conditional\",\"tpTriggerPx\":\"3100.25\",\"tpOrdPx\":\"-1\"}"
+    }
+   ],
+   "outcome": {
+    "result": "681"
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "4484947d33ade4f58f40473884e3c541",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "move_order_stop",
+      "callbackRatio": "0.015",
+      "activePx": "76000"
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order-algo",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "UhixZyQM/4xYYqj2b7elZn4qDxSBJvA+b0va4s2/h4k="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": "{\"instId\":\"BTC-USDT-SWAP\",\"tdMode\":\"isolated\",\"side\":\"sell\",\"algoClOrdId\":\"4484947d33ade4f58f40473884e3c541\",\"sz\":\"12\",\"reduceOnly\":true,\"ordType\":\"move_order_stop\",\"callbackRatio\":\"0.015\",\"activePx\":\"76000\"}"
+    }
+   ],
+   "outcome": {
+    "result": "681"
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "SOL-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "algoClOrdId": "609a69b8c1a0c18b7b37fb0bea3081e1",
+      "sz": "7",
+      "reduceOnly": true,
+      "ordType": "move_order_stop",
+      "callbackSpread": "1.5"
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/order-algo",
+     "method": "POST",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "pY+wQW0451xIdL3BYwrX3q8sP2XbW5A5rIa24qUqi5k="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": "{\"instId\":\"SOL-USDT-SWAP\",\"tdMode\":\"isolated\",\"side\":\"buy\",\"algoClOrdId\":\"609a69b8c1a0c18b7b37fb0bea3081e1\",\"sz\":\"7\",\"reduceOnly\":true,\"ordType\":\"move_order_stop\",\"callbackSpread\":\"1.5\"}"
+    }
+   ],
+   "outcome": {
+    "result": "681"
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "6d0654bb45e5a93f9e7b06f24155d681",
+      "sz": "1",
+      "reduceOnly": true,
+      "ordType": "move_order_stop"
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [],
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "A trailing stop needs exactly one of callbackRatio or callbackSpread"
+    }
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "SOL-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "algoClOrdId": "609a69b8c1a0c18b7b37fb0bea3081e1",
+      "sz": "7",
+      "reduceOnly": true,
+      "ordType": "move_order_stop",
+      "callbackSpread": "1.5",
+      "callbackRatio": "0.01"
+     }
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [],
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "A trailing stop needs exactly one of callbackRatio or callbackSpread"
+    }
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     []
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"sCode\":\"0\",\"sMsg\":\"\"},{\"algoId\":\"682\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [],
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "700"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "701"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "702"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "703"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "704"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "705"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "706"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "707"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "708"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "709"
+      },
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "710"
+      }
+     ]
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"sCode\":\"0\",\"sMsg\":\"\"},{\"algoId\":\"682\",\"sCode\":\"0\",\"sMsg\":\"\"}]}"
+   ],
+   "sent": [],
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "OKX cancels at most 10 algo orders per call"
+    }
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "move_order_stop"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"instId\":\"BTC-USDT-SWAP\",\"ordType\":\"conditional\",\"state\":\"live\",\"side\":\"sell\",\"sz\":\"12\",\"slTriggerPx\":\"74000\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/orders-algo-pending?ordType=move_order_stop&instType=SWAP",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "t1IR3WSXdrVhR7Jb78GvDO659G0io8mndSAfIrsgGAY="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": [
+     {
+      "algoId": "681",
+      "algoClOrdId": "a1",
+      "instId": "BTC-USDT-SWAP",
+      "ordType": "conditional",
+      "state": "live",
+      "side": "sell",
+      "sz": "12",
+      "slTriggerPx": "74000"
+     }
+    ]
+   }
+  },
+  {
+   "venue": "OKX_DEMO",
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "oco"
+    ]
+   },
+   "reply": [
+    200,
+    "{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"681\",\"algoClOrdId\":\"a1\",\"instId\":\"BTC-USDT-SWAP\",\"ordType\":\"conditional\",\"state\":\"live\",\"side\":\"sell\",\"sz\":\"12\",\"slTriggerPx\":\"74000\"}]}"
+   ],
+   "sent": [
+    {
+     "url": "https://okx.test/api/v5/trade/orders-algo-pending?ordType=oco&instType=SWAP",
+     "method": "GET",
+     "headers": [
+      [
+       "content-type",
+       "application/json"
+      ],
+      [
+       "OK-ACCESS-KEY",
+       "golden-api-key-0123"
+      ],
+      [
+       "OK-ACCESS-SIGN",
+       "mfmtYujJ7OUNCPdq+VOh5wAEMH8SuUrrFDDmwyPkUlE="
+      ],
+      [
+       "OK-ACCESS-TIMESTAMP",
+       "2026-01-02T03:04:05.067Z"
+      ],
+      [
+       "OK-ACCESS-PASSPHRASE",
+       "golden-passphrase-89"
+      ],
+      [
+       "x-simulated-trading",
+       "1"
+      ]
+     ],
+     "body": null
+    }
+   ],
+   "outcome": {
+    "result": [
+     {
+      "algoId": "681",
+      "algoClOrdId": "a1",
+      "instId": "BTC-USDT-SWAP",
+      "ordType": "conditional",
+      "state": "live",
+      "side": "sell",
+      "sz": "12",
+      "slTriggerPx": "74000"
+     }
+    ]
+   }
+  }
+ ],
+ "outcomes": [
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "empty",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX config: No account configuration returned",
+     "code": "config"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "noData",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX config: No account configuration returned",
+     "code": "config"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "nullData",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX config: No account configuration returned",
+     "code": "config"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "refusedWithRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51008: Insufficient margin",
+     "code": "51008"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "refusedNoRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50113: Invalid Sign",
+     "code": "50113"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "refusedEmptyMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50000: Request refused",
+     "code": "50000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "refusedEmptyRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 1: All operations failed",
+     "code": "1"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "refusedNoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "notFound",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "notFoundOnRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "rowRefusedInSuccess",
+   "outcome": {
+    "result": {
+     "ordId": "",
+     "algoId": "",
+     "sCode": "51000",
+     "sMsg": "Parameter error"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "rowWithoutSCode",
+   "outcome": {
+    "result": {
+     "ordId": "9",
+     "algoId": "9"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "rowSCodeWithoutMsg",
+   "outcome": {
+    "result": {
+     "sCode": "51000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "rowEmptySCode",
+   "outcome": {
+    "result": {
+     "ordId": "9",
+     "sCode": "",
+     "sMsg": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "partlyCancelled",
+   "outcome": {
+    "result": {
+     "algoId": "681",
+     "sCode": "0",
+     "sMsg": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "http500Json",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 500"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "http503Refusal",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 503"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "http502Html",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 502 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "http200Text",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "http200Empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "http401Json",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50111: Invalid OK-ACCESS-KEY",
+     "code": "50111"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "http429NoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 429: Too Many Requests",
+     "code": "429"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "jsonNull",
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "Cannot read properties of null (reading 'code')"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "jsonNumber",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getConfig",
+    "args": []
+   },
+   "reply": "network",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "No answer from OKX: fetch failed"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "empty",
+   "outcome": {
+    "result": {
+     "ctVal": "",
+     "lotSz": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "noData",
+   "outcome": {
+    "result": {
+     "ctVal": "",
+     "lotSz": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "nullData",
+   "outcome": {
+    "result": {
+     "ctVal": "",
+     "lotSz": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "refusedWithRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51008: Insufficient margin",
+     "code": "51008"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "refusedNoRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50113: Invalid Sign",
+     "code": "50113"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "refusedEmptyMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50000: Request refused",
+     "code": "50000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "refusedEmptyRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 1: All operations failed",
+     "code": "1"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "refusedNoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "notFound",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "notFoundOnRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "rowRefusedInSuccess",
+   "outcome": {
+    "result": {
+     "ctVal": "",
+     "lotSz": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "rowWithoutSCode",
+   "outcome": {
+    "result": {
+     "ctVal": "",
+     "lotSz": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "rowSCodeWithoutMsg",
+   "outcome": {
+    "result": {
+     "ctVal": "",
+     "lotSz": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "rowEmptySCode",
+   "outcome": {
+    "result": {
+     "ctVal": "",
+     "lotSz": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "partlyCancelled",
+   "outcome": {
+    "result": {
+     "ctVal": "",
+     "lotSz": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "http500Json",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 500"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "http503Refusal",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 503"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "http502Html",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 502 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "http200Text",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "http200Empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "http401Json",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50111: Invalid OK-ACCESS-KEY",
+     "code": "50111"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "http429NoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 429: Too Many Requests",
+     "code": "429"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "jsonNull",
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "Cannot read properties of null (reading 'code')"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "jsonNumber",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getContractValue",
+    "args": [
+     "BTCUSDT"
+    ]
+   },
+   "reply": "network",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "No answer from OKX: fetch failed"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "empty",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "noData",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "nullData",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "refusedWithRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51008: Insufficient margin",
+     "code": "51008"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "refusedNoRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50113: Invalid Sign",
+     "code": "50113"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "refusedEmptyMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50000: Request refused",
+     "code": "50000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "refusedEmptyRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 1: All operations failed",
+     "code": "1"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "refusedNoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "notFound",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "notFoundOnRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "rowRefusedInSuccess",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "rowWithoutSCode",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "rowSCodeWithoutMsg",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "rowEmptySCode",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "partlyCancelled",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "http500Json",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 500"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "http503Refusal",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 503"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "http502Html",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 502 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "http200Text",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "http200Empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "http401Json",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50111: Invalid OK-ACCESS-KEY",
+     "code": "50111"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "http429NoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 429: Too Many Requests",
+     "code": "429"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "jsonNull",
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "Cannot read properties of null (reading 'code')"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "jsonNumber",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getUsdtBalance",
+    "args": []
+   },
+   "reply": "network",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "No answer from OKX: fetch failed"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "empty",
+   "outcome": {
+    "result": []
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "noData",
+   "outcome": {
+    "result": []
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "nullData",
+   "outcome": {
+    "result": []
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "refusedWithRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51008: Insufficient margin",
+     "code": "51008"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "refusedNoRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50113: Invalid Sign",
+     "code": "50113"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "refusedEmptyMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50000: Request refused",
+     "code": "50000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "refusedEmptyRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 1: All operations failed",
+     "code": "1"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "refusedNoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "notFound",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "notFoundOnRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "rowRefusedInSuccess",
+   "outcome": {
+    "result": [
+     {
+      "ordId": "",
+      "algoId": "",
+      "sCode": "51000",
+      "sMsg": "Parameter error"
+     }
+    ]
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "rowWithoutSCode",
+   "outcome": {
+    "result": [
+     {
+      "ordId": "9",
+      "algoId": "9"
+     }
+    ]
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "rowSCodeWithoutMsg",
+   "outcome": {
+    "result": [
+     {
+      "sCode": "51000"
+     }
+    ]
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "rowEmptySCode",
+   "outcome": {
+    "result": [
+     {
+      "ordId": "9",
+      "sCode": "",
+      "sMsg": ""
+     }
+    ]
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "partlyCancelled",
+   "outcome": {
+    "result": [
+     {
+      "algoId": "681",
+      "sCode": "0",
+      "sMsg": ""
+     },
+     {
+      "algoId": "682",
+      "sCode": "51400",
+      "sMsg": "Cancellation failed"
+     }
+    ]
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "http500Json",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 500"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "http503Refusal",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 503"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "http502Html",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 502 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "http200Text",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "http200Empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "http401Json",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50111: Invalid OK-ACCESS-KEY",
+     "code": "50111"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "http429NoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 429: Too Many Requests",
+     "code": "429"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "jsonNull",
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "Cannot read properties of null (reading 'code')"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "jsonNumber",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPositions",
+    "args": []
+   },
+   "reply": "network",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "No answer from OKX: fetch failed"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "empty",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "noData",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "nullData",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "refusedWithRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51008: Insufficient margin",
+     "code": "51008"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "refusedNoRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50113: Invalid Sign",
+     "code": "50113"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "refusedEmptyMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50000: Request refused",
+     "code": "50000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "refusedEmptyRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 1: All operations failed",
+     "code": "1"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "refusedNoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "notFound",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "notFoundOnRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "rowRefusedInSuccess",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "rowWithoutSCode",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "rowSCodeWithoutMsg",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "rowEmptySCode",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "partlyCancelled",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "http500Json",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 500"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "http503Refusal",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 503"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "http502Html",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 502 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "http200Text",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "http200Empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "http401Json",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50111: Invalid OK-ACCESS-KEY",
+     "code": "50111"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "http429NoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 429: Too Many Requests",
+     "code": "429"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "jsonNull",
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "Cannot read properties of null (reading 'code')"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "jsonNumber",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "setLeverage",
+    "args": [
+     "BTC-USDT-SWAP",
+     3
+    ]
+   },
+   "reply": "network",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "No answer from OKX: fetch failed"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX acknowledged the order without a result row"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "noData",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX acknowledged the order without a result row"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "nullData",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX acknowledged the order without a result row"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "refusedWithRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51008: Insufficient margin",
+     "code": "51008"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "refusedNoRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50113: Invalid Sign",
+     "code": "50113"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "refusedEmptyMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50000: Request refused",
+     "code": "50000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "refusedEmptyRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 1: All operations failed",
+     "code": "1"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "refusedNoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "notFound",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "notFoundOnRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "rowRefusedInSuccess",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51000: Parameter error",
+     "code": "51000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "rowWithoutSCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX order: Order refused",
+     "code": "order"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "rowSCodeWithoutMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51000: Order refused",
+     "code": "51000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "rowEmptySCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX : ",
+     "code": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "partlyCancelled",
+   "outcome": {
+    "result": ""
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "http500Json",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 500"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "http503Refusal",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 503"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "http502Html",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 502 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "http200Text",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "http200Empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "http401Json",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50111: Invalid OK-ACCESS-KEY",
+     "code": "50111"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "http429NoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 429: Too Many Requests",
+     "code": "429"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "jsonNull",
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "Cannot read properties of null (reading 'code')"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "jsonNumber",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeOrder",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "buy",
+      "ordType": "market",
+      "sz": "12",
+      "clOrdId": "44ba634553891b6b03721fea5ed99eb0",
+      "attachAlgoOrds": [
+       {
+        "attachAlgoClOrdId": "94b6f2ae27ea89359d787cc1651f767b",
+        "slTriggerPx": "74250.5",
+        "slOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "fc52bbdfc60163e1c5a2a13db474fa17",
+        "tpTriggerPx": "76500",
+        "tpOrdPx": "-1"
+       },
+       {
+        "attachAlgoClOrdId": "ab4b3cd8153d611f647efaaba54c5067",
+        "callbackRatio": "0.02",
+        "activePx": "75500"
+       }
+      ]
+     }
+    ]
+   },
+   "reply": "network",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "No answer from OKX: fetch failed"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX acknowledged the algo order without a result row"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "noData",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX acknowledged the algo order without a result row"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "nullData",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX acknowledged the algo order without a result row"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "refusedWithRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51008: Insufficient margin",
+     "code": "51008"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "refusedNoRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50113: Invalid Sign",
+     "code": "50113"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "refusedEmptyMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50000: Request refused",
+     "code": "50000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "refusedEmptyRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 1: All operations failed",
+     "code": "1"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "refusedNoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "notFound",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "notFoundOnRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "rowRefusedInSuccess",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51000: Parameter error",
+     "code": "51000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "rowWithoutSCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX algo: Algo order refused",
+     "code": "algo"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "rowSCodeWithoutMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51000: Algo order refused",
+     "code": "51000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "rowEmptySCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX : ",
+     "code": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "partlyCancelled",
+   "outcome": {
+    "result": "681"
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "http500Json",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 500"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "http503Refusal",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 503"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "http502Html",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 502 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "http200Text",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "http200Empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "http401Json",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50111: Invalid OK-ACCESS-KEY",
+     "code": "50111"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "http429NoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 429: Too Many Requests",
+     "code": "429"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "jsonNull",
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "Cannot read properties of null (reading 'code')"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "jsonNumber",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "placeAlgo",
+    "args": [
+     {
+      "instId": "BTC-USDT-SWAP",
+      "tdMode": "isolated",
+      "side": "sell",
+      "algoClOrdId": "2ce5b3afb07401378ce220166eb413dc",
+      "sz": "12",
+      "reduceOnly": true,
+      "ordType": "conditional",
+      "slTriggerPx": "74000",
+      "slOrdPx": "-1"
+     }
+    ]
+   },
+   "reply": "network",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "No answer from OKX: fetch failed"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "empty",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "noData",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "nullData",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "refusedWithRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51008: Insufficient margin",
+     "code": "51008"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "refusedNoRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50113: Invalid Sign",
+     "code": "50113"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "refusedEmptyMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50000: Request refused",
+     "code": "50000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "refusedEmptyRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 1: All operations failed",
+     "code": "1"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "refusedNoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "notFound",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "notFoundOnRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "rowRefusedInSuccess",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51000: Parameter error",
+     "code": "51000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "rowWithoutSCode",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "rowSCodeWithoutMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51000: Algo cancel refused",
+     "code": "51000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "rowEmptySCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX : ",
+     "code": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "partlyCancelled",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51400: Cancellation failed",
+     "code": "51400"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "http500Json",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 500"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "http503Refusal",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 503"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "http502Html",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 502 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "http200Text",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "http200Empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "http401Json",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50111: Invalid OK-ACCESS-KEY",
+     "code": "50111"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "http429NoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 429: Too Many Requests",
+     "code": "429"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "jsonNull",
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "Cannot read properties of null (reading 'code')"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "jsonNumber",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelAlgos",
+    "args": [
+     [
+      {
+       "instId": "BTC-USDT-SWAP",
+       "algoId": "681"
+      },
+      {
+       "instId": "ETH-USDT-SWAP",
+       "algoId": "682"
+      }
+     ]
+    ]
+   },
+   "reply": "network",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "No answer from OKX: fetch failed"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "empty",
+   "outcome": {
+    "result": []
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "noData",
+   "outcome": {
+    "result": []
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "nullData",
+   "outcome": {
+    "result": []
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "refusedWithRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51008: Insufficient margin",
+     "code": "51008"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "refusedNoRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50113: Invalid Sign",
+     "code": "50113"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "refusedEmptyMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50000: Request refused",
+     "code": "50000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "refusedEmptyRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 1: All operations failed",
+     "code": "1"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "refusedNoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "notFound",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "notFoundOnRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "rowRefusedInSuccess",
+   "outcome": {
+    "result": [
+     {
+      "ordId": "",
+      "algoId": "",
+      "sCode": "51000",
+      "sMsg": "Parameter error"
+     }
+    ]
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "rowWithoutSCode",
+   "outcome": {
+    "result": [
+     {
+      "ordId": "9",
+      "algoId": "9"
+     }
+    ]
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "rowSCodeWithoutMsg",
+   "outcome": {
+    "result": [
+     {
+      "sCode": "51000"
+     }
+    ]
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "rowEmptySCode",
+   "outcome": {
+    "result": [
+     {
+      "ordId": "9",
+      "sCode": "",
+      "sMsg": ""
+     }
+    ]
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "partlyCancelled",
+   "outcome": {
+    "result": [
+     {
+      "algoId": "681",
+      "sCode": "0",
+      "sMsg": ""
+     },
+     {
+      "algoId": "682",
+      "sCode": "51400",
+      "sMsg": "Cancellation failed"
+     }
+    ]
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "http500Json",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 500"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "http503Refusal",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 503"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "http502Html",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 502 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "http200Text",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "http200Empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "http401Json",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50111: Invalid OK-ACCESS-KEY",
+     "code": "50111"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "http429NoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 429: Too Many Requests",
+     "code": "429"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "jsonNull",
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "Cannot read properties of null (reading 'code')"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "jsonNumber",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getPendingAlgos",
+    "args": [
+     "conditional"
+    ]
+   },
+   "reply": "network",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "No answer from OKX: fetch failed"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "empty",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "noData",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "nullData",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "refusedWithRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51008: Insufficient margin",
+     "code": "51008"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "refusedNoRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50113: Invalid Sign",
+     "code": "50113"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "refusedEmptyMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50000: Request refused",
+     "code": "50000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "refusedEmptyRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 1: All operations failed",
+     "code": "1"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "refusedNoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "notFound",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "notFoundOnRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "rowRefusedInSuccess",
+   "outcome": {
+    "result": {
+     "ordId": "",
+     "algoId": "",
+     "sCode": "51000",
+     "sMsg": "Parameter error"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "rowWithoutSCode",
+   "outcome": {
+    "result": {
+     "ordId": "9",
+     "algoId": "9"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "rowSCodeWithoutMsg",
+   "outcome": {
+    "result": {
+     "sCode": "51000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "rowEmptySCode",
+   "outcome": {
+    "result": {
+     "ordId": "9",
+     "sCode": "",
+     "sMsg": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "partlyCancelled",
+   "outcome": {
+    "result": {
+     "algoId": "681",
+     "sCode": "0",
+     "sMsg": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "http500Json",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 500"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "http503Refusal",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 503"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "http502Html",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 502 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "http200Text",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "http200Empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "http401Json",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50111: Invalid OK-ACCESS-KEY",
+     "code": "50111"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "http429NoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 429: Too Many Requests",
+     "code": "429"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "jsonNull",
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "Cannot read properties of null (reading 'code')"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "jsonNumber",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getAlgo",
+    "args": [
+     "2ce5b3afb07401378ce220166eb413dc"
+    ]
+   },
+   "reply": "network",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "No answer from OKX: fetch failed"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "empty",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "noData",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "nullData",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "refusedWithRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51008: Insufficient margin",
+     "code": "51008"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "refusedNoRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50113: Invalid Sign",
+     "code": "50113"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "refusedEmptyMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50000: Request refused",
+     "code": "50000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "refusedEmptyRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 1: All operations failed",
+     "code": "1"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "refusedNoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "notFound",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "notFoundOnRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51603: Order does not exist",
+     "code": "51603"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "rowRefusedInSuccess",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "rowWithoutSCode",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "rowSCodeWithoutMsg",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "rowEmptySCode",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "partlyCancelled",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http500Json",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 500"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http503Refusal",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 503"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http502Html",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 502 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http200Text",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http200Empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http401Json",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50111: Invalid OK-ACCESS-KEY",
+     "code": "50111"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http429NoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 429: Too Many Requests",
+     "code": "429"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "jsonNull",
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "Cannot read properties of null (reading 'code')"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "jsonNumber",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "cancelOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "network",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "No answer from OKX: fetch failed"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "empty",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "noData",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "nullData",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "refusedWithRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 51008: Insufficient margin",
+     "code": "51008"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "refusedNoRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50113: Invalid Sign",
+     "code": "50113"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "refusedEmptyMsg",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50000: Request refused",
+     "code": "50000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "refusedEmptyRow",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 1: All operations failed",
+     "code": "1"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "refusedNoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "notFound",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "notFoundOnRow",
+   "outcome": {
+    "result": null
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "rowRefusedInSuccess",
+   "outcome": {
+    "result": {
+     "ordId": "",
+     "algoId": "",
+     "sCode": "51000",
+     "sMsg": "Parameter error"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "rowWithoutSCode",
+   "outcome": {
+    "result": {
+     "ordId": "9",
+     "algoId": "9"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "rowSCodeWithoutMsg",
+   "outcome": {
+    "result": {
+     "sCode": "51000"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "rowEmptySCode",
+   "outcome": {
+    "result": {
+     "ordId": "9",
+     "sCode": "",
+     "sMsg": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "partlyCancelled",
+   "outcome": {
+    "result": {
+     "algoId": "681",
+     "sCode": "0",
+     "sMsg": ""
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http500Json",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 500"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http503Refusal",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 503"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http502Html",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 502 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http200Text",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http200Empty",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "OKX returned HTTP 200 without JSON"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http401Json",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 50111: Invalid OK-ACCESS-KEY",
+     "code": "50111"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "http429NoCode",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 429: Too Many Requests",
+     "code": "429"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "jsonNull",
+   "outcome": {
+    "error": {
+     "kind": "error",
+     "message": "Cannot read properties of null (reading 'code')"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "jsonNumber",
+   "outcome": {
+    "error": {
+     "kind": "rejection",
+     "message": "OKX 200: Request refused",
+     "code": "200"
+    }
+   }
+  },
+  {
+   "call": {
+    "name": "getOrder",
+    "args": [
+     "BTC-USDT-SWAP",
+     "44ba634553891b6b03721fea5ed99eb0"
+    ]
+   },
+   "reply": "network",
+   "outcome": {
+    "error": {
+     "kind": "unknown",
+     "message": "No answer from OKX: fetch failed"
+    }
+   }
+  }
+ ]
+}

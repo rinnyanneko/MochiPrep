@@ -275,6 +275,14 @@ impl PaperStore for AuditedStore {
     fn list_orders(&self, account_id: &str, limit: usize) -> Result<Vec<Order>, StoreFailure> {
         self.inner.list_orders(account_id, limit)
     }
+    fn find_orders_by_exchange_ids(
+        &self,
+        account_id: &str,
+        exchange_order_ids: &[String],
+    ) -> Result<Vec<Order>, StoreFailure> {
+        self.inner
+            .find_orders_by_exchange_ids(account_id, exchange_order_ids)
+    }
     fn insert_fill(&self, f: &Fill) -> Result<(), StoreFailure> {
         self.write("insert_fill");
         self.inner.insert_fill(f)

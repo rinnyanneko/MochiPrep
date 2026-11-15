@@ -1,0 +1,814 @@
+[
+ {
+  "label": "nothing changes",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "95",
+   "takeProfit": "110",
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "after": {
+   "stopLoss": "95",
+   "takeProfit": "110",
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "the same stop written differently",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "95",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "95.00",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "no protection at all, unchanged",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a stop added to a long",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "95",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a stop added to a short",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "105",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a long stop moved up",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "95",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "97",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a short stop moved down",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": "105",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "103",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a long stop moved down",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "95",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "93",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a short stop moved up",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": "105",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "107",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a stop removed",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "95",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a target added",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": "110",
+   "trailingStop": null
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a target moved closer",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": "110",
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": "105",
+   "trailingStop": null
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a target removed",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": "90",
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a trailing stop added",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a trailing stop with activation added",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "SPREAD",
+    "callback": "2",
+    "activationPrice": "95"
+   }
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a ratio callback made smaller",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.02",
+    "activationPrice": null
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a spread callback made smaller with the same activation",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "SPREAD",
+    "callback": "3",
+    "activationPrice": "95"
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "SPREAD",
+    "callback": "2",
+    "activationPrice": "95"
+   }
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a callback made larger",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.02",
+    "activationPrice": null
+   }
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "the kind changed",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "SPREAD",
+    "callback": "0.5",
+    "activationPrice": null
+   }
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "the activation changed",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.02",
+    "activationPrice": "110"
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": "111"
+   }
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "an activation added",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.02",
+    "activationPrice": null
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": "110"
+   }
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "an activation dropped",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.02",
+    "activationPrice": "110"
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a trailing stop removed",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a tighter stop with a target added",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "95",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "97",
+   "takeProfit": "110",
+   "trailingStop": null
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a tighter stop and a tighter trail",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "95",
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.02",
+    "activationPrice": null
+   }
+  },
+  "after": {
+   "stopLoss": "97",
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a tighter stop with the trail removed",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "95",
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.02",
+    "activationPrice": null
+   }
+  },
+  "after": {
+   "stopLoss": "97",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a tighter stop with an unchanged target",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": "105",
+   "takeProfit": "90",
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "104",
+   "takeProfit": "90",
+   "trailingStop": null
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a long stop moved to the same price written differently",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "95.5",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "95.50000",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a short stop added",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "0.0000090123",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a long stop moved up by one tiny tick",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "0.000009",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "0.0000090001",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a short stop moved down by one tiny tick",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": "0.0000091",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "0.00000909",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a long stop moved up past the old target",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "95",
+   "takeProfit": "96",
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "97",
+   "takeProfit": "96",
+   "trailingStop": null
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "the same target written differently",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": "110",
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": "110.0",
+   "trailingStop": null
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a target moved further",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": "90",
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": "80",
+   "trailingStop": null
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "the same trail written differently",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": "110"
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.010",
+    "activationPrice": "110.00"
+   }
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a ratio callback made smaller, activation written differently",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.02",
+    "activationPrice": "110"
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": "110.0"
+   }
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "a spread callback unchanged with the activation removed",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "SPREAD",
+    "callback": "2",
+    "activationPrice": "95"
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "SPREAD",
+    "callback": "2",
+    "activationPrice": null
+   }
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a spread callback made smaller without activation",
+  "side": "LONG",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "SPREAD",
+    "callback": "500",
+    "activationPrice": null
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "SPREAD",
+    "callback": "499.5",
+    "activationPrice": null
+   }
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "the kind changed with a smaller callback",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "SPREAD",
+    "callback": "2",
+    "activationPrice": null
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a stop swapped for a trailing stop",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "74000",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a trailing stop added beside a kept stop",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "74000",
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "74000",
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "SPREAD",
+    "callback": "500",
+    "activationPrice": "76000"
+   }
+  },
+  "expected": "REDUCES_RISK"
+ },
+ {
+  "label": "everything added at once",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "after": {
+   "stopLoss": "105",
+   "takeProfit": "90",
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "everything removed at once",
+  "side": "LONG",
+  "before": {
+   "stopLoss": "95",
+   "takeProfit": "110",
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "after": {
+   "stopLoss": null,
+   "takeProfit": null,
+   "trailingStop": null
+  },
+  "expected": "NEEDS_ARMED"
+ },
+ {
+  "label": "a looser stop and a tighter trail",
+  "side": "SHORT",
+  "before": {
+   "stopLoss": "105",
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.02",
+    "activationPrice": null
+   }
+  },
+  "after": {
+   "stopLoss": "106",
+   "takeProfit": null,
+   "trailingStop": {
+    "kind": "RATIO",
+    "callback": "0.01",
+    "activationPrice": null
+   }
+  },
+  "expected": "NEEDS_ARMED"
+ }
+]

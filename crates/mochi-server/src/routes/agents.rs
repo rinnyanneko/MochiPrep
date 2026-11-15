@@ -158,9 +158,13 @@ async fn stop_all(
     body(&state, &headers, &bytes).await?;
     Ok(Json(
         call(&state, |r| {
-            let stopped = r.stop_all_agents()?;
+            // Stop All must leave nothing able to trade real money by accident. Done first so a
+            // storage failure while stopping agents cannot leave an account armed, and the replay
+            // is stopped whether or not stopping the agents failed.
+            r.disarm(None);
+            let stopped = r.stop_all_agents();
             r.set_playing(false);
-            Ok(json!({"stopped":stopped}))
+            Ok(json!({"stopped":stopped?}))
         })
         .await?,
     ))
@@ -172,13 +176,14 @@ async fn execute(
     bytes: Bytes,
 ) -> Result<Json<Value>, ApiError> {
     body(&state, &headers, &bytes).await?;
-    Ok(Json(
-        call(&state, move |r| {
-            r.api_signal(&id)?;
-            r.execute_signal(&id)
-        })
-        .await?,
-    ))
+    let signal = id.clone();
+    // Checked before the suggestion is used, so a refusal does not burn it.
+    call(&state, move |r| {
+        let record = r.api_signal(&signal)?;
+        r.assert_can_execute_signal(&record)
+    })
+    .await?;
+    Ok(Json(state.runtime.execute_signal(id).await?))
 }
 async fn dismiss(
     State(state): State<AppState>,

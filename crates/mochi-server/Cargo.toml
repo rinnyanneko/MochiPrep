@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# Test-only ways to an OKX session that skip the connect checks. Only this crate's own tests
+# enable it (the dev-dependency on itself below), so a real connect always runs every check.
+test-seams = []
+
 [dependencies]
 axum = { workspace = true }
 # Streams for the SSE body; axum's own Sse is built on the same crate.
@@ -16,7 +21,9 @@ mochi-core = { path = "../mochi-core" }
 mochi-decimal = { path = "../mochi-decimal" }
 mochi-domain = { path = "../mochi-domain" }
 mochi-market = { path = "../mochi-market" }
+mochi-okx = { path = "../mochi-okx" }
 mochi-store = { path = "../mochi-store" }
+mochi-vault = { path = "../mochi-vault" }
 rand = { workspace = true }
 regex = { workspace = true }
 # The same rusqlite as mochi-store; the runtime takes its open connection.
@@ -32,8 +39,12 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "ansi"] }
 url = { workspace = true }
 uuid = { workspace = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
+mochi-server = { path = ".", features = ["test-seams"] }
+# The in-process fake OKX for the OKX trading tests.
+mochi-okx = { path = "../mochi-okx", features = ["fake"] }
 tempfile = { workspace = true }
 # Paused time for the timing tests; socket reads and writes for the SSE shutdown test.
 tokio = { workspace = true, features = ["test-util", "io-util"] }

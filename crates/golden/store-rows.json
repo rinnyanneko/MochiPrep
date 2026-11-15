@@ -1384,70 +1384,7 @@
     "updatedAt": 1700000001600
    }
   ],
-  "listOpenOrdersForMarketLive": [
-   {
-    "id": "ord-2",
-    "accountId": "acc-1",
-    "clientOrderId": "cli-2",
-    "symbol": "BTCUSDT",
-    "side": "SELL",
-    "type": "STOP_MARKET",
-    "quantity": "0.5",
-    "price": null,
-    "triggerPrice": null,
-    "leverage": 3,
-    "reduceOnly": false,
-    "closePosition": true,
-    "status": "OPEN",
-    "filledQuantity": "0.5",
-    "avgFillPrice": null,
-    "reservedMargin": "0",
-    "attachedStopLoss": null,
-    "attachedTakeProfit": null,
-    "trailingKind": null,
-    "trailingCallback": null,
-    "trailingActivationPrice": null,
-    "trailingExtreme": null,
-    "attachedTrailingStop": null,
-    "rejectReason": null,
-    "exchangeOrderId": null,
-    "agentId": null,
-    "decisionId": null,
-    "createdAt": 1700000000500,
-    "updatedAt": 1700000001500
-   },
-   {
-    "id": "ord-3",
-    "accountId": "acc-1",
-    "clientOrderId": "cli-3",
-    "symbol": "BTCUSDT",
-    "side": "SELL",
-    "type": "STOP_MARKET",
-    "quantity": "0.5",
-    "price": null,
-    "triggerPrice": null,
-    "leverage": 3,
-    "reduceOnly": false,
-    "closePosition": true,
-    "status": "OPEN",
-    "filledQuantity": "0.5",
-    "avgFillPrice": null,
-    "reservedMargin": "0",
-    "attachedStopLoss": null,
-    "attachedTakeProfit": null,
-    "trailingKind": null,
-    "trailingCallback": null,
-    "trailingActivationPrice": null,
-    "trailingExtreme": null,
-    "attachedTrailingStop": null,
-    "rejectReason": null,
-    "exchangeOrderId": null,
-    "agentId": null,
-    "decisionId": null,
-    "createdAt": 1700000000500,
-    "updatedAt": 1700000001600
-   }
-  ],
+  "listOpenOrdersForMarketLive": [],
   "listOpenOrdersForMarketReplay": [
    {
     "id": "ord-5",
@@ -1935,28 +1872,7 @@
     "closedAt": null
    }
   ],
-  "listOpenPositionsForMarketLive": [
-   {
-    "id": "pos-2",
-    "accountId": "acc-1",
-    "symbol": "ETHUSDT",
-    "side": "SHORT",
-    "quantity": "0.5",
-    "entryPrice": "67000.5",
-    "leverage": 3,
-    "margin": "11166.75",
-    "liquidationPrice": "45000.1",
-    "status": "OPEN",
-    "realizedPnl": "-5",
-    "feesPaid": "20.1",
-    "fundingPaid": "1.5",
-    "maxQuantity": "0.75",
-    "exitPrice": null,
-    "lastFundingTime": 1700000003000,
-    "openedAt": 1700000000000,
-    "closedAt": null
-   }
-  ],
+  "listOpenPositionsForMarketLive": [],
   "listOpenPositionsForMarketReplay": [
    {
     "id": "pos-6",
@@ -3337,5 +3253,97 @@
   "positions": [],
   "ledger_events": [],
   "equity_history": []
+ },
+ "profile": {
+  "saves": [
+   {
+    "id": "acc-1",
+    "name": "Profiled",
+    "source": "LIVE",
+    "venue": "OKX_DEMO",
+    "exchangeUid": "123456",
+    "liveLimits": {
+     "maxLeverage": 2.5,
+     "maxRiskPerTradePct": 1e-7,
+     "maxDailyLossPct": 0.30000000000000004,
+     "maxOpenPositions": 2,
+     "requireStopLoss": false,
+     "maxQuoteAgeSec": 10,
+     "maxNotional": 1e+21
+    },
+    "isDemo": true,
+    "initialBalance": "123.5",
+    "walletBalance": "7",
+    "usedMargin": "500.25",
+    "realizedPnl": "234.5678",
+    "feesPaid": "12.5",
+    "fundingPaid": "-0.75",
+    "config": {
+     "takerFeeRate": "0.0006",
+     "makerFeeRate": "0.0001",
+     "slippageBps": "2.5",
+     "impactBpsPerMillion": "7"
+    },
+    "createdAt": 1700000000000
+   },
+   {
+    "id": "acc-2",
+    "name": "No limits",
+    "source": "REPLAY",
+    "venue": "PAPER",
+    "exchangeUid": null,
+    "liveLimits": null,
+    "isDemo": false,
+    "initialBalance": "0",
+    "walletBalance": "10234.5678",
+    "usedMargin": "500.25",
+    "realizedPnl": "234.5678",
+    "feesPaid": "12.5",
+    "fundingPaid": "-0.75",
+    "config": {
+     "takerFeeRate": "0.0005",
+     "makerFeeRate": "0.0002",
+     "slippageBps": "1",
+     "impactBpsPerMillion": "5"
+    },
+    "createdAt": 1700000000000
+   }
+  ],
+  "accounts": [
+   {
+    "id": "acc-1",
+    "name": "Profiled",
+    "source": "LIVE",
+    "is_demo": 1,
+    "initial_balance": "123.5",
+    "wallet_balance": "10234.5678",
+    "used_margin": "500.25",
+    "realized_pnl": "234.5678",
+    "fees_paid": "12.5",
+    "funding_paid": "-0.75",
+    "config": "{\"takerFeeRate\":\"0.0006\",\"makerFeeRate\":\"0.0001\",\"slippageBps\":\"2.5\",\"impactBpsPerMillion\":\"7\"}",
+    "created_at": 1700000000000,
+    "venue": "OKX_DEMO",
+    "exchange_uid": "123456",
+    "live_limits": "{\"maxLeverage\":2.5,\"maxRiskPerTradePct\":1e-7,\"maxDailyLossPct\":0.30000000000000004,\"maxOpenPositions\":2,\"requireStopLoss\":false,\"maxQuoteAgeSec\":10,\"maxNotional\":1e+21}"
+   },
+   {
+    "id": "acc-2",
+    "name": "No limits",
+    "source": "REPLAY",
+    "is_demo": 0,
+    "initial_balance": "0",
+    "wallet_balance": "10234.5678",
+    "used_margin": "500.25",
+    "realized_pnl": "234.5678",
+    "fees_paid": "12.5",
+    "funding_paid": "-0.75",
+    "config": "{\"takerFeeRate\":\"0.0005\",\"makerFeeRate\":\"0.0002\",\"slippageBps\":\"1\",\"impactBpsPerMillion\":\"5\"}",
+    "created_at": 1700000000000,
+    "venue": "PAPER",
+    "exchange_uid": null,
+    "live_limits": null
+   }
+  ]
  }
 }

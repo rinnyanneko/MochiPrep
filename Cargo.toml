@@ -17,6 +17,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip", "raw_value", "preserve_order"] }
 thiserror = "2"
 sha2 = "0.10"
+# OKX request signing (crates/mochi-okx): HMAC-SHA256, as Node's createHmac.
+hmac = "0.12"
 tempfile = "3"
 num-bigint = "0.4"
 num-traits = "0.2"
@@ -27,6 +29,7 @@ tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 rand = "0.8"
 subtle = "2"
+zeroize = { version = "1", features = ["derive"] }
 tracing = "0.1"
 url = "2"
 regex = "1"
