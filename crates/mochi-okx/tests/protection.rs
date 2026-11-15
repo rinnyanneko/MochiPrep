@@ -539,6 +539,47 @@ async fn a_trailing_stop_is_added_while_disarmed_in_its_own_move_order_stop_algo
     );
 }
 
+/// An SL-only edit that keeps the trailing stop, started while a trailing edit is held on OKX,
+/// reads the trailing stop in its own queued step: it keeps the new one, never the one in force
+/// when it was called.
+#[tokio::test]
+async fn an_sl_only_edit_started_during_a_trailing_edit_keeps_the_new_trailing_stop() {
+    let h = Harness::with_position().await;
+    let hold = h.okx.hold_next("POST", "/trade/order-algo");
+    let engine = h.engine.clone();
+    let trailing = tokio::spawn(async move {
+        let protection = Protection {
+            trailing_stop: Some(ratio("0.01")),
+            ..stop("74000")
+        };
+        engine
+            .set_protection(ACCOUNT, "BTCUSDT", protection, None, None)
+            .await
+    });
+    hold.reached().await;
+    // Polled once while the trailing placement is held, so anything it reads before queueing is
+    // read now, before the trailing stop exists.
+    let mut edit =
+        Box::pin(
+            h.engine
+                .set_protection_with(ACCOUNT, "BTCUSDT", stop("74500"), true, None, None),
+        );
+    std::future::poll_fn(|cx| {
+        assert!(std::future::Future::poll(edit.as_mut(), cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    hold.release();
+    trailing.await.unwrap().unwrap();
+    let result = edit.await.unwrap();
+    assert_eq!(result.after.stop_loss.as_deref(), Some("74500"));
+    assert_eq!(result.after.trailing_stop, Some(ratio("0.01")));
+    assert_eq!(
+        h.engine.protection_of("BTCUSDT").trailing_stop,
+        Some(ratio("0.01"))
+    );
+}
+
 #[tokio::test]
 async fn refuses_an_invalid_stop_before_sending_anything() {
     let h = Harness::with_position().await;
@@ -1405,6 +1446,53 @@ async fn a_full_size_stop_with_a_stale_quote_sends_nothing() {
     h.sync().await;
     assert!(h.algo_placed().is_empty());
     assert!(h.canceled().is_empty());
+}
+
+/// An order whose fill keeps failing to write stays OPEN and fails the sync, but never stops the
+/// other orders or protection from being brought in line, and its fill is recorded once the
+/// write succeeds. Nothing is resent.
+#[tokio::test]
+async fn a_fill_that_keeps_failing_to_write_does_not_block_the_other_orders() {
+    let h = connect(Vec::new()).await;
+    h.okx.state().rest_limit_orders = true;
+    let mut ids = Vec::new();
+    for _ in 0..2 {
+        let mut request = order();
+        request.order_type = EntryOrderType::Limit;
+        request.price = Some("74500".into());
+        ids.push(h.engine.place_order(request).await.unwrap().order.id);
+    }
+    h.okx.state().fill_resting();
+    h.okx.state().calls.clear();
+    h.store(|s| {
+        s.connection()
+            .execute_batch(&format!(
+                "CREATE TRIGGER refuse_fill BEFORE INSERT ON fills WHEN NEW.order_id='{}'
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END",
+                ids[0]
+            ))
+            .unwrap()
+    });
+    for _ in 0..2 {
+        let error = h.engine.sync().await.unwrap_err().to_string();
+        assert!(error.contains("refused"), "{error}");
+        assert!(!h.engine.healthy());
+        assert_eq!(h.order_row(&ids[0]).status, OrderStatus::Open);
+        assert_eq!(h.order_row(&ids[1]).status, OrderStatus::Filled);
+        // Protection was still reconciled: the second entry's stop is matched as ours.
+        assert_eq!(h.view().stop_loss.as_deref(), Some("74000"));
+    }
+    h.store(|s| {
+        s.connection()
+            .execute_batch("DROP TRIGGER refuse_fill")
+            .unwrap()
+    });
+    h.sync().await;
+    assert!(h.engine.healthy());
+    assert_eq!(h.order_row(&ids[0]).status, OrderStatus::Filled);
+    let fills = h.store(|s| s.list_fills_by_order(&ids[0]).unwrap());
+    assert_eq!(fills.len(), 1);
+    assert_eq!(h.count("POST /api/v5/trade/order"), 0);
 }
 
 fn short_position() -> Row {

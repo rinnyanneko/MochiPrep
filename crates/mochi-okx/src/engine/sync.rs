@@ -126,9 +126,22 @@ impl OkxEngine {
             .await?
         };
         // Orders first, so an entry seen filling here has its protection rows before algos are
-        // matched.
+        // matched. An order whose answer cannot be recorded (its fill write keeps failing, say)
+        // stays OPEN and is tried again next sync, nothing resent; it fails this sync, but not
+        // before the other orders, positions and protection are brought in line. Only an OKX or
+        // shutdown failure stops the pass at once.
+        let mut order_error: Option<EngineError> = None;
         for mut order in open.into_iter().filter(|o| !is_leg(o)) {
-            self.sync_order(&mut order, &registry).await?;
+            match self.sync_order(&mut order, &registry).await {
+                Ok(()) => {}
+                Err(error @ (EngineError::Okx(_) | EngineError::Stopped)) => return Err(error),
+                Err(error) => {
+                    order_error.get_or_insert(EngineError::Message(format!(
+                        "Could not record OKX order {}: {error}",
+                        order.id
+                    )));
+                }
+            }
         }
         let client = &self.deps.client;
         let (usdt, remote, conditional, oco, trailing) = tokio::try_join!(
@@ -186,7 +199,8 @@ impl OkxEngine {
             state.positions = positions;
             state.balance = Some(balance.clone());
             state.last_sync_at = Some(at);
-            state.sync_error = None;
+            // Set here, in the same step, so the account never reads as healthy in between.
+            state.sync_error = order_error.as_ref().map(ToString::to_string);
             (at - state.last_equity_at >= EQUITY_EVERY_MS).then(|| {
                 state.last_equity_at = at;
                 EquityPoint {
@@ -202,7 +216,7 @@ impl OkxEngine {
             self.rows(move |rows| Ok(rows.upsert_equity_point(&point)?))
                 .await?;
         }
-        Ok(())
+        order_error.map_or(Ok(()), Err)
     }
 }
 
