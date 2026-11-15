@@ -82,6 +82,8 @@ Protection belongs to a position only if its side closes it: a sell for a long, 
 5. **Algos when a position closes.** What OKX does with reduce-only algos once the position closes is not confirmed. MochiPrep cancels its own after the cleanup wait above, and does not touch External ones.
 6. **Which price trailing tracks.** Whether OKX trails the last, mark or index price is not confirmed. On OKX, MochiPrep shows the trigger price OKX reports and no extreme of its own.
 7. **Fixed size.** Protection algos are sent with a fixed `sz`, the position size when they were placed. If you add to the position in the OKX app, MochiPrep's stop covers only the original size until the protection is changed again.
+8. **Attached stop size (Rust backend).** Whether OKX reports an attached stop's `sz` as the size of the entry that filled is not confirmed. When two entries fill into one position, the Rust backend reads OKX's `sz` to decide whether the newest stop covers the whole position, and falls back to the size it sent when OKX reports none.
+9. **Extra full-position stop (Rust backend).** Whether OKX accepts one more reduce-only stop sized to the whole position beside the stops attached to each entry is not confirmed. When armed, the Rust backend places one such stop before cancelling the per-entry ones. If OKX refuses it, it is not retried, and the per-entry stops stay in force.
 
 ## Trading pairs
 

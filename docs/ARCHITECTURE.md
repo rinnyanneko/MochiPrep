@@ -60,6 +60,7 @@ Accepted differences from Node, none on a path the web UI depends on:
 - An unknown path or wrong method answers 404 `{"error":"Not found"}`, not Fastify's `{message,error,statusCode}`. On such paths a 415 or 413 can come before the 404, because bodies are checked before routing.
 - Static files carry no `Last-Modified`, a different `ETag` and no percent-decoding, unlike `@fastify/send`.
 - Playwright runs one worker against one shared backend, so spec files depend on their name order: `demo.spec.ts`'s 40,000.00 total equity holds only before `paper.spec.ts` creates its account.
+- Only the Rust backend will be released, so it fixes review findings Node still has: stops covering every fill of a stacked position, resting entry orders counted toward the position limit, disarming before any fallible work, retried lost-sync pauses, and races between overlapping closes, protection edits, connects and disconnects, and sync's order and fill writes.
 - Neither backend handles Ctrl-Break on Windows (Node listens for SIGINT and SIGTERM only), so Ctrl-Break ends the process without a clean shutdown. On Ctrl-C the Rust server closes open event streams and the database cleanly.
 
 ## Rust carryovers
