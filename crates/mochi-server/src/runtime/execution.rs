@@ -134,6 +134,8 @@ pub(super) struct ExchangeSession {
     pub secrets: [Zeroizing<String>; 3],
     /// Whether the last sync succeeded: only the change to unhealthy pauses agents.
     pub was_healthy: bool,
+    /// A lost-sync pause that did not complete: retried on every sync until it does.
+    pub pause_pending: bool,
 }
 
 impl ExchangeSession {
@@ -593,6 +595,7 @@ impl RuntimeHandle {
                 armed: flag,
                 secrets,
                 was_healthy: true,
+                pause_pending: false,
             };
             if let Some(old) = r.exchanges.insert(id, session) {
                 old.retire();

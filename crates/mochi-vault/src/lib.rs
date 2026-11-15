@@ -174,9 +174,13 @@ fn derive(password: &str, salt: &[u8], kdf: KdfParams) -> Result<Zeroizing<[u8; 
     if !kdf.n.is_power_of_two() || kdf.n < 2 {
         return Err(VaultError::Kdf);
     }
-    // Checked before `Params::new` and the allocation: scrypt needs 128 * N * r bytes.
+    // Each cap is checked before the product so an oversized n or r cannot overflow (and panic
+    // in debug) ahead of the memory check. scrypt needs 128 * N * r bytes.
+    if kdf.n > MAX_N || kdf.r > MAX_R || kdf.p > MAX_P {
+        return Err(VaultError::Kdf);
+    }
     let memory = 128u64 * u64::from(kdf.n) * u64::from(kdf.r);
-    if kdf.n > MAX_N || kdf.r > MAX_R || kdf.p > MAX_P || memory > MAX_MEMORY {
+    if memory > MAX_MEMORY {
         return Err(VaultError::Kdf);
     }
     let log_n = u8::try_from(kdf.n.trailing_zeros()).map_err(|_| VaultError::Kdf)?;
@@ -233,4 +237,23 @@ pub fn unwrap_with_password(wrap: &PasswordWrap, password: &str) -> Result<DataK
         .try_into()
         .map_err(|_| VaultError::WrongPassword)?;
     Ok(DataKey::from_bytes(key))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oversized_kdf_cost_is_refused_not_overflowed() {
+        // 128 * 2^31 * 2^31 overflows u64: this panicked in debug before the caps came first.
+        let kdf = KdfParams {
+            n: 1 << 31,
+            r: 1 << 31,
+            p: 1,
+        };
+        assert!(matches!(
+            derive("pw", &[0u8; 16], kdf),
+            Err(VaultError::Kdf)
+        ));
+    }
 }

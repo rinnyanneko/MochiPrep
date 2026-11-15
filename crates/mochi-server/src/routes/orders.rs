@@ -150,10 +150,22 @@ async fn protection(
         decision_id: None,
     };
     // A refusal reaches the client as a 400 with its reason.
-    let result = engine
+    let result = match engine
         .set_protection(account_id, symbol, protection, meta)
         .await
-        .map_err(|failure| failure.error)?;
+    {
+        Ok(result) => result,
+        Err(failure) => {
+            // A part-way refusal has already changed legs on OKX: views must not stay stale.
+            if failure.after.is_some() {
+                state
+                    .runtime
+                    .invalidate(&[Topic::Orders, Topic::Positions])
+                    .await?;
+            }
+            return Err(failure.error);
+        }
+    };
     state
         .runtime
         .invalidate(&[Topic::Orders, Topic::Positions])

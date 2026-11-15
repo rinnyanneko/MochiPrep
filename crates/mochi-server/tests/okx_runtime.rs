@@ -14,7 +14,7 @@ use mochi_ai::{AiProvider, AiRequest, AiResponse, CompletionFuture, ProviderKind
 use mochi_core::paper::{CreateAccountArgs, PaperStore};
 use mochi_domain::{
     default_risk_settings, Candle, DataSource, FeedState, FeedStatus, OrderRequest, PaperAccount,
-    Quote, ServerEvent, Timeframe, ToastLevel, VaultStatus,
+    Quote, ServerEvent, Timeframe, ToastLevel, Topic, VaultStatus,
 };
 use mochi_okx::fake::{FakeOkx, API_KEY, PASSPHRASE, SECRET_KEY};
 use mochi_server::config::{config_from, Config};
@@ -836,6 +836,37 @@ async fn a_part_way_protection_refusal_through_the_route_is_a_400_with_its_reaso
     w.rt.shutdown().await;
 }
 
+/// Legs OKX already accepted change what clients should show, even though the call failed.
+#[tokio::test]
+async fn a_part_way_protection_refusal_still_invalidates_orders_and_positions() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.place(&account.id).await;
+    w.okx.state().reject_algo_if = Some(Box::new(|body| body["ordType"] == "move_order_stop"));
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let mut events = w.rt.subscribe();
+    let (status, _) = w
+        .send(
+            "PUT",
+            &format!("/api/positions/{}/BTCUSDT/protection", account.id),
+            Some(json!({"stopLoss": "74500", "takeProfit": null,
+                        "trailingStop": {"kind": "RATIO", "callback": "0.01", "activationPrice": null}})),
+        )
+        .await;
+    assert_eq!(status, 400);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let mut topics = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if let ServerEvent::Invalidate { topics: t } = event {
+            topics.extend(t);
+        }
+    }
+    assert!(topics.contains(&Topic::Orders), "{topics:?}");
+    assert!(topics.contains(&Topic::Positions), "{topics:?}");
+    w.rt.shutdown().await;
+}
+
 // ---- AI agents --------------------------------------------------------------------------------
 
 #[tokio::test]
@@ -1321,6 +1352,97 @@ async fn stop_all_disarms_real_accounts_even_when_the_account_read_fails() {
     accounts_unreadable(&w, false).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(w.statuses().await[0]["armed"], false);
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn disarm_route_clears_arming_even_when_the_account_read_fails_and_unknown_ids_stay_404() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    accounts_unreadable(&w, true).await;
+    let (status, _) = w
+        .send(
+            "POST",
+            &format!("/api/exchange/okx/{}/disarm", account.id),
+            None,
+        )
+        .await;
+    accounts_unreadable(&w, false).await;
+    assert_ne!(status, 200);
+    assert_eq!(w.statuses().await[0]["armed"], false);
+    let (status, body) = w.send("POST", "/api/exchange/okx/nope/disarm", None).await;
+    assert_eq!((status, body), (404, json!({"error": "Unknown account"})));
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn stop_all_disarms_even_when_stopping_agents_fails() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    let agent = w.agent_on(&account.id, "AUTO").await;
+    let id = agent.clone();
+    w.rt.call(move |r| {
+        r.start_agent(&id).unwrap();
+        r.connection()
+            .execute_batch(
+                "CREATE TRIGGER refuse_agent_update BEFORE UPDATE ON agents                  BEGIN SELECT RAISE(ABORT, 'refused'); END",
+            )
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    let (status, _) = w.send("POST", "/api/agents/stop-all", None).await;
+    assert_ne!(status, 200);
+    assert_eq!(w.statuses().await[0]["armed"], false);
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn lost_sync_pauses_every_agent_and_retries_a_failed_pause_without_new_toasts() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    let mut ids = Vec::new();
+    for _ in 0..3 {
+        let agent = w.agent_on(&account.id, "AUTO").await;
+        let id = agent.clone();
+        w.rt.call(move |r| r.start_agent(&id).unwrap())
+            .await
+            .unwrap();
+        ids.push(agent);
+    }
+    // Only the first agent's update is refused; the others must still be paused.
+    let first = ids[0].clone();
+    w.rt.call(move |r| {
+        r.connection()
+            .execute_batch(&format!(
+                "CREATE TRIGGER refuse_one BEFORE UPDATE ON agents WHEN OLD.id='{first}'                  BEGIN SELECT RAISE(ABORT, 'refused'); END"
+            ))
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    let mut events = w.rt.subscribe();
+    w.okx.state().down = true;
+    w.rt.sync_exchanges().await.unwrap();
+    assert!(w.agent(&ids[0]).await.running);
+    assert!(!w.agent(&ids[1]).await.running);
+    assert!(!w.agent(&ids[2]).await.running);
+    assert_eq!(toasts(&mut events).len(), 1);
+    // The store recovers; a later failed sync finishes the pause, quietly.
+    w.rt.call(|r| {
+        r.connection()
+            .execute_batch("DROP TRIGGER refuse_one")
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    w.rt.sync_exchanges().await.unwrap();
+    assert!(!w.agent(&ids[0]).await.running);
+    assert_eq!(w.agent(&ids[0]).await.status, "PAUSED");
+    assert!(toasts(&mut events).is_empty());
     w.rt.shutdown().await;
 }
 

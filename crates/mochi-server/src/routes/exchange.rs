@@ -88,8 +88,9 @@ async fn disarm(
 ) -> Result<Json<Value>, ApiError> {
     body(&state, &headers, &bytes).await?;
     call(&state, move |r| {
-        require_account(r, &id)?;
+        // Cleared before the account lookup: an unreadable store must not leave it armed.
         r.disarm(Some(&id));
+        require_account(r, &id)?;
         Ok(())
     })
     .await?;

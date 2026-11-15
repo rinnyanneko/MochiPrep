@@ -110,12 +110,16 @@ impl Runtime {
         Ok(count)
     }
     pub fn pause_account_agents(&mut self, account: &str, detail: &str) -> Result<(), ApiError> {
+        let mut first_error = None;
         for a in rows::list_agents(self.connection()).map_err(|e| self.api_error(e))? {
             if a.account_id == account && a.running {
-                self.pause_agent(&a.id, Some(detail.into()))?;
+                // One agent failing to pause must not leave the others trading: try them all.
+                if let Err(error) = self.pause_agent(&a.id, Some(detail.into())) {
+                    first_error.get_or_insert(error);
+                }
             }
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
     /// Node's `setKey`: sealed while unlocked, refused while locked, plaintext while OFF.
     pub fn set_key(&mut self, id: &str, key: &str) -> Result<(), ApiError> {

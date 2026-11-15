@@ -135,8 +135,8 @@ fn read_saved(data_key: &DataKey, sealed: &str, account_id: &str) -> Result<Save
 }
 
 impl Runtime {
-    /// Records one account's sync. Only the change from healthy to unhealthy pauses its agents
-    /// and says so; agents are never un-paused automatically. A session replaced or removed
+    /// Records one account's sync. The change from healthy to unhealthy pauses its agents and says
+    /// so, and an incomplete pause is retried silently on later syncs; agents are never un-paused automatically. A session replaced or removed
     /// while it synced is not the one this result belongs to.
     pub(super) fn after_sync(
         &mut self,
@@ -144,20 +144,34 @@ impl Runtime {
         engine: &Arc<OkxEngine>,
         result: Result<(), String>,
     ) {
-        let lost = match self.exchanges.get_mut(account_id) {
-            Some(session) if Arc::ptr_eq(&session.engine, engine) => match result {
-                Ok(()) => {
-                    session.was_healthy = true;
-                    None
+        let mut lost = None;
+        let mut retry_pause = false;
+        if let Some(session) = self.exchanges.get_mut(account_id) {
+            if Arc::ptr_eq(&session.engine, engine) {
+                match result {
+                    Ok(()) => session.was_healthy = true,
+                    Err(text) if session.was_healthy => {
+                        session.was_healthy = false;
+                        lost = Some(text);
+                    }
+                    Err(_) => {}
                 }
-                Err(text) if session.was_healthy => {
-                    session.was_healthy = false;
-                    Some(text)
-                }
-                Err(_) => None,
-            },
-            _ => None,
-        };
+                retry_pause = session.pause_pending;
+            }
+        }
+        if lost.is_none() && !retry_pause {
+            self.invalidate(SYNCED);
+            return;
+        }
+        // The pause is retried while it is still owed (agents may keep trading otherwise); only
+        // the change to unhealthy says so, so a retry never repeats the toast.
+        let paused = self.pause_account_agents(account_id, "Lost sync with OKX");
+        if let Err(error) = &paused {
+            tracing::warn!(error = %error.message(), "could not pause agents after a lost sync");
+        }
+        if let Some(session) = self.exchanges.get_mut(account_id) {
+            session.pause_pending = paused.is_err();
+        }
         if let Some(text) = lost {
             let name = self
                 .engine()
@@ -167,9 +181,6 @@ impl Runtime {
                 .flatten()
                 .map(|a| a.name)
                 .unwrap_or_else(|| "undefined".to_string());
-            if let Err(error) = self.pause_account_agents(account_id, "Lost sync with OKX") {
-                tracing::warn!(error = %error.message(), "could not pause agents after a lost sync");
-            }
             let message = format!(
                 "{name}: lost sync with OKX. Agents paused. {}",
                 self.redact(&text)

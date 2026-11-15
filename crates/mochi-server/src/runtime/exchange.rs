@@ -210,6 +210,7 @@ impl RuntimeHandle {
             armed,
             secrets,
             was_healthy: true,
+            pause_pending: false,
         };
         // 10-12. Register, save or forget the key, and take the first balance.
         self.call(move |r| r.register_session(account, session, remember, &saved))
