@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use mochi_domain::{EquityPoint, Fill, Liquidity, Order, OrderStatus, PositionSide};
 use serde_json::Value;
 
-use super::protection::record_attached;
+use super::protection::{record_attached, Held};
 use super::{
     dec, is_leg, EngineError, OkxEngine, Registry, EQUITY_EVERY_MS, NEVER_ARRIVED_AFTER_MS,
 };
@@ -133,17 +133,20 @@ impl OkxEngine {
             .into_iter()
             .filter(|p| js_number(p.get("pos")) != 0.0)
             .collect();
-        let held: HashMap<String, PositionSide> = open
-            .iter()
-            .map(|p| {
-                let side = if js_number(p.get("pos")) > 0.0 {
-                    PositionSide::Long
-                } else {
-                    PositionSide::Short
-                };
-                (nullish_text(p.get("instId")).unwrap_or_default(), side)
-            })
-            .collect();
+        let mut held: HashMap<String, Held> = HashMap::new();
+        for p in &open {
+            let side = if js_number(p.get("pos")) > 0.0 {
+                PositionSide::Long
+            } else {
+                PositionSide::Short
+            };
+            let size = dec_or_zero(p.get("pos"))?;
+            let contracts = if size.is_negative() { size.neg() } else { size };
+            held.insert(
+                nullish_text(p.get("instId")).unwrap_or_default(),
+                Held { side, contracts },
+            );
+        }
         let algos = conditional.into_iter().chain(oco).chain(trailing).collect();
         let protection = self.reconcile_protection(algos, &held).await?;
         self.state().protection = protection.clone();

@@ -84,6 +84,11 @@ pub struct FakeState {
     pub cancel_fails: bool,
     /// Makes algo lookups (pending list and single lookup) fail.
     pub algo_lookup_down: bool,
+    /// Limit orders rest, live and unfilled, until [`FakeState::fill_resting`]; market orders
+    /// still fill at once.
+    pub rest_limit_orders: bool,
+    /// Resting limit orders, as sent, oldest first.
+    resting: Vec<Row>,
     algo_seq: u64,
 }
 
@@ -116,6 +121,8 @@ impl Default for FakeState {
             reject_algo_if: None,
             cancel_fails: false,
             algo_lookup_down: false,
+            rest_limit_orders: false,
+            resting: Vec::new(),
             algo_seq: 0,
         }
     }
@@ -142,6 +149,13 @@ impl FakeState {
         };
         self.algos.insert(key, algo.clone());
         algo
+    }
+
+    /// Fills every resting limit order, oldest first, as the market reaching their prices would.
+    pub fn fill_resting(&mut self) {
+        for order in std::mem::take(&mut self.resting) {
+            fill(self, &order);
+        }
     }
 }
 
@@ -453,13 +467,43 @@ fn place(state: &mut FakeState, order: Value) -> Result<HttpReply, String> {
     if let Some(refusal) = state.reject_row_next.take() {
         return Ok(ok(json!([refusal_row(&refusal, "ordId")])));
     }
-    let order = object(&order);
+    let mut order = object(&order);
     let ord_id = state.placed.len().to_string();
+    order.insert("ordId".into(), json!(ord_id));
+    let cl_ord_id = order.get("clOrdId").cloned().unwrap_or(Value::Null);
+    if state.rest_limit_orders && order.get("ordType") == Some(&json!("limit")) {
+        let mut live = Row::new();
+        live.insert("ordId".into(), json!(ord_id));
+        live.insert("clOrdId".into(), cl_ord_id.clone());
+        live.insert("state".into(), json!("live"));
+        live.insert("accFillSz".into(), json!("0"));
+        live.insert("avgPx".into(), json!(""));
+        live.insert("fee".into(), json!("0"));
+        live.insert("pnl".into(), json!("0"));
+        state
+            .orders
+            .insert(text(Some(&cl_ord_id)).unwrap_or_default(), live);
+        state.resting.push(order);
+    } else {
+        fill(state, &order);
+    }
+    if state.lose_next_response {
+        state.lose_next_response = false;
+        return Err("socket hang up".into());
+    }
+    Ok(ok(
+        json!([{ "ordId": ord_id, "clOrdId": cl_ord_id, "sCode": "0", "sMsg": "" }]),
+    ))
+}
+
+/// Fills `order` (its body plus the `ordId` given on arrival) in full at [`PRICE`].
+fn fill(state: &mut FakeState, order: &Row) {
+    let ord_id = order.get("ordId").cloned().unwrap_or(Value::Null);
     let cl_ord_id = order.get("clOrdId").cloned().unwrap_or(Value::Null);
     let sz = order.get("sz").cloned().unwrap_or(Value::Null);
     let buy = order.get("side") == Some(&json!("buy"));
     let mut filled = Row::new();
-    filled.insert("ordId".into(), json!(ord_id));
+    filled.insert("ordId".into(), ord_id);
     filled.insert("clOrdId".into(), cl_ord_id.clone());
     filled.insert("state".into(), json!("filled"));
     filled.insert("accFillSz".into(), sz.clone());
@@ -515,11 +559,4 @@ fn place(state: &mut FakeState, order: Value) -> Result<HttpReply, String> {
         fields.insert("sz".into(), sz.clone());
         state.add_algo(fields);
     }
-    if state.lose_next_response {
-        state.lose_next_response = false;
-        return Err("socket hang up".into());
-    }
-    Ok(ok(
-        json!([{ "ordId": ord_id, "clOrdId": cl_ord_id, "sCode": "0", "sMsg": "" }]),
-    ))
 }

@@ -1186,3 +1186,128 @@ async fn an_unreadable_answer_to_a_placement_is_a_refusal_not_an_unknown_outcome
     assert!(h.canceled().is_empty());
     assert_eq!(h.order_row(&old.id).status, OrderStatus::Open);
 }
+
+// ---- stacked entries ----------------------------------------------------------------------------
+
+/// The live stop-loss algos on the fake, as (sz, trigger), oldest first.
+fn live_stops(h: &Harness) -> Vec<(String, String)> {
+    h.okx
+        .state()
+        .algos
+        .values()
+        .filter(|a| a["state"] == "live" && a["ordType"] == "conditional")
+        .filter_map(|a| {
+            Some((
+                a["sz"].as_str()?.to_string(),
+                a.get("slTriggerPx")?.as_str()?.to_string(),
+            ))
+        })
+        .collect()
+}
+
+/// The contracts the live stops cover between them, against the fake's position.
+fn stop_cover(h: &Harness) -> (f64, f64) {
+    let covered: f64 = live_stops(h)
+        .iter()
+        .map(|(sz, _)| sz.parse::<f64>().unwrap())
+        .sum();
+    let held = h.okx.state().position.as_ref().unwrap()["pos"]
+        .as_str()
+        .unwrap()
+        .parse::<f64>()
+        .unwrap();
+    (covered, held)
+}
+
+/// Two resting BTC longs, each with its own stop, both filled on OKX before the next sync.
+async fn two_stacked_fills() -> Harness {
+    let h = connect(Vec::new()).await;
+    h.okx.state().rest_limit_orders = true;
+    for stop_loss in ["74000", "74200"] {
+        let mut request = order();
+        request.order_type = EntryOrderType::Limit;
+        request.price = Some("74500".into());
+        request.stop_loss = Some(stop_loss.into());
+        let placed = h.engine.place_order(request).await.unwrap();
+        assert_eq!(placed.order.status, OrderStatus::Open);
+    }
+    h.okx.state().fill_resting();
+    h.okx.state().calls.clear();
+    h
+}
+
+/// Each fill attaches a stop sized to itself. Retiring the older one as replaced would leave half
+/// the position without a stop on OKX, so the older stops stay until one stop covers it all,
+/// placed before anything is cancelled.
+#[tokio::test]
+async fn two_entries_filling_into_one_position_keep_the_whole_position_stopped() {
+    let h = two_stacked_fills().await;
+    h.sync().await;
+    let (covered, held) = stop_cover(&h);
+    assert_eq!(held, 0.2);
+    assert!(covered >= held, "{covered} of {held} contracts stopped");
+    assert!(h.canceled().is_empty());
+    // One stop for the whole position, at the newest entry's level.
+    let sent = h.algo_placed();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["sz"], "0.2");
+    assert_eq!(sent[0]["slTriggerPx"], "74200");
+    assert_eq!(sent[0]["reduceOnly"], true);
+    assert_eq!(h.view().stop_loss.as_deref(), Some("74200"));
+
+    // OKX lists it: only now are the per-fill stops retired.
+    h.sync().await;
+    assert_eq!(live_stops(&h), [("0.2".to_string(), "74200".to_string())]);
+    assert_eq!(h.canceled().len(), 2);
+    let placed = h.index_of("POST /api/v5/trade/order-algo").unwrap();
+    let cancelled = h.index_of("POST /api/v5/trade/cancel-algos").unwrap();
+    assert!(cancelled > placed);
+    assert_eq!(h.view().stop_loss.as_deref(), Some("74200"));
+
+    // Settled: nothing more is placed or cancelled, and nothing is left marked cancel pending.
+    h.sync().await;
+    assert_eq!(h.algo_placed().len(), 1);
+    assert_eq!(h.canceled().len(), 2);
+    assert!(h.view().external_protection.is_empty());
+}
+
+/// Disarmed, nothing is placed, and each fill keeps its own stop: the position stays covered.
+#[tokio::test]
+async fn disarmed_two_stacked_fills_keep_their_own_stops() {
+    let h = two_stacked_fills().await;
+    h.disarm();
+    h.sync().await;
+    h.sync().await;
+    assert!(h.algo_placed().is_empty());
+    assert!(h.canceled().is_empty());
+    let (covered, held) = stop_cover(&h);
+    assert!(covered >= held, "{covered} of {held} contracts stopped");
+    assert_eq!(h.view().stop_loss.as_deref(), Some("74200"));
+}
+
+/// A refused full-size stop is not retried every sync, and the per-fill stops stay.
+#[tokio::test]
+async fn a_refused_full_size_stop_leaves_the_per_fill_stops_and_is_not_retried() {
+    let h = two_stacked_fills().await;
+    h.okx.state().reject_next_algo = Some(Refusal::new("51000", "Parameter error"));
+    h.sync().await;
+    h.sync().await;
+    assert_eq!(h.algo_placed().len(), 1);
+    assert!(h.canceled().is_empty());
+    let (covered, held) = stop_cover(&h);
+    assert!(covered >= held, "{covered} of {held} contracts stopped");
+}
+
+/// A full-size stop whose answer is lost is looked up on the next sync, never sent again.
+#[tokio::test]
+async fn a_full_size_stop_with_an_unknown_outcome_is_resolved_by_lookup_never_resent() {
+    let h = two_stacked_fills().await;
+    h.okx.state().lose_next_algo_response = true;
+    h.sync().await;
+    assert_eq!(h.algo_placed().len(), 1);
+    assert!(h.canceled().is_empty());
+    h.sync().await;
+    assert_eq!(h.algo_placed().len(), 1);
+    assert_eq!(live_stops(&h), [("0.2".to_string(), "74200".to_string())]);
+    assert_eq!(h.canceled().len(), 2);
+}

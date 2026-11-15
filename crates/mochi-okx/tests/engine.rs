@@ -382,6 +382,101 @@ async fn enforces_the_open_position_limit_across_symbols() {
     assert_eq!(h.placed().len(), 1);
 }
 
+/// A limit entry below the market, so the fake leaves it resting.
+fn resting_entry(symbol: &str) -> OrderRequest {
+    let mut request = order();
+    request.symbol = symbol.into();
+    request.order_type = EntryOrderType::Limit;
+    request.price = Some("74500".into());
+    request
+}
+
+fn set_max_open_positions(h: &Harness, max: f64) {
+    h.store(|s| {
+        let limits = RiskSettings {
+            max_open_positions: max,
+            ..default_live_limits()
+        };
+        s.connection()
+            .execute(
+                "UPDATE accounts SET live_limits=? WHERE id=?",
+                (serde_json::to_string(&limits).unwrap(), ACCOUNT.to_string()),
+            )
+            .unwrap();
+    });
+}
+
+/// Positions are only read back on sync, so a resting entry must take its slot at once: two
+/// resting limits on different pairs would otherwise both pass and both fill.
+#[tokio::test]
+async fn a_resting_entry_counts_toward_the_open_position_limit() {
+    let h = connect(
+        RiskSettings {
+            max_open_positions: 1.0,
+            ..default_live_limits()
+        },
+        Vec::new(),
+    )
+    .await;
+    h.arm();
+    h.okx.state().rest_limit_orders = true;
+    let btc = h
+        .engine
+        .place_order(resting_entry("BTCUSDT"))
+        .await
+        .unwrap();
+    assert_eq!(btc.order.status, OrderStatus::Open);
+    assert!(h.engine.positions().is_empty());
+
+    let eth = h
+        .engine
+        .place_order(resting_entry("ETHUSDT"))
+        .await
+        .unwrap();
+    assert_eq!(reason(&eth), "LIMIT_POSITIONS: 1 open, limit 1");
+    assert_eq!(h.placed().len(), 1);
+
+    // Another entry on the pair already resting adds no new position, as before.
+    let again = h
+        .engine
+        .place_order(resting_entry("BTCUSDT"))
+        .await
+        .unwrap();
+    assert_eq!(again.order.status, OrderStatus::Open);
+    assert_eq!(h.placed().len(), 2);
+}
+
+/// The slot a resting entry takes never blocks an exit.
+#[tokio::test]
+async fn a_resting_entry_on_another_pair_never_blocks_a_reduce_only_exit() {
+    let h = connect(
+        RiskSettings {
+            max_open_positions: 2.0,
+            ..default_live_limits()
+        },
+        Vec::new(),
+    )
+    .await;
+    h.arm();
+    h.engine.place_order(order()).await.unwrap();
+    h.okx.state().rest_limit_orders = true;
+    let eth = h
+        .engine
+        .place_order(resting_entry("ETHUSDT"))
+        .await
+        .unwrap();
+    assert_eq!(eth.order.status, OrderStatus::Open);
+    // Now over the ceiling: a BTC position and a resting ETH entry against a limit of 1.
+    set_max_open_positions(&h, 1.0);
+    let mut exit = order();
+    exit.side = OrderSide::Sell;
+    exit.reduce_only = Some(true);
+    exit.stop_loss = None;
+    let exit = h.engine.place_order(exit).await.unwrap();
+    assert_eq!(exit.order.status, OrderStatus::Filled, "{}", reason(&exit));
+    assert!(h.okx.state().position.is_none());
+}
+
 #[tokio::test]
 async fn refuses_an_order_larger_than_available_margin() {
     let h = connect(

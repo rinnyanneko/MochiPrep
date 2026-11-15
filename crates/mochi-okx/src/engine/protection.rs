@@ -112,6 +112,12 @@ impl SymbolProtection {
 
 pub(crate) type ProtectionMap = HashMap<String, SymbolProtection>;
 
+/// A position OKX listed on this sync: its side and its size in contracts, never negative.
+pub(crate) struct Held {
+    pub side: PositionSide,
+    pub contracts: Dec,
+}
+
 /// Consecutive syncs that found our protection but no position, and the first such sync.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Miss {
@@ -355,6 +361,16 @@ fn algo_body(row: &Order, registry: &Registry) -> Result<AlgoOrderBody, EngineEr
         }
     }
     Ok(body)
+}
+
+/// Whether `row`, whose algo OKX listed as `algo`, covers a position of `contracts`. OKX's own
+/// `sz` is the truth when it reads as a number; otherwise the size the row was sent with.
+fn covers(row: &Order, algo: &Row, contracts: &Dec, registry: &Registry) -> bool {
+    let size = match num(algo.get("sz")) {
+        Some(sz) => Dec::parse(&sz).ok(),
+        None => to_contracts(row, registry).ok(),
+    };
+    size.is_some_and(|size| size.gte(contracts))
 }
 
 /// What a protection change reads from the store before deciding.
@@ -754,10 +770,16 @@ impl OkxEngine {
     /// marked, and the cancel is retried each sync. A row belongs to the held position only if
     /// its side closes it (SELL a long, BUY a short): after a quick re-entry on the other side,
     /// the previous position's algos are cancelled, never put in force.
+    ///
+    /// Older rows of a leg are cancelled only once the newest covers the whole position. Two
+    /// entries filling into one position each attach an algo sized to their own fill, so retiring
+    /// the older one would leave the rest of the position without that leg on OKX. Until then
+    /// every row stays live and, armed, one algo at the newest row's level and sized to the whole
+    /// position is placed; the sync after OKX lists it retires the rest (placed before cancelled).
     pub(super) async fn reconcile_protection(
         &self,
         algos: Vec<Row>,
-        held: &HashMap<String, PositionSide>,
+        held: &HashMap<String, Held>,
     ) -> Result<ProtectionMap, EngineError> {
         let at = self.now();
         let account_id = self.deps.account_id.clone();
@@ -842,8 +864,9 @@ impl OkxEngine {
         // still counts as held.
         let is_held = |row: &Order| held.contains_key(&to_inst_id(&row.symbol));
         let closes_held = |row: &Order| {
-            held.get(&to_inst_id(&row.symbol))
-                .is_some_and(|side| (*side == PositionSide::Long) == (row.side == OrderSide::Sell))
+            held.get(&to_inst_id(&row.symbol)).is_some_and(|held| {
+                (held.side == PositionSide::Long) == (row.side == OrderSide::Sell)
+            })
         };
         let other_side = |row: &Order| is_held(row) && !closes_held(row);
         let key_of = |row: &Order| format!("{}:{:?}", row.symbol, leg_of(row));
@@ -922,19 +945,24 @@ impl OkxEngine {
             }
         }
 
+        let mut uncovered: Vec<usize> = Vec::new();
         for (_, members) in &groups {
             let first = &rows[members[0].0];
-            if !is_held(first) {
+            let Some(position) = held.get(&to_inst_id(&first.symbol)) else {
                 if position_gone(first) {
                     for (i, algo) in members {
                         cancel.push((*i, algo.clone(), Some(POSITION_CLOSED)));
                     }
                 }
                 continue;
-            }
+            };
             let (last, older) = members.split_last().expect("a group has a row");
-            for (i, algo) in older {
-                cancel.push((*i, algo.clone(), Some(REPLACED)));
+            if covers(&rows[last.0], &last.1, &position.contracts, &registry) {
+                for (i, algo) in older {
+                    cancel.push((*i, algo.clone(), Some(REPLACED)));
+                }
+            } else if !older.is_empty() {
+                uncovered.push(last.0);
             }
             let effective = &rows[last.0];
             let Some(leg) = leg_of(effective) else {
@@ -944,6 +972,28 @@ impl OkxEngine {
             entry.set(leg, effective.clone());
             if leg == Leg::Trail {
                 entry.trail_trigger = num(last.1.get("moveTriggerPx"));
+            }
+        }
+
+        // Placing changes which level guards the older fills, as a protection change does, so it
+        // needs the account armed. Disarmed, every fill keeps its own algo, which between them
+        // still cover the whole position.
+        // A placement still awaiting OKX's answer (a protection change, or an earlier cover) may
+        // already be the replacement, so nothing more is sent until it is resolved.
+        if (self.deps.is_armed)() {
+            for i in uncovered {
+                let newest = &rows[i];
+                let awaiting = rows.iter().take(open_count).any(|r| {
+                    r.status == OrderStatus::Open
+                        && r.symbol == newest.symbol
+                        && r.exchange_order_id.as_deref().is_none_or(str::is_empty)
+                });
+                if awaiting {
+                    continue;
+                }
+                if let Some(position) = held.get(&to_inst_id(&newest.symbol)) {
+                    self.cover_position(newest, position, &registry).await?;
+                }
             }
         }
 
@@ -983,6 +1033,79 @@ impl OkxEngine {
         }
         self.state().cancel_error = failure;
         Ok(result)
+    }
+
+    /// Places one algo for `newest`'s leg at its level, sized to the whole position. Its id is
+    /// fixed by the row and the size, so it is sent at most once: an unknown outcome is resolved
+    /// by lookup on a later sync like any other row, and a refusal is not retried (the older algos
+    /// then simply stay). Only an OKX answer is absorbed here; a store failure aborts the sync.
+    async fn cover_position(
+        &self,
+        newest: &Order,
+        position: &Held,
+        registry: &Registry,
+    ) -> Result<(), EngineError> {
+        let id = format!("{}:cover:{}", newest.id, position.contracts.to_fixed());
+        let lookup = id.clone();
+        if self
+            .rows(move |rows| Ok(rows.get_order(&lookup)?))
+            .await?
+            .is_some()
+        {
+            return Ok(());
+        }
+        let Some(leg) = leg_of(newest) else {
+            return Ok(());
+        };
+        let Ok(spec) = registry.get(&newest.symbol) else {
+            return Ok(());
+        };
+        let level = |wanted: Leg| {
+            (leg == wanted)
+                .then(|| newest.trigger_price.clone())
+                .flatten()
+        };
+        let protection = Protection {
+            stop_loss: level(Leg::Sl),
+            take_profit: level(Leg::Tp),
+            trailing_stop: (leg == Leg::Trail).then(|| spec_of(newest)).flatten(),
+        };
+        if !leg.is_set(&protection) {
+            return Ok(());
+        }
+        let source = Source {
+            account_id: newest.account_id.clone(),
+            symbol: newest.symbol.clone(),
+            side: position.side,
+            quantity: position
+                .contracts
+                .mul(&dec(&spec.venue_contract_value)?)
+                .to_fixed(),
+            leverage: newest.leverage,
+            agent_id: newest.agent_id.clone(),
+            decision_id: newest.decision_id.clone(),
+        };
+        let mut row = protection_row(id, &source, leg, &protection, self.now());
+        // Written before anything is sent, so an unanswered request can be looked up by
+        // algoClOrdId.
+        let inserted = row.clone();
+        self.rows(move |rows| Ok(rows.insert_order(&inserted)?))
+            .await?;
+        match self.place(&mut row, registry).await {
+            Ok(()) => Ok(()),
+            // Unknown outcome: never placed again; a later sync looks it up.
+            Err(EngineError::Okx(OkxError::Unknown(message))) => {
+                row.reject_reason = Some(format!("Awaiting confirmation: {message}"));
+                self.save(row).await
+            }
+            Err(error @ (EngineError::Okx(_) | EngineError::Message(_))) => {
+                row.status = OrderStatus::Rejected;
+                row.reject_reason = Some(error.to_string());
+                row.updated_at = self.now();
+                self.save(row).await
+            }
+            Err(error) => Err(error),
+        }
     }
 
     async fn close_row(&self, row: &mut Order, reason: &str) -> Result<(), EngineError> {

@@ -1,10 +1,12 @@
 //! Node's `preTradeRefusal`: the last line of defence. Every order passes here, from the UI or
 //! from an agent. The checks run in Node's order and the texts are Node's, word for word.
 
+use std::collections::HashSet;
+
 use mochi_core::paper::validate_trailing;
 use mochi_decimal::Dec;
 use mochi_domain::jsnum::{js_number_string, js_to_fixed};
-use mochi_domain::{Order, OrderSide, OrderType, PositionSide, PositionView};
+use mochi_domain::{Order, OrderSide, OrderStatus, OrderType, PositionSide, PositionView};
 
 use super::{day_start_equity, dec, is_leg, side_text, EngineError, OkxEngine, Prepared};
 use crate::ids::to_inst_id;
@@ -33,14 +35,18 @@ impl OkxEngine {
                 "NOT_ARMED: real-money orders are switched off for this account".into(),
             ));
         }
-        let (healthy, balance, sync_error, open_positions) = {
+        let (healthy, balance, sync_error, held_symbols) = {
             let healthy = self.healthy();
             let state = self.state();
             (
                 healthy,
                 state.balance.clone(),
                 state.sync_error.clone(),
-                state.positions.len(),
+                state
+                    .positions
+                    .iter()
+                    .map(|p| p.position.symbol.clone())
+                    .collect::<Vec<_>>(),
             )
         };
         let Some(balance) = balance.filter(|_| healthy) else {
@@ -86,6 +92,21 @@ impl OkxEngine {
                     .into(),
             ));
         }
+        // A resting entry takes a slot too: positions are only read back on sync, so two limit
+        // entries on different pairs would otherwise both pass while resting and both fill. Each
+        // pair counts once, whether it holds a position, an opening order, or both. The traded
+        // pair is left out: a position there was refused above, and another entry on it adds no
+        // new position. Exits (reduce-only) returned before any of this, so they never count.
+        let mut symbols: HashSet<&str> = held_symbols.iter().map(String::as_str).collect();
+        symbols.extend(
+            prepared
+                .open_orders
+                .iter()
+                .filter(|o| o.status == OrderStatus::Open && !o.reduce_only && !is_leg(o))
+                .map(|o| o.symbol.as_str()),
+        );
+        symbols.remove(order.symbol.as_str());
+        let open_positions = symbols.len();
         if open_positions as f64 >= limits.max_open_positions {
             return Ok(Some(format!(
                 "LIMIT_POSITIONS: {open_positions} open, limit {}",
