@@ -238,7 +238,13 @@ impl Runtime {
         self.expire_signals(source)?;
         let now = self.market_now(source);
         for a in rows::list_agents(self.connection()).map_err(|e| self.api_error(e))? {
+            // An agent whose lost-sync pause is still owed stays unscheduled until the pause
+            // lands: it was reported paused, so it must not trade meanwhile.
+            let pause_owed = self
+                .exchange_session(&a.account_id)
+                .is_some_and(|session| session.pause_pending);
             if a.running
+                && !pause_owed
                 && a.next_run_at.is_some_and(|at| at <= now)
                 && self.require_account(&a.account_id)?.source == source
             {

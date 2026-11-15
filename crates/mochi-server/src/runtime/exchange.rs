@@ -22,7 +22,7 @@ use serde::Serialize;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
-use super::execution::{okx_engine, okx_venue, ExchangeSession};
+use super::execution::{okx_engine, okx_venue, ExchangeSession, SessionLink};
 use super::redact::redact_secrets;
 use super::{internal_error, unix_ms, Runtime, RuntimeHandle};
 use crate::error::ApiError;
@@ -160,7 +160,7 @@ impl RuntimeHandle {
             .ok_or_else(|| ApiError::bad_request("Not an exchange environment"))?;
         let remember = input.remember;
         // 1. Before any network call.
-        let (options, live, specs, epoch) = self
+        let (options, live, specs, epoch, vault) = self
             .call(move |r| {
                 if remember && r.vault_status()? != VaultStatus::Unlocked {
                     return Err(ApiError::bad_request(
@@ -168,7 +168,13 @@ impl RuntimeHandle {
                     ));
                 }
                 let epoch = epoch.unwrap_or(r.session_seq);
-                Ok((r.okx.clone(), r.live(), r.instruments().to_vec(), epoch))
+                Ok((
+                    r.okx.clone(),
+                    r.live(),
+                    r.instruments().to_vec(),
+                    epoch,
+                    r.vault.generation,
+                ))
             })
             .await??;
         let secrets = secrets_of(&input);
@@ -210,6 +216,7 @@ impl RuntimeHandle {
         // unarmed until it is registered, so its first sync places nothing a protection change
         // would need arming for.
         let armed = Arc::new(AtomicBool::new(false));
+        let link = SessionLink::new(&account.id, epoch);
         let engine = okx_engine(
             self.downgrade(),
             &account.id,
@@ -217,9 +224,18 @@ impl RuntimeHandle {
             &options,
             live,
             armed.clone(),
+            link.clone(),
         );
         if let Err(error) = engine.sync().await {
-            return Err(self.refused(error.to_string(), &secrets).await);
+            // A sync whose writes were refused because the account changed meanwhile says why.
+            let changed = account.clone();
+            let refusal = self
+                .call(move |r| r.registration_refusal(&changed, reconnect, epoch).err())
+                .await?;
+            return Err(match refusal {
+                Some(refusal) => refusal,
+                None => self.refused(error.to_string(), &secrets).await,
+            });
         }
         let session = ExchangeSession {
             engine,
@@ -227,8 +243,10 @@ impl RuntimeHandle {
             secrets,
             was_healthy: true,
             pause_pending: false,
+            link,
         };
         // 10-12. Register, save or forget the key, and take the first balance.
+        let remember = remember.then_some(vault);
         self.call(move |r| r.register_session(account, session, remember, &saved, reconnect, epoch))
             .await?
     }
@@ -341,12 +359,13 @@ impl Runtime {
 
     /// Steps 10-12, once the first sync succeeded. A new manual session replaces the old one,
     /// which resets arming to the venue's default. A connect whose account changed while it was
-    /// out (see [`Self::registration_refusal`]) registers nothing and saves nothing.
+    /// out (see [`Self::registration_refusal`]) registers nothing and saves nothing. `remember`
+    /// is the vault generation the owner asked to save the key under.
     fn register_session(
         &mut self,
         mut account: PaperAccount,
         session: ExchangeSession,
-        remember: bool,
+        remember: Option<u64>,
         saved: &str,
         reconnect: bool,
         epoch: u64,
@@ -361,6 +380,7 @@ impl Runtime {
             return Err(self.api_error(error));
         }
         self.bump_session(&account.id);
+        session.link.registered.store(true, Ordering::SeqCst);
         let engine = session.engine.clone();
         session
             .armed
@@ -369,9 +389,11 @@ impl Runtime {
             old.retire();
         }
         let now = unix_ms();
-        if remember {
-            // Checked again: the vault may have been reset while OKX was answering.
-            let Some(data_key) = self.data_key() else {
+        if let Some(vault) = remember {
+            // Checked again: the vault may have been turned off or reset while OKX was
+            // answering, and perhaps set up anew, with a password the box was not ticked for.
+            let data_key = self.data_key().filter(|_| self.vault.generation == vault);
+            let Some(data_key) = data_key else {
                 return Err(ApiError::bad_request(
                     "Connected, but the key was not saved: the master password was removed meanwhile",
                 ));

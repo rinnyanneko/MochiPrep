@@ -1584,3 +1584,42 @@ async fn a_refused_cancel_is_still_retried_after_its_row_leaves_the_recent_windo
     h.sync().await;
     assert_eq!(h.algo_state(&old.id), "canceled");
 }
+
+/// The position list can lag behind the fills the same sync confirmed. Read with only the first
+/// of two stacked fills, the newest per-fill stop looks as if it covers the position, but it
+/// covers only its own fill: the older stop must stay until a stop sized to both is live.
+#[tokio::test]
+async fn a_lagging_position_never_retires_the_older_stop_of_two_stacked_fills() {
+    let h = two_stacked_fills().await;
+    h.okx.state().position.as_mut().unwrap()["pos"] = json!("0.1");
+    h.sync().await;
+    assert!(h.canceled().is_empty());
+    // The full-size stop covers both confirmed fills, not the lagging position.
+    let sent = h.algo_placed();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["sz"], "0.2");
+
+    h.okx.state().position.as_mut().unwrap()["pos"] = json!("0.2");
+    h.sync().await;
+    assert_eq!(live_stops(&h), [("0.2".to_string(), "74200".to_string())]);
+    assert_eq!(h.canceled().len(), 2);
+    let (covered, held) = stop_cover(&h);
+    assert!(covered >= held, "{covered} of {held} contracts stopped");
+}
+
+/// A per-fill stop that OKX lists at a size larger than its entry filled (the size first sent,
+/// say) is still read as covering only its own fill: the older stop stays.
+#[tokio::test]
+async fn an_attached_stop_listed_larger_than_its_fill_never_retires_the_older_stop() {
+    let h = two_stacked_fills().await;
+    {
+        let mut state = h.okx.state();
+        let newest = state.algos.values_mut().last().unwrap();
+        newest["sz"] = json!("0.2");
+    }
+    h.disarm();
+    h.sync().await;
+    h.sync().await;
+    assert!(h.canceled().is_empty());
+    assert_eq!(live_stops(&h).len(), 2);
+}

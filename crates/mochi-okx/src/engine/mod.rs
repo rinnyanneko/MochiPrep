@@ -148,9 +148,14 @@ impl<S: PaperStore> LiveRows for Rows<'_, S> {
 pub type StoreWork = Box<dyn FnOnce(&dyn LiveRows) + Send>;
 
 /// Where the store lives. The future resolves once `work` has run, or once it never will (its
-/// owner has stopped), in which case `work` is dropped unrun.
+/// owner has stopped, or refuses this engine's writes), in which case `work` is dropped unrun.
 pub trait StoreAccess: Send + Sync {
     fn run(&self, work: StoreWork) -> BoxFuture<'static, ()>;
+
+    /// Why work was dropped unrun, when it was not because the owner stopped.
+    fn refusal(&self) -> Option<String> {
+        None
+    }
 }
 
 pub type QuoteSource = Arc<dyn Fn(&str) -> Option<Quote> + Send + Sync>;
@@ -353,7 +358,12 @@ impl OkxEngine {
                 let _ = answer.send(work(rows));
             }))
             .await;
-        answered.await.map_err(|_| EngineError::Stopped)?
+        answered.await.map_err(|_| {
+            self.deps
+                .store
+                .refusal()
+                .map_or(EngineError::Stopped, EngineError::Message)
+        })?
     }
 
     pub(crate) async fn registry(&self) -> Result<Registry, EngineError> {

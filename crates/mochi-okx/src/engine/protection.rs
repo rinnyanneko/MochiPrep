@@ -363,14 +363,48 @@ fn algo_body(row: &Order, registry: &Registry) -> Result<AlgoOrderBody, EngineEr
     Ok(body)
 }
 
-/// Whether `row`, whose algo OKX listed as `algo`, covers a position of `contracts`. OKX's own
-/// `sz` is the truth when it reads as a number; otherwise the size the row was sent with.
+/// A row's size in contracts as OKX listed it in `algo`, and as the row records it (for an
+/// attached row, what its entry filled), each when it reads.
+fn sizes(row: &Order, algo: &Row, registry: &Registry) -> (Option<Dec>, Option<Dec>) {
+    let listed = num(algo.get("sz")).and_then(|sz| Dec::parse(&sz).ok());
+    (listed, to_contracts(row, registry).ok())
+}
+
+/// Whether `row`, whose algo OKX listed as `algo`, covers a position of `contracts`. It takes the
+/// smaller of OKX's `sz` and the row's own size: older stops are retired on this, so a size OKX
+/// reports above what was filled or sent is never trusted.
 fn covers(row: &Order, algo: &Row, contracts: &Dec, registry: &Registry) -> bool {
-    let size = match num(algo.get("sz")) {
-        Some(sz) => Dec::parse(&sz).ok(),
-        None => to_contracts(row, registry).ok(),
+    let size = match sizes(row, algo, registry) {
+        (Some(listed), Some(own)) => Some(listed.min(&own)),
+        (listed, own) => listed.or(own),
     };
     size.is_some_and(|size| size.gte(contracts))
+}
+
+/// A row attached to an entry, sized to that entry's fill alone. Other rows (a protection
+/// change, a cover) were sized to the whole position when placed.
+fn is_per_fill(row: &Order) -> bool {
+    leg_of(row).is_some_and(|leg| row.id.ends_with(&format!(":{}", leg.tag())))
+}
+
+/// The contracts a group's live rows guard between them, oldest first: a whole-position row
+/// counts as its own size, and each later per-fill row adds its fill. It takes the larger of
+/// OKX's `sz` and the row's own, since a cover sized to it must not fall short. `None` when a
+/// size does not read.
+fn group_claim(members: &[(usize, Row)], rows: &[Order], registry: &Registry) -> Option<Dec> {
+    let mut claim = super::zero();
+    for (i, algo) in members {
+        let size = match sizes(&rows[*i], algo, registry) {
+            (Some(listed), Some(own)) => listed.max(&own),
+            (listed, own) => listed.or(own)?,
+        };
+        claim = if is_per_fill(&rows[*i]) {
+            claim.add(&size)
+        } else {
+            size
+        };
+    }
+    Some(claim)
 }
 
 /// A stop must sit below the price for a long and above it for a short; a target the other way
@@ -845,12 +879,15 @@ impl OkxEngine {
     /// its side closes it (SELL a long, BUY a short): after a quick re-entry on the other side,
     /// the previous position's algos are cancelled, never put in force.
     ///
-    /// Older rows of a leg are cancelled only once the newest covers the whole position. Two
-    /// entries filling into one position each attach an algo sized to their own fill, so retiring
-    /// the older one would leave the rest of the position without that leg on OKX. Until then
-    /// every row stays live and, armed, one SL or TP algo sized to the whole position is placed at
-    /// the most protective level among the live rows, never a looser one; the sync after OKX
-    /// lists it retires the rest (placed before cancelled). Trailing stops are never covered.
+    /// Older rows of a leg are cancelled only once the newest, a row sized to the whole position,
+    /// covers it. Two entries filling into one position each attach an algo sized to their own
+    /// fill, so retiring the older one would leave the rest of the position without that leg on
+    /// OKX. A newest per-fill row never retires older ones: the position list can lag behind the
+    /// fills this sync confirmed and make it look as if it covers. Until then every row stays
+    /// live and, armed, one SL or TP algo is placed at the most protective level among the live
+    /// rows, never a looser one, sized to the larger of the position and what the rows guard
+    /// between them. The sync after OKX lists it retires the rest (placed before cancelled).
+    /// Trailing stops are never covered.
     pub(super) async fn reconcile_protection(
         &self,
         algos: Vec<Row>,
@@ -1046,7 +1083,7 @@ impl OkxEngine {
             }
         }
 
-        let mut uncovered: Vec<Vec<usize>> = Vec::new();
+        let mut uncovered: Vec<(Vec<usize>, Option<Dec>)> = Vec::new();
         for (_, members) in &groups {
             let first = &rows[members[0].0];
             let Some(position) = held.get(&to_inst_id(&first.symbol)) else {
@@ -1058,12 +1095,17 @@ impl OkxEngine {
                 continue;
             };
             let (last, older) = members.split_last().expect("a group has a row");
-            if covers(&rows[last.0], &last.1, &position.contracts, &registry) {
+            if !is_per_fill(&rows[last.0])
+                && covers(&rows[last.0], &last.1, &position.contracts, &registry)
+            {
                 for (i, algo) in older {
                     cancel.push((*i, algo.clone(), Some(REPLACED)));
                 }
             } else if !older.is_empty() {
-                uncovered.push(members.iter().map(|(i, _)| *i).collect());
+                uncovered.push((
+                    members.iter().map(|(i, _)| *i).collect(),
+                    group_claim(members, &rows, &registry),
+                ));
             }
             let effective = &rows[last.0];
             let Some(leg) = leg_of(effective) else {
@@ -1082,7 +1124,7 @@ impl OkxEngine {
         // A placement still awaiting OKX's answer (a protection change, or an earlier cover) may
         // already be the replacement, so nothing more is sent until it is resolved.
         let mut limits: Option<RiskSettings> = None;
-        for members in uncovered {
+        for (members, claim) in uncovered {
             if !(self.deps.is_armed)() {
                 break;
             }
@@ -1106,6 +1148,14 @@ impl OkxEngine {
             let Some(position) = held.get(&to_inst_id(&newest.symbol)) else {
                 continue;
             };
+            // A size that does not read leaves the per-fill rows as they are.
+            let Some(claim) = claim else {
+                continue;
+            };
+            let cover = Held {
+                side: position.side,
+                contracts: position.contracts.max(&claim),
+            };
             let group = members.iter().map(|i| &rows[*i]);
             let Some(level) = tightest_level(leg, position.side, group)? else {
                 continue;
@@ -1114,7 +1164,7 @@ impl OkxEngine {
                 limits = Some(self.context().await?.limits);
             }
             let limits = limits.as_ref().expect("read above");
-            self.cover_position(newest, leg, level, position, &registry, limits)
+            self.cover_position(newest, leg, level, &cover, &registry, limits)
                 .await?;
         }
 
@@ -1156,23 +1206,24 @@ impl OkxEngine {
         Ok(result)
     }
 
-    /// Places one algo for `newest`'s leg at `level`, the most protective in its group, sized to
-    /// the whole position. It first passes the market checks a protection change gets (a healthy
-    /// recent sync, a fresh quote, the level on the right side of the price); refused, nothing is
-    /// written or sent, the per-fill algos stay, and a later sync tries again. Its id is fixed by
-    /// the row and the size, so it is sent at most once: an unknown outcome is resolved by lookup
-    /// on a later sync like any other row, and an OKX refusal is not retried (the older algos then
-    /// simply stay). Only an OKX answer is absorbed here; a store failure aborts the sync.
+    /// Places one algo for `newest`'s leg at `level`, the most protective in its group, on
+    /// `cover`'s side and sized to its contracts, at least the whole position. It first passes the market checks a protection
+    /// change gets (a healthy recent sync, a fresh quote, the level on the right side of the
+    /// price); refused, nothing is written or sent, the per-fill algos stay, and a later sync
+    /// tries again. Its id is fixed by the row and the size, so it is sent at most once: an
+    /// unknown outcome is resolved by lookup on a later sync like any other row, and an OKX
+    /// refusal is not retried (the older algos then simply stay). Only an OKX answer is absorbed
+    /// here; a store failure aborts the sync.
     async fn cover_position(
         &self,
         newest: &Order,
         leg: Leg,
         level: String,
-        position: &Held,
+        cover: &Held,
         registry: &Registry,
         limits: &RiskSettings,
     ) -> Result<(), EngineError> {
-        let id = format!("{}:cover:{}", newest.id, position.contracts.to_fixed());
+        let id = format!("{}:cover:{}", newest.id, cover.contracts.to_fixed());
         let lookup = id.clone();
         if self
             .rows(move |rows| Ok(rows.get_order(&lookup)?))
@@ -1193,14 +1244,14 @@ impl OkxEngine {
             Ok(last) => last,
             Err(_) => return Ok(()),
         };
-        if wrong_side_refusal(position.side, &last, &protection)?.is_some() {
+        if wrong_side_refusal(cover.side, &last, &protection)?.is_some() {
             return Ok(());
         }
         let source = Source {
             account_id: newest.account_id.clone(),
             symbol: newest.symbol.clone(),
-            side: position.side,
-            quantity: position
+            side: cover.side,
+            quantity: cover
                 .contracts
                 .mul(&dec(&spec.venue_contract_value)?)
                 .to_fixed(),

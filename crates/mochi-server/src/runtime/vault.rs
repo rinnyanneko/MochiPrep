@@ -37,6 +37,10 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// What the runtime holds for the master password. The data key lives only here, in memory.
 pub(super) struct VaultState {
     pub(super) data_key: Option<DataKey>,
+    /// Counts data keys: a new one on enable, none after a disable or reset. A connect that
+    /// was asked to save its key notes it at the start and saves nothing if it changed, so a key
+    /// is only ever sealed under the vault the owner ticked the box for.
+    pub(super) generation: u64,
     busy: Arc<AtomicBool>,
     kdf: KdfParams,
 }
@@ -45,6 +49,7 @@ impl VaultState {
     pub(super) fn new(kdf: KdfParams) -> Self {
         VaultState {
             data_key: None,
+            generation: 0,
             busy: Arc::default(),
             kdf,
         }
@@ -314,6 +319,7 @@ impl Runtime {
             .map_err(|e| self.api_error(e))?;
         let blocked = self.scrub()?;
         self.vault.data_key = Some(data_key);
+        self.vault.generation += 1;
         self.invalidate(&[Topic::Vault, Topic::Providers, Topic::Exchange]);
         // The keys are sealed either way; only the old plaintext pages outlive this call.
         if blocked {
@@ -367,6 +373,7 @@ impl Runtime {
             .map_err(|e| self.api_error(e))?;
         self.agents.keys.extend(keys);
         self.vault.data_key = None;
+        self.vault.generation += 1;
         self.invalidate(&[Topic::Vault, Topic::Providers, Topic::Exchange]);
         Ok(VaultStatus::Off)
     }
@@ -409,6 +416,7 @@ impl Runtime {
             self.agents.keys.remove(&id);
         }
         self.vault.data_key = None;
+        self.vault.generation += 1;
         self.invalidate(&[Topic::Vault, Topic::Providers, Topic::Exchange]);
         Ok(())
     }

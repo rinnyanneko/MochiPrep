@@ -139,6 +139,30 @@ pub(super) struct ExchangeSession {
     pub was_healthy: bool,
     /// A lost-sync pause that did not complete: retried on every sync until it does.
     pub pause_pending: bool,
+    /// What its engine's store writes are checked against.
+    pub link: Arc<SessionLink>,
+}
+
+/// Ties an engine's store writes to its session. Until the session registers, they are allowed
+/// while its account has not changed since the connect began (see `Runtime::session_seq`);
+/// once registered, only while it is still the account's session. So a sync or order still out
+/// on OKX when its session is replaced or removed never writes over its successor's rows.
+pub(super) struct SessionLink {
+    pub account_id: String,
+    pub epoch: u64,
+    pub registered: AtomicBool,
+    refused: AtomicBool,
+}
+
+impl SessionLink {
+    pub(super) fn new(account_id: &str, epoch: u64) -> Arc<Self> {
+        Arc::new(SessionLink {
+            account_id: account_id.to_string(),
+            epoch,
+            registered: AtomicBool::new(false),
+            refused: AtomicBool::new(false),
+        })
+    }
 }
 
 impl ExchangeSession {
@@ -167,12 +191,13 @@ pub(super) fn okx_engine(
     options: &OkxOptions,
     live: Arc<dyn LiveFeed>,
     armed: Arc<AtomicBool>,
+    link: Arc<SessionLink>,
 ) -> Arc<OkxEngine> {
     OkxEngine::new(OkxEngineDeps {
         account_id: account_id.to_string(),
         venue: client.venue(),
         client,
-        store: Arc::new(ActorStore { runtime }),
+        store: Arc::new(ActorStore { runtime, link }),
         get_quote: Arc::new(move |symbol: &str| live.get_quote(symbol)),
         now: options.now.clone(),
         is_armed: Arc::new(move || armed.load(Ordering::SeqCst)),
@@ -205,6 +230,17 @@ impl Runtime {
 
     pub(super) fn exchange_session(&self, account_id: &str) -> Option<&ExchangeSession> {
         self.exchanges.get(account_id)
+    }
+
+    /// Whether the session `link` belongs to may still write to the store (see [`SessionLink`]).
+    fn session_current(&self, link: &Arc<SessionLink>) -> bool {
+        if link.registered.load(Ordering::SeqCst) {
+            self.exchanges
+                .get(&link.account_id)
+                .is_some_and(|session| Arc::ptr_eq(&session.link, link))
+        } else {
+            !self.session_changed_since(&link.account_id, link.epoch)
+        }
     }
 
     /// The engine behind a target, for work that runs off the task (agent cycles). It holds no
@@ -282,19 +318,27 @@ impl WeakRuntimeHandle {
     }
 }
 
-/// The store as the runtime task owns it. Each piece of work runs there, alone.
+/// The store as the runtime task owns it. Each piece of work runs there, alone, and only while
+/// the engine's session is current, checked in the same step as the write.
 pub(super) struct ActorStore {
     pub runtime: WeakRuntimeHandle,
+    pub link: Arc<SessionLink>,
 }
 
 impl StoreAccess for ActorStore {
     fn run(&self, work: StoreWork) -> mochi_okx::BoxFuture<'static, ()> {
         let runtime = self.runtime.upgrade();
+        let link = self.link.clone();
         Box::pin(async move {
             if let Some(runtime) = runtime {
-                // A runtime that stopped drops the work unrun; the engine reports it.
+                // A runtime that stopped, or a session no longer current, drops the work unrun;
+                // the engine reports it.
                 let _ = runtime
                     .call(move |runtime| {
+                        if !runtime.session_current(&link) {
+                            link.refused.store(true, Ordering::SeqCst);
+                            return;
+                        }
                         work(&Rows {
                             store: runtime.engine().store(),
                             instruments: runtime.instruments(),
@@ -302,6 +346,12 @@ impl StoreAccess for ActorStore {
                     })
                     .await;
             }
+        })
+    }
+
+    fn refusal(&self) -> Option<String> {
+        self.link.refused.load(Ordering::SeqCst).then(|| {
+            "This OKX session was replaced or disconnected, so its result was not recorded".into()
         })
     }
 }
@@ -573,12 +623,12 @@ impl RuntimeHandle {
         armed: bool,
     ) -> Result<(), ApiError> {
         let id = account_id.to_string();
-        let (venue, options, live) = self
+        let (venue, options, live, epoch) = self
             .call(move |r| {
                 let account = r.require_account(&id)?;
                 let venue = okx_venue(account.venue)
                     .ok_or_else(|| ApiError::bad_request("Not an exchange account"))?;
-                Ok((venue, r.okx.clone(), r.live()))
+                Ok((venue, r.okx.clone(), r.live(), r.session_seq))
             })
             .await??;
         let secrets = [
@@ -588,6 +638,7 @@ impl RuntimeHandle {
         ];
         let client = options.client(credentials, venue);
         let flag = Arc::new(AtomicBool::new(armed));
+        let link = SessionLink::new(account_id, epoch);
         let engine = okx_engine(
             self.downgrade(),
             account_id,
@@ -595,6 +646,7 @@ impl RuntimeHandle {
             &options,
             live,
             flag.clone(),
+            link.clone(),
         );
         if let Err(error) = engine.sync().await {
             let text = error.to_string();
@@ -608,8 +660,10 @@ impl RuntimeHandle {
                 secrets,
                 was_healthy: true,
                 pause_pending: false,
+                link: link.clone(),
             };
             r.bump_session(&id);
+            link.registered.store(true, Ordering::SeqCst);
             if let Some(old) = r.exchanges.insert(id, session) {
                 old.retire();
             }

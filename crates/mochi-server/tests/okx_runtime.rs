@@ -1449,6 +1449,59 @@ async fn lost_sync_pauses_every_agent_and_retries_a_failed_pause_without_new_toa
     w.rt.shutdown().await;
 }
 
+/// A lost-sync pause that keeps failing to write leaves the agent stored as running. Once sync is
+/// back, the live tick must still not run its scheduled cycle, which would trade on an account the
+/// owner was told had its agents paused.
+#[tokio::test(start_paused = true)]
+async fn an_agent_whose_lost_sync_pause_is_still_owed_is_not_scheduled() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    let agent = w.agent_on(&account.id, "AUTO").await;
+    let id = agent.clone();
+    w.rt.call(move |r| {
+        r.start_agent(&id).unwrap();
+        r.connection()
+            .execute(
+                "UPDATE agents SET next_run_at=? WHERE id=?",
+                rusqlite::params![i64::MAX, id],
+            )
+            .unwrap();
+        // Only the pause is refused; the cycle's own status writes still go through.
+        r.connection()
+            .execute_batch(
+                "CREATE TRIGGER refuse_pause BEFORE UPDATE ON agents WHEN NEW.running=0
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END",
+            )
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    w.okx.state().down = true;
+    w.rt.sync_exchanges().await.unwrap();
+    w.okx.state().down = false;
+    w.rt.sync_exchanges().await.unwrap();
+    assert_eq!(w.statuses().await[0]["healthy"], true);
+    assert!(w.agent(&agent).await.running);
+
+    let placed = w.placed();
+    let id = agent.clone();
+    w.rt.call(move |r| {
+        r.connection()
+            .execute(
+                "UPDATE agents SET next_run_at=0 WHERE id=?",
+                rusqlite::params![id],
+            )
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(3500)).await;
+    w.rt.call(|_| ()).await.unwrap();
+    assert_eq!(w.placed(), placed);
+    w.rt.shutdown().await;
+}
+
 // ---- restart ----------------------------------------------------------------------------------
 
 #[tokio::test]
@@ -1794,5 +1847,79 @@ async fn a_connect_refused_at_registration_leaves_the_accounts_limits_as_they_we
         .contains("while connecting to OKX"));
     assert_eq!(limits(w.rt.clone()).await, before);
     assert_eq!(w.statuses().await[0]["connected"], false);
+    w.rt.shutdown().await;
+}
+
+/// A connect asked to save its key under one master password, still out on OKX while the owner
+/// resets the vault and sets a new password, saves nothing: the key is never sealed under a vault
+/// the box was not ticked for. It still connects.
+#[tokio::test]
+async fn a_connect_out_on_okx_across_a_vault_reset_and_new_password_saves_no_key() {
+    let w = World::new().await;
+    enable(&w).await;
+    let hold = w.okx.hold_next("GET", "/account/config");
+    let (connected, ()) = tokio::join!(w.connect_with("OKX_DEMO", true), async {
+        hold.reached().await;
+        w.rt.reset_vault(mochi_server::runtime::VAULT_RESET_PHRASE.into())
+            .await
+            .unwrap();
+        w.rt.enable_vault("another password".into()).await.unwrap();
+        hold.release();
+    });
+    assert!(connected
+        .unwrap_err()
+        .message()
+        .contains("the key was not saved"));
+    let status = &w.statuses().await[0];
+    assert_eq!(
+        (status["connected"].clone(), status["saved"].clone()),
+        (json!(true), json!(false))
+    );
+    w.rt.shutdown().await;
+}
+
+/// A sync still out on OKX when the owner connects the account anew must not write what it read
+/// over the new session's rows: here its late answer says the entry is still resting, after the
+/// new session has recorded it filled.
+#[tokio::test]
+async fn a_sync_of_a_replaced_session_never_writes_over_the_new_sessions_orders() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.okx.state().rest_limit_orders = true;
+    let request: OrderRequest = serde_json::from_value(json!({
+        "accountId": account.id, "clientOrderId": uuid::Uuid::new_v4().to_string(),
+        "symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "price": "74500",
+        "quantity": "0.001", "leverage": 3, "stopLoss": "74000",
+    }))
+    .unwrap();
+    let engine = w.rt.execution(&account.id).await.unwrap();
+    let placed = engine.place_order(request).await.unwrap();
+    assert_eq!(placed.order.status, mochi_domain::OrderStatus::Open);
+    let resting = {
+        let state = w.okx.state();
+        let (key, row) = state.orders.iter().last().unwrap();
+        (key.clone(), row.clone())
+    };
+
+    let hold = w.okx.hold_next("GET", "/trade/order");
+    let (synced, ()) = tokio::join!(w.rt.sync_exchanges(), async {
+        hold.reached().await;
+        w.okx.state().fill_resting();
+        w.connect("OKX_LIVE").await;
+        // The old session's lookup was answered before the fill, and arrives only now.
+        w.okx
+            .state()
+            .orders
+            .insert(resting.0.clone(), resting.1.clone());
+        hold.release();
+    });
+    synced.unwrap();
+    let id = placed.order.id.clone();
+    let row =
+        w.rt.call(move |r| r.engine().store().get_order(&id).unwrap().unwrap())
+            .await
+            .unwrap();
+    assert_eq!(row.status, mochi_domain::OrderStatus::Filled);
     w.rt.shutdown().await;
 }
