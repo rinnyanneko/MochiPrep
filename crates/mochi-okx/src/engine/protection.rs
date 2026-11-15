@@ -373,6 +373,74 @@ fn covers(row: &Order, algo: &Row, contracts: &Dec, registry: &Registry) -> bool
     size.is_some_and(|size| size.gte(contracts))
 }
 
+/// A stop must sit below the price for a long and above it for a short; a target the other way
+/// round. Node's texts.
+fn wrong_side_refusal(
+    side: PositionSide,
+    last: &Dec,
+    target: &Protection,
+) -> Result<Option<String>, EngineError> {
+    let long = side == PositionSide::Long;
+    let wrong_side = |price: &str, below: bool| -> Result<bool, EngineError> {
+        let price = dec(price)?;
+        Ok(if below {
+            price.gte(last)
+        } else {
+            price.lte(last)
+        })
+    };
+    if let Some(stop) = target.stop_loss.as_deref().filter(|s| !s.is_empty()) {
+        if wrong_side(stop, long)? {
+            return Ok(Some(format!(
+                "INVALID_PROTECTION: stop {stop} is on the wrong side of {} for {}",
+                last.to_fixed(),
+                side_text(side)
+            )));
+        }
+    }
+    if let Some(goal) = target.take_profit.as_deref().filter(|s| !s.is_empty()) {
+        if wrong_side(goal, !long)? {
+            return Ok(Some(format!(
+                "INVALID_PROTECTION: target {goal} is on the wrong side of {} for {}",
+                last.to_fixed(),
+                side_text(side)
+            )));
+        }
+    }
+    Ok(None)
+}
+
+/// The most protective level among a leg's live rows, the one closest to the price on its side:
+/// for a long, the highest stop and the lowest target; for a short, the other way round. A
+/// full-size cover at any other level would loosen the stop of some fill. Only SL and TP have a
+/// level; `None` when no row carries one.
+fn tightest_level<'a>(
+    leg: Leg,
+    side: PositionSide,
+    rows: impl Iterator<Item = &'a Order>,
+) -> Result<Option<String>, EngineError> {
+    // Highest wins for a long's stop and a short's target.
+    let highest = (leg == Leg::Sl) == (side == PositionSide::Long);
+    let mut best: Option<(Dec, String)> = None;
+    for row in rows {
+        let Some(text) = row.trigger_price.as_deref().filter(|t| !t.is_empty()) else {
+            continue;
+        };
+        let level = dec(text)?;
+        let better = best.as_ref().is_none_or(|(current, _)| {
+            if highest {
+                level.gt(current)
+            } else {
+                level.lt(current)
+            }
+        });
+        if better {
+            best = Some((level, text.to_string()));
+        }
+    }
+    Ok(best.map(|(_, text)| text))
+}
+
 /// What a protection change reads from the store before deciding.
 struct Context {
     limits: RiskSettings,
@@ -621,61 +689,18 @@ impl OkxEngine {
         {
             return Ok(Some("NOT_ARMED: this change increases risk".into()));
         }
-        let healthy = self.healthy();
-        let (has_balance, sync_error) = {
-            let state = self.state();
-            (state.balance.is_some(), state.sync_error.clone())
-        };
-        if !healthy || !has_balance {
-            let why = sync_error.unwrap_or_else(|| "no recent sync with OKX".into());
-            return Ok(Some(format!("EXCHANGE_NOT_SYNCED: {why}")));
-        }
         let limits = &context.limits;
-        let Some(quote) = (self.deps.get_quote)(symbol) else {
-            return Ok(Some("NO_MARKET_DATA: no quote".into()));
+        let last = match self.market_refusal(symbol, limits)? {
+            Ok(last) => last,
+            Err(refusal) => return Ok(Some(refusal)),
         };
-        let age = (self.now() - quote.ts) as f64 / 1000.0;
-        if age > limits.max_quote_age_sec {
-            return Ok(Some(format!(
-                "MARKET_DATA_STALE: quote is {}s old",
-                mochi_domain::jsnum::js_to_fixed(age, 0)
-            )));
-        }
-
         if limits.require_stop_loss && before.stop_loss.is_some() && target.stop_loss.is_none() {
             return Ok(Some(
                 "LIMIT_STOP_REQUIRED: positions must keep a stop loss".into(),
             ));
         }
-        let last = dec(&quote.last)?;
-        let long = side == PositionSide::Long;
-        // A stop must sit below the price for a long and above it for a short; a target the
-        // other way round.
-        let wrong_side = |price: &str, below: bool| -> Result<bool, EngineError> {
-            let price = dec(price)?;
-            Ok(if below {
-                price.gte(&last)
-            } else {
-                price.lte(&last)
-            })
-        };
-        if let Some(stop) = target.stop_loss.as_deref().filter(|s| !s.is_empty()) {
-            if wrong_side(stop, long)? {
-                return Ok(Some(format!(
-                    "INVALID_PROTECTION: stop {stop} is on the wrong side of {} for {}",
-                    last.to_fixed(),
-                    side_text(side)
-                )));
-            }
-        }
-        if let Some(goal) = target.take_profit.as_deref().filter(|s| !s.is_empty()) {
-            if wrong_side(goal, !long)? {
-                return Ok(Some(format!(
-                    "INVALID_PROTECTION: target {goal} is on the wrong side of {} for {}",
-                    last.to_fixed(),
-                    side_text(side)
-                )));
-            }
+        if let Some(refusal) = wrong_side_refusal(side, &last, target)? {
+            return Ok(Some(refusal));
         }
         // A kept trailing stop is not re-checked: its activation may rightly be behind the market
         // by now.
@@ -690,6 +715,36 @@ impl OkxEngine {
             }
         }
         Ok(None)
+    }
+
+    /// The market checks any placement of protection passes, a protection change or a full-size
+    /// cover: a recent healthy sync with a balance, and a fresh quote. Answers the last price, or
+    /// the refusal in Node's words.
+    fn market_refusal(
+        &self,
+        symbol: &str,
+        limits: &RiskSettings,
+    ) -> Result<Result<Dec, String>, EngineError> {
+        let healthy = self.healthy();
+        let (has_balance, sync_error) = {
+            let state = self.state();
+            (state.balance.is_some(), state.sync_error.clone())
+        };
+        if !healthy || !has_balance {
+            let why = sync_error.unwrap_or_else(|| "no recent sync with OKX".into());
+            return Ok(Err(format!("EXCHANGE_NOT_SYNCED: {why}")));
+        }
+        let Some(quote) = (self.deps.get_quote)(symbol) else {
+            return Ok(Err("NO_MARKET_DATA: no quote".into()));
+        };
+        let age = (self.now() - quote.ts) as f64 / 1000.0;
+        if age > limits.max_quote_age_sec {
+            return Ok(Err(format!(
+                "MARKET_DATA_STALE: quote is {}s old",
+                mochi_domain::jsnum::js_to_fixed(age, 0)
+            )));
+        }
+        Ok(Ok(dec(&quote.last)?))
     }
 
     /// Cancels the algos behind these rows and marks the rows closed. The cancel answer is not
@@ -793,8 +848,9 @@ impl OkxEngine {
     /// Older rows of a leg are cancelled only once the newest covers the whole position. Two
     /// entries filling into one position each attach an algo sized to their own fill, so retiring
     /// the older one would leave the rest of the position without that leg on OKX. Until then
-    /// every row stays live and, armed, one algo at the newest row's level and sized to the whole
-    /// position is placed; the sync after OKX lists it retires the rest (placed before cancelled).
+    /// every row stays live and, armed, one SL or TP algo sized to the whole position is placed at
+    /// the most protective level among the live rows, never a looser one; the sync after OKX
+    /// lists it retires the rest (placed before cancelled). Trailing stops are never covered.
     pub(super) async fn reconcile_protection(
         &self,
         algos: Vec<Row>,
@@ -990,7 +1046,7 @@ impl OkxEngine {
             }
         }
 
-        let mut uncovered: Vec<usize> = Vec::new();
+        let mut uncovered: Vec<Vec<usize>> = Vec::new();
         for (_, members) in &groups {
             let first = &rows[members[0].0];
             let Some(position) = held.get(&to_inst_id(&first.symbol)) else {
@@ -1007,7 +1063,7 @@ impl OkxEngine {
                     cancel.push((*i, algo.clone(), Some(REPLACED)));
                 }
             } else if !older.is_empty() {
-                uncovered.push(last.0);
+                uncovered.push(members.iter().map(|(i, _)| *i).collect());
             }
             let effective = &rows[last.0];
             let Some(leg) = leg_of(effective) else {
@@ -1020,26 +1076,46 @@ impl OkxEngine {
             }
         }
 
-        // Placing changes which level guards the older fills, as a protection change does, so it
-        // needs the account armed. Disarmed, every fill keeps its own algo, which between them
-        // still cover the whole position.
+        // A full-size cover changes which algo guards the older fills, so it needs the account
+        // armed, read before each placement so that a disarm mid-loop stops the rest. Disarmed,
+        // every fill keeps its own algo, which between them still cover the whole position.
         // A placement still awaiting OKX's answer (a protection change, or an earlier cover) may
         // already be the replacement, so nothing more is sent until it is resolved.
-        if (self.deps.is_armed)() {
-            for i in uncovered {
-                let newest = &rows[i];
-                let awaiting = rows.iter().take(open_count).any(|r| {
-                    r.status == OrderStatus::Open
-                        && r.symbol == newest.symbol
-                        && r.exchange_order_id.as_deref().is_none_or(str::is_empty)
-                });
-                if awaiting {
-                    continue;
-                }
-                if let Some(position) = held.get(&to_inst_id(&newest.symbol)) {
-                    self.cover_position(newest, position, &registry).await?;
-                }
+        let mut limits: Option<RiskSettings> = None;
+        for members in uncovered {
+            if !(self.deps.is_armed)() {
+                break;
             }
+            let newest = &rows[*members.last().expect("a group has a row")];
+            let Some(leg) = leg_of(newest) else {
+                continue;
+            };
+            // Never for a trailing stop: the per-fill trails already cover the whole size, and a
+            // new one would start from the current price, behind trails that have ratcheted.
+            if leg == Leg::Trail {
+                continue;
+            }
+            let awaiting = rows.iter().take(open_count).any(|r| {
+                r.status == OrderStatus::Open
+                    && r.symbol == newest.symbol
+                    && r.exchange_order_id.as_deref().is_none_or(str::is_empty)
+            });
+            if awaiting {
+                continue;
+            }
+            let Some(position) = held.get(&to_inst_id(&newest.symbol)) else {
+                continue;
+            };
+            let group = members.iter().map(|i| &rows[*i]);
+            let Some(level) = tightest_level(leg, position.side, group)? else {
+                continue;
+            };
+            if limits.is_none() {
+                limits = Some(self.context().await?.limits);
+            }
+            let limits = limits.as_ref().expect("read above");
+            self.cover_position(newest, leg, level, position, &registry, limits)
+                .await?;
         }
 
         // Still live on OKX as of this sync, so still shown, marked, until a later sync no longer
@@ -1080,15 +1156,21 @@ impl OkxEngine {
         Ok(result)
     }
 
-    /// Places one algo for `newest`'s leg at its level, sized to the whole position. Its id is
-    /// fixed by the row and the size, so it is sent at most once: an unknown outcome is resolved
-    /// by lookup on a later sync like any other row, and a refusal is not retried (the older algos
-    /// then simply stay). Only an OKX answer is absorbed here; a store failure aborts the sync.
+    /// Places one algo for `newest`'s leg at `level`, the most protective in its group, sized to
+    /// the whole position. It first passes the market checks a protection change gets (a healthy
+    /// recent sync, a fresh quote, the level on the right side of the price); refused, nothing is
+    /// written or sent, the per-fill algos stay, and a later sync tries again. Its id is fixed by
+    /// the row and the size, so it is sent at most once: an unknown outcome is resolved by lookup
+    /// on a later sync like any other row, and an OKX refusal is not retried (the older algos then
+    /// simply stay). Only an OKX answer is absorbed here; a store failure aborts the sync.
     async fn cover_position(
         &self,
         newest: &Order,
+        leg: Leg,
+        level: String,
         position: &Held,
         registry: &Registry,
+        limits: &RiskSettings,
     ) -> Result<(), EngineError> {
         let id = format!("{}:cover:{}", newest.id, position.contracts.to_fixed());
         let lookup = id.clone();
@@ -1099,23 +1181,19 @@ impl OkxEngine {
         {
             return Ok(());
         }
-        let Some(leg) = leg_of(newest) else {
-            return Ok(());
-        };
         let Ok(spec) = registry.get(&newest.symbol) else {
             return Ok(());
         };
-        let level = |wanted: Leg| {
-            (leg == wanted)
-                .then(|| newest.trigger_price.clone())
-                .flatten()
-        };
         let protection = Protection {
-            stop_loss: level(Leg::Sl),
-            take_profit: level(Leg::Tp),
-            trailing_stop: (leg == Leg::Trail).then(|| spec_of(newest)).flatten(),
+            stop_loss: (leg == Leg::Sl).then(|| level.clone()),
+            take_profit: (leg == Leg::Tp).then_some(level),
+            trailing_stop: None,
         };
-        if !leg.is_set(&protection) {
+        let last = match self.market_refusal(&newest.symbol, limits)? {
+            Ok(last) => last,
+            Err(_) => return Ok(()),
+        };
+        if wrong_side_refusal(position.side, &last, &protection)?.is_some() {
             return Ok(());
         }
         let source = Source {

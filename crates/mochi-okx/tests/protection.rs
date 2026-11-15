@@ -1218,13 +1218,24 @@ fn stop_cover(h: &Harness) -> (f64, f64) {
 
 /// Two resting BTC longs, each with its own stop, both filled on OKX before the next sync.
 async fn two_stacked_fills() -> Harness {
+    stacked_fills(["74000", "74200"].map(stop)).await
+}
+
+/// Resting BTC longs with this protection each, oldest first, all filled on OKX before the next
+/// sync. Without a stop among them, the account does not require one.
+async fn stacked_fills<const N: usize>(protection: [Protection; N]) -> Harness {
     let h = connect(Vec::new()).await;
+    if protection.iter().all(|p| p.stop_loss.is_none()) {
+        h.set_limits(no_stop_required());
+    }
     h.okx.state().rest_limit_orders = true;
-    for stop_loss in ["74000", "74200"] {
+    for protection in protection {
         let mut request = order();
         request.order_type = EntryOrderType::Limit;
         request.price = Some("74500".into());
-        request.stop_loss = Some(stop_loss.into());
+        request.stop_loss = protection.stop_loss;
+        request.take_profit = protection.take_profit;
+        request.trailing_stop = protection.trailing_stop;
         let placed = h.engine.place_order(request).await.unwrap();
         assert_eq!(placed.order.status, OrderStatus::Open);
     }
@@ -1307,6 +1318,93 @@ async fn a_full_size_stop_with_an_unknown_outcome_is_resolved_by_lookup_never_re
     assert_eq!(h.algo_placed().len(), 1);
     assert_eq!(live_stops(&h), [("0.2".to_string(), "74200".to_string())]);
     assert_eq!(h.canceled().len(), 2);
+}
+
+/// The full-size stop takes the most protective live level, never the newest when an older fill's
+/// stop is tighter: retiring the older stop at 74200 for one at 74000 would loosen it.
+#[tokio::test]
+async fn a_tighter_older_stop_is_kept_as_the_full_size_stops_level() {
+    let h = stacked_fills(["74200", "74000"].map(stop)).await;
+    h.sync().await;
+    let sent = h.algo_placed();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["sz"], "0.2");
+    assert_eq!(sent[0]["slTriggerPx"], "74200");
+    h.sync().await;
+    assert_eq!(live_stops(&h), [("0.2".to_string(), "74200".to_string())]);
+    assert_eq!(h.view().stop_loss.as_deref(), Some("74200"));
+}
+
+/// The same for take-profit: the target closest to the price wins, for a long the lowest.
+#[tokio::test]
+async fn a_nearer_older_target_is_kept_as_the_full_size_targets_level() {
+    let target = |price: &str| Protection {
+        stop_loss: None,
+        take_profit: Some(price.into()),
+        trailing_stop: None,
+    };
+    let h = stacked_fills([target("76000"), target("77000")]).await;
+    h.sync().await;
+    let sent = h.algo_placed();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["sz"], "0.2");
+    assert_eq!(sent[0]["tpTriggerPx"], "76000");
+}
+
+/// Stacked trailing stops are never replaced by a full-size one: each per-fill trail stays, and
+/// between them they cover the position. A new trail would start from the current price.
+#[tokio::test]
+async fn stacked_trailing_stops_are_never_covered_by_a_new_one() {
+    let trail = || Protection {
+        stop_loss: None,
+        take_profit: None,
+        trailing_stop: Some(ratio("0.01")),
+    };
+    let h = stacked_fills([trail(), trail()]).await;
+    h.sync().await;
+    h.sync().await;
+    assert!(h.algo_placed().is_empty());
+    assert!(h.canceled().is_empty());
+    let trails = h
+        .okx
+        .state()
+        .algos
+        .values()
+        .filter(|a| a["state"] == "live" && a["ordType"] == "move_order_stop")
+        .count();
+    assert_eq!(trails, 2);
+}
+
+/// A full-size stop on the wrong side of the price is refused by the protection-change checks:
+/// nothing is written or sent, the per-fill stops stay, and it is tried again once the price is
+/// back.
+#[tokio::test]
+async fn a_full_size_stop_on_the_wrong_side_of_the_price_sends_nothing() {
+    let h = two_stacked_fills().await;
+    *h.prices.lock().unwrap() = ("74149".into(), "74151".into(), "74150".into());
+    h.sync().await;
+    h.sync().await;
+    assert!(h.algo_placed().is_empty());
+    assert!(h.canceled().is_empty());
+    assert!(!h.protection_rows().iter().any(|r| r.id.contains(":cover:")));
+    let (covered, held) = stop_cover(&h);
+    assert!(covered >= held, "{covered} of {held} contracts stopped");
+
+    *h.prices.lock().unwrap() = ("74999".into(), "75001".into(), "75000".into());
+    h.sync().await;
+    assert_eq!(h.algo_placed().len(), 1);
+}
+
+/// A stale quote refuses the full-size stop too: nothing is sent.
+#[tokio::test]
+async fn a_full_size_stop_with_a_stale_quote_sends_nothing() {
+    let h = two_stacked_fills().await;
+    let mut limits = default_live_limits();
+    limits.max_quote_age_sec = -1.0;
+    h.set_limits(limits);
+    h.sync().await;
+    assert!(h.algo_placed().is_empty());
+    assert!(h.canceled().is_empty());
 }
 
 fn short_position() -> Row {
