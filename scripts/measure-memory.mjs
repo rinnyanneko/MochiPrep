@@ -216,20 +216,23 @@ export function latestFeedState(messages, previous = 'unknown') {
 /**
  * Follows the event stream until `stop()`. `state()` is the newest OKX (LIVE) feed state seen, so a
  * drop during the idle wait reaches the report; `settled` resolves once the feed is connected, the
- * stream ends or 30 s pass. One deadline covers the session request and the stream.
+ * stream ends or 30 s pass. The 30 s bounds that wait and the session request only: the stream
+ * itself is closed by `stop()`, however long the idle wait is.
  */
 function watchLiveFeed(port) {
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), 30_000);
   let last = 'unknown';
   let markSettled;
   const settled = new Promise((resolve) => {
     markSettled = resolve;
   });
+  const timer = setTimeout(() => markSettled(), 30_000);
   const run = async () => {
     try {
       // No Origin header: Node's fetch sends none, which is what /api/session accepts.
-      const session = await fetch(`http://127.0.0.1:${port}/api/session`, { signal: abort.signal });
+      // A hung server cannot stall past the deadline: it covers the body read too.
+      const deadline = AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]);
+      const session = await fetch(`http://127.0.0.1:${port}/api/session`, { signal: deadline });
       const { token } = await session.json();
       const response = await fetch(`http://127.0.0.1:${port}/api/events?token=${encodeURIComponent(token)}`, {
         signal: abort.signal,

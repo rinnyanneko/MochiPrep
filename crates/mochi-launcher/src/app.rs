@@ -238,6 +238,11 @@ pub async fn start_backend(app: &AppHandle) {
         return;
     }
     let mut backend = state.backend.lock().await;
+    // Checked again under the lock: a caller that passed the first check may have waited here
+    // while the update set the flag and stopped the backend.
+    if state.installing.load(Ordering::SeqCst) {
+        return;
+    }
     if backend.as_mut().is_some_and(|running| running.is_alive()) {
         return;
     }
