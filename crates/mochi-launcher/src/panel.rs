@@ -109,11 +109,10 @@ pub async fn panel_action(app: AppHandle, action: String) {
     tray::run_action(&app, &action);
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "linux")))]
 mod tests {
     use super::*;
 
-    #[cfg(not(target_os = "linux"))]
     #[test]
     fn the_tray_is_available_outside_linux() {
         assert!(tray_available());
