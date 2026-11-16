@@ -55,7 +55,7 @@ Before pushing or opening or updating a pull request, verify the publishing GitH
 
 - Accounting uses `mochi_decimal::Dec` (`crates/mochi-decimal`), never `f64` or `rust_decimal`.
 - Every wallet or margin change goes through the ledger, inside one store transaction.
-- AI output is untrusted. Only the agent cycle (`crates/mochi-server/src/runtime/agent_cycle.rs`) turns it into orders, and only after strict parsing (`agent_parse.rs`) and the risk engine.
+- AI output is untrusted. Only the agent cycle (`crates/mochi-server/src/runtime/agent_cycle.rs`) turns it into orders, and only after strict parsing (`crates/mochi-server/src/agent_parse.rs`) and the risk engine.
 - The paper engine must never invent a price: fills come from observed quotes, never OHLC paths.
 - AI keys live in SQLite by the owner's choice, and never in logs, errors or the browser. With a master password set they are only stored sealed (`crates/mochi-vault`).
 - OKX credentials stay in `Runtime` memory (`crates/mochi-server/src/runtime`), unless the owner opts to save them sealed by the master password. Never write them to disk in plaintext or show them to a model. The master password and data key are never written anywhere.
