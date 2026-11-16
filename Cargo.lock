@@ -947,10 +947,14 @@ dependencies = [
 name = "mochi-launcher-core"
 version = "0.1.0"
 dependencies = [
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -1012,6 +1016,7 @@ dependencies = [
  "mochi-core",
  "mochi-decimal",
  "mochi-domain",
+ "mochi-launcher-core",
  "mochi-market",
  "mochi-okx",
  "mochi-server",

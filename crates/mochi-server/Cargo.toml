@@ -42,6 +42,8 @@ uuid = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+# The launcher's supervisor and client, driven against this binary in launcher_contract.rs.
+mochi-launcher-core = { path = "../mochi-launcher-core" }
 mochi-server = { path = ".", features = ["test-seams"] }
 # The in-process fake OKX for the OKX trading tests.
 mochi-okx = { path = "../mochi-okx", features = ["fake"] }
