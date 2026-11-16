@@ -16,7 +16,8 @@
     "test:e2e": "playwright test",
     "test:e2e:rust": "cargo build --release -p mochi-server && node e2e/run-rust.mjs",
     "typecheck": "pnpm -r --parallel typecheck",
-    "golden": "pnpm --filter @mochiprep/server golden"
+    "golden": "pnpm --filter @mochiprep/server golden",
+    "measure:memory": "node scripts/measure-memory.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.0",
