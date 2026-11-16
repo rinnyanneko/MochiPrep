@@ -159,12 +159,21 @@ async fn run_steps(app: &AppHandle, update: &Update) {
                 if let Some(interface) = app.get_webview_window(INTERFACE) {
                     let _ = interface.destroy();
                 }
+                // Before the stop, so no start_backend caller can slip in between the stop and
+                // the install.
+                app.state::<AppState>()
+                    .installing
+                    .store(true, Ordering::SeqCst);
                 app::stop_backend(app).await;
             }
             // On Windows a successful install starts the installer and ends this process, so
             // the steps after it run only on macOS and Linux.
             UpdateStep::Install => {
                 if let Err(error) = update.install(&bytes) {
+                    // Cleared first: this recovery is the one start the flag must allow.
+                    app.state::<AppState>()
+                        .installing
+                        .store(false, Ordering::SeqCst);
                     app::start_backend(app).await;
                     app::end_stop_flow(app);
                     app::show_error(

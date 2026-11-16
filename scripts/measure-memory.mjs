@@ -206,39 +206,64 @@ function startBackend(binary, port, dataDir) {
   return { child, ready };
 }
 
-/** Reads the event stream until the OKX (LIVE) feed is connected, or 30 s pass. */
-async function liveFeedState(port) {
+/** Folds event-stream messages into the newest live-feed state; messages that say nothing keep it. */
+export function latestFeedState(messages, previous = 'unknown') {
+  let last = previous;
+  for (const message of messages) last = liveFeedOf(message) ?? last;
+  return last;
+}
+
+/**
+ * Follows the event stream until `stop()`. `state()` is the newest OKX (LIVE) feed state seen, so a
+ * drop during the idle wait reaches the report; `settled` resolves once the feed is connected, the
+ * stream ends or 30 s pass. One deadline covers the session request and the stream.
+ */
+function watchLiveFeed(port) {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), 30_000);
   let last = 'unknown';
-  try {
-    // No Origin header: Node's fetch sends none, which is what /api/session accepts.
-    const { token } = await (await fetch(`http://127.0.0.1:${port}/api/session`)).json();
-    const response = await fetch(`http://127.0.0.1:${port}/api/events?token=${encodeURIComponent(token)}`, {
-      signal: abort.signal,
-    });
-    const decoder = new TextDecoder();
-    let buffer = '';
-    for await (const chunk of response.body) {
-      buffer += decoder.decode(chunk, { stream: true });
-      let end;
-      while ((end = buffer.indexOf('\n\n')) >= 0) {
-        const message = buffer.slice(0, end);
-        buffer = buffer.slice(end + 2);
-        const state = liveFeedOf(message);
-        if (!state) continue;
-        // The first status is usually "connecting"; keep reading until the feed settles.
-        last = state;
-        if (last === 'connected') return last;
+  let markSettled;
+  const settled = new Promise((resolve) => {
+    markSettled = resolve;
+  });
+  const run = async () => {
+    try {
+      // No Origin header: Node's fetch sends none, which is what /api/session accepts.
+      const session = await fetch(`http://127.0.0.1:${port}/api/session`, { signal: abort.signal });
+      const { token } = await session.json();
+      const response = await fetch(`http://127.0.0.1:${port}/api/events?token=${encodeURIComponent(token)}`, {
+        signal: abort.signal,
+      });
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for await (const chunk of response.body) {
+        buffer += decoder.decode(chunk, { stream: true });
+        const messages = [];
+        let end;
+        while ((end = buffer.indexOf('\n\n')) >= 0) {
+          messages.push(buffer.slice(0, end));
+          buffer = buffer.slice(end + 2);
+        }
+        // The first status is usually "connecting"; the report keeps the last one seen.
+        last = latestFeedState(messages, last);
+        if (last === 'connected') markSettled();
       }
+    } catch {
+      // A reset stream is a missing data point for the feed only; the backend is still measurable.
+    } finally {
+      clearTimeout(timer);
+      markSettled();
     }
-  } catch {
-    // A reset stream is a missing data point for the feed only; the backend is still measurable.
-  } finally {
-    clearTimeout(timer);
-    abort.abort();
-  }
-  return last;
+  };
+  run();
+  return {
+    settled,
+    state: () => last,
+    stop: () => {
+      clearTimeout(timer);
+      abort.abort();
+    },
+  };
 }
 
 function gitCommit() {
@@ -263,8 +288,12 @@ async function main() {
       pid = child.pid;
     }
     // Idle is measured with the interface closed: this script never opens a browser.
-    const liveFeed = await liveFeedState(options.port);
+    // The stream stays open through the idle wait, so the report carries the state at the end.
+    const feed = watchLiveFeed(options.port);
+    await feed.settled;
     await sleep(options.idle * 1000);
+    const liveFeed = feed.state();
+    feed.stop();
 
     let backendPid = pid;
     let tree;

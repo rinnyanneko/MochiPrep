@@ -97,6 +97,7 @@ Run each row on Windows, macOS and Linux before a release. Rows marked OKX need 
 | 33 | Click the update item with the network cut | An error dialog names the download failure; the backend keeps running throughout and the interface still works. |
 | 34 | Click the update item with a paper agent running | Once the download finishes, `Stop MochiPrep's backend?` asks; Cancel changes nothing and the agent keeps running. During the download, Quit and Restart still work. |
 | 35 | Untick `Check for updates automatically`, Save, restart the launcher | No request goes to GitHub (watch with a proxy or firewall log) and no update item appears. |
+| 35a | With the import window still open, click the update item and confirm the stop; then click Skip in the import window | The old backend does not start during the install; if the install fails, the backend starts again. |
 
 ## Owner's pre-release checks
 

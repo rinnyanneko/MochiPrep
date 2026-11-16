@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { gateFailures, liveFeedOf, pickBackendPid, parseFootprint, parseProcStatus, parseWorkingSet } from './measure-memory.mjs';
+import { gateFailures, latestFeedState, liveFeedOf, pickBackendPid, parseFootprint, parseProcStatus, parseWorkingSet } from './measure-memory.mjs';
 
 test('parseFootprint reads the phys_footprint line in KB and MB', () => {
   const kb = 'Footprint: 14 MB\n\n  Dirty  Clean\n\nmochi-server [123]: 64-bit    Footprint: 14 MB (16384 bytes per page)\n';
@@ -47,4 +47,12 @@ test('liveFeedOf ignores malformed and unrelated messages', () => {
 test('pickBackendPid refuses to fall back to the launcher', () => {
   assert.equal(pickBackendPid([10, 11, 12], 10, (pid) => pid === 12), 12);
   assert.throws(() => pickBackendPid([10, 11], 10, () => false), /no mochi-server/);
+});
+
+test('latestFeedState reports the last state, so a later drop wins', () => {
+  const feed = (status) => `data: ${JSON.stringify({ type: 'feed', status: { source: 'LIVE', state: status } })}`;
+  assert.equal(latestFeedState([feed('CONNECTING'), feed('CONNECTED')]), 'connected');
+  assert.equal(latestFeedState([feed('CONNECTED'), ': heartbeat', feed('DEGRADED')]), 'degraded');
+  assert.equal(latestFeedState([': heartbeat'], 'connected'), 'connected');
+  assert.equal(latestFeedState([]), 'unknown');
 });

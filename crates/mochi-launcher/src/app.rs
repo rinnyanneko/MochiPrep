@@ -44,6 +44,10 @@ pub struct AppState {
     /// Set while an update downloads or installs, so repeated clicks do not start another.
     /// Separate from `stopping`, which the update takes only once the download is done.
     pub updating: AtomicBool,
+    /// Set from the update's backend stop until its install fails (a success relaunches the
+    /// process). `start_backend` refuses meanwhile, so a window closing or a menu item cannot
+    /// start the old `mochi-server` while the installer replaces its files.
+    pub installing: AtomicBool,
     /// A newer release the last update check found; `None` until one is found.
     pub update: Mutex<Option<updater::Available>>,
 }
@@ -77,6 +81,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         stopping: AtomicBool::new(false),
         importing: AtomicBool::new(false),
         updating: AtomicBool::new(false),
+        installing: AtomicBool::new(false),
         update: Mutex::new(None),
     });
     if panel::tray_available() {
@@ -212,6 +217,9 @@ fn set_state(app: &AppHandle, next: BackendState) {
 /// still pending or one fully settled.
 pub async fn start_backend(app: &AppHandle) {
     let state = app.state::<AppState>();
+    if state.installing.load(Ordering::SeqCst) {
+        return;
+    }
     let (accepted, offer_import, port) = {
         let settings = lock(&state.settings);
         (
