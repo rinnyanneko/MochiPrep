@@ -16,6 +16,7 @@
     "test:e2e": "cargo build --release -p mochi-server && playwright test",
     "typecheck": "pnpm -r --parallel typecheck",
     "measure:memory": "node scripts/measure-memory.mjs",
+    "measure:web-memory": "node scripts/measure-web-memory.mjs",
     "tauri": "tauri",
     "bundle": "node scripts/bundle.mjs"
   },
