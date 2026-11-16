@@ -3,19 +3,21 @@
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tripleProblem } from "./triples.mjs";
+import { knownTriple, tripleProblem } from "./triples.mjs";
 
-const triple = process.argv[2];
-if (!triple) {
+const argument = process.argv[2];
+if (!argument) {
   console.error("usage: node scripts/stage-backend.mjs <rust-target-triple>");
   process.exit(1);
 }
 
-const problem = tripleProblem(triple);
+const problem = tripleProblem(argument);
 if (problem) {
   console.error(problem);
   process.exit(1);
 }
+// From here on only the constant from the known list is used, never the argument.
+const triple = knownTriple(argument);
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ext = triple.includes("windows") ? ".exe" : "";

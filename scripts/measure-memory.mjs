@@ -34,7 +34,7 @@ const MIB = 1024 * 1024;
 
 /** `footprint <pid>` on macOS: the `phys_footprint` line, or the `Footprint:` summary line. */
 export function parseFootprint(text) {
-  const pattern = (label) => new RegExp(`${label}:\\s*([\\d.]+)\\s*(KB|MB|GB|bytes?)`, 'i');
+  const pattern = (label) => new RegExp(String.raw`${label}:\s*([\d.]+)\s*(KB|MB|GB|bytes?)`, 'i');
   const match = pattern('phys_footprint').exec(text) ?? pattern('Footprint').exec(text);
   if (!match) throw new Error('no footprint line in output');
   const unit = match[2].toUpperCase();
@@ -94,8 +94,15 @@ function metricName() {
   return process.platform === 'darwin' ? 'footprint' : 'rss';
 }
 
+// System tools are run by absolute path, not looked up on PATH, so a directory earlier on PATH
+// cannot put another program in their place.
+const SYSTEM_ROOT = process.env.SystemRoot || String.raw`C:\Windows`;
+const POWERSHELL = join(SYSTEM_ROOT, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+const PS = '/bin/ps';
+const FOOTPRINT = '/usr/bin/footprint';
+
 function powershell(command) {
-  return execFileSync('powershell', ['-NoProfile', '-Command', command], { encoding: 'utf8' });
+  return execFileSync(POWERSHELL, ['-NoProfile', '-Command', command], { encoding: 'utf8' });
 }
 
 function sampleBytes(pid) {
@@ -103,7 +110,7 @@ function sampleBytes(pid) {
     case 'win32':
       return parseWorkingSet(powershell(`(Get-Process -Id ${pid}).WorkingSet64`));
     case 'darwin':
-      return parseFootprint(execFileSync('footprint', [String(pid)], { encoding: 'utf8' }));
+      return parseFootprint(execFileSync(FOOTPRINT, [String(pid)], { encoding: 'utf8' }));
     default:
       return parseProcStatus(readFileSync(`/proc/${pid}/status`, 'utf8'));
   }
@@ -118,7 +125,7 @@ function windowsParentPairs() {
 }
 
 function macParentPairs() {
-  const table = execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' });
+  const table = execFileSync(PS, ['-axo', 'pid=,ppid='], { encoding: 'utf8' });
   const pairs = [];
   for (const line of table.split('\n')) {
     const [pid, ppid] = line.trim().split(/\s+/).map(Number);
@@ -182,7 +189,7 @@ function isMochiServer(pid) {
     const name =
       process.platform === 'win32'
         ? powershell(`(Get-Process -Id ${pid}).ProcessName`)
-        : execFileSync('ps', ['-o', 'comm=', '-p', String(pid)], { encoding: 'utf8' });
+        : execFileSync(PS, ['-o', 'comm=', '-p', String(pid)], { encoding: 'utf8' });
     return /mochi-server/i.test(name);
   } catch {
     return false;
@@ -307,7 +314,8 @@ export function watchLiveFeed(port) {
 
 function gitCommit() {
   try {
-    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+    // git is a developer tool found on PATH by design; it only labels the report.
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim(); // NOSONAR
   } catch {
     return 'unknown';
   }

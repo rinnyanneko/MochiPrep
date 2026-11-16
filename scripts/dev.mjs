@@ -28,7 +28,8 @@ const viteManifest = webRequire.resolve('vite/package.json');
 const viteBin = join(dirname(viteManifest), webRequire(viteManifest).bin.vite);
 
 const children = [
-  spawn('cargo', ['run', '-p', 'mochi-server'], { cwd: root, env, stdio: 'inherit' }),
+  // cargo is the developer's own toolchain, found on PATH by design.
+  spawn('cargo', ['run', '-p', 'mochi-server'], { cwd: root, env, stdio: 'inherit' }), // NOSONAR
   spawn(process.execPath, [viteBin, '--port', webPort], { cwd: webDir, env, stdio: 'inherit' }),
 ];
 
@@ -40,7 +41,9 @@ function stopAll() {
     if (process.platform === 'win32') {
       // `cargo run` on Windows starts mochi-server as its own child and does not pass a kill on,
       // so the whole tree is ended or the server would outlive this script.
-      spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      // By absolute path, so a directory earlier on PATH cannot stand in for taskkill.
+      const taskkill = join(process.env.SystemRoot || String.raw`C:\Windows`, 'System32', 'taskkill.exe');
+      spawnSync(taskkill, ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
     } else {
       // On Unix `cargo run` replaces itself with the server, so the signal reaches it directly.
       child.kill('SIGINT');
