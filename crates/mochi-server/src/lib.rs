@@ -9,6 +9,14 @@ pub mod routes;
 pub mod runtime;
 pub mod validate;
 
+/// Start of the line the server prints once it listens; the bound port follows. A launcher reads
+/// it from stdout to learn the port.
+pub const READY_PREFIX: &str = "MochiPrep backend on http://127.0.0.1:";
+
+/// Exit code when the port is already taken, so a launcher can tell it from other failures
+/// without parsing stderr.
+pub const EXIT_PORT_IN_USE: u8 = 3;
+
 use std::fmt;
 use std::sync::Arc;
 
