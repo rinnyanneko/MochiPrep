@@ -6,42 +6,77 @@ MochiPrep is a local-first, bring-your-own-key AI trading terminal for USDT-marg
 
 > **DYOR: do your own research.** MochiPrep is not financial advice. AI output can be wrong, and you are responsible for your own trades.
 
-> **Real money:** OKX trading has only been tested against a simulated exchange, never with real funds. Read [Trading on OKX](docs/OKX_TRADING.md) first. AI decisions can be wrong, and you are responsible for every order.
+> **Real money:** OKX trading has only been tested against a simulated exchange, not OKX Demo Trading and not with real funds. Read [Trading on OKX](docs/OKX_TRADING.md) first. AI decisions can be wrong, and you are responsible for every order.
 
-## Prerequisites
+## Install
 
-- Node.js 22.13 or newer (`node:sqlite` is required)
-- pnpm 9 or newer (the repository pins pnpm 11)
+Download the build for your system from the [latest GitHub release](https://github.com/rinnyanneko/MochiPrep/releases/latest) and start MochiPrep. It runs a tray app that starts the backend and opens the interface in its own window. On first launch you read and accept the risk warning; nothing runs before that.
 
-## Run locally
+| System | Download |
+| --- | --- |
+| Windows | `.msi` or the NSIS `.exe` installer |
+| macOS | `.dmg`, one per CPU architecture (Apple silicon or Intel) |
+| Linux | `.deb` (`sudo apt install ./MochiPrep_*.deb`) or `.AppImage` (`chmod +x MochiPrep_*.AppImage`, then run it) |
+
+Your data (the SQLite database and the launcher settings) lives in your operating system's application data folder. See [the launcher guide](docs/LAUNCHER.md) for the exact paths. Nothing else is required: no Docker, no account, no paid service.
+
+### Unsigned builds
+
+The installers are not code-signed by Windows or Apple, so your system warns you the first time. The updater files are signed separately; that signature is what checks updates.
+
+- **Windows:** SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**.
+- **macOS:** the first launch is blocked. Open **System Settings > Privacy & Security**, scroll to the message about MochiPrep, and choose **Open Anyway**.
+- **Linux:** no prompt. Mark the AppImage executable first.
+
+### Updating
+
+- Windows, macOS and the Linux AppImage update from the tray: when a newer release exists the menu shows an update item, and clicking it downloads, installs and restarts.
+- A `.deb` or a distribution package (such as the AUR) updates through the package manager. The tray only says a version is available and opens the release page.
+- The launcher checks for a new version at start and every 24 hours. Turn that off with **Check for updates automatically** in Settings.
+
+## Memory use
+
+The backend is a single Rust binary. With the interface closed, idle for 12 seconds and the live OKX feed connected, its Windows x86_64 working set measured 19.49, 19.74 and 19.76 MiB over three runs, against 83 MiB for the Node backend it replaced (measured at `bd11fbe`). The release gate is 20 MiB or less. It was reached by tuning, with 2 tokio worker threads and a release profile of `lto = "fat"` and `codegen-units = 1`, not by an allocator change.
+
+Measure it yourself:
+
+```sh
+cargo build --release -p mochi-server
+node scripts/measure-memory.mjs --binary target/release/mochi-server.exe --gate
+```
+
+Linux and macOS are measured in CI for reference only (Linux resident set, macOS `footprint`); the gate applies to Windows only. The web interface's own WebView memory is separate and not included. The launcher plus backend has a budget of 66 MiB with the interface closed; that is a manual check (`--pid <launcher pid>`) that has not been done yet.
+
+## Development
+
+Needs Node 22.13 or newer with pnpm 9 or newer (the repository pins pnpm 11), and a Rust toolchain. Node is only for the web UI and the scripts; the backend is Rust.
 
 ```sh
 pnpm install
 pnpm dev
 ```
 
-Open <http://localhost:5173>. The backend binds to `127.0.0.1:8787` and keeps its SQLite database in `.mochiprep/`. Nothing else is required: no Docker, no account, no paid service.
+`pnpm dev` runs the Rust server (through cargo) and the vite dev server. Open <http://localhost:5173>. The backend binds to `127.0.0.1:8787` and keeps its SQLite database in `.mochiprep/` in the repository. Set `MOCHIPREP_PORT` or `MOCHIPREP_WEB_PORT` to change the ports.
 
-For everyday use, build the web app once and run the backend alone. It serves the UI at <http://localhost:8787>, with no Vite dev server:
+For everyday use from source, build the web app once and run the release server alone. It embeds the UI and serves it at <http://localhost:8787>:
 
 ```sh
 pnpm build
 pnpm start
 ```
 
-`pnpm start` bundles the backend first (under a second) and runs the bundle, which uses about 80 MiB of memory in one process, against about 125 MiB across the two processes `pnpm dev` runs for the backend. To skip pnpm's own process too, run `node --max-semi-space-size=1 apps/server/dist/main.mjs` after a start or `pnpm --filter @mochiprep/server build`.
-
-A Rust backend is available for paper trading, replay, demo mode, AI providers, agents and suggestions. Build the web UI with `pnpm build`, then run `cargo run -p mochi-server`; it uses the same local API and database format. Node remains the default for `pnpm dev` and `pnpm start`. Rust vault mutations and OKX trading are still unavailable; a saved master password stays locked and remote AI cannot load its keys. See [backend status and compatibility limits](docs/ARCHITECTURE.md#rust-backend-in-progress). `pnpm test:e2e:rust` runs the existing browser suite against Rust.
+To build the installers locally, run `pnpm bundle -- --target <triple>`. Releases are built by CI from a `vX.Y.Z` tag that matches the workspace version.
 
 ## Test
 
 ```sh
-pnpm test        # unit and integration, offline, no API key
+pnpm test                # web unit tests (vitest), offline, no API key
 pnpm typecheck
-pnpm test:e2e    # Playwright through the real UI, needs Google Chrome installed
+cargo test --workspace   # Rust crates
+pnpm test:e2e            # Playwright through the real UI, needs Google Chrome installed
 ```
 
-`pnpm test` fails any test that tries to reach the network. The browser test runs on its own ports with a throwaway database.
+`pnpm test:e2e` builds the release `mochi-server` and runs the browser tests against it on its own port (`MOCHIPREP_E2E_API_PORT`, default 8877) with a throwaway database. On Linux, `mochi-launcher` needs `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev`; otherwise add `--exclude mochi-launcher` to the cargo command.
 
 ## Demo Mode
 
@@ -73,12 +108,12 @@ Connect an account in **Settings**, using Demo Trading or a real account. See [h
 
 ## BYOK providers
 
-Add a provider in **Settings**, paste its key, then pick it when creating an agent. See [how to get API keys](docs/API_KEYS.md). You can configure OpenAI-compatible, OpenAI, Anthropic, Gemini, DeepSeek, or OpenCode providers, and add extra request headers for gateways that need them. AI keys and extra headers are saved **unencrypted** in the local SQLite file, so they survive restarts. The database lives in `.mochiprep/`, which only your user can read and git ignores. Anyone who can read that file, including backups of it, can read the keys. To prevent that, set a **master password** in Settings: AI keys are then stored encrypted, OKX keys can optionally be saved encrypted too, and you unlock once after every restart. There is no password recovery. Extra headers stay unencrypted. Keys are never logged or returned to the browser. Model output is strictly validated and must pass server-side risk checks before the paper engine can accept an order.
+Add a provider in **Settings**, paste its key, then pick it when creating an agent. See [how to get API keys](docs/API_KEYS.md). You can configure OpenAI-compatible, OpenAI, Anthropic, Gemini, DeepSeek, or OpenCode providers, and add extra request headers for gateways that need them. AI keys and extra headers are saved **unencrypted** in the local SQLite file, so they survive restarts. The database lives in your application data folder (`.mochiprep/` when run from source), which only your user can read. Anyone who can read that file, including backups of it, can read the keys. To prevent that, set a **master password** in Settings: AI keys are then stored encrypted, OKX keys can optionally be saved encrypted too, and you unlock once after every restart. There is no password recovery. Extra headers stay unencrypted. Keys are never logged or returned to the browser. Model output is strictly validated and must pass backend risk checks before the paper engine can accept an order.
 
 ## Current limits
 
 - OKX is the only exchange. Linear USDT crypto perpetuals only, isolated margin, one-way position mode. OKX's stock, commodity and pre-market contracts are excluded.
-- OKX order handling is untested against the real exchange.
+- OKX order handling has only been tested against a simulated exchange, not OKX Demo Trading and not a real account.
 - Paper trading uses one 0.5% maintenance rate for every pair, while OKX uses tiers, so simulated liquidation is less accurate on small coins.
 - Simplified fills, funding, and isolated liquidation; no order-book queue, partial liquidity, maintenance tiers, cross margin, or exchange-identical liquidation.
 - Arming always ends on restart. OKX credentials are kept only in memory unless you set a master password and choose to save them, in which case they are stored encrypted and you unlock after each restart. AI keys persist across restarts, encrypted when a master password is set.

@@ -21,6 +21,7 @@ MochiPrep 的後端目前是 Node/TypeScript，打包後一個 process 約 83 Mi
   - Launcher 加後端（介面關閉時）必須明顯低於 83 MiB。
   - 介面打開時 WebView 的記憶體另外量、另外報告，不跟後端混算。
   - 每個 Release 都要附上量測數字和量測方法。
+  - **2026-11-16 實測結果（註記）**：Windows x86_64、介面關閉、閒置約 12 秒、live 行情連線中，三次量測的 working set 為 19.49、19.74、19.76 MiB（`node scripts/measure-memory.mjs --binary target/release/mochi-server.exe --gate`），通過 ≤ 20 MiB 的門檻（Node 基準 83 MiB）。達成方式是調校：tokio worker 執行緒降為 2，release profile 設 `lto = "fat"` 與 `codegen-units = 1`。擁有者決定不更換配置器（沒有套用 Windows segment heap）。Launcher 加後端 ≤ 66 MiB 的檢查仍需擁有者手動以 `--pid` 量測，尚未完成。
 - **功能對等**：現有的每一項功能都要在 Rust 後端上運作，判斷標準如下：
   - 現有的 Playwright e2e（`e2e/demo.spec.ts`）**不改測試內容**，直接打 Rust 後端就要通過。
   - 現有 279 個 TypeScript 單元與整合測試涵蓋的每個情境（帳務、風控、模擬撮合、清算、資金費、OKX 的各種失敗與未知結果、主密碼、AI provider 解析與重試、新聞、指標、回放），在 Rust 端都要有對應的測試。可以重新改寫，但不能少。
@@ -139,6 +140,8 @@ agent 的 system prompt 和 context 格式要與現在一致，換後端不能�
 用 mock 的 OKX 跑單元測試，可以涵蓋各種失敗與結果未知的情境。但簽章、WebSocket 倉位同步、拒絕有提現權限的 key 這些環節，只有實際連到 OKX 模擬盤才能確認。
 
 擁有者決定**等測試做完再決定**要不要把「OKX 模擬盤實測」列為切換條件。在 Rust 版通過全部 mock 測試和 e2e 之後，要把這個問題重新提出來，並在擁有者回覆之前，暫停切換。這項實測需要擁有者自己的模擬盤 API key，所以只能手動執行，不放進 CI。
+
+**2026-11-16 擁有者決定（註記）**：OKX 模擬盤實測**不是**切換條件。Rust 版目前只對模擬（行程內 fake）的交易所測試過，沒有對 OKX 模擬盤或真實帳戶測試過。`OKX_TRADING.md` 的 UNCONFIRMED 清單保留，並寫明這是信任真實資金之前建議由擁有者自行完成的檢查。
 
 ## 架構方向（我的提議，擁有者可推翻）
 

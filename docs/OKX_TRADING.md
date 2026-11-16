@@ -4,7 +4,7 @@
 
 > **Status: tested only against a simulated exchange.** The client follows OKX's published API, and its signature format was accepted by the real endpoint, but no order has ever been placed on OKX. Real money carries the risk of real loss, including from a bug in this code, and AI decisions can be wrong. You are responsible for every order.
 
-Both backends implement this: the Node server and the Rust server (`mochi-server`) follow the same rules. The Rust OKX paths have only been run against an in-process fake OKX, never against real OKX Demo or real money.
+The Rust server (`mochi-server`, with `mochi-okx`) implements this. Its OKX paths have only been run against an in-process fake OKX, never against real OKX Demo or real money.
 
 ## Before your first real order
 
@@ -18,7 +18,7 @@ Work through these in order, and stop at the first surprise.
 6. Stop the network or the backend while a position is open, and confirm the stop still sits on OKX.
 7. Only then create a real key, again **Trade only**, with small ceilings.
 
-These assumptions still need checking on the real exchange:
+The UNCONFIRMED list below is the recommended owner check before trusting real money. It is not a condition for installing or releasing MochiPrep: the owner decided on 2026-11-16 that OKX Demo testing is not required for the switch to the Rust backend. These assumptions still need checking on the real exchange:
 
 - The demo REST host is `https://openapi.okx.com`, per OKX's documentation.
 - `51603` means an order does not exist. Only that code counts as "not found", and anything else leaves the order unresolved.

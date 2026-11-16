@@ -1,6 +1,6 @@
 # Desktop launcher
 
-`mochi-launcher` is a tray app that runs the Rust backend (`mochi-server`) as a child process and opens the web interface in its own window. The testable parts (settings, import, tray model, supervisor, backend client) are in `mochi-launcher-core`; `mochi-launcher` is the Tauri shell around them. Node stays the default backend for `pnpm dev`, `pnpm start` and `pnpm test:e2e`.
+`mochi-launcher` is a tray app that runs the Rust backend (`mochi-server`) as a child process and opens the web interface in its own window. The testable parts (settings, import, tray model, supervisor, backend client) are in `mochi-launcher-core`; `mochi-launcher` is the Tauri shell around them.
 
 ## Running in development
 
@@ -36,7 +36,7 @@ Consent and launcher settings never go into the backend's SQLite. A missing or c
 ## Behaviour
 
 - The backend does not start until the current terms version is accepted. Declining, or closing the terms window, quits.
-- Before the first start, if the data folder has no `mochiprep.db`, the launcher offers once to import a `.mochiprep` folder (for example the Node backend's). The database is copied as a consistent snapshot; the original is not changed. Import into existing data is refused. A copy that cannot finish within 60 s (a source another program keeps writing to) gives up with an error, and the offer stays open.
+- Before the first start, if the data folder has no `mochiprep.db`, the launcher offers once to import a `.mochiprep` folder (for example the former Node backend's). The database is copied as a consistent snapshot; the original is not changed. Import into existing data is refused. A copy that cannot finish within 60 s (a source another program keeps writing to) gives up with an error, and the offer stays open.
 - The port defaults to 8787 and is set in Settings (1024 to 65535). The launcher never picks another port: a busy port shows `Error: port <p> is in use`.
 - Closing the interface window stops only the window; the backend and its agents keep running.
 - Disarm all is enabled while the backend runs and a real account is armed, or while its state cannot be read: disarming is always safe.
@@ -79,7 +79,7 @@ Run each row on Windows, macOS and Linux before a release. Rows marked OKX need 
 | 15 | Settings: enter `80`, Save | `Port must be a number from 1024 to 65535` shows; nothing is saved. |
 | 16 | Settings: change the port, Save, answer Yes | `Restart the backend now to use port <p>?` asks; Restart (with its confirmation if needed) brings the backend up on the new port. |
 | 17 | Settings: tick `Start MochiPrep when I log in`, Save, log out and in | MochiPrep starts at login; unticking removes it again. |
-| 18 | Import from a Node `.mochiprep` folder on a new data folder | Accounts and history appear in the interface; the source folder's files are unchanged. |
+| 18 | Import from a `.mochiprep` folder made by the former Node backend on a new data folder | Accounts and history appear in the interface; the source folder's files are unchanged. |
 | 19 | With the import offer open, copy any `mochiprep.db` into the data folder, then import a valid folder | `MochiPrep already has data here, so nothing was imported.`; the copied-in file is unchanged. With a `mochiprep.db` already there at launch, no offer is shown. |
 | 20 | Import from an empty folder, then Skip | The error shows inline and the offer stays open; Skip starts the backend on empty data. |
 | 21 | Linux: GNOME without AppIndicator | The panel replaces the tray icon, shows live status, and closing it asks to quit (when an agent runs). |
@@ -97,3 +97,13 @@ Run each row on Windows, macOS and Linux before a release. Rows marked OKX need 
 | 33 | Click the update item with the network cut | An error dialog names the download failure; the backend keeps running throughout and the interface still works. |
 | 34 | Click the update item with a paper agent running | Once the download finishes, `Stop MochiPrep's backend?` asks; Cancel changes nothing and the agent keeps running. During the download, Quit and Restart still work. |
 | 35 | Untick `Check for updates automatically`, Save, restart the launcher | No request goes to GitHub (watch with a proxy or firewall log) and no update item appears. |
+
+## Owner's pre-release checks
+
+These need the owner's machines and cannot run in CI. They are not done yet.
+
+| # | Check | Expected |
+|---|---|---|
+| 36 | Launcher plus backend memory with the interface closed: start the launcher, wait 12 s, then `node scripts/measure-memory.mjs --binary <mochi-server> --pid <launcher pid>` | The launcher tree is at most 66 MiB working set on Windows x86_64. |
+| 37 | Install and launch each unsigned artifact (Windows `.msi` and NSIS `.exe`, macOS `.dmg` for each architecture, Linux `.deb` and `.AppImage`) | The OS warning in README "Unsigned builds" appears and the documented steps get past it; the launcher starts and the terms window opens. |
+| 38 | One real update: publish a test release with a higher version from the draft, then update an older install from the tray | The tray shows `Update to v<version>`; clicking it downloads, installs and relaunches on the new version. |
