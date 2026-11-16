@@ -17,10 +17,13 @@
     "test:e2e:rust": "cargo build --release -p mochi-server && node e2e/run-rust.mjs",
     "typecheck": "pnpm -r --parallel typecheck",
     "golden": "pnpm --filter @mochiprep/server golden",
-    "measure:memory": "node scripts/measure-memory.mjs"
+    "measure:memory": "node scripts/measure-memory.mjs",
+    "tauri": "tauri",
+    "bundle": "node scripts/bundle.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.0",
+    "@tauri-apps/cli": "2.12.4",
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0",
     "vitest": "^5.1.0"
