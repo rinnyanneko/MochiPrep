@@ -32,10 +32,13 @@ fn spawn(port: u16, data: &std::path::Path, parent_mode: bool) -> Child {
     command.spawn().unwrap()
 }
 
-fn first_line(stdout: ChildStdout) -> String {
+/// Returns the reader too: dropping it would close the pipe, and the server's next println
+/// (the offline notice) would then panic.
+fn first_line(stdout: ChildStdout) -> (String, BufReader<ChildStdout>) {
+    let mut reader = BufReader::new(stdout);
     let mut line = String::new();
-    BufReader::new(stdout).read_line(&mut line).unwrap();
-    line
+    reader.read_line(&mut line).unwrap();
+    (line, reader)
 }
 
 fn wait_for_exit(child: &mut Child, within: Duration) -> Option<std::process::ExitStatus> {
@@ -54,7 +57,7 @@ fn prints_the_ready_line_with_the_bound_port() {
     let data = tempfile::tempdir().unwrap();
     let port = free_port();
     let mut child = spawn(port, data.path(), false);
-    let line = first_line(child.stdout.take().unwrap());
+    let (line, _stdout) = first_line(child.stdout.take().unwrap());
     child.kill().unwrap();
     child.wait().unwrap();
     let rest = line
@@ -71,8 +74,7 @@ fn exits_cleanly_when_stdin_closes_in_parent_mode() {
     let data = tempfile::tempdir().unwrap();
     let port = free_port();
     let mut child = spawn(port, data.path(), true);
-    let stdout = child.stdout.take().unwrap();
-    let line = first_line(stdout);
+    let (line, _stdout) = first_line(child.stdout.take().unwrap());
     assert!(line.starts_with(READY_PREFIX), "line was {line:?}");
     drop(child.stdin.take());
     let status = wait_for_exit(&mut child, Duration::from_secs(10));
@@ -88,7 +90,7 @@ fn ignores_stdin_without_parent_mode() {
     let data = tempfile::tempdir().unwrap();
     let port = free_port();
     let mut child = spawn(port, data.path(), false);
-    let line = first_line(child.stdout.take().unwrap());
+    let (line, _stdout) = first_line(child.stdout.take().unwrap());
     assert!(line.starts_with(READY_PREFIX), "line was {line:?}");
     drop(child.stdin.take());
     std::thread::sleep(Duration::from_secs(1));
@@ -96,12 +98,21 @@ fn ignores_stdin_without_parent_mode() {
     let mut body = String::new();
     if still_running {
         let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        // A hung server must fail the test, not hang it.
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         write!(
             stream,
             "GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
         )
         .unwrap();
-        stream.read_to_string(&mut body).unwrap();
+        let read = stream.read_to_string(&mut body);
+        if read.is_err() {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("no health response within 5 s: {read:?}");
+        }
     }
     child.kill().unwrap();
     child.wait().unwrap();
