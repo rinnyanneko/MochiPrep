@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "local",
+  "description": "The launcher's own pages. The interface window is deliberately absent: it loads the backend over http and gets no Tauri access.",
+  "windows": ["terms", "settings", "import", "panel"],
+  "permissions": [
+    "dialog:default",
+    "allow-accept-terms",
+    "allow-decline-terms",
+    "allow-close-terms"
+  ]
+}
