@@ -944,6 +944,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mochi-launcher-core"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "mochi-market"
 version = "0.1.0"
 dependencies = [
