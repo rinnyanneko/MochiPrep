@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { gateFailures, parseFootprint, parseProcStatus, parseWorkingSet } from './measure-memory.mjs';
+import { gateFailures, liveFeedOf, pickBackendPid, parseFootprint, parseProcStatus, parseWorkingSet } from './measure-memory.mjs';
 
 test('parseFootprint reads the phys_footprint line in KB and MB', () => {
   const kb = 'Footprint: 14 MB\n\n  Dirty  Clean\n\nmochi-server [123]: 64-bit    Footprint: 14 MB (16384 bytes per page)\n';
@@ -31,4 +31,18 @@ test('gateFailures', () => {
   assert.match(feed[0], /degraded/);
   // Other OSes only report.
   assert.deepEqual(gateFailures({ metric: 'rss', mib: 90, liveFeed: 'connected' }), []);
+});
+
+test('liveFeedOf ignores malformed and unrelated messages', () => {
+  const feed = (source, state) => `data: ${JSON.stringify({ type: 'feed', status: { source, state } })}`;
+  assert.equal(liveFeedOf(feed('LIVE', 'CONNECTED')), 'connected');
+  assert.equal(liveFeedOf(feed('LIVE', 'DEGRADED')), 'degraded');
+  assert.equal(liveFeedOf(feed('REPLAY', 'OFFLINE_REPLAY')), undefined);
+  assert.equal(liveFeedOf('data: {not json'), undefined);
+  assert.equal(liveFeedOf(': heartbeat'), undefined);
+});
+
+test('pickBackendPid refuses to fall back to the launcher', () => {
+  assert.equal(pickBackendPid([10, 11, 12], 10, (pid) => pid === 12), 12);
+  assert.throws(() => pickBackendPid([10, 11], 10, () => false), /no mochi-server/);
 });

@@ -57,6 +57,25 @@ export function gateFailures(report) {
   return failures;
 }
 
+/** The OKX feed state in one SSE message ("data: {...}"), or undefined for anything else, malformed JSON included. */
+export function liveFeedOf(message) {
+  if (!message.startsWith('data: ')) return undefined;
+  try {
+    const event = JSON.parse(message.slice(6));
+    if (event.type !== 'feed' || event.status?.source !== 'LIVE') return undefined;
+    return String(event.status.state).toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+/** The launcher's mochi-server descendant. Never the launcher itself: that would report its memory as the backend's. */
+export function pickBackendPid(members, launcherPid, isBackend) {
+  const found = members.find((member) => member !== launcherPid && isBackend(member));
+  if (found === undefined) throw new Error("no mochi-server process under pid " + launcherPid);
+  return found;
+}
+
 // ---- Sampling ---------------------------------------------------------------------------
 
 const round = (value) => Math.round(value * 100) / 100;
@@ -185,12 +204,12 @@ function startBackend(binary, port, dataDir) {
 
 /** Reads the event stream until the OKX (LIVE) feed is connected, or 30 s pass. */
 async function liveFeedState(port) {
-  // No Origin header: Node's fetch sends none, which is what /api/session accepts.
-  const { token } = await (await fetch(`http://127.0.0.1:${port}/api/session`)).json();
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), 30_000);
   let last = 'unknown';
   try {
+    // No Origin header: Node's fetch sends none, which is what /api/session accepts.
+    const { token } = await (await fetch(`http://127.0.0.1:${port}/api/session`)).json();
     const response = await fetch(`http://127.0.0.1:${port}/api/events?token=${encodeURIComponent(token)}`, {
       signal: abort.signal,
     });
@@ -202,16 +221,15 @@ async function liveFeedState(port) {
       while ((end = buffer.indexOf('\n\n')) >= 0) {
         const message = buffer.slice(0, end);
         buffer = buffer.slice(end + 2);
-        if (!message.startsWith('data: ')) continue;
-        const event = JSON.parse(message.slice(6));
-        if (event.type !== 'feed' || event.status?.source !== 'LIVE') continue;
+        const state = liveFeedOf(message);
+        if (!state) continue;
         // The first status is usually "connecting"; keep reading until the feed settles.
-        last = String(event.status.state).toLowerCase();
+        last = state;
         if (last === 'connected') return last;
       }
     }
-  } catch (error) {
-    if (error.name !== 'AbortError') throw error;
+  } catch {
+    // A reset stream is a missing data point for the feed only; the backend is still measurable.
   } finally {
     clearTimeout(timer);
     abort.abort();
@@ -249,7 +267,7 @@ async function main() {
     if (options.pid) {
       const members = treePids(pid);
       tree = launcherTree(members);
-      backendPid = members.find((member) => member !== pid && isMochiServer(member)) ?? pid;
+      backendPid = pickBackendPid(members, pid, isMochiServer);
     }
     const bytes = sampleBytes(backendPid);
     const report = {
