@@ -2,6 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod import_window;
+mod panel;
+mod settings_window;
 mod tray;
 mod windows;
 
@@ -23,7 +26,14 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             windows::accept_terms,
             windows::decline_terms,
-            windows::close_terms
+            windows::close_terms,
+            settings_window::get_settings,
+            settings_window::save_settings,
+            import_window::choose_import_folder,
+            import_window::run_import,
+            import_window::skip_import,
+            panel::panel_state,
+            panel::panel_action
         ])
         .setup(|app| app::setup(app.handle()))
         .build(tauri::generate_context!())

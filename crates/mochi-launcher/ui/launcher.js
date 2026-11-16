@@ -11,6 +11,10 @@ function showError(message) {
   error.hidden = false;
 }
 
+function clearError() {
+  document.getElementById("error").hidden = true;
+}
+
 function setUpTerms() {
   const text = document.getElementById("terms-text");
   const boxes = [document.getElementById("understand"), document.getElementById("accept")];
@@ -60,6 +64,95 @@ function setUpTerms() {
   quitButton.addEventListener("click", () => invoke("decline_terms").catch(showError));
 }
 
+function setUpSettings() {
+  const form = document.getElementById("settings-form");
+  const port = document.getElementById("port");
+  const autostart = document.getElementById("autostart");
+  const save = document.getElementById("save");
+  const saved = document.getElementById("saved");
+
+  invoke("get_settings")
+    .then((settings) => {
+      port.value = String(settings.port);
+      autostart.checked = settings.autostart;
+    })
+    .catch(showError);
+
+  // Any edit makes an earlier "Saved." stale.
+  form.addEventListener("input", () => { saved.hidden = true; });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    clearError();
+    saved.hidden = true;
+    save.disabled = true;
+    invoke("save_settings", { port: port.value, autostart: autostart.checked })
+      .then(() => { saved.hidden = false; })
+      .catch(showError)
+      .finally(() => { save.disabled = false; });
+  });
+}
+
+function setUpImport() {
+  const importButton = document.getElementById("import");
+  const skipButton = document.getElementById("skip");
+  const working = document.getElementById("working");
+
+  function setBusy(busy) {
+    importButton.disabled = busy;
+    skipButton.disabled = busy;
+    working.hidden = !busy;
+  }
+
+  importButton.addEventListener("click", async () => {
+    clearError();
+    setBusy(true);
+    try {
+      const folder = await invoke("choose_import_folder");
+      // A cancelled picker leaves the offer open.
+      if (folder !== null) {
+        await invoke("run_import", { folder });
+      }
+    } catch (error) {
+      showError(error);
+    } finally {
+      setBusy(false);
+    }
+  });
+  skipButton.addEventListener("click", () => invoke("skip_import").catch(showError));
+}
+
+function setUpPanel() {
+  const status = document.getElementById("status");
+  const armed = document.getElementById("armed");
+  const button = (action) => document.querySelector(`[data-action="${action}"]`);
+
+  function render(view) {
+    status.textContent = view.status;
+    armed.textContent = view.armed ?? "";
+    armed.hidden = view.armed === null;
+    button("open").disabled = !view.canOpenInterface;
+    button("disarm").disabled = !view.canDisarmAll;
+  }
+
+  // Listening first, so a change between the two calls is not lost.
+  window.__TAURI__.event.listen("panel-state", (event) => render(event.payload))
+    .then(() => invoke("panel_state"))
+    .then(render)
+    .catch(showError);
+  document.querySelectorAll("[data-action]").forEach((element) => {
+    element.addEventListener("click", () => {
+      clearError();
+      invoke("panel_action", { action: element.dataset.action }).catch(showError);
+    });
+  });
+}
+
 if (document.body.classList.contains("terms")) {
   setUpTerms();
+} else if (document.body.classList.contains("settings")) {
+  setUpSettings();
+} else if (document.body.classList.contains("import")) {
+  setUpImport();
+} else if (document.body.classList.contains("panel")) {
+  setUpPanel();
 }

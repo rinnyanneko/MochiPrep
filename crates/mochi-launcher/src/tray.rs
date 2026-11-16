@@ -1,4 +1,5 @@
 //! The tray icon and its menu, rebuilt from `menu_model` whenever the backend state changes.
+//! The fallback panel shows the same items and runs the same actions.
 
 use mochi_launcher_core::model::{menu_model, MenuModel};
 use tauri::image::Image;
@@ -7,6 +8,8 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{include_image, AppHandle, Manager};
 
 use crate::app::{self, lock, AppState};
+use crate::panel;
+use crate::settings_window;
 use crate::windows;
 
 const TRAY_ID: &str = "main";
@@ -17,6 +20,7 @@ const OPEN: &str = "open";
 const RESTART: &str = "restart";
 const DISARM: &str = "disarm";
 const TERMS: &str = "terms";
+const SETTINGS: &str = "settings";
 const QUIT: &str = "quit";
 
 fn icon(armed: bool) -> Image<'static> {
@@ -27,7 +31,7 @@ fn icon(armed: bool) -> Image<'static> {
     }
 }
 
-fn current_model(app: &AppHandle) -> MenuModel {
+pub fn current_model(app: &AppHandle) -> MenuModel {
     let state = app.state::<AppState>();
     let backend = lock(&state.state).clone();
     let snapshot = lock(&state.snapshot).clone();
@@ -82,6 +86,13 @@ fn build_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Menu<tauri::W
         true,
         None::<&str>,
     )?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        SETTINGS,
+        "Settings…",
+        true,
+        None::<&str>,
+    )?)?;
     menu.append(&MenuItem::with_id(app, QUIT, "Quit", true, None::<&str>)?)?;
     Ok(menu)
 }
@@ -99,12 +110,14 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
 }
 
 /// Rebuilds the menu and swaps the icon so an armed real account is visible without opening
-/// the menu. Failures are ignored: the next state change rebuilds it again.
+/// the menu, and updates the fallback panel if that is shown instead. Failures are ignored: the
+/// next state change rebuilds it again.
 pub fn refresh_menu(app: &AppHandle) {
+    let model = current_model(app);
+    panel::refresh_panel(app, &model);
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
-    let model = current_model(app);
     if let Ok(menu) = build_menu(app, &model) {
         let _ = tray.set_menu(Some(menu));
     }
@@ -114,8 +127,14 @@ pub fn refresh_menu(app: &AppHandle) {
 }
 
 fn on_menu_event(app: &AppHandle, event: MenuEvent) {
+    run_action(app, event.id().as_ref());
+}
+
+/// Runs a tray item by its id; the panel's buttons use the same ids.
+pub fn run_action(app: &AppHandle, action: &str) {
     let handle = app.clone();
-    match event.id().as_ref() {
+    match action {
+        SETTINGS => settings_window::open_settings(app),
         OPEN => windows::open_interface(app),
         TERMS => windows::open_terms(app),
         RESTART => {

@@ -6,6 +6,15 @@
   "permissions": [
     "allow-accept-terms",
     "allow-decline-terms",
-    "allow-close-terms"
+    "allow-close-terms",
+    "allow-get-settings",
+    "allow-save-settings",
+    "allow-choose-import-folder",
+    "allow-run-import",
+    "allow-skip-import",
+    "allow-panel-state",
+    "allow-panel-action",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
   ]
 }

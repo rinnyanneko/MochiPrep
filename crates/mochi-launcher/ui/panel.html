@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MochiPrep</title>
+  <link rel="stylesheet" href="launcher.css">
+</head>
+<body class="panel">
+  <main class="scroll">
+    <p id="status" class="status" role="status"></p>
+    <p id="armed" class="armed" role="alert" hidden></p>
+    <div class="buttons">
+      <button type="button" data-action="open" class="primary">Open interface</button>
+      <button type="button" data-action="restart">Restart backend</button>
+      <button type="button" data-action="disarm">Disarm all</button>
+      <hr>
+      <button type="button" data-action="terms">Risk &amp; disclaimer…</button>
+      <button type="button" data-action="settings">Settings…</button>
+      <button type="button" data-action="quit">Quit</button>
+    </div>
+    <p id="error" class="error" role="alert" hidden></p>
+  </main>
+
+  <script src="launcher.js"></script>
+</body>
+</html>

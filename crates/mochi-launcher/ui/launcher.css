@@ -106,3 +106,63 @@ button:disabled {
 }
 
 [hidden] { display: none !important; }
+
+.form {
+  display: grid;
+  gap: 10px;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+}
+
+.field input {
+  width: 10em;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+}
+
+.note {
+  margin: 0;
+  color: var(--muted);
+}
+
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.status {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+/* An armed real account is the one state the panel must not let pass unnoticed. */
+.armed {
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--error);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.buttons {
+  display: grid;
+  gap: 6px;
+}
+
+.buttons hr {
+  width: 100%;
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.panel .error { margin-top: 12px; }

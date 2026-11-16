@@ -15,6 +15,8 @@ use mochi_launcher_core::supervisor::{self, Backend, BackendCommand};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
+use crate::import_window::{self, should_offer_import, IMPORT};
+use crate::panel::{self, PANEL};
 use crate::tray::refresh_menu;
 use crate::windows::{self, INTERFACE, TERMS};
 
@@ -35,6 +37,9 @@ pub struct AppState {
     pub quitting: AtomicBool,
     /// Set while a Restart or Quit flow runs, so repeated clicks do not queue a dialog each.
     pub stopping: AtomicBool,
+    /// Set while a data import copies, so its window cannot be closed (which would start the
+    /// backend into the folder being written).
+    pub importing: AtomicBool,
 }
 
 /// A poisoned lock only means another thread panicked mid-update; the launcher's values are
@@ -62,8 +67,13 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         snapshot: Mutex::new(None),
         quitting: AtomicBool::new(false),
         stopping: AtomicBool::new(false),
+        importing: AtomicBool::new(false),
     });
-    crate::tray::create(app)?;
+    if panel::tray_available() {
+        crate::tray::create(app)?;
+    } else {
+        panel::open_panel(app)?;
+    }
     if accepted {
         let handle = app.clone();
         tauri::async_runtime::spawn(async move { start_backend(&handle).await });
@@ -93,9 +103,13 @@ pub fn on_second_launch(app: &AppHandle) {
     let running = *lock(&app.state::<AppState>().state) == BackendState::Running;
     if running {
         windows::open_interface(app);
-    } else if let Some(terms) = app.get_webview_window(TERMS) {
-        let _ = terms.unminimize();
-        let _ = terms.set_focus();
+    } else if let Some(window) = app
+        .get_webview_window(TERMS)
+        .or_else(|| app.get_webview_window(IMPORT))
+        .or_else(|| app.get_webview_window(PANEL))
+    {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
     } else {
         // Without this the second launch would look like it did nothing at all.
         let state = app.state::<AppState>();
@@ -151,16 +165,26 @@ fn set_state(app: &AppHandle, next: BackendState) {
     refresh_menu(app);
 }
 
-/// Starts the backend unless one is alive. Never before the terms are accepted: that is checked
-/// here, not by the callers, so no menu item or second launch can get around it.
+/// Starts the backend unless one is alive. Never before the terms are accepted, and never while
+/// the one-time import is still unanswered (a backend would create the database the import
+/// needs to write): both are checked here, not by the callers, so no menu item or second launch
+/// can get around them.
 pub async fn start_backend(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let (accepted, port) = {
+    let (accepted, offer_import, port) = {
         let settings = lock(&state.settings);
-        (terms_accepted(&settings), settings.port)
+        (
+            terms_accepted(&settings),
+            should_offer_import(&settings, &state.data_dir),
+            settings.port,
+        )
     };
     if !accepted {
         windows::open_terms(app);
+        return;
+    }
+    if offer_import {
+        import_window::open_import(app);
         return;
     }
     let mut backend = state.backend.lock().await;
