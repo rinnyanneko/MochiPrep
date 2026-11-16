@@ -18,6 +18,11 @@ pub struct Config {
     /// unavailable (`/api/news` names every enabled feed as unreadable). Node has no such
     /// switch; it always connects.
     pub offline: bool,
+    /// `MOCHIPREP_PARENT_STDIN=1`: a launcher started this process and holds its stdin, so the
+    /// server shuts down gracefully when stdin ends. That also covers a launcher that crashed or
+    /// was killed, which cannot send a signal. Off by default so a shell with no input (CI,
+    /// `< /dev/null`) never stops a server.
+    pub parent_stdin: bool,
 }
 
 impl Config {
@@ -74,6 +79,7 @@ pub fn config_from(var: impl Fn(&str) -> Option<String>) -> Config {
         data_dir,
         allowed_origins,
         offline: var("MOCHIPREP_OFFLINE").is_some_and(|value| value.trim() == "1"),
+        parent_stdin: var("MOCHIPREP_PARENT_STDIN").is_some_and(|value| value.trim() == "1"),
     }
 }
 
@@ -89,4 +95,26 @@ fn repo_root() -> PathBuf {
         .and_then(Path::parent)
         .expect("crates/mochi-server sits two levels below the repo root")
         .to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parent_stdin(value: Option<&str>) -> bool {
+        config_from(|name| match name {
+            "MOCHIPREP_PARENT_STDIN" => value.map(String::from),
+            _ => None,
+        })
+        .parent_stdin
+    }
+
+    #[test]
+    fn parent_stdin_is_on_only_for_one() {
+        assert!(parent_stdin(Some("1")));
+        assert!(parent_stdin(Some(" 1 ")));
+        assert!(!parent_stdin(None));
+        assert!(!parent_stdin(Some("0")));
+        assert!(!parent_stdin(Some("true")));
+    }
 }

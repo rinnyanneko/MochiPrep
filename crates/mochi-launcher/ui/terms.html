@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MochiPrep: Risk warning and disclaimer</title>
+  <link rel="stylesheet" href="launcher.css">
+</head>
+<body class="terms">
+  <main id="terms-text" class="scroll" tabindex="0" aria-label="Risk warning and disclaimer text">
+    <h1>Risk warning and disclaimer <span class="version">· Version 1</span></h1>
+
+    <p><strong>MochiPrep is software, not advice.</strong> Nothing it shows, including AI output, suggestions, backtests, replays, or the leaderboard, is financial, investment, legal, or tax advice. Do your own research.</p>
+
+    <p><strong>You can lose all of the money you trade, and in extreme conditions more.</strong> Perpetual futures use leverage, so a small price move can liquidate a position. In a fast or illiquid market, a position can be closed at a price worse than its liquidation price. The loss can then exceed the margin, and your account balance can go negative, leaving you owing the difference to the exchange. Prices can also gap past a stop loss, and an exchange can fail to execute a stop.</p>
+
+    <p><strong>AI decisions can be wrong.</strong> Models make mistakes, misread data, and can be misled by false or manipulative news. The risk engine limits order size and leverage, but it cannot tell a bad decision from a good one.</p>
+
+    <p><strong>Agents trade while you are away.</strong> The backend keeps running when the interface is closed. On an armed real account, agents in automatic mode place orders without asking you. Stop them or disarm the account whenever you are not prepared to accept that.</p>
+
+    <p><strong>The software can have bugs.</strong> The OKX integration in this version has been tested only against a simulated exchange, not against OKX Demo Trading or a real OKX account. A bug in MochiPrep, OKX, your network, or an AI provider can cause orders you did not intend, or prevent the exits you did.</p>
+
+    <p><strong>Simulated results are not predictive.</strong> Paper trading, demo mode, and replay use simulated fills. They do not show what would happen with real money.</p>
+
+    <p><strong>Keep your keys safe.</strong> Use exchange keys with trade permission only, never withdrawal permission. Anyone with access to your computer while MochiPrep is unlocked may be able to use them.</p>
+
+    <p><strong>Check your local rules.</strong> Crypto derivatives are restricted or prohibited in some countries. You are responsible for making sure you may use them.</p>
+
+    <p><strong>No warranty, no liability.</strong> MochiPrep is provided "as is" under the GNU AGPL v3, without warranty of any kind. To the extent the law allows, its authors and contributors are not liable for any loss arising from its use.</p>
+
+    <div id="consent" class="consent">
+      <label><input type="checkbox" id="understand" disabled> I understand that I can lose all of the funds I trade, and in extreme conditions more, including through AI errors or software bugs.</label>
+      <label><input type="checkbox" id="accept" disabled> I have read and accept this disclaimer. I am responsible for every order placed through MochiPrep.</label>
+    </div>
+  </main>
+
+  <footer class="actions">
+    <p id="hint" class="hint">Scroll to the end to continue.</p>
+    <p id="error" class="error" role="alert" hidden></p>
+    <button type="button" id="quit">Quit</button>
+    <button type="button" id="continue" class="primary" disabled>Continue</button>
+    <button type="button" id="close" class="primary" hidden>Close</button>
+  </footer>
+
+  <script src="launcher.js"></script>
+</body>
+</html>

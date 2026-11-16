@@ -1,0 +1,30 @@
+[package]
+name = "mochi-launcher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "MochiPrep desktop launcher: terms, tray, and the backend as a child process"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+mochi-launcher-core = { path = "../mochi-launcher-core" }
+# tray-icon is the launcher's whole surface; everything else stays at Tauri's defaults.
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-autostart = "2"
+tokio = { workspace = true }
+serde = { workspace = true }
+
+# Asks the session bus whether a tray exists (panel.rs); other systems always have one. The
+# check uses zbus's blocking API on its own thread, so the features are named rather than left to
+# the defaults: `blocking-api` for `zbus::blocking`, `async-io` as the executor it runs on.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

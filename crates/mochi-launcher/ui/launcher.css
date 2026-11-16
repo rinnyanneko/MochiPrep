@@ -1,0 +1,174 @@
+:root {
+  --bg: #fdf8f3;
+  --fg: #2b2433;
+  --muted: #6b6274;
+  --line: #e6dccf;
+  --accent: #2b2433;
+  --accent-fg: #fdf1e6;
+  --error: #b42318;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1d1922;
+    --fg: #f3ece4;
+    --muted: #a9a0b2;
+    --line: #3a3342;
+    --accent: #fdf1e6;
+    --accent-fg: #2b2433;
+    --error: #f97066;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+
+/* The terms text is focusable so the keyboard can scroll it; inset, the ring is not clipped. */
+.scroll:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+h1 .version {
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.consent {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.consent label {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.consent input { margin-top: 4px; }
+
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 12px 24px;
+  border-top: 1px solid var(--line);
+}
+
+.hint, .error {
+  margin: 0 auto 0 0;
+  color: var(--muted);
+}
+
+.error { color: var(--error); }
+
+button {
+  padding: 6px 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+[hidden] { display: none !important; }
+
+.form {
+  display: grid;
+  gap: 10px;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+}
+
+.field input {
+  width: 10em;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+}
+
+.note {
+  margin: 0;
+  color: var(--muted);
+}
+
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.status {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+/* An armed real account is the one state the panel must not let pass unnoticed. */
+.armed {
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--error);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.buttons {
+  display: grid;
+  gap: 6px;
+}
+
+.buttons hr {
+  width: 100%;
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.panel .error { margin-top: 12px; }

@@ -1,11 +1,14 @@
 use std::future::IntoFuture;
+use std::io::{Read, Write};
 use std::net::Ipv4Addr;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
 use mochi_market::okx_public::{OkxPublicFeed, REST_BASE, WS_URL};
-use mochi_server::{app, load_config, AppState, RuntimeHandle, RuntimeOptions};
+use mochi_server::{
+    app, load_config, AppState, RuntimeHandle, RuntimeOptions, EXIT_PORT_IN_USE, READY_PREFIX,
+};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::sleep;
@@ -51,22 +54,33 @@ async fn main() -> ExitCode {
         Ok(listener) => listener,
         Err(error) => {
             eprintln!("Cannot listen on 127.0.0.1:{}: {error}", config.port);
+            return if error.kind() == std::io::ErrorKind::AddrInUse {
+                ExitCode::from(EXIT_PORT_IN_USE)
+            } else {
+                ExitCode::FAILURE
+            };
+        }
+    };
+    // The port actually bound, which a launcher parses; flushed because piped stdout is buffered.
+    let port = match listener.local_addr() {
+        Ok(address) => address.port(),
+        Err(error) => {
+            eprintln!("Cannot read the listening address: {error}");
             return ExitCode::FAILURE;
         }
     };
-    println!(
-        "MochiPrep backend on http://127.0.0.1:{} (data: {})",
-        config.port,
-        config.data_dir.display()
-    );
+    println!("{READY_PREFIX}{port} (data: {})", config.data_dir.display());
+    let _ = std::io::stdout().flush();
     if config.offline {
         println!("MOCHIPREP_OFFLINE=1: not connecting to OKX market data or news feeds");
+        let _ = std::io::stdout().flush();
     }
+    let stdin_closed = config.parent_stdin.then(watch_stdin);
 
     let (signalled, on_signal) = oneshot::channel::<()>();
     let server = axum::serve(listener, app(state))
         .with_graceful_shutdown(async move {
-            shutdown_signal().await;
+            shutdown_signal(stdin_closed).await;
             // Open event streams never finish on their own, and graceful shutdown waits for
             // every response to finish.
             streams.close_all();
@@ -99,8 +113,38 @@ async fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Ctrl-C everywhere, and SIGTERM on Unix, as Node handles SIGINT and SIGTERM.
-async fn shutdown_signal() {
+/// Resolves when the parent closes this process's stdin. A plain thread does the blocking read:
+/// a blocking task would keep the runtime from dropping at exit, and the thread dies with the
+/// process.
+fn watch_stdin() -> oneshot::Receiver<()> {
+    let (closed, on_close) = oneshot::channel();
+    std::thread::spawn(move || {
+        let mut sink = [0u8; 256];
+        let mut stdin = std::io::stdin().lock();
+        // Anything the parent writes is ignored; only the end of the stream (or an error, which
+        // means the pipe is gone) matters.
+        while matches!(stdin.read(&mut sink), Ok(n) if n > 0) {}
+        let _ = closed.send(());
+    });
+    on_close
+}
+
+/// Ctrl-C everywhere, and SIGTERM on Unix, as Node handles SIGINT and SIGTERM. In parent mode,
+/// stdin ending counts too.
+async fn shutdown_signal(stdin_closed: Option<oneshot::Receiver<()>>) {
+    let parent_gone = async {
+        match stdin_closed {
+            Some(closed) => {
+                // The thread only ends by sending; a dropped sender would be a bug, so do not
+                // treat it as a reason to stop.
+                if closed.await.is_err() {
+                    std::future::pending::<()>().await;
+                }
+            }
+            None => std::future::pending::<()>().await,
+        }
+    };
+
     let ctrl_c = async {
         if tokio::signal::ctrl_c().await.is_err() {
             // Without a handler we cannot be stopped gracefully; wait forever rather than exit now.
@@ -123,5 +167,6 @@ async fn shutdown_signal() {
     tokio::select! {
         () = ctrl_c => {}
         () = terminate => {}
+        () = parent_gone => {}
     }
 }

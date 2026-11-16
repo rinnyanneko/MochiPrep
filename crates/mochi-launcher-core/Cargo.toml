@@ -1,0 +1,21 @@
+[package]
+name = "mochi-launcher-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# The backend is plain HTTP on loopback: hyper's HTTP/1 client needs no TLS, where reqwest
+# compiled with the workspace's rustls feature would demand a crypto provider.
+http-body-util = { workspace = true }
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+# One rusqlite version across the workspace (mochi-store uses 0.37); "backup" is for the import.
+rusqlite = { version = "0.37", features = ["bundled", "backup"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["process", "io-util"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
