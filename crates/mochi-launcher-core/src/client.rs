@@ -118,11 +118,7 @@ impl BackendClient {
         let mut disarmed = 0;
         let mut first_error = None;
         for id in &armed {
-            let result = match account_path(id) {
-                Some(path) => self.authed(Method::POST, &path, true).await.map(|_| ()),
-                None => Err(ClientError::Unreadable("unexpected account id".to_string())),
-            };
-            match result {
+            match self.disarm(id).await {
                 Ok(()) => disarmed += 1,
                 Err(error) => {
                     first_error.get_or_insert(error);
@@ -133,6 +129,14 @@ impl BackendClient {
             Some(error) => Err(error),
             None => Ok(disarmed),
         }
+    }
+
+    /// Disarms one OKX account: the same request the web interface sends.
+    pub async fn disarm(&self, account_id: &str) -> Result<(), ClientError> {
+        let path = account_path(account_id)
+            .ok_or_else(|| ClientError::Unreadable("unexpected account id".to_string()))?;
+        self.authed(Method::POST, &path, true).await?;
+        Ok(())
     }
 
     /// A request with the bearer token. A 401 means the token belongs to an earlier backend

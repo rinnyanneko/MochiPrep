@@ -4,7 +4,7 @@
 use std::net::{Ipv4Addr, TcpListener};
 use std::path::{Path, PathBuf};
 
-use mochi_launcher_core::client::BackendClient;
+use mochi_launcher_core::client::{BackendClient, ClientError};
 use mochi_launcher_core::model::BackendSnapshot;
 use mochi_launcher_core::supervisor::{self, BackendCommand, StartError};
 
@@ -65,6 +65,25 @@ async fn snapshot_of_a_fresh_backend_is_idle() {
         }
     );
     assert_eq!(disarmed.expect("disarm"), 0);
+}
+
+/// Disarm is the launcher's only real-money request. No live account exists here, so an unknown
+/// id is disarmed: the server must take the request itself (a 400 or 415 would mean the body or
+/// its content type is wrong) and then answer that the account does not exist.
+#[tokio::test]
+async fn disarm_request_shape_is_accepted() {
+    let data = tempfile::tempdir().unwrap();
+    let port = free_port();
+    let backend = supervisor::start(&command(port, data.path()))
+        .await
+        .expect("starts");
+    let answer = BackendClient::new(port).disarm("acct_unknown").await;
+    backend.stop().await;
+    match answer {
+        Ok(()) => {}
+        Err(ClientError::Status { status: 404, .. }) => {}
+        Err(other) => panic!("disarm request refused: {other}"),
+    }
 }
 
 #[tokio::test]

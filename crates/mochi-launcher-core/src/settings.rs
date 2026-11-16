@@ -51,8 +51,10 @@ pub fn load_settings(path: &Path) -> LauncherSettings {
     s
 }
 
-/// Writes a temp file beside the target and renames it, so a crash never leaves a half-written
-/// consent file.
+/// Writes a temp file beside the target, flushes it to disk and renames it over the target, so a
+/// crash of the launcher never leaves a half-written consent file. The directory entry is not
+/// synced, so after a power loss the old file, or on some file systems an empty one, may come
+/// back; either loads as defaults or as the previous consent, never as an invented acceptance.
 pub fn save_settings(path: &Path, s: &LauncherSettings) -> std::io::Result<()> {
     let dir = path
         .parent()
@@ -61,11 +63,18 @@ pub fn save_settings(path: &Path, s: &LauncherSettings) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let tmp = path.with_extension("json.tmp");
     let body = serde_json::to_string_pretty(s).map_err(std::io::Error::other)?;
-    let result = std::fs::write(&tmp, body).and_then(|()| std::fs::rename(&tmp, path));
+    let result = write_synced(&tmp, body.as_bytes()).and_then(|()| std::fs::rename(&tmp, path));
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
     result
+}
+
+fn write_synced(path: &Path, body: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(body)?;
+    file.sync_all()
 }
 
 pub fn terms_accepted(s: &LauncherSettings) -> bool {

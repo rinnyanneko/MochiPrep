@@ -1,6 +1,7 @@
 //! Runs `mochi-server` as the launcher's child: start it, wait until it serves the API, stop it.
 
 use std::collections::VecDeque;
+use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -68,11 +69,23 @@ impl fmt::Display for StartError {
 impl std::error::Error for StartError {}
 
 /// A running backend child. Dropping it kills the process; `stop` lets it shut down cleanly.
-#[derive(Debug)]
 pub struct Backend {
     child: Child,
     stdin: Option<ChildStdin>,
     port: u16,
+    /// Still filled after the start, so a backend that dies later can say why.
+    stderr_tail: StderrTail,
+}
+
+/// Leaves out the stderr tail: `Debug` output can end up anywhere, and the tail is the child's
+/// raw output.
+impl fmt::Debug for Backend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Backend")
+            .field("pid", &self.child.id())
+            .field("port", &self.port)
+            .finish_non_exhaustive()
+    }
 }
 
 type StderrTail = Arc<Mutex<VecDeque<u8>>>;
@@ -81,25 +94,7 @@ type StderrTail = Arc<Mutex<VecDeque<u8>>>;
 /// 20 s of spawning. The child is killed on every error path.
 pub async fn start(cmd: &BackendCommand) -> Result<Backend, StartError> {
     let deadline = Instant::now() + START_TIMEOUT;
-    let mut command = Command::new(&cmd.program);
-    command
-        .env("MOCHIPREP_PORT", cmd.port.to_string())
-        .env("MOCHIPREP_DATA_DIR", &cmd.data_dir)
-        // Closing stdin is how `stop` asks it to exit, and how it notices the launcher died.
-        .env("MOCHIPREP_PARENT_STDIN", "1")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    // The command is the whole truth: an inherited MOCHIPREP_OFFLINE must not override it.
-    if cmd.offline {
-        command.env("MOCHIPREP_OFFLINE", "1");
-    } else {
-        command.env_remove("MOCHIPREP_OFFLINE");
-    }
-    #[cfg(windows)]
-    command.creation_flags(CREATE_NO_WINDOW);
-
+    let mut command = backend_command(cmd, std::env::vars_os().map(|(name, _)| name));
     let mut child = command
         .spawn()
         .map_err(|error| StartError::Spawn(error.to_string()))?;
@@ -140,8 +135,47 @@ pub async fn start(cmd: &BackendCommand) -> Result<Backend, StartError> {
         child,
         stdin,
         port: cmd.port,
+        stderr_tail: tail,
     })
 }
+
+/// The backend's configuration comes from the launcher alone. Every `MOCHIPREP_*` variable the
+/// launcher inherited is removed first (a shell's `MOCHIPREP_ALLOWED_ORIGINS`, say, would widen
+/// who can call the API), then only the ones the launcher means are set.
+fn backend_command(cmd: &BackendCommand, inherited: impl IntoIterator<Item = OsString>) -> Command {
+    let mut command = Command::new(&cmd.program);
+    for name in inherited {
+        if is_mochiprep_variable(&name) {
+            command.env_remove(name);
+        }
+    }
+    command
+        .env("MOCHIPREP_PORT", cmd.port.to_string())
+        .env("MOCHIPREP_DATA_DIR", &cmd.data_dir)
+        // Closing stdin is how `stop` asks it to exit, and how it notices the launcher died.
+        .env("MOCHIPREP_PARENT_STDIN", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    if cmd.offline {
+        command.env("MOCHIPREP_OFFLINE", "1");
+    }
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
+/// Ignoring case because Windows environment names are case-insensitive: `mochiprep_port` is
+/// read as `MOCHIPREP_PORT` there.
+fn is_mochiprep_variable(name: &OsStr) -> bool {
+    name.to_str().is_some_and(|name| {
+        name.get(..PREFIX.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(PREFIX))
+    })
+}
+
+const PREFIX: &str = "MOCHIPREP_";
 
 impl Backend {
     pub fn port(&self) -> u16 {
@@ -152,6 +186,11 @@ impl Backend {
     /// that may still hold armed accounts.
     pub fn is_alive(&mut self) -> bool {
         !matches!(self.child.try_wait(), Ok(Some(_)))
+    }
+
+    /// The last of the child's stderr, trimmed; empty if it wrote none.
+    pub fn stderr_tail(&self) -> String {
+        tail_text(&self.stderr_tail)
     }
 
     /// Closes stdin, which the backend takes as the signal to shut down, and kills it if it
@@ -217,17 +256,19 @@ async fn exited(
     if let Some(task) = stderr_task {
         let _ = timeout(STDERR_SETTLE, task).await;
     }
-    let stderr_tail = tail
-        .lock()
+    StartError::Exited {
+        code: status.code(),
+        stderr_tail: tail_text(tail),
+    }
+}
+
+fn tail_text(tail: &StderrTail) -> String {
+    tail.lock()
         .map(|tail| {
             let bytes: Vec<u8> = tail.iter().copied().collect();
             String::from_utf8_lossy(&bytes).trim().to_string()
         })
-        .unwrap_or_default();
-    StartError::Exited {
-        code: status.code(),
-        stderr_tail,
-    }
+        .unwrap_or_default()
 }
 
 async fn kill(mut child: Child) -> StartError {
@@ -238,6 +279,63 @@ async fn kill(mut child: Child) -> StartError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inherited_mochiprep_variables_do_not_reach_the_backend() {
+        let cmd = BackendCommand {
+            program: PathBuf::from("mochi-server"),
+            port: 8977,
+            data_dir: PathBuf::from("data"),
+            offline: false,
+        };
+        let inherited = [
+            "MOCHIPREP_ALLOWED_ORIGINS",
+            "mochiprep_host",
+            "MOCHIPREP_OFFLINE",
+            "MOCHIPREP_PORT",
+            "PATH",
+        ]
+        .map(OsString::from);
+        let command = backend_command(&cmd, inherited);
+        let envs: Vec<(String, Option<String>)> = command
+            .as_std()
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        let value = |name: &str| {
+            envs.iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .map(|(_, value)| value.clone())
+        };
+        // Removed: present in the list with no value.
+        assert_eq!(value("MOCHIPREP_ALLOWED_ORIGINS"), Some(None));
+        assert_eq!(value("MOCHIPREP_HOST"), Some(None));
+        assert_eq!(value("MOCHIPREP_OFFLINE"), Some(None));
+        // Set by the launcher, whatever was inherited.
+        assert_eq!(value("MOCHIPREP_PORT"), Some(Some("8977".to_string())));
+        assert_eq!(value("MOCHIPREP_DATA_DIR"), Some(Some("data".to_string())));
+        assert_eq!(value("MOCHIPREP_PARENT_STDIN"), Some(Some("1".to_string())));
+        // Anything else is inherited untouched.
+        assert_eq!(value("PATH"), None);
+
+        let offline = backend_command(
+            &BackendCommand {
+                offline: true,
+                ..cmd
+            },
+            [],
+        );
+        let set_offline = offline
+            .as_std()
+            .get_envs()
+            .any(|(name, value)| name == "MOCHIPREP_OFFLINE" && value == Some(OsStr::new("1")));
+        assert!(set_offline);
+    }
 
     #[test]
     fn errors_read_as_the_tray_shows_them() {
