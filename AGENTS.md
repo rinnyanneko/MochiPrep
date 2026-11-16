@@ -32,6 +32,7 @@ The backend is Rust. Node is only for the web UI and the scripts.
     cargo test --workspace    # Rust crates; on Linux mochi-launcher needs libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev (or add --exclude mochi-launcher)
     pnpm bundle -- --target <triple>   # installers
     pnpm measure:memory       # memory gate, see README
+    node --test "scripts/*.test.mjs"   # release, updater-manifest and memory scripts
 
 Needs Node >= 22.13 and a Rust toolchain. Workspace packages export TypeScript source, so web tests, typecheck and `dev` need no build step.
 
@@ -40,7 +41,7 @@ Needs Node >= 22.13 and a Rust toolchain. Workspace packages export TypeScript s
 - `mochi-server` serves the Node-era API contract: auth, SSE, paper trading, replay, market data, instruments, news, AI providers, agents, suggestions, demo mode, the master-password vault and OKX trading. It embeds `apps/web/dist`, so `pnpm build` first if you run it by hand.
 - OKX has only been run against the in-process fake OKX, never OKX Demo or a real account. The UNCONFIRMED list in `docs/OKX_TRADING.md` is the owner's recommended check before trusting real money (the owner decided on 2026-11-16 that it is not a release condition).
 - `MOCHIPREP_OFFLINE=1`: no OKX public feed and no news fetching (the replay still runs). The e2e config sets it.
-- Releases: a `vX.Y.Z` tag matching `[workspace.package].version` runs `.github/workflows/release.yml`, which builds a DRAFT release; the owner publishes. Builds are not OS code-signed; updater artifacts are signed.
+- Releases: a `vX.Y.Z` tag matching `[workspace.package].version` runs `.github/workflows/release.yml`, which creates a DRAFT release, uploads every leg's bundles to it by id, then writes `latest.json` once with `scripts/updater-manifest.mjs`; the owner publishes. Builds are not OS code-signed; updater artifacts are signed.
 - Performance statistics (`performance.rs`), fractions and times use `f64` or integers by design; money never does.
 - The vault format stays byte-compatible with the golden fixtures in `crates/golden`. Migrations live in `crates/mochi-store/migrations/`.
 - Rust doc comments that name `packages/...` or `apps/server/...` refer to the Node backend, removed in the switch-over and still in git history.

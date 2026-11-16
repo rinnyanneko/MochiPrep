@@ -2,6 +2,7 @@ name: Build
 
 # Reusable: builds the launcher for all six targets. Permissions are inherited from the caller, so
 # only a caller that sets `contents: write` (the release workflow) can upload to a release.
+# Third-party actions are pinned by commit: this job holds the updater signing key.
 on:
   workflow_call:
     inputs:
@@ -11,7 +12,9 @@ on:
       upload-release:
         type: boolean
         required: true
-      release-tag:
+      # The draft the release workflow created. By id, because GitHub's lookup by tag does not
+      # see drafts, and six legs looking up by tag would each create their own draft.
+      release-id:
         type: string
         required: false
         default: ""
@@ -41,16 +44,18 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.99"
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      # rustup ships on every runner image; no third-party action needed next to the signing key.
+      - name: Install Rust
+        shell: bash
+        run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+          rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ${{ matrix.target }}
       - name: Install Linux build packages
@@ -64,14 +69,17 @@ jobs:
         run: cargo build --release -p mochi-server --target ${{ matrix.target }}
       - name: Stage backend as externalBin
         run: node scripts/stage-backend.mjs ${{ matrix.target }}
+      # The numbers are for reference (the gate is checked on Windows x86_64 before a release), so
+      # a flaky run must not block a release; in CI it still fails loudly.
       - name: Measure backend memory
+        continue-on-error: ${{ inputs.upload-release }}
         run: node scripts/measure-memory.mjs --binary target/${{ matrix.target }}/release/mochi-server${{ matrix.exe }} --port 8987 --out memory-${{ matrix.target }}.json
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
           name: memory-${{ matrix.target }}
           path: memory-${{ matrix.target }}.json
-          if-no-files-found: warn
+          if-no-files-found: ${{ inputs.upload-release && 'warn' || 'error' }}
       # The release config enables updater artifacts, which need a signing key. Unsigned CI runs
       # turn them off with a second --config that Tauri merges over the first.
       - name: Write no-updater override
@@ -79,7 +87,7 @@ jobs:
         shell: bash
         run: echo '{"bundle":{"createUpdaterArtifacts":false}}' > "$RUNNER_TEMP/no-updater.json"
       - name: Bundle launcher
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -93,11 +101,11 @@ jobs:
             --bundles ${{ matrix.bundles }}
             --config ${{ github.workspace }}/crates/mochi-launcher/tauri.release.conf.json
             ${{ !inputs.sign-updater && format('--config {0}/no-updater.json', runner.temp) || '' }}
-          tagName: ${{ inputs.upload-release && inputs.release-tag || '' }}
-          releaseName: ${{ inputs.upload-release && inputs.release-tag || '' }}
+          # An empty id uploads nothing (CI). The release workflow writes latest.json once, after
+          # every leg, so no leg merges it concurrently and loses another's platforms.
+          releaseId: ${{ inputs.upload-release && inputs.release-id || '' }}
           releaseDraft: true
-          updaterJsonPreferNsis: true
-          includeUpdaterJson: ${{ inputs.upload-release }}
+          includeUpdaterJson: false
       - uses: actions/upload-artifact@v4
         if: ${{ !inputs.upload-release }}
         with:

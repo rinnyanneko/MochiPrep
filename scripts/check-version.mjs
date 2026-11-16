@@ -4,8 +4,7 @@
 //
 //   node scripts/check-version.mjs v0.1.0
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isMain } from './is-main.mjs';
 
 /** The `version` under `[workspace.package]`, or null. */
 export function workspaceVersion(toml) {
@@ -23,7 +22,7 @@ export function checkTag(tag, toml) {
   return null;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const tag = process.argv[2];
   if (!tag) {
     console.error('usage: node scripts/check-version.mjs <tag>');

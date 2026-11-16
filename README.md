@@ -31,7 +31,7 @@ The installers are not code-signed by Windows or Apple, so your system warns you
 ### Updating
 
 - Windows, macOS and the Linux AppImage update from the tray: when a newer release exists the menu shows an update item, and clicking it downloads, installs and restarts.
-- A `.deb` or a distribution package (such as the AUR) updates through the package manager. The tray only says a version is available and opens the release page.
+- A `.deb` updates through the package manager, as would a distribution package if one is published. The tray only says a version is available and opens the release page.
 - The launcher checks for a new version at start and every 24 hours. Turn that off with **Check for updates automatically** in Settings.
 
 ## Memory use

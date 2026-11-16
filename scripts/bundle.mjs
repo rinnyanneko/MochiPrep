@@ -1,7 +1,9 @@
 // pnpm bundle --target <triple> [extra tauri build args]
 // Builds the web UI, the release backend, stages it as the launcher's externalBin, then bundles.
-// Args after --target <triple> go to `tauri build` (CI appends --config for no-signing-key runs).
+// Args after --target <triple> go to `tauri build`.
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,8 +31,22 @@ function run(cmd, cmdArgs) {
 run("pnpm", ["build"]);
 run("cargo", ["build", "--release", "-p", "mochi-server", "--target", triple]);
 run("node", ["scripts/stage-backend.mjs", triple]);
+// The release config turns on updater artifacts, and Tauri fails after bundling when it cannot
+// sign them. Without a signing key a local bundle gets the installers only; a second --config is
+// merged over the first. An explicit --config in args comes later and still wins.
+const overrides = [];
+if (!process.env.TAURI_SIGNING_PRIVATE_KEY) {
+  const overrideDir = mkdtempSync(join(tmpdir(), "mochi-bundle-"));
+  // On exit rather than in a finally: run() ends the process on a failed step.
+  process.on("exit", () => rmSync(overrideDir, { recursive: true, force: true }));
+  const override = join(overrideDir, "no-updater.json");
+  writeFileSync(override, JSON.stringify({ bundle: { createUpdaterArtifacts: false } }));
+  overrides.push("--config", override);
+  console.log("TAURI_SIGNING_PRIVATE_KEY is not set: updater artifacts are skipped, installers only.");
+}
 run("pnpm", [
   "tauri", "build",
   "--config", "crates/mochi-launcher/tauri.release.conf.json",
+  ...overrides,
   ...args,
 ]);

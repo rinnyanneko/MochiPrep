@@ -6,21 +6,23 @@ import { test } from 'node:test';
 import { checkTag, workspaceVersion } from './check-version.mjs';
 import { buildNotes, readReports } from './release-notes.mjs';
 
-const win = { target: 'x86_64-pc-windows-msvc', metric: 'workingSet', bytes: 19327352, mib: 18.4, liveFeed: 'connected', idleSeconds: 12, measuredAt: '2026-11-16T00:00:00Z', commit: 'abc1234' };
-const mac = { target: 'aarch64-apple-darwin', metric: 'footprint', bytes: 25165824, mib: 24, liveFeed: 'degraded', idleSeconds: 12, measuredAt: '2026-11-16T00:00:00Z', commit: 'abc1234' };
+const win = { target: 'win32-x64', metric: 'workingSet', bytes: 19327352, mib: 18.4, liveFeed: 'connected', idleSeconds: 12, measuredAt: '2026-11-16T00:00:00Z', commit: 'abc1234' };
+const mac = { target: 'darwin-arm64', metric: 'footprint', bytes: 25165824, mib: 24, liveFeed: 'degraded', idleSeconds: 12, measuredAt: '2026-11-16T00:00:00Z', commit: 'abc1234' };
 
 test('notes have a memory table row per target, sorted, with the method and caveats', () => {
   const notes = buildNotes([mac, win]);
   assert.match(notes, /^## Memory/m);
   const rows = notes.split('\n').filter((l) => l.startsWith('| ') && !l.includes('---') && !l.startsWith('| Target'));
   assert.equal(rows.length, 2);
-  assert.equal(rows[0], '| aarch64-apple-darwin | footprint | 24 | degraded |');
-  assert.equal(rows[1], '| x86_64-pc-windows-msvc | workingSet | 18.4 | connected |');
+  assert.equal(rows[0], '| darwin-arm64 | footprint | 24 | degraded |');
+  assert.equal(rows[1], '| win32-x64 | workingSet | 18.4 | connected |');
   assert.match(notes, /interface closed/);
   assert.match(notes, /12 s/);
   assert.match(notes, /83 MiB/);
   assert.match(notes, /bd11fbe/);
-  assert.match(notes, /Windows x86_64/);
+  assert.match(notes, /20 MiB gate is checked on Windows x86_64 before a release; CI numbers are for reference/);
+  assert.match(notes, /`win32-x64` is Windows x86_64/);
+  assert.doesNotMatch(notes, /is gated/);
   assert.match(notes, /without a connected feed are not comparable/);
 });
 
@@ -29,6 +31,8 @@ test('notes have Install and OKX sections', () => {
   assert.match(notes, /^## Install/m);
   assert.match(notes, /README\.md#install/);
   assert.match(notes, /README\.md#unsigned-builds/);
+  assert.match(notes, /not OS code-signed for now \(the updater artifacts are signed\)/);
+  assert.doesNotMatch(notes, /are unsigned/);
   assert.match(notes, /^## OKX/m);
   assert.match(notes, /simulated exchange/);
   assert.match(notes, /not.*OKX Demo Trading/i);

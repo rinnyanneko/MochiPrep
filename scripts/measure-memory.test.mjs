@@ -22,15 +22,17 @@ test('parseWorkingSet reads the PowerShell integer', () => {
 });
 
 test('gateFailures', () => {
-  assert.deepEqual(gateFailures({ metric: 'workingSet', mib: 18.4, liveFeed: 'connected' }), []);
-  const over = gateFailures({ metric: 'workingSet', mib: 21, liveFeed: 'connected' });
+  const win = { target: 'win32-x64', metric: 'workingSet' };
+  assert.deepEqual(gateFailures({ ...win, mib: 18.4, liveFeed: 'connected' }), []);
+  const over = gateFailures({ ...win, mib: 21, liveFeed: 'connected' });
   assert.equal(over.length, 1);
   assert.match(over[0], /20 MiB/);
-  const feed = gateFailures({ metric: 'workingSet', mib: 18.4, liveFeed: 'degraded' });
+  const feed = gateFailures({ ...win, mib: 18.4, liveFeed: 'degraded' });
   assert.equal(feed.length, 1);
   assert.match(feed[0], /degraded/);
-  // Other OSes only report.
-  assert.deepEqual(gateFailures({ metric: 'rss', mib: 90, liveFeed: 'connected' }), []);
+  // Every other target only reports, Windows ARM64 included.
+  assert.deepEqual(gateFailures({ target: 'win32-arm64', metric: 'workingSet', mib: 30, liveFeed: 'degraded' }), []);
+  assert.deepEqual(gateFailures({ target: 'linux-x64', metric: 'rss', mib: 90, liveFeed: 'connected' }), []);
 });
 
 test('liveFeedOf ignores malformed and unrelated messages', () => {

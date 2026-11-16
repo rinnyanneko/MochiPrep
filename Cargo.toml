@@ -43,7 +43,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 webpki-roots = "1"
 
 # One codegen unit with whole-program LTO: the smaller, better-packed code touches fewer image
-# pages, about 0.7 MiB less working set for mochi-server, whose release gate is 20 MiB on Windows.
+# pages, about 0.5 MiB less working set (0.7 MiB fewer image pages) for mochi-server, whose release
+# gate is 20 MiB on Windows.
 # Only build time changes; panics still unwind.
 [profile.release]
 lto = "fat"

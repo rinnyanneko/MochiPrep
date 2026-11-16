@@ -10,15 +10,19 @@
 // the token and feed from --port, reports the launcher's mochi-server child as the backend and
 // adds the whole launcher process tree as `launcherTree`.
 //
+// The report's `target` is Node's `<platform>-<arch>` (win32-x64, linux-arm64, darwin-arm64...).
+//
 // Exit codes: 0 a number was read, 1 the backend did not start or nothing could be read,
-// 2 (only with --gate) the Windows gate failed.
+// 2 (only with --gate) the win32-x64 gate failed.
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isMain } from './is-main.mjs';
 
 export const GATE_MIB = 20;
+// The 20 MiB budget was set and measured on Windows x86_64 only; Windows ARM64 is reported.
+export const GATED_TARGET = 'win32-x64';
 const READY_PREFIX = 'MochiPrep backend on http://127.0.0.1:';
 const MIB = 1024 * 1024;
 
@@ -48,9 +52,9 @@ export function parseWorkingSet(text) {
   return Number(trimmed);
 }
 
-/** Reasons the Windows gate fails; empty elsewhere, where the number is only reported. */
+/** Reasons the win32-x64 gate fails; empty for every other target, where the number is only reported. */
 export function gateFailures(report) {
-  if (report.metric !== 'workingSet') return [];
+  if (report.target !== GATED_TARGET) return [];
   const failures = [];
   if (report.mib > GATE_MIB) failures.push(`working set ${report.mib} MiB is over the ${GATE_MIB} MiB limit`);
   if (report.liveFeed !== 'connected') failures.push(`live OKX feed was ${report.liveFeed}, not connected`);
@@ -296,7 +300,7 @@ async function main() {
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   main().then(
     (code) => process.exit(code),
     (error) => {
