@@ -71,6 +71,8 @@ pub fn open_terms(app: &AppHandle) {
 /// Without a terms window there is no way to accept the terms, so at first launch the launcher
 /// explains and quits rather than sitting in the tray with a backend it may never start.
 fn terms_window_failed(app: &AppHandle, read_only: bool, error: &str) {
+    // The error text may end in its own period; the sentence below adds one.
+    let error = error.trim_end().trim_end_matches('.');
     let message = format!("MochiPrep cannot open the risk warning window: {error}");
     if read_only {
         app::show_error(app, "Cannot open the risk warning", &message);

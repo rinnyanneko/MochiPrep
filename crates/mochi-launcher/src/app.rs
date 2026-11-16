@@ -58,6 +58,8 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         _ => app.path().app_data_dir()?,
     };
     let accepted = terms_accepted(&settings);
+    #[cfg(target_os = "macos")]
+    macos_tray_only(app)?;
     app.manage(AppState {
         settings: Mutex::new(settings),
         settings_path,
@@ -82,6 +84,29 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     }
     let handle = app.clone();
     tauri::async_runtime::spawn(async move { poll(handle).await });
+    Ok(())
+}
+
+/// On macOS the Dock's Quit and Cmd+Q call `terminate:`, which ends the process at once: no
+/// confirmation, and no chance to stop the backend cleanly. A tray-only app has neither: no Dock
+/// icon (the accessory policy), and a menu without Quit in place of Tauri's default one. The
+/// Edit items stay, because the interface's copy and paste shortcuts are menu key equivalents
+/// on macOS. Quit stays in the tray, where it asks first.
+#[cfg(target_os = "macos")]
+fn macos_tray_only(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{MenuBuilder, SubmenuBuilder};
+
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory)?;
+    let edit = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+    app.set_menu(MenuBuilder::new(app).item(&edit).build()?)?;
     Ok(())
 }
 
@@ -236,12 +261,17 @@ pub async fn stop_backend(app: &AppHandle) {
 /// state with a live process asks too.
 pub async fn confirm_stop(app: &AppHandle) -> bool {
     let state = app.state::<AppState>();
-    let (alive, port) = {
-        let mut backend = state.backend.lock().await;
-        match backend.as_mut() {
-            Some(child) => (child.is_alive(), Some(child.port())),
-            None => (false, None),
-        }
+    let held = match state.backend.try_lock() {
+        Ok(mut backend) => Some(child_status(&mut backend)),
+        Err(_) => None,
+    };
+    let (alive, port) = match held {
+        Some(status) => status,
+        // A start holds the backend for up to 20 s while its process comes up. That process
+        // is alive and its state not yet readable, which needs the confirmation anyway, so it
+        // is asked now instead of after a silent wait; the stop that follows waits for the start.
+        None if *lock(&state.state) == BackendState::Starting => return ask_to_stop(app).await,
+        None => child_status(&mut *state.backend.lock().await),
     };
     let snapshot = match (alive, port) {
         (true, Some(port)) => BackendClient::new(port).snapshot().await.ok(),
@@ -251,6 +281,17 @@ pub async fn confirm_stop(app: &AppHandle) -> bool {
     if !needs_confirmation(&current, alive, snapshot.as_ref()) {
         return true;
     }
+    ask_to_stop(app).await
+}
+
+fn child_status(backend: &mut Option<Backend>) -> (bool, Option<u16>) {
+    match backend.as_mut() {
+        Some(child) => (child.is_alive(), Some(child.port())),
+        None => (false, None),
+    }
+}
+
+async fn ask_to_stop(app: &AppHandle) -> bool {
     let (answer_tx, answer_rx) = tokio::sync::oneshot::channel();
     app.dialog()
         .message(CONFIRM_TEXT)
@@ -357,10 +398,11 @@ async fn refresh_snapshot(app: &AppHandle) {
         };
         if !child.is_alive() {
             // No automatic restart: a backend that keeps dying would loop, and the owner
-            // should see that it stopped.
+            // should see that it stopped, and why (the backend redacts its own logs).
+            let tail = child.stderr_tail();
             *backend = None;
             drop(backend);
-            set_state(app, BackendState::Error(DIED_MESSAGE.to_string()));
+            set_state(app, BackendState::Error(died_message(&tail)));
             return;
         }
         child.port()
@@ -382,6 +424,25 @@ async fn refresh_snapshot(app: &AppHandle) {
     }
 }
 
+/// A tray label is one line, so the tail's whitespace is collapsed and only its end is kept: the
+/// error is usually the last thing the backend wrote.
+fn died_message(stderr_tail: &str) -> String {
+    const MAX_CHARS: usize = 200;
+    let words: Vec<&str> = stderr_tail.split_whitespace().collect();
+    if words.is_empty() {
+        return DIED_MESSAGE.to_string();
+    }
+    let line = words.join(" ");
+    let count = line.chars().count();
+    let shown = if count > MAX_CHARS {
+        let end: String = line.chars().skip(count - MAX_CHARS).collect();
+        format!("...{end}")
+    } else {
+        line
+    };
+    format!("{DIED_MESSAGE}: {shown}")
+}
+
 async fn poll(app: AppHandle) {
     let mut ticks = tokio::time::interval(POLL_INTERVAL);
     // A slow poll (a hung backend takes 5 s per request) must not be followed by a burst of
@@ -390,5 +451,27 @@ async fn poll(app: AppHandle) {
     loop {
         ticks.tick().await;
         refresh_snapshot(&app).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::died_message;
+
+    #[test]
+    fn died_message_keeps_the_end_of_the_tail_on_one_line() {
+        assert_eq!(died_message(" \n"), "backend stopped unexpectedly");
+        assert_eq!(
+            died_message("starting\nError: database is locked\n\n"),
+            "backend stopped unexpectedly: starting Error: database is locked"
+        );
+        let long = format!("{}\nthe reason", "x".repeat(500));
+        let message = died_message(&long);
+        assert!(message.ends_with("the reason"));
+        assert!(message.starts_with("backend stopped unexpectedly: ..."));
+        assert_eq!(
+            message.chars().count(),
+            "backend stopped unexpectedly: ...".len() + 200
+        );
     }
 }

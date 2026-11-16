@@ -50,29 +50,52 @@ pub fn open_import(app: &AppHandle) {
     let handle = app.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
-            // A copy in progress must finish (or fail) first; a backend starting meanwhile would
-            // create its own database in the target.
-            if handle.state::<AppState>().importing.load(Ordering::SeqCst) {
+            // Closing the window is a Skip. A copy in progress must finish (or fail) first; a
+            // backend starting meanwhile would create its own database in the target.
+            if !skip(&handle) {
                 api.prevent_close();
-                return;
             }
-            // Closing the window is a Skip.
-            finish(&handle);
         }
     });
 }
 
-/// Settles the offer and starts the backend. A failed save is not reported: the cost is only
-/// that the next launch offers again, and only if the data dir still has no database.
+/// Settles the offer and starts the backend.
 fn finish(app: &AppHandle) {
     {
         let state = app.state::<AppState>();
         let mut current = lock(&state.settings);
-        let mut next = current.clone();
-        next.import_offered = true;
-        let _ = settings::save_settings(&state.settings_path, &next);
-        *current = next;
+        settle_offer(&state.settings_path, &mut current);
     }
+    close_and_start(app);
+}
+
+/// Settles the offer as a Skip and starts the backend, unless a copy is running. The check and
+/// the settling happen under the settings lock, which `run_import` also holds while it checks the
+/// offer and claims `importing`: either the copy starts and the Skip is refused, or the offer
+/// closes and the copy is refused.
+fn skip(app: &AppHandle) -> bool {
+    {
+        let state = app.state::<AppState>();
+        let mut current = lock(&state.settings);
+        if state.importing.load(Ordering::SeqCst) {
+            return false;
+        }
+        settle_offer(&state.settings_path, &mut current);
+    }
+    close_and_start(app);
+    true
+}
+
+/// A failed save is not reported: the cost is only that the next launch offers again, and only
+/// if the data dir still has no database.
+fn settle_offer(settings_path: &Path, current: &mut LauncherSettings) {
+    let mut next = current.clone();
+    next.import_offered = true;
+    let _ = settings::save_settings(settings_path, &next);
+    *current = next;
+}
+
+fn close_and_start(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(IMPORT) {
         let _ = window.destroy();
     }
@@ -98,12 +121,22 @@ pub async fn choose_import_folder(app: AppHandle) -> Option<String> {
 #[tauri::command]
 pub async fn run_import(app: AppHandle, folder: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    if state
-        .importing
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
     {
-        return Err("An import is already running.".to_string());
+        let current = lock(&state.settings);
+        // The window may have been closed (a Skip) while the folder picker was open: the backend
+        // is then starting on this data dir, and a copy could replace the database it creates.
+        if current.import_offered {
+            return Err(
+                "The import offer is closed: MochiPrep started without importing.".to_string(),
+            );
+        }
+        if state
+            .importing
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return Err("An import is already running.".to_string());
+        }
     }
     let source = PathBuf::from(folder);
     let target = state.data_dir.clone();
@@ -121,7 +154,7 @@ pub async fn run_import(app: AppHandle, folder: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn skip_import(app: AppHandle) {
-    finish(&app);
+    skip(&app);
 }
 
 #[cfg(test)]
