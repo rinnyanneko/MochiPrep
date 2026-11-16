@@ -105,6 +105,6 @@ These need the owner's machines and cannot run in CI. They are not done yet.
 
 | # | Check | Expected |
 |---|---|---|
-| 36 | Launcher plus backend memory with the interface closed: start the launcher, wait 12 s, then `node scripts/measure-memory.mjs --binary <mochi-server> --pid <launcher pid>` | The launcher tree is at most 66 MiB working set on Windows x86_64. |
+| 36 | Launcher plus backend memory with the interface closed: start the launcher, wait 12 s, then `node scripts/measure-memory.mjs --pid <launcher pid> --port <the port in Settings, 8787 by default>` | The launcher tree is at most 66 MiB working set on Windows x86_64. |
 | 37 | Install and launch each unsigned artifact (Windows `.msi` and NSIS `.exe`, macOS `.dmg` for each architecture, Linux `.deb` and `.AppImage`) | The OS warning in README "Unsigned builds" appears and the documented steps get past it; the launcher starts and the terms window opens. |
 | 38 | One real update: publish a test release with a higher version from the draft, then update an older install from the tray | The tray shows `Update to v<version>`; clicking it downloads, installs and relaunches on the new version. |

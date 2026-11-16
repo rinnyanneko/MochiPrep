@@ -3,12 +3,16 @@
 // gate (<= 20 MiB working set on Windows x86_64, live OKX feed connected) is a number rather
 // than a belief. No dependencies: it runs on any machine that can run the release.
 //
-//   node scripts/measure-memory.mjs --binary <path> [--port 8987] [--idle 12] [--out report.json]
-//                                   [--pid <launcher pid>] [--gate]
+//   node scripts/measure-memory.mjs --binary <path> [--port 8987] [--idle 12] [--out report.json] [--gate]
+//   node scripts/measure-memory.mjs --pid <launcher pid> --port <launcher backend port> [--idle 12] [--out ...]
 //
-// With --pid the backend was started by the launcher (not by this script): the script reads
-// the token and feed from --port, reports the launcher's mochi-server child as the backend and
+// With --pid the backend was started by the launcher (not by this script, so --binary is refused):
+// the script reads the token and feed from --port, which must be the port in the launcher's
+// settings (8787 unless changed), reports the launcher's mochi-server child as the backend and
 // adds the whole launcher process tree as `launcherTree`.
+//
+// The feed must still be connected when memory is sampled: if the event stream ends early the
+// feed is reported as `unknown`, which fails the gate.
 //
 // The report's `target` is Node's `<platform>-<arch>` (win32-x64, linux-arm64, darwin-arm64...).
 //
@@ -187,8 +191,10 @@ function isMochiServer(pid) {
 
 // ---- Driving the backend ----------------------------------------------------------------
 
-function parseArgs(argv) {
-  const options = { port: 8987, idle: 12, gate: false };
+const DEFAULT_PORT = 8987;
+
+export function parseArgs(argv) {
+  const options = { idle: 12, gate: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--gate') options.gate = true;
@@ -197,9 +203,20 @@ function parseArgs(argv) {
       options[arg.slice(2)] = argv[i];
     } else throw new Error(`unknown argument ${arg}`);
   }
-  options.port = Number(options.port);
   options.idle = Number(options.idle);
   if (!options.binary && !options.pid) throw new Error('--binary <path> or --pid <launcher pid> is required');
+  // With --pid the launcher's backend is measured, so starting another one here would measure
+  // the wrong process tree and read the feed from the wrong port.
+  if (options.binary && options.pid) throw new Error('--binary and --pid cannot be combined');
+  // The launcher's backend listens on the port in the launcher's settings (8787 unless changed);
+  // guessing it would read another server's feed, so it must be given.
+  if (options.pid && options.port === undefined) throw new Error('--pid needs --port <the launcher backend port>');
+  options.port = Number(options.port ?? DEFAULT_PORT);
+  for (const name of ['port', 'idle', ...(options.pid ? ['pid'] : [])]) {
+    if (!Number.isInteger(Number(options[name])) || Number(options[name]) < 0) {
+      throw new Error(`--${name} must be a whole number`);
+    }
+  }
   return options;
 }
 
@@ -234,7 +251,7 @@ export function latestFeedState(messages, previous = 'unknown') {
  * stream ends or 30 s pass. The 30 s bounds that wait and the session request only: the stream
  * itself is closed by `stop()`, however long the idle wait is.
  */
-function watchLiveFeed(port) {
+export function watchLiveFeed(port) {
   const abort = new AbortController();
   let last = 'unknown';
   let markSettled;
@@ -269,6 +286,9 @@ function watchLiveFeed(port) {
     } catch {
       // A reset stream is a missing data point for the feed only; the backend is still measurable.
     } finally {
+      // Ending before stop() means nothing is watching the feed any more, so the last state seen
+      // proves nothing about the moment of sampling: report it as unknown, which fails the gate.
+      if (!abort.signal.aborted) last = 'unknown';
       clearTimeout(timer);
       markSettled();
     }
@@ -311,8 +331,6 @@ async function main() {
     const feed = watchLiveFeed(options.port);
     await feed.settled;
     await sleep(options.idle * 1000);
-    const liveFeed = feed.state();
-    feed.stop();
 
     let backendPid = pid;
     let tree;
@@ -322,6 +340,9 @@ async function main() {
       backendPid = pickBackendPid(members, pid, isMochiServer);
     }
     const bytes = sampleBytes(backendPid);
+    // Read after sampling, while the stream is still open: the state then covers the sample.
+    const liveFeed = feed.state();
+    feed.stop();
     const report = {
       target: `${process.platform}-${process.arch}`,
       metric: metricName(),

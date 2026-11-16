@@ -45,7 +45,7 @@ cargo build --release -p mochi-server
 node scripts/measure-memory.mjs --binary target/release/mochi-server.exe --gate
 ```
 
-Linux and macOS are measured in CI for reference only (Linux resident set, macOS `footprint`); the gate applies to Windows only. The web interface's own WebView memory is separate and not included. The launcher plus backend has a budget of 66 MiB with the interface closed; that is a manual check (`--pid <launcher pid>`) that has not been done yet.
+Linux and macOS are measured in CI for reference only (Linux resident set, macOS `footprint`); the gate applies to Windows only. The web interface's own WebView memory is separate and not included. The launcher plus backend has a budget of 66 MiB with the interface closed; that is a manual check (`node scripts/measure-memory.mjs --pid <launcher pid> --port <launcher backend port>`) that has not been done yet.
 
 ## Development
 
