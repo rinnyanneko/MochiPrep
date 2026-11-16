@@ -321,16 +321,8 @@ fn node_default_and_test_kdfs_are_accepted() {
 fn untrusted_stored_kdf_is_rejected_before_opening_the_wrapped_key() {
     // The read path must enforce the same resource caps as password creation.
     for kdf in [
-        KdfParams {
-            n: 0,
-            r: 8,
-            p: 1,
-        },
-        KdfParams {
-            n: 1,
-            r: 8,
-            p: 1,
-        },
+        KdfParams { n: 0, r: 8, p: 1 },
+        KdfParams { n: 1, r: 8, p: 1 },
         KdfParams {
             n: 1024,
             r: 0,
