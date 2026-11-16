@@ -141,10 +141,20 @@ pub async fn run_import(app: AppHandle, folder: String) -> Result<(), String> {
     let source = PathBuf::from(folder);
     let target = state.data_dir.clone();
     let copied = tauri::async_runtime::spawn_blocking(move || import_data(&source, &target)).await;
-    state.importing.store(false, Ordering::SeqCst);
+    let imported = matches!(copied, Ok(Ok(())));
+    {
+        // `importing` is cleared under the settings lock, together with settling the offer on
+        // success: a Skip checks both under that lock, so it sees either a copy still running or
+        // an offer already closed, never the moment in between.
+        let mut current = lock(&state.settings);
+        if imported {
+            settle_offer(&state.settings_path, &mut current);
+        }
+        state.importing.store(false, Ordering::SeqCst);
+    }
     match copied {
         Ok(Ok(())) => {
-            finish(&app);
+            close_and_start(&app);
             Ok(())
         }
         Ok(Err(error)) => Err(error.to_string()),

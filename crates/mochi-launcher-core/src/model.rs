@@ -18,6 +18,42 @@ pub struct BackendSnapshot {
     pub armed_live_accounts: Vec<String>,
 }
 
+/// The tray's last snapshot, tagged with the backend state it was read under. A poll's request
+/// can outlive a restart; its answer then describes the old process and must not replace what
+/// the new one reports.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SnapshotSlot {
+    generation: u64,
+    snapshot: Option<BackendSnapshot>,
+}
+
+impl SnapshotSlot {
+    pub fn snapshot(&self) -> Option<&BackendSnapshot> {
+        self.snapshot.as_ref()
+    }
+
+    /// Taken before a request; `store` accepts the answer only while it is still current.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Every backend state change forgets the snapshot and outdates requests still out.
+    pub fn reset(&mut self) {
+        self.generation += 1;
+        self.snapshot = None;
+    }
+
+    /// Stores an answer read under `generation`. Returns whether the stored snapshot changed;
+    /// an answer from an earlier generation is dropped and changes nothing.
+    pub fn store(&mut self, generation: u64, snapshot: Option<BackendSnapshot>) -> bool {
+        if generation != self.generation || self.snapshot == snapshot {
+            return false;
+        }
+        self.snapshot = snapshot;
+        true
+    }
+}
+
 /// An unreadable snapshot with a live process counts as "maybe armed": better a needless prompt
 /// than silently disarming real accounts. The state is not consulted: a live process is what
 /// matters, whatever the launcher believes about it.
@@ -71,6 +107,23 @@ mod tests {
             agents_running: agents,
             armed_live_accounts: armed.iter().map(|s| s.to_string()).collect(),
         }
+    }
+
+    #[test]
+    fn a_snapshot_from_before_a_state_change_is_dropped() {
+        let mut slot = SnapshotSlot::default();
+        let before_restart = slot.generation();
+        // The restart: Stopped, then Starting, then Running, each a reset.
+        slot.reset();
+        slot.reset();
+        slot.reset();
+        let current = slot.generation();
+        assert!(!slot.store(before_restart, Some(snap(1, &["old"]))));
+        assert_eq!(slot.snapshot(), None);
+        assert!(slot.store(current, Some(snap(0, &[]))));
+        assert_eq!(slot.snapshot(), Some(&snap(0, &[])));
+        // The same answer again is no change, so the menu is not rebuilt.
+        assert!(!slot.store(current, Some(snap(0, &[]))));
     }
 
     #[test]

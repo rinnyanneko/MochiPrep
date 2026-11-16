@@ -134,10 +134,18 @@ function setUpPanel() {
     button("disarm").disabled = !view.canDisarmAll;
   }
 
-  // Listening first, so a change between the two calls is not lost.
-  window.__TAURI__.event.listen("panel-state", (event) => render(event.payload))
+  // Listening first, so a change between the two calls is not lost. Every state change emits an
+  // event, and the event and the command answer travel separately, so the answer can arrive
+  // after a newer event: once any event has arrived, the answer is older news and is dropped.
+  let sawEvent = false;
+  window.__TAURI__.event.listen("panel-state", (event) => {
+    sawEvent = true;
+    render(event.payload);
+  })
     .then(() => invoke("panel_state"))
-    .then(render)
+    .then((view) => {
+      if (!sawEvent) render(view);
+    })
     .catch(showError);
   document.querySelectorAll("[data-action]").forEach((element) => {
     element.addEventListener("click", () => {

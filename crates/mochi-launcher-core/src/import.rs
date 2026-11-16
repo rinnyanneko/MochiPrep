@@ -42,15 +42,33 @@ fn io<E: fmt::Display>(e: E) -> ImportError {
 /// Copies `source_dir/mochiprep.db` into `target_dir` as a consistent snapshot. Never overwrites
 /// existing data; the new file appears under its final name only once complete.
 pub fn import_data(source_dir: &Path, target_dir: &Path) -> Result<(), ImportError> {
-    import_with(source_dir, target_dir, |from, to| std::fs::rename(from, to))
+    import_with(source_dir, target_dir, publish)
 }
 
-/// `finalize` is the last step (the rename into place); it is a parameter so tests can make it
-/// fail after the partial file exists and check the cleanup.
+/// Gives the complete partial file its final name without ever replacing a file already there.
+/// `rename` would replace one (on Windows too, as std calls it with REPLACE_EXISTING), and a
+/// database created after the check above is the owner's data. A hard link fails instead when
+/// the name is taken; the partial name is then dropped.
+fn publish(partial: &Path, final_path: &Path) -> Result<(), ImportError> {
+    match std::fs::hard_link(partial, final_path) {
+        Ok(()) => {
+            // A leftover partial is harmless: the next import removes it before copying.
+            let _ = std::fs::remove_file(partial);
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            Err(ImportError::TargetExists)
+        }
+        Err(error) => Err(io(error)),
+    }
+}
+
+/// `finalize` is the last step (publishing under the final name); it is a parameter so tests
+/// can make it fail after the partial file exists and check the cleanup.
 fn import_with(
     source_dir: &Path,
     target_dir: &Path,
-    finalize: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+    finalize: impl FnOnce(&Path, &Path) -> Result<(), ImportError>,
 ) -> Result<(), ImportError> {
     if let (Ok(a), Ok(b)) = (source_dir.canonicalize(), target_dir.canonicalize()) {
         if a == b {
@@ -67,8 +85,7 @@ fn import_with(
     }
     create_private_dir(target_dir)?;
     let partial = target_dir.join(PARTIAL_NAME);
-    let result = copy_snapshot(&source_db, &partial)
-        .and_then(|()| finalize(&partial, &final_path).map_err(io));
+    let result = copy_snapshot(&source_db, &partial).and_then(|()| finalize(&partial, &final_path));
     if result.is_err() {
         // The side files exist only if the partial was ever opened in WAL mode; remove them too.
         for suffix in ["", "-wal", "-shm"] {
@@ -251,12 +268,31 @@ mod tests {
         // Fail the final rename, after the partial file is complete.
         let r = import_with(src.path(), dst.path(), |from, _| {
             assert!(from.exists());
-            Err(std::io::Error::other("boom"))
+            Err(ImportError::Io("boom".into()))
         });
         assert_eq!(r, Err(ImportError::Io("boom".into())));
         assert!(!dst.path().join("mochiprep.db").exists());
         let left: Vec<_> = std::fs::read_dir(dst.path()).unwrap().collect();
         assert!(left.is_empty(), "left behind: {left:?}");
+    }
+
+    /// A database that appears in the target while the copy runs (a backend started meanwhile)
+    /// is kept, and the import reports that data exists instead of replacing it.
+    #[test]
+    fn never_replaces_a_database_created_during_the_copy() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        drop(make_source(src.path()));
+        let r = import_with(src.path(), dst.path(), |from, to| {
+            std::fs::write(to, b"created meanwhile").unwrap();
+            publish(from, to)
+        });
+        assert_eq!(r, Err(ImportError::TargetExists));
+        assert_eq!(
+            std::fs::read(dst.path().join("mochiprep.db")).unwrap(),
+            b"created meanwhile"
+        );
+        assert!(!dst.path().join("mochiprep.db.importing").exists());
     }
 
     #[test]

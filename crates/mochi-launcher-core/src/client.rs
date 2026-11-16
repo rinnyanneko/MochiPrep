@@ -101,20 +101,26 @@ impl BackendClient {
 
     pub async fn snapshot(&self) -> Result<BackendSnapshot, ClientError> {
         let agents = self.authed(Method::GET, "/api/agents", false).await?;
+        Ok(BackendSnapshot {
+            agents_running: count_running(&agents)?,
+            armed_live_accounts: self.armed_live_accounts().await?,
+        })
+    }
+
+    /// The armed `OKX_LIVE` account ids, read from the exchange status alone.
+    pub async fn armed_live_accounts(&self) -> Result<Vec<String>, ClientError> {
         let exchange = self
             .authed(Method::GET, "/api/exchange/status", false)
             .await?;
-        Ok(BackendSnapshot {
-            agents_running: count_running(&agents)?,
-            armed_live_accounts: armed_live(&exchange)?,
-        })
+        armed_live(&exchange)
     }
 
     /// Disarms every armed `OKX_LIVE` account and returns how many. One failure does not stop
     /// the others: each account left armed is real money, so all are tried before the first
-    /// error is reported.
+    /// error is reported. Only the exchange status is read: a failing agents route must not
+    /// keep real accounts armed.
     pub async fn disarm_all_live(&self) -> Result<usize, ClientError> {
-        let armed = self.snapshot().await?.armed_live_accounts;
+        let armed = self.armed_live_accounts().await?;
         let mut disarmed = 0;
         let mut first_error = None;
         for id in &armed {
@@ -345,6 +351,83 @@ mod tests {
         assert_eq!(account_path("../vault/reset"), None);
         assert_eq!(account_path("a?b"), None);
         assert_eq!(account_path(""), None);
+    }
+
+    /// A one-route-per-path stand-in for the backend: answers `/api/agents` with 500, so only a
+    /// disarm that skips the agents route can get through.
+    async fn fake_backend_with_broken_agents() -> (u16, tokio::sync::mpsc::UnboundedReceiver<String>)
+    {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (seen_tx, seen_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let mut buffer = Vec::new();
+                let mut chunk = [0u8; 1024];
+                while !buffer.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match socket.read(&mut chunk).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => buffer.extend_from_slice(&chunk[..n]),
+                    }
+                }
+                let head = String::from_utf8_lossy(&buffer).to_string();
+                let request_line = head.lines().next().unwrap_or_default().to_string();
+                let path = request_line
+                    .split(' ')
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_string();
+                let (status, body) = match path.as_str() {
+                    "/api/session" => ("200 OK", r#"{"token":"t"}"#.to_string()),
+                    "/api/agents" => ("500 Internal Server Error", "{}".to_string()),
+                    "/api/exchange/status" => (
+                        "200 OK",
+                        format!(
+                            "[{},{}]",
+                            status_row("acct_live", "OKX_LIVE", true),
+                            status_row("acct_demo", "OKX_DEMO", true)
+                        ),
+                    ),
+                    _ => ("200 OK", "{}".to_string()),
+                };
+                let _ = seen_tx.send(request_line);
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        (port, seen_rx)
+    }
+
+    #[tokio::test]
+    async fn disarm_all_does_not_depend_on_the_agents_route() {
+        let (port, mut seen) = fake_backend_with_broken_agents().await;
+        let client = BackendClient::new(port);
+        assert!(client.snapshot().await.is_err(), "agents route is broken");
+        assert_eq!(client.disarm_all_live().await, Ok(1));
+        let mut requests = Vec::new();
+        while let Ok(line) = seen.try_recv() {
+            requests.push(line);
+        }
+        assert!(
+            requests
+                .iter()
+                .any(|line| line.starts_with("POST /api/exchange/okx/acct_live/disarm ")),
+            "{requests:?}"
+        );
+        assert!(
+            !requests.iter().any(|line| line.contains("acct_demo")),
+            "{requests:?}"
+        );
     }
 
     #[test]

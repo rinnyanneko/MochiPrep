@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use mochi_launcher_core::client::BackendClient;
 use mochi_launcher_core::model::{
-    menu_model, needs_confirmation, BackendSnapshot, BackendState, CONFIRM_TEXT, CONFIRM_TITLE,
+    menu_model, needs_confirmation, BackendState, SnapshotSlot, CONFIRM_TEXT, CONFIRM_TITLE,
 };
 use mochi_launcher_core::settings::{load_settings, terms_accepted, LauncherSettings};
 use mochi_launcher_core::supervisor::{self, Backend, BackendCommand};
@@ -31,7 +31,7 @@ pub struct AppState {
     /// the child, so a start and a stop can never interleave.
     pub backend: tokio::sync::Mutex<Option<Backend>>,
     pub state: Mutex<BackendState>,
-    pub snapshot: Mutex<Option<BackendSnapshot>>,
+    pub snapshot: Mutex<SnapshotSlot>,
     /// Set only by the Quit flows; any other exit request (the last window closing) is refused,
     /// because the launcher lives in the tray.
     pub quitting: AtomicBool,
@@ -66,7 +66,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         data_dir,
         backend: tokio::sync::Mutex::new(None),
         state: Mutex::new(BackendState::Stopped),
-        snapshot: Mutex::new(None),
+        snapshot: Mutex::new(SnapshotSlot::default()),
         quitting: AtomicBool::new(false),
         stopping: AtomicBool::new(false),
         importing: AtomicBool::new(false),
@@ -186,21 +186,24 @@ fn offline() -> bool {
 fn set_state(app: &AppHandle, next: BackendState) {
     let state = app.state::<AppState>();
     *lock(&state.state) = next;
-    *lock(&state.snapshot) = None;
+    lock(&state.snapshot).reset();
     refresh_menu(app);
 }
 
 /// Starts the backend unless one is alive. Never before the terms are accepted, and never while
 /// the one-time import is still unanswered (a backend would create the database the import
-/// needs to write): both are checked here, not by the callers, so no menu item or second launch
-/// can get around them.
+/// needs to write) or a copy is running: all are checked here, not by the callers, so no menu
+/// item or second launch can get around them. The import clears `importing` under the settings
+/// lock in the same step that settles the offer, so reading both under it sees either an import
+/// still pending or one fully settled.
 pub async fn start_backend(app: &AppHandle) {
     let state = app.state::<AppState>();
     let (accepted, offer_import, port) = {
         let settings = lock(&state.settings);
         (
             terms_accepted(&settings),
-            should_offer_import(&settings, &state.data_dir),
+            state.importing.load(Ordering::SeqCst)
+                || should_offer_import(&settings, &state.data_dir),
             settings.port,
         )
     };
@@ -239,8 +242,10 @@ pub async fn start_backend(app: &AppHandle) {
         }
         Err(message) => BackendState::Error(message),
     };
-    drop(backend);
+    // Published while the child is still owned: a stop that takes the lock next then sets its
+    // own state after this one, never before it.
     set_state(app, next);
+    drop(backend);
     refresh_snapshot(app).await;
 }
 
@@ -261,15 +266,19 @@ pub async fn stop_backend(app: &AppHandle) {
 /// state with a live process asks too.
 pub async fn confirm_stop(app: &AppHandle) -> bool {
     let state = app.state::<AppState>();
+    // A start holds the backend for up to 20 s while its process comes up. That process is
+    // alive and its state not yet readable, which needs the confirmation anyway, so it is asked
+    // now instead of after a silent wait; the stop that follows waits for the start. Checked
+    // before the lock, so whatever the lock shows at this moment cannot skip the question.
+    if *lock(&state.state) == BackendState::Starting {
+        return ask_to_stop(app).await;
+    }
     let held = match state.backend.try_lock() {
         Ok(mut backend) => Some(child_status(&mut backend)),
         Err(_) => None,
     };
     let (alive, port) = match held {
         Some(status) => status,
-        // A start holds the backend for up to 20 s while its process comes up. That process
-        // is alive and its state not yet readable, which needs the confirmation anyway, so it
-        // is asked now instead of after a silent wait; the stop that follows waits for the start.
         None if *lock(&state.state) == BackendState::Starting => return ask_to_stop(app).await,
         None => child_status(&mut *state.backend.lock().await),
     };
@@ -386,6 +395,8 @@ async fn running_port(app: &AppHandle) -> Option<u16> {
 /// that flow updates the menu itself.
 async fn refresh_snapshot(app: &AppHandle) {
     let state = app.state::<AppState>();
+    // Taken first: any state change from here on outdates the answer.
+    let generation = lock(&state.snapshot).generation();
     if *lock(&state.state) != BackendState::Running {
         return;
     }
@@ -408,16 +419,9 @@ async fn refresh_snapshot(app: &AppHandle) {
         child.port()
     };
     let snapshot = BackendClient::new(port).snapshot().await.ok();
-    let changed = {
-        // A stop may have begun while the request was out; its state wins.
-        if *lock(&state.state) != BackendState::Running {
-            return;
-        }
-        let mut current = lock(&state.snapshot);
-        let changed = *current != snapshot;
-        *current = snapshot;
-        changed
-    };
+    // A stop, or a whole restart, may have happened while the request was out; then the answer
+    // is about the old process and is dropped.
+    let changed = lock(&state.snapshot).store(generation, snapshot);
     // Rebuilding the menu closes it if it is open, so only a real change does.
     if changed {
         refresh_menu(app);

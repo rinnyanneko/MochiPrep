@@ -64,7 +64,8 @@ pub fn get_settings(app: AppHandle) -> SettingsView {
 }
 
 /// Saves the form. The login item is set before the file is written, so the file never claims
-/// an autostart the system did not take; it is set every time, which also repairs a login item
+/// an autostart the system did not take, and put back if the file cannot be written; it is set
+/// every time, which also repairs a login item
 /// removed outside MochiPrep. A new port only takes effect when the backend restarts, so the
 /// owner is asked whether to restart now.
 #[tauri::command]
@@ -73,14 +74,19 @@ pub async fn save_settings(app: AppHandle, port: String, autostart: bool) -> Res
         let state = app.state::<AppState>();
         let mut current = lock(&state.settings);
         let (next, port_changed) = apply_settings(&current, &port, autostart)?;
-        let login_item = if autostart {
-            app.autolaunch().enable()
-        } else {
-            app.autolaunch().disable()
+        // Unreadable means unknown; the saved setting is the best guess of what the system has.
+        let was_enabled = app.autolaunch().is_enabled().unwrap_or(current.autostart);
+        let set_login_item = |enabled: bool| {
+            let result = if enabled {
+                app.autolaunch().enable()
+            } else {
+                app.autolaunch().disable()
+            };
+            result.map_err(|error| error.to_string())
         };
-        login_item.map_err(|error| format!("Cannot change starting at login: {error}"))?;
-        settings::save_settings(&state.settings_path, &next)
-            .map_err(|error| format!("Cannot save the settings: {error}"))?;
+        set_login_item_then_save(was_enabled, autostart, set_login_item, || {
+            settings::save_settings(&state.settings_path, &next).map_err(|error| error.to_string())
+        })?;
         let new_port = next.port;
         *current = next;
         (port_changed, new_port)
@@ -89,6 +95,31 @@ pub async fn save_settings(app: AppHandle, port: String, autostart: bool) -> Res
         ask_restart(&app, new_port);
     }
     Ok(())
+}
+
+/// Sets the login item, then saves the file; if the save fails the login item is put back as it
+/// was, so the system never starts MochiPrep at login against what the settings say. The save
+/// error is the one reported, with a failed rollback added to it.
+fn set_login_item_then_save(
+    was_enabled: bool,
+    enabled: bool,
+    mut set_login_item: impl FnMut(bool) -> Result<(), String>,
+    save: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    set_login_item(enabled).map_err(|error| format!("Cannot change starting at login: {error}"))?;
+    let Err(error) = save() else {
+        return Ok(());
+    };
+    let saved = format!("Cannot save the settings: {error}");
+    if was_enabled == enabled {
+        return Err(saved);
+    }
+    match set_login_item(was_enabled) {
+        Ok(()) => Err(saved),
+        Err(rollback) => Err(format!(
+            "{saved}. Starting at login could not be put back either: {rollback}"
+        )),
+    }
 }
 
 fn ask_restart(app: &AppHandle, port: u16) {
@@ -118,6 +149,63 @@ mod tests {
             autostart: false,
             import_offered: true,
         }
+    }
+
+    #[test]
+    fn a_failed_save_puts_the_login_item_back() {
+        let mut calls = Vec::new();
+        let result = set_login_item_then_save(
+            false,
+            true,
+            |enabled| {
+                calls.push(enabled);
+                Ok(())
+            },
+            || Err("disk full".to_string()),
+        );
+        assert_eq!(
+            result,
+            Err("Cannot save the settings: disk full".to_string())
+        );
+        assert_eq!(calls, vec![true, false]);
+    }
+
+    #[test]
+    fn a_failed_rollback_is_reported_with_the_save_error() {
+        let mut calls = 0;
+        let result = set_login_item_then_save(
+            true,
+            false,
+            |_| {
+                calls += 1;
+                if calls == 1 {
+                    Ok(())
+                } else {
+                    Err("denied".to_string())
+                }
+            },
+            || Err("disk full".to_string()),
+        );
+        assert_eq!(
+            result,
+            Err("Cannot save the settings: disk full. Starting at login could not be put back either: denied".to_string())
+        );
+    }
+
+    #[test]
+    fn a_successful_save_keeps_the_new_login_item() {
+        let mut calls = Vec::new();
+        let result = set_login_item_then_save(
+            false,
+            true,
+            |enabled| {
+                calls.push(enabled);
+                Ok(())
+            },
+            || Ok(()),
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(calls, vec![true]);
     }
 
     #[test]

@@ -34,7 +34,7 @@ fn icon(armed: bool) -> Image<'static> {
 pub fn current_model(app: &AppHandle) -> MenuModel {
     let state = app.state::<AppState>();
     let backend = lock(&state.state).clone();
-    let snapshot = lock(&state.snapshot).clone();
+    let snapshot = lock(&state.snapshot).snapshot().cloned();
     menu_model(&backend, snapshot.as_ref())
 }
 
