@@ -8,15 +8,13 @@
   "packageManager": "pnpm@11.24.0",
   "engines": { "node": ">=22.13.0", "pnpm": ">=9" },
   "scripts": {
-    "dev": "pnpm --parallel --filter @mochiprep/server --filter @mochiprep/web dev",
+    "dev": "node scripts/dev.mjs",
     "build": "pnpm --filter @mochiprep/web build",
-    "start": "pnpm --filter @mochiprep/server start",
+    "start": "pnpm build && cargo run --release -p mochi-server",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
-    "test:e2e:rust": "cargo build --release -p mochi-server && node e2e/run-rust.mjs",
+    "test:e2e": "cargo build --release -p mochi-server && playwright test",
     "typecheck": "pnpm -r --parallel typecheck",
-    "golden": "pnpm --filter @mochiprep/server golden",
     "measure:memory": "node scripts/measure-memory.mjs",
     "tauri": "tauri",
     "bundle": "node scripts/bundle.mjs"

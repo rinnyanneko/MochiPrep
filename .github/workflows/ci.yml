@@ -79,7 +79,7 @@ jobs:
       # The Rust server embeds apps/web/dist, so the UI must be built before the server compiles.
       - run: pnpm build
       # Uses the Google Chrome preinstalled on the runner (playwright channel: chrome).
-      - run: pnpm test:e2e:rust
+      - run: pnpm test:e2e
 
   bundle:
     uses: ./.github/workflows/build.yml

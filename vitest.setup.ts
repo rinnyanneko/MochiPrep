@@ -5,7 +5,7 @@ const realFetch = globalThis.fetch;
 const blocked: string[] = [];
 
 /**
- * Tests must run offline. Provider code turns a fetch failure into an AI_ERROR record, so the
+ * Tests must run offline. Code under test may catch a fetch failure, so the
  * throw alone could pass unnoticed: attempts are collected and fail the test afterwards.
  */
 globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
