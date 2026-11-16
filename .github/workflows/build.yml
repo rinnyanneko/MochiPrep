@@ -74,6 +74,10 @@ jobs:
           if-no-files-found: warn
       # The release config enables updater artifacts, which need a signing key. Unsigned CI runs
       # turn them off with a second --config that Tauri merges over the first.
+      - name: Write no-updater override
+        if: ${{ !inputs.sign-updater }}
+        shell: bash
+        run: echo '{"bundle":{"createUpdaterArtifacts":false}}' > "$RUNNER_TEMP/no-updater.json"
       - name: Bundle launcher
         uses: tauri-apps/tauri-action@v0
         env:
@@ -88,7 +92,7 @@ jobs:
             --target ${{ matrix.target }}
             --bundles ${{ matrix.bundles }}
             --config ${{ github.workspace }}/crates/mochi-launcher/tauri.release.conf.json
-            ${{ !inputs.sign-updater && '--config {\"bundle\":{\"createUpdaterArtifacts\":false}}' || '' }}
+            ${{ !inputs.sign-updater && format('--config {0}/no-updater.json', runner.temp) || '' }}
           tagName: ${{ inputs.upload-release && inputs.release-tag || '' }}
           releaseName: ${{ inputs.upload-release && inputs.release-tag || '' }}
           releaseDraft: true
