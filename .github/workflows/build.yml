@@ -1,0 +1,103 @@
+name: Build
+
+# Reusable: builds the launcher for all six targets. Permissions are inherited from the caller, so
+# only a caller that sets `contents: write` (the release workflow) can upload to a release.
+on:
+  workflow_call:
+    inputs:
+      sign-updater:
+        type: boolean
+        required: true
+      upload-release:
+        type: boolean
+        required: true
+      release-tag:
+        type: string
+        required: false
+        default: ""
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: "1.99"
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, bundles: "nsis,msi", exe: ".exe" }
+          - { os: windows-11-arm, target: aarch64-pc-windows-msvc, bundles: "nsis,msi", exe: ".exe" }
+          - { os: macos-15-intel, target: x86_64-apple-darwin, bundles: "app,dmg", exe: "" }
+          - { os: macos-latest, target: aarch64-apple-darwin, bundles: "app,dmg", exe: "" }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bundles: "deb,appimage", exe: "" }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, bundles: "deb,appimage", exe: "" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99"
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install Linux build packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Build backend
+        run: cargo build --release -p mochi-server --target ${{ matrix.target }}
+      - name: Stage backend as externalBin
+        run: node scripts/stage-backend.mjs ${{ matrix.target }}
+      - name: Measure backend memory
+        run: node scripts/measure-memory.mjs --binary target/${{ matrix.target }}/release/mochi-server${{ matrix.exe }} --port 8987 --out memory-${{ matrix.target }}.json
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: memory-${{ matrix.target }}
+          path: memory-${{ matrix.target }}.json
+          if-no-files-found: warn
+      # The release config enables updater artifacts, which need a signing key. Unsigned CI runs
+      # turn them off with a second --config that Tauri merges over the first.
+      - name: Bundle launcher
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: crates/mochi-launcher
+          tauriScript: pnpm tauri
+          # Absolute config path: the action runs the CLI from projectPath, not the repo root.
+          args: >-
+            --target ${{ matrix.target }}
+            --bundles ${{ matrix.bundles }}
+            --config ${{ github.workspace }}/crates/mochi-launcher/tauri.release.conf.json
+            ${{ !inputs.sign-updater && '--config {\"bundle\":{\"createUpdaterArtifacts\":false}}' || '' }}
+          tagName: ${{ inputs.upload-release && inputs.release-tag || '' }}
+          releaseName: ${{ inputs.upload-release && inputs.release-tag || '' }}
+          releaseDraft: true
+          updaterJsonPreferNsis: true
+          includeUpdaterJson: ${{ inputs.upload-release }}
+      - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.upload-release }}
+        with:
+          name: bundle-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/bundle/**
+          if-no-files-found: error
