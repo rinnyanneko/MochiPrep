@@ -16,8 +16,27 @@ use tokio::time::sleep;
 /// How long open requests get to finish after a shutdown signal.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
-#[tokio::main]
-async fn main() -> ExitCode {
+/// Tokio worker threads. The work is I/O-bound, the ledger and SQLite run in one runtime task, and
+/// the vault KDF uses the separate blocking pool, so two workers are enough; each extra worker
+/// costs resident memory and the spec gate is 20 MiB.
+const WORKER_THREADS: usize = 2;
+
+fn main() -> ExitCode {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(WORKER_THREADS)
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("Cannot start the async runtime: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    runtime.block_on(run())
+}
+
+async fn run() -> ExitCode {
     // Warnings and errors to stderr, like Fastify's `logger: { level: 'warn' }`. Every message
     // the runtime logs has been through its secret redaction.
     tracing_subscriber::fmt()

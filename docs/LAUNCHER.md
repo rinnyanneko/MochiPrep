@@ -1,6 +1,6 @@
 # Desktop launcher
 
-`mochi-launcher` is a tray app that runs the Rust backend (`mochi-server`) as a child process and opens the web interface in its own window. The testable parts (settings, import, tray model, supervisor, backend client) are in `mochi-launcher-core`; `mochi-launcher` is the Tauri shell around them. Node stays the default backend for `pnpm dev`, `pnpm start` and `pnpm test:e2e`.
+`mochi-launcher` is a tray app that runs the Rust backend (`mochi-server`) as a child process and opens the web interface in its own window. The testable parts (settings, import, tray model, supervisor, backend client) are in `mochi-launcher-core`; `mochi-launcher` is the Tauri shell around them.
 
 ## Running in development
 
@@ -26,7 +26,7 @@ The bundle identifier is `io.github.rinnyanneko.mochiprep`.
 
 | What | Windows | macOS | Linux |
 |---|---|---|---|
-| `launcher.json` (terms consent, port, autostart, import offered) | `%APPDATA%\io.github.rinnyanneko.mochiprep` | `~/Library/Application Support/io.github.rinnyanneko.mochiprep` | `~/.config/io.github.rinnyanneko.mochiprep` |
+| `launcher.json` (terms consent, port, autostart, import offered, update checks) | `%APPDATA%\io.github.rinnyanneko.mochiprep` | `~/Library/Application Support/io.github.rinnyanneko.mochiprep` | `~/.config/io.github.rinnyanneko.mochiprep` |
 | Backend data (`mochiprep.db`), unless `MOCHIPREP_DATA_DIR` is set | `%APPDATA%\io.github.rinnyanneko.mochiprep` | `~/Library/Application Support/io.github.rinnyanneko.mochiprep` | `~/.local/share/io.github.rinnyanneko.mochiprep` |
 
 The interface window's WebView keeps its own data (the interface's saved preferences) apart from these; on Windows it is `%LOCALAPPDATA%\io.github.rinnyanneko.mochiprep\EBWebView`.
@@ -36,7 +36,7 @@ Consent and launcher settings never go into the backend's SQLite. A missing or c
 ## Behaviour
 
 - The backend does not start until the current terms version is accepted. Declining, or closing the terms window, quits.
-- Before the first start, if the data folder has no `mochiprep.db`, the launcher offers once to import a `.mochiprep` folder (for example the Node backend's). The database is copied as a consistent snapshot; the original is not changed. Import into existing data is refused. A copy that cannot finish within 60 s (a source another program keeps writing to) gives up with an error, and the offer stays open.
+- Before the first start, if the data folder has no `mochiprep.db`, the launcher offers once to import a `.mochiprep` folder (for example the former Node backend's). The database is copied as a consistent snapshot; the original is not changed. Import into existing data is refused. A copy that cannot finish within 60 s (a source another program keeps writing to) gives up with an error, and the offer stays open.
 - The port defaults to 8787 and is set in Settings (1024 to 65535). The launcher never picks another port: a busy port shows `Error: port <p> is in use`.
 - Closing the interface window stops only the window; the backend and its agents keep running.
 - Disarm all is enabled while the backend runs and a real account is armed, or while its state cannot be read: disarming is always safe.
@@ -44,6 +44,17 @@ Consent and launcher settings never go into the backend's SQLite. A missing or c
 - On macOS the launcher has no Dock icon and its menu has no Quit (only Edit, for copy and paste), so Cmd+Q does nothing and Quit is only in the tray, where it asks first.
 - On Linux without a tray (GNOME without the AppIndicator extension) a small panel window with the same items replaces the tray icon. Closing the panel is Quit.
 - Killing the launcher closes the backend's stdin, and the backend shuts down cleanly.
+
+## Updates
+
+Release builds look for a new version at `https://github.com/rinnyanneko/MochiPrep/releases/latest/download/latest.json` once at start and then every 24 hours while the launcher runs. A failed check is logged to stderr and tried again a day later. Debug builds never check. Turning off `Check for updates automatically` in Settings stops the checks (the setting is `checkUpdates` in `launcher.json`, on by default).
+
+A check only finds out what exists: nothing is downloaded or installed until the owner clicks the update item, which shows in the tray (and the no-tray panel) only when a newer release is known.
+
+- Windows installs, the macOS `.app` and a Linux AppImage update themselves: the item reads `Update to v<version>`. Clicking it downloads the update while the backend still runs (Restart and Quit keep working meanwhile; a download not done within 15 minutes gives up), then asks `Stop MochiPrep's backend?` when Quit would, stops the backend, installs and relaunches. A failed download stops nothing; a failed install starts the backend again. Either shows an error dialog. A check that gets no answer within 30 s counts as failed. On Windows the installer runs in passive mode (a progress bar, no questions).
+- Any other Linux install (a `.deb` or a distribution package) belongs to the package manager: the item reads `v<version> available` and opens `https://github.com/rinnyanneko/MochiPrep/releases/latest`.
+
+The updater's signing public key is in `tauri.conf.json` (`plugins.updater.pubkey`); an update not signed by its private key is refused.
 
 ## Manual checklist
 
@@ -68,7 +79,7 @@ Run each row on Windows, macOS and Linux before a release. Rows marked OKX need 
 | 15 | Settings: enter `80`, Save | `Port must be a number from 1024 to 65535` shows; nothing is saved. |
 | 16 | Settings: change the port, Save, answer Yes | `Restart the backend now to use port <p>?` asks; Restart (with its confirmation if needed) brings the backend up on the new port. |
 | 17 | Settings: tick `Start MochiPrep when I log in`, Save, log out and in | MochiPrep starts at login; unticking removes it again. |
-| 18 | Import from a Node `.mochiprep` folder on a new data folder | Accounts and history appear in the interface; the source folder's files are unchanged. |
+| 18 | Import from a `.mochiprep` folder made by the former Node backend on a new data folder | Accounts and history appear in the interface; the source folder's files are unchanged. |
 | 19 | With the import offer open, copy any `mochiprep.db` into the data folder, then import a valid folder | `MochiPrep already has data here, so nothing was imported.`; the copied-in file is unchanged. With a `mochiprep.db` already there at launch, no offer is shown. |
 | 20 | Import from an empty folder, then Skip | The error shows inline and the offer stays open; Skip starts the backend on empty data. |
 | 21 | Linux: GNOME without AppIndicator | The panel replaces the tray icon, shows live status, and closing it asks to quit (when an agent runs). |
@@ -81,3 +92,19 @@ Run each row on Windows, macOS and Linux before a release. Rows marked OKX need 
 | 28 | Close the import offer while its folder picker is open, then pick a folder | The import is refused (the offer is closed); the backend runs on the empty data folder. |
 | 29 | A backend that dies after starting (kill `mochi-server` alone) | Within 3 s the tray shows `Backend: Error: backend stopped unexpectedly`, followed by the end of its stderr if it wrote any. |
 | 30 | Terms with the keyboard only: Tab into the text, scroll it with the arrow keys or Page Down to the end | The boxes unlock and can be ticked with Space; Continue starts the backend. |
+| 31 | Release build older than the latest release, `Check for updates automatically` on | Shortly after launch the tray (or panel) shows `Update to v<version>`; with no newer release there is no update item. Clicking it with nothing running downloads, restarts once, and the new version runs. |
+| 32 | Linux `.deb` install with a newer release out | The item reads `v<version> available`; clicking it opens the release page and changes nothing. |
+| 33 | Click the update item with the network cut | An error dialog names the download failure; the backend keeps running throughout and the interface still works. |
+| 34 | Click the update item with a paper agent running | Once the download finishes, `Stop MochiPrep's backend?` asks; Cancel changes nothing and the agent keeps running. During the download, Quit and Restart still work. |
+| 35 | Untick `Check for updates automatically`, Save, restart the launcher | No request goes to GitHub (watch with a proxy or firewall log) and no update item appears. |
+| 35a | With the import window still open, click the update item and confirm the stop; then click Skip in the import window | The old backend does not start during the install; if the install fails, the backend starts again. |
+
+## Owner's pre-release checks
+
+These need the owner's machines and cannot run in CI. They are not done yet.
+
+| # | Check | Expected |
+|---|---|---|
+| 36 | Launcher plus backend memory with the interface closed: start the launcher, wait 12 s, then `node scripts/measure-memory.mjs --pid <launcher pid> --port <the port in Settings, 8787 by default>` | The launcher tree is at most 66 MiB working set on Windows x86_64. |
+| 37 | Install and launch each unsigned artifact (Windows `.msi` and NSIS `.exe`, macOS `.dmg` for each architecture, Linux `.deb` and `.AppImage`) | The OS warning in README "Unsigned builds" appears and the documented steps get past it; the launcher starts and the terms window opens. |
+| 38 | One real update: publish a test release with a higher version from the draft, then update an older install from the tray | The tray shows `Update to v<version>`; clicking it downloads, installs and relaunches on the new version. |

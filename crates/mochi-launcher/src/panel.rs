@@ -52,6 +52,7 @@ pub struct PanelView {
     armed: Option<String>,
     can_open_interface: bool,
     can_disarm_all: bool,
+    update: Option<String>,
 }
 
 impl From<&MenuModel> for PanelView {
@@ -61,6 +62,7 @@ impl From<&MenuModel> for PanelView {
             armed: model.armed_label.clone(),
             can_open_interface: model.can_open_interface,
             can_disarm_all: model.can_disarm_all,
+            update: model.update_label.clone(),
         }
     }
 }
@@ -107,11 +109,10 @@ pub async fn panel_action(app: AppHandle, action: String) {
     tray::run_action(&app, &action);
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "linux")))]
 mod tests {
     use super::*;
 
-    #[cfg(not(target_os = "linux"))]
     #[test]
     fn the_tray_is_available_outside_linux() {
         assert!(tray_available());

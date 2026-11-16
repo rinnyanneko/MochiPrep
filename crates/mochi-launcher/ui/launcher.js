@@ -68,6 +68,7 @@ function setUpSettings() {
   const form = document.getElementById("settings-form");
   const port = document.getElementById("port");
   const autostart = document.getElementById("autostart");
+  const checkUpdates = document.getElementById("check-updates");
   const save = document.getElementById("save");
   const saved = document.getElementById("saved");
 
@@ -76,6 +77,7 @@ function setUpSettings() {
   function setLocked(locked) {
     port.disabled = locked;
     autostart.disabled = locked;
+    checkUpdates.disabled = locked;
     save.disabled = locked;
   }
 
@@ -84,6 +86,7 @@ function setUpSettings() {
     .then((settings) => {
       port.value = String(settings.port);
       autostart.checked = settings.autostart;
+      checkUpdates.checked = settings.checkUpdates;
       setLocked(false);
     })
     // Without the stored values a save would overwrite them with whatever the form holds.
@@ -97,7 +100,11 @@ function setUpSettings() {
     clearError();
     saved.hidden = true;
     setLocked(true);
-    invoke("save_settings", { port: port.value, autostart: autostart.checked })
+    invoke("save_settings", {
+      port: port.value,
+      autostart: autostart.checked,
+      checkUpdates: checkUpdates.checked,
+    })
       .then(() => { saved.hidden = false; })
       .catch(showError)
       .finally(() => setLocked(false));
@@ -144,6 +151,10 @@ function setUpPanel() {
     armed.hidden = view.armed === null;
     button("open").disabled = !view.canOpenInterface;
     button("disarm").disabled = !view.canDisarmAll;
+    // Present only when a check found a newer release, as in the tray.
+    const update = button("update");
+    update.textContent = view.update ?? "";
+    update.hidden = view.update === null;
   }
 
   // Listening first, so a change between the two calls is not lost. Every state change emits an

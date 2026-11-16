@@ -17,6 +17,9 @@ pub struct LauncherSettings {
     pub port: u16,
     pub autostart: bool,
     pub import_offered: bool,
+    /// Whether the launcher looks for a new release by itself. Nothing is downloaded until the
+    /// owner clicks the update item.
+    pub check_updates: bool,
 }
 
 impl Default for LauncherSettings {
@@ -26,6 +29,7 @@ impl Default for LauncherSettings {
             port: DEFAULT_PORT,
             autostart: false,
             import_offered: false,
+            check_updates: true,
         }
     }
 }
@@ -166,6 +170,29 @@ mod tests {
     }
 
     #[test]
+    fn an_old_file_without_check_updates_checks_and_keeps_its_consent() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("launcher.json");
+        std::fs::write(
+            &p,
+            r#"{"acceptedTermsVersion":1,"port":8787,"autostart":false,"importOffered":true}"#,
+        )
+        .unwrap();
+        let s = load_settings(&p);
+        assert!(s.check_updates);
+        assert_eq!(s.accepted_terms_version, Some(1));
+        assert!(terms_accepted(&s));
+    }
+
+    #[test]
+    fn check_updates_off_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("launcher.json");
+        std::fs::write(&p, r#"{"acceptedTermsVersion":1,"checkUpdates":false}"#).unwrap();
+        assert!(!load_settings(&p).check_updates);
+    }
+
+    #[test]
     fn save_then_load_roundtrips() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("nested").join("launcher.json");
@@ -174,6 +201,7 @@ mod tests {
             port: 9001,
             autostart: true,
             import_offered: true,
+            check_updates: false,
         };
         save_settings(&p, &s).unwrap();
         assert_eq!(load_settings(&p), s);

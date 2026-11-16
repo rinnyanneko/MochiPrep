@@ -21,40 +21,34 @@ use rusqlite::Connection;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// The Node backend's migration files, embedded so the Rust binary needs no files at runtime.
+/// The migration files, embedded so the Rust binary needs no files at runtime.
 /// `migration_list_matches_directory` fails if a file is added without being listed here.
 pub const MIGRATIONS: &[(&str, &str)] = &[
-    (
-        "001_init.sql",
-        include_str!("../../../apps/server/src/db/migrations/001_init.sql"),
-    ),
+    ("001_init.sql", include_str!("../migrations/001_init.sql")),
     (
         "002_live_and_keys.sql",
-        include_str!("../../../apps/server/src/db/migrations/002_live_and_keys.sql"),
+        include_str!("../migrations/002_live_and_keys.sql"),
     ),
     (
         "003_instruments.sql",
-        include_str!("../../../apps/server/src/db/migrations/003_instruments.sql"),
+        include_str!("../migrations/003_instruments.sql"),
     ),
     (
         "004_execution_mode.sql",
-        include_str!("../../../apps/server/src/db/migrations/004_execution_mode.sql"),
+        include_str!("../migrations/004_execution_mode.sql"),
     ),
     (
         "005_provider_headers.sql",
-        include_str!("../../../apps/server/src/db/migrations/005_provider_headers.sql"),
+        include_str!("../migrations/005_provider_headers.sql"),
     ),
     (
         "006_agent_news.sql",
-        include_str!("../../../apps/server/src/db/migrations/006_agent_news.sql"),
+        include_str!("../migrations/006_agent_news.sql"),
     ),
-    (
-        "007_vault.sql",
-        include_str!("../../../apps/server/src/db/migrations/007_vault.sql"),
-    ),
+    ("007_vault.sql", include_str!("../migrations/007_vault.sql")),
     (
         "008_trailing_stop.sql",
-        include_str!("../../../apps/server/src/db/migrations/008_trailing_stop.sql"),
+        include_str!("../migrations/008_trailing_stop.sql"),
     ),
 ];
 

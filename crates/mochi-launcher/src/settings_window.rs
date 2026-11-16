@@ -1,4 +1,4 @@
-//! The Settings window: the backend's port and starting MochiPrep at login.
+//! The Settings window: the backend's port, starting MochiPrep at login, and update checks.
 
 use mochi_launcher_core::settings::{self, validate_port, LauncherSettings};
 use serde::Serialize;
@@ -11,9 +11,11 @@ use crate::app::{self, lock, AppState};
 pub const SETTINGS: &str = "settings";
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SettingsView {
     port: u16,
     autostart: bool,
+    check_updates: bool,
 }
 
 /// Validates the form and returns the settings to save, plus whether the port changed (which
@@ -22,11 +24,13 @@ pub fn apply_settings(
     current: &LauncherSettings,
     port: &str,
     autostart: bool,
+    check_updates: bool,
 ) -> Result<(LauncherSettings, bool), String> {
     let port = validate_port(port)?;
     let next = LauncherSettings {
         port,
         autostart,
+        check_updates,
         ..current.clone()
     };
     Ok((next, port != current.port))
@@ -41,7 +45,7 @@ pub fn open_settings(app: &AppHandle) {
     }
     let built = WebviewWindowBuilder::new(app, SETTINGS, WebviewUrl::App("settings.html".into()))
         .title("MochiPrep: Settings")
-        .inner_size(460.0, 300.0)
+        .inner_size(460.0, 330.0)
         .resizable(false)
         .center()
         .build();
@@ -60,6 +64,7 @@ pub fn get_settings(app: AppHandle) -> SettingsView {
     SettingsView {
         port: settings.port,
         autostart: settings.autostart,
+        check_updates: settings.check_updates,
     }
 }
 
@@ -67,13 +72,19 @@ pub fn get_settings(app: AppHandle) -> SettingsView {
 /// an autostart the system did not take, and put back if the file cannot be written; it is set
 /// every time, which also repairs a login item
 /// removed outside MochiPrep. A new port only takes effect when the backend restarts, so the
-/// owner is asked whether to restart now.
+/// owner is asked whether to restart now. `check_updates` takes effect at the update loop's next
+/// tick, within the hour.
 #[tauri::command]
-pub async fn save_settings(app: AppHandle, port: String, autostart: bool) -> Result<(), String> {
+pub async fn save_settings(
+    app: AppHandle,
+    port: String,
+    autostart: bool,
+    check_updates: bool,
+) -> Result<(), String> {
     let (port_changed, new_port) = {
         let state = app.state::<AppState>();
         let mut current = lock(&state.settings);
-        let (next, port_changed) = apply_settings(&current, &port, autostart)?;
+        let (next, port_changed) = apply_settings(&current, &port, autostart, check_updates)?;
         // Unreadable means unknown; the saved setting is the best guess of what the system has.
         let was_enabled = app.autolaunch().is_enabled().unwrap_or(current.autostart);
         let set_login_item = |enabled: bool| {
@@ -148,6 +159,7 @@ mod tests {
             port: 8787,
             autostart: false,
             import_offered: true,
+            check_updates: true,
         }
     }
 
@@ -211,16 +223,16 @@ mod tests {
     #[test]
     fn a_bad_port_is_the_validation_error() {
         let expected = validate_port("80").unwrap_err();
-        assert_eq!(apply_settings(&current(), "80", true), Err(expected));
+        assert_eq!(apply_settings(&current(), "80", true, true), Err(expected));
         assert_eq!(
-            apply_settings(&current(), "x", false),
+            apply_settings(&current(), "x", false, true),
             Err(validate_port("x").unwrap_err())
         );
     }
 
     #[test]
     fn the_same_port_is_not_a_change() {
-        let (next, changed) = apply_settings(&current(), " 8787 ", true).unwrap();
+        let (next, changed) = apply_settings(&current(), " 8787 ", true, true).unwrap();
         assert!(!changed);
         assert_eq!(
             next,
@@ -232,8 +244,21 @@ mod tests {
     }
 
     #[test]
+    fn turning_update_checks_off_is_saved_and_is_not_a_port_change() {
+        let (next, changed) = apply_settings(&current(), "8787", false, false).unwrap();
+        assert!(!changed);
+        assert_eq!(
+            next,
+            LauncherSettings {
+                check_updates: false,
+                ..current()
+            }
+        );
+    }
+
+    #[test]
     fn a_new_port_is_a_change_and_keeps_the_rest() {
-        let (next, changed) = apply_settings(&current(), "8977", false).unwrap();
+        let (next, changed) = apply_settings(&current(), "8977", false, true).unwrap();
         assert!(changed);
         assert_eq!(
             next,

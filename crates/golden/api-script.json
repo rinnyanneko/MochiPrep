@@ -1,5 +1,5 @@
 {
- "about": "A scripted Node session (apps/server/golden/api-script.ts); Rust replays it in tests/golden_api.rs.",
+ "about": "A scripted session recorded from the Node backend before it was removed; Rust replays it in tests/golden_api.rs.",
  "replayMinutes": 6500,
  "addedInstruments": [
   {

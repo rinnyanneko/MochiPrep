@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi", "app", "dmg", "deb", "appimage"],
+    "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/mochi-server"]
+  }
+}

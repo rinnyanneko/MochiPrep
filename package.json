@@ -8,18 +8,20 @@
   "packageManager": "pnpm@11.24.0",
   "engines": { "node": ">=22.13.0", "pnpm": ">=9" },
   "scripts": {
-    "dev": "pnpm --parallel --filter @mochiprep/server --filter @mochiprep/web dev",
+    "dev": "node scripts/dev.mjs",
     "build": "pnpm --filter @mochiprep/web build",
-    "start": "pnpm --filter @mochiprep/server start",
+    "start": "pnpm build && cargo run --release -p mochi-server",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
-    "test:e2e:rust": "cargo build --release -p mochi-server && node e2e/run-rust.mjs",
+    "test:e2e": "cargo build --release -p mochi-server && playwright test",
     "typecheck": "pnpm -r --parallel typecheck",
-    "golden": "pnpm --filter @mochiprep/server golden"
+    "measure:memory": "node scripts/measure-memory.mjs",
+    "tauri": "tauri",
+    "bundle": "node scripts/bundle.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.0",
+    "@tauri-apps/cli": "2.12.4",
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0",
     "vitest": "^5.1.0"

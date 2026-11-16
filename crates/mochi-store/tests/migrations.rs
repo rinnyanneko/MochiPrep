@@ -55,10 +55,7 @@ fn fresh_schema_matches_node() {
 
 #[test]
 fn migration_list_matches_directory() {
-    let dir = format!(
-        "{}/../../apps/server/src/db/migrations",
-        env!("CARGO_MANIFEST_DIR")
-    );
+    let dir = format!("{}/migrations", env!("CARGO_MANIFEST_DIR"));
     let mut files: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
