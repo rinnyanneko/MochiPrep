@@ -1,0 +1,54 @@
+name: Release
+
+# A tag `vX.Y.Z` builds all six targets and fills a DRAFT release. Publishing it is the owner's
+# action; nothing here publishes.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/check-version.mjs "$GITHUB_REF_NAME"
+
+  build:
+    needs: version
+    # build.yml cannot exceed these permissions, and tauri-action needs write to create the draft.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      sign-updater: true
+      upload-release: true
+      release-tag: ${{ github.ref_name }}
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+  notes:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: memory-*
+          path: memory-reports
+      - run: node scripts/release-notes.mjs memory-reports "$GITHUB_REF_NAME" > notes.md
+      - name: Set the draft release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --notes-file notes.md
