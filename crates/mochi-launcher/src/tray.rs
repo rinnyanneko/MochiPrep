@@ -112,7 +112,17 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
 /// Rebuilds the menu and swaps the icon so an armed real account is visible without opening
 /// the menu, and updates the fallback panel if that is shown instead. Failures are ignored: the
 /// next state change rebuilds it again.
+///
+/// Callers run on several threads. Reading the model and publishing it both happen in one task
+/// on the main thread, which runs its tasks one at a time: every change queues a task that reads
+/// the state when it runs, so the last task always publishes the latest state and an older read
+/// can never land after it.
 pub fn refresh_menu(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || publish_menu(&handle));
+}
+
+fn publish_menu(app: &AppHandle) {
     let model = current_model(app);
     panel::refresh_panel(app, &model);
     let Some(tray) = app.tray_by_id(TRAY_ID) else {

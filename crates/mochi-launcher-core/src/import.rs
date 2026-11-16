@@ -1,13 +1,23 @@
 //! One-time import of an existing MochiPrep data folder (for example the Node backend's) into the
 //! launcher's data dir.
 
-use rusqlite::{backup::Backup, Connection, OpenFlags};
+use rusqlite::{
+    backup::{Backup, StepResult},
+    Connection, OpenFlags,
+};
 use std::fmt;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const DB_NAME: &str = "mochiprep.db";
 const PARTIAL_NAME: &str = "mochiprep.db.importing";
+/// SQLite restarts a backup whenever another connection commits to the source between steps, so
+/// a source a running backend keeps writing to may never finish copying. The import window stays
+/// locked while a copy runs, so the copy gives up instead of holding it forever.
+const COPY_DEADLINE: Duration = Duration::from_secs(60);
+const PAGES_PER_STEP: i32 = 256;
+/// The pause after a busy or locked step, so a source held by a writer is not polled hot.
+const BUSY_PAUSE: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportError {
@@ -42,7 +52,7 @@ fn io<E: fmt::Display>(e: E) -> ImportError {
 /// Copies `source_dir/mochiprep.db` into `target_dir` as a consistent snapshot. Never overwrites
 /// existing data; the new file appears under its final name only once complete.
 pub fn import_data(source_dir: &Path, target_dir: &Path) -> Result<(), ImportError> {
-    import_with(source_dir, target_dir, publish)
+    import_with(source_dir, target_dir, COPY_DEADLINE, publish)
 }
 
 /// Gives the complete partial file its final name without ever replacing a file already there.
@@ -68,6 +78,7 @@ fn publish(partial: &Path, final_path: &Path) -> Result<(), ImportError> {
 fn import_with(
     source_dir: &Path,
     target_dir: &Path,
+    deadline: Duration,
     finalize: impl FnOnce(&Path, &Path) -> Result<(), ImportError>,
 ) -> Result<(), ImportError> {
     if let (Ok(a), Ok(b)) = (source_dir.canonicalize(), target_dir.canonicalize()) {
@@ -85,7 +96,8 @@ fn import_with(
     }
     create_private_dir(target_dir)?;
     let partial = target_dir.join(PARTIAL_NAME);
-    let result = copy_snapshot(&source_db, &partial).and_then(|()| finalize(&partial, &final_path));
+    let result = copy_snapshot(&source_db, &partial, deadline)
+        .and_then(|()| finalize(&partial, &final_path));
     if result.is_err() {
         // The side files exist only if the partial was ever opened in WAL mode; remove them too.
         for suffix in ["", "-wal", "-shm"] {
@@ -95,7 +107,7 @@ fn import_with(
     result
 }
 
-fn copy_snapshot(source_db: &Path, partial: &Path) -> Result<(), ImportError> {
+fn copy_snapshot(source_db: &Path, partial: &Path, deadline: Duration) -> Result<(), ImportError> {
     // Read-only, so a database the Node backend still has open is never modified; the backup API
     // reads through its WAL for a consistent view.
     let src =
@@ -124,10 +136,22 @@ fn copy_snapshot(source_db: &Path, partial: &Path) -> Result<(), ImportError> {
     create_private_file(partial)?;
     let mut dst = Connection::open(partial).map_err(io)?;
     let backup = Backup::new(&src, &mut dst).map_err(io)?;
-    backup
-        .run_to_completion(256, Duration::from_millis(0), None)
-        .map_err(io)?;
-    Ok(())
+    let started = Instant::now();
+    loop {
+        match backup.step(PAGES_PER_STEP).map_err(io)? {
+            StepResult::Done => return Ok(()),
+            StepResult::More => {}
+            StepResult::Busy | StepResult::Locked => std::thread::sleep(BUSY_PAUSE),
+            // Not a variant rusqlite 0.37 returns; treated as "not finished yet".
+            _ => std::thread::sleep(BUSY_PAUSE),
+        }
+        if started.elapsed() >= deadline {
+            return Err(ImportError::Io(format!(
+                "the source database is busy: it kept changing for {} s, so its copy never                  finished. Close whatever is using it (such as another MochiPrep) and try again.",
+                deadline.as_secs()
+            )));
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -266,7 +290,7 @@ mod tests {
         let dst = tempfile::tempdir().unwrap();
         drop(make_source(src.path()));
         // Fail the final rename, after the partial file is complete.
-        let r = import_with(src.path(), dst.path(), |from, _| {
+        let r = import_with(src.path(), dst.path(), COPY_DEADLINE, |from, _| {
             assert!(from.exists());
             Err(ImportError::Io("boom".into()))
         });
@@ -283,7 +307,7 @@ mod tests {
         let src = tempfile::tempdir().unwrap();
         let dst = tempfile::tempdir().unwrap();
         drop(make_source(src.path()));
-        let r = import_with(src.path(), dst.path(), |from, to| {
+        let r = import_with(src.path(), dst.path(), COPY_DEADLINE, |from, to| {
             std::fs::write(to, b"created meanwhile").unwrap();
             publish(from, to)
         });
@@ -293,6 +317,29 @@ mod tests {
             b"created meanwhile"
         );
         assert!(!dst.path().join("mochiprep.db.importing").exists());
+    }
+
+    /// A copy that cannot finish in time (here: a zero deadline and more pages than one step
+    /// copies) gives up with an error and removes its partial file.
+    #[test]
+    fn a_copy_past_its_deadline_gives_up_and_cleans_up() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let c = make_source(src.path());
+        c.execute("CREATE TABLE filler (b BLOB); ", []).unwrap();
+        // Well over PAGES_PER_STEP pages, so the first step cannot finish the copy.
+        c.execute("INSERT INTO filler VALUES (zeroblob(4 * 1024 * 1024))", [])
+            .unwrap();
+        drop(c);
+        let r = import_with(src.path(), dst.path(), Duration::ZERO, |_, _| {
+            panic!("an unfinished copy must not be published")
+        });
+        match r {
+            Err(ImportError::Io(message)) => assert!(message.contains("busy"), "{message}"),
+            other => panic!("expected a busy error, got {other:?}"),
+        }
+        let left: Vec<_> = std::fs::read_dir(dst.path()).unwrap().collect();
+        assert!(left.is_empty(), "left behind: {left:?}");
     }
 
     #[test]

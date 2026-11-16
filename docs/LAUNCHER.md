@@ -36,9 +36,10 @@ Consent and launcher settings never go into the backend's SQLite. A missing or c
 ## Behaviour
 
 - The backend does not start until the current terms version is accepted. Declining, or closing the terms window, quits.
-- Before the first start, if the data folder has no `mochiprep.db`, the launcher offers once to import a `.mochiprep` folder (for example the Node backend's). The database is copied as a consistent snapshot; the original is not changed. Import into existing data is refused.
+- Before the first start, if the data folder has no `mochiprep.db`, the launcher offers once to import a `.mochiprep` folder (for example the Node backend's). The database is copied as a consistent snapshot; the original is not changed. Import into existing data is refused. A copy that cannot finish within 60 s (a source another program keeps writing to) gives up with an error, and the offer stays open.
 - The port defaults to 8787 and is set in Settings (1024 to 65535). The launcher never picks another port: a busy port shows `Error: port <p> is in use`.
 - Closing the interface window stops only the window; the backend and its agents keep running.
+- Disarm all is enabled while the backend runs and a real account is armed, or while its state cannot be read: disarming is always safe.
 - Quit, Restart and a port change that restarts ask `Stop MochiPrep's backend?` first if an agent is running, a real (`OKX_LIVE`) account is armed, or the backend's state cannot be read.
 - On macOS the launcher has no Dock icon and its menu has no Quit (only Edit, for copy and paste), so Cmd+Q does nothing and Quit is only in the tray, where it asks first.
 - On Linux without a tray (GNOME without the AppIndicator extension) a small panel window with the same items replaces the tray icon. Closing the panel is Quit.
@@ -79,3 +80,4 @@ Run each row on Windows, macOS and Linux before a release. Rows marked OKX need 
 | 27 | Quit right after launch, while the tray shows `Backend: Starting` | `Stop MochiPrep's backend?` shows at once; Continue quits once the start finishes. |
 | 28 | Close the import offer while its folder picker is open, then pick a folder | The import is refused (the offer is closed); the backend runs on the empty data folder. |
 | 29 | A backend that dies after starting (kill `mochi-server` alone) | Within 3 s the tray shows `Backend: Error: backend stopped unexpectedly`, followed by the end of its stderr if it wrote any. |
+| 30 | Terms with the keyboard only: Tab into the text, scroll it with the arrow keys or Page Down to the end | The boxes unlock and can be ticked with Space; Continue starts the backend. |

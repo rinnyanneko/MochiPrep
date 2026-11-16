@@ -90,11 +90,14 @@ pub fn menu_model(state: &BackendState, snapshot: Option<&BackendSnapshot>) -> M
         (BackendState::Running, Some(s)) => s.armed_live_accounts.len(),
         _ => 0,
     };
+    let running = *state == BackendState::Running;
     MenuModel {
         status_label,
         armed_label: (armed > 0).then(|| format!("Real account armed ({armed})")),
-        can_open_interface: *state == BackendState::Running,
-        can_disarm_all: armed > 0,
+        can_open_interface: running,
+        // An unreadable snapshot (say `/api/agents` fails) says nothing about the accounts, and
+        // disarming works without it and is always safe, so it stays available then.
+        can_disarm_all: running && (snapshot.is_none() || armed > 0),
     }
 }
 
@@ -185,6 +188,15 @@ mod tests {
     }
 
     #[test]
+    fn running_menu_with_an_unreadable_snapshot_keeps_disarm_all() {
+        let m = menu_model(&BackendState::Running, None);
+        assert_eq!(m.armed_label, None);
+        assert!(m.can_disarm_all);
+        // Quit still asks, as an unknown state may hide an armed account.
+        assert!(needs_confirmation(&BackendState::Running, true, None));
+    }
+
+    #[test]
     fn error_menu_names_the_problem() {
         let m = menu_model(&BackendState::Error("port 8787 is in use".into()), None);
         assert_eq!(m.status_label, "Backend: Error: port 8787 is in use");
@@ -198,6 +210,8 @@ mod tests {
             menu_model(&BackendState::Starting, None).status_label,
             "Backend: Starting"
         );
+        assert!(!menu_model(&BackendState::Starting, None).can_disarm_all);
+        assert!(!menu_model(&BackendState::Stopped, None).can_disarm_all);
         assert_eq!(
             menu_model(&BackendState::Stopped, None).status_label,
             "Backend: Stopped"

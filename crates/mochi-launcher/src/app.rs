@@ -412,7 +412,8 @@ async fn refresh_snapshot(app: &AppHandle) {
             // should see that it stopped, and why (the backend redacts its own logs).
             let tail = child.stderr_tail();
             *backend = None;
-            drop(backend);
+            // Published while the lock is held, as start and stop do: a start waiting for the
+            // lock then sets its own state after this one, never before it.
             set_state(app, BackendState::Error(died_message(&tail)));
             return;
         }

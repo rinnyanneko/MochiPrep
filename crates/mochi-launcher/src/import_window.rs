@@ -36,6 +36,13 @@ pub fn open_import(app: &AppHandle) {
     let window = match built {
         Ok(window) => window,
         Err(error) => {
+            // Two opens can race past the check above (the first start and a tray Restart);
+            // the loser's build fails because the window exists, and that is no reason to skip.
+            if let Some(window) = app.get_webview_window(IMPORT) {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+                return;
+            }
             // Without the window there is nothing to answer, so the offer is settled as a Skip
             // and the backend starts on an empty data dir.
             app::show_error(

@@ -71,24 +71,36 @@ function setUpSettings() {
   const save = document.getElementById("save");
   const saved = document.getElementById("saved");
 
+  // The form is locked until the stored settings arrive, and while a save is out: an edit made
+  // meanwhile would be overwritten by the loaded values, or shown as "Saved." when it was not.
+  function setLocked(locked) {
+    port.disabled = locked;
+    autostart.disabled = locked;
+    save.disabled = locked;
+  }
+
+  setLocked(true);
   invoke("get_settings")
     .then((settings) => {
       port.value = String(settings.port);
       autostart.checked = settings.autostart;
+      setLocked(false);
     })
+    // Without the stored values a save would overwrite them with whatever the form holds.
     .catch(showError);
 
   // Any edit makes an earlier "Saved." stale.
   form.addEventListener("input", () => { saved.hidden = true; });
   form.addEventListener("submit", (event) => {
     event.preventDefault();
+    if (save.disabled) return;
     clearError();
     saved.hidden = true;
-    save.disabled = true;
+    setLocked(true);
     invoke("save_settings", { port: port.value, autostart: autostart.checked })
       .then(() => { saved.hidden = false; })
       .catch(showError)
-      .finally(() => { save.disabled = false; });
+      .finally(() => setLocked(false));
   });
 }
 
