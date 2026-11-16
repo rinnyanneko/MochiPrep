@@ -17,8 +17,13 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-autostart = "2"
+# Release builds only check for a new version; nothing installs until the owner clicks the
+# tray's update item (updater.rs).
+tauri-plugin-updater = "2"
 tokio = { workspace = true }
 serde = { workspace = true }
+# `generate_context!` writes the plugins' config from tauri.conf.json as `serde_json` values.
+serde_json = { workspace = true }
 
 # Asks the session bus whether a tray exists (panel.rs); other systems always have one. The
 # check uses zbus's blocking API on its own thread, so the features are named rather than left to

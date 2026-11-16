@@ -1,6 +1,8 @@
 //! What the tray shows and when quitting needs a confirmation. Pure functions so the rules are
 //! testable without a window.
 
+use crate::update::{update_label, UpdateOffer};
+
 pub const CONFIRM_TITLE: &str = "Stop MochiPrep's backend?";
 pub const CONFIRM_TEXT: &str = "Running agents will stop and real accounts will be disarmed. Open positions and their stop orders stay on OKX.";
 
@@ -77,9 +79,15 @@ pub struct MenuModel {
     pub armed_label: Option<String>,
     pub can_open_interface: bool,
     pub can_disarm_all: bool,
+    /// Only when a check found a newer release; there is no item otherwise.
+    pub update_label: Option<String>,
 }
 
-pub fn menu_model(state: &BackendState, snapshot: Option<&BackendSnapshot>) -> MenuModel {
+pub fn menu_model(
+    state: &BackendState,
+    snapshot: Option<&BackendSnapshot>,
+    update: Option<&UpdateOffer>,
+) -> MenuModel {
     let status_label = match state {
         BackendState::Starting => "Backend: Starting".to_string(),
         BackendState::Running => "Backend: Running".to_string(),
@@ -98,12 +106,14 @@ pub fn menu_model(state: &BackendState, snapshot: Option<&BackendSnapshot>) -> M
         // An unreadable snapshot (say `/api/agents` fails) says nothing about the accounts, and
         // disarming works without it and is always safe, so it stays available then.
         can_disarm_all: running && (snapshot.is_none() || armed > 0),
+        update_label: update.map(update_label),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::update::{InstallKind, UpdateOffer};
 
     fn snap(agents: usize, armed: &[&str]) -> BackendSnapshot {
         BackendSnapshot {
@@ -173,7 +183,7 @@ mod tests {
 
     #[test]
     fn running_menu_with_armed_accounts() {
-        let m = menu_model(&BackendState::Running, Some(&snap(0, &["a", "b"])));
+        let m = menu_model(&BackendState::Running, Some(&snap(0, &["a", "b"])), None);
         assert_eq!(m.status_label, "Backend: Running");
         assert_eq!(m.armed_label, Some("Real account armed (2)".to_string()));
         assert!(m.can_open_interface);
@@ -182,14 +192,14 @@ mod tests {
 
     #[test]
     fn running_menu_without_armed_accounts() {
-        let m = menu_model(&BackendState::Running, Some(&snap(0, &[])));
+        let m = menu_model(&BackendState::Running, Some(&snap(0, &[])), None);
         assert_eq!(m.armed_label, None);
         assert!(!m.can_disarm_all);
     }
 
     #[test]
     fn running_menu_with_an_unreadable_snapshot_keeps_disarm_all() {
-        let m = menu_model(&BackendState::Running, None);
+        let m = menu_model(&BackendState::Running, None, None);
         assert_eq!(m.armed_label, None);
         assert!(m.can_disarm_all);
         // Quit still asks, as an unknown state may hide an armed account.
@@ -198,22 +208,43 @@ mod tests {
 
     #[test]
     fn error_menu_names_the_problem() {
-        let m = menu_model(&BackendState::Error("port 8787 is in use".into()), None);
+        let m = menu_model(
+            &BackendState::Error("port 8787 is in use".into()),
+            None,
+            None,
+        );
         assert_eq!(m.status_label, "Backend: Error: port 8787 is in use");
         assert!(!m.can_open_interface);
         assert!(!m.can_disarm_all);
     }
 
     #[test]
+    fn the_update_label_shows_only_with_an_offer() {
+        let offer = UpdateOffer {
+            version: "0.2.0".to_string(),
+            kind: InstallKind::SelfUpdating,
+        };
+        let with = menu_model(&BackendState::Running, None, Some(&offer));
+        assert_eq!(with.update_label, Some("Update to v0.2.0".to_string()));
+        // An update is offered whatever the backend state, even while it is in error.
+        let errored = menu_model(&BackendState::Error("x".into()), None, Some(&offer));
+        assert_eq!(errored.update_label, Some("Update to v0.2.0".to_string()));
+        assert_eq!(
+            menu_model(&BackendState::Running, None, None).update_label,
+            None
+        );
+    }
+
+    #[test]
     fn starting_and_stopped_labels() {
         assert_eq!(
-            menu_model(&BackendState::Starting, None).status_label,
+            menu_model(&BackendState::Starting, None, None).status_label,
             "Backend: Starting"
         );
-        assert!(!menu_model(&BackendState::Starting, None).can_disarm_all);
-        assert!(!menu_model(&BackendState::Stopped, None).can_disarm_all);
+        assert!(!menu_model(&BackendState::Starting, None, None).can_disarm_all);
+        assert!(!menu_model(&BackendState::Stopped, None, None).can_disarm_all);
         assert_eq!(
-            menu_model(&BackendState::Stopped, None).status_label,
+            menu_model(&BackendState::Stopped, None, None).status_label,
             "Backend: Stopped"
         );
     }

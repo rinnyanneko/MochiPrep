@@ -10,6 +10,7 @@ use tauri::{include_image, AppHandle, Manager};
 use crate::app::{self, lock, AppState};
 use crate::panel;
 use crate::settings_window;
+use crate::updater;
 use crate::windows;
 
 const TRAY_ID: &str = "main";
@@ -22,6 +23,7 @@ const DISARM: &str = "disarm";
 const TERMS: &str = "terms";
 const SETTINGS: &str = "settings";
 const QUIT: &str = "quit";
+const UPDATE: &str = "update";
 
 fn icon(armed: bool) -> Image<'static> {
     if armed {
@@ -35,7 +37,10 @@ pub fn current_model(app: &AppHandle) -> MenuModel {
     let state = app.state::<AppState>();
     let backend = lock(&state.state).clone();
     let snapshot = lock(&state.snapshot).snapshot().cloned();
-    menu_model(&backend, snapshot.as_ref())
+    let update = lock(&state.update)
+        .as_ref()
+        .map(|available| available.offer.clone());
+    menu_model(&backend, snapshot.as_ref(), update.as_ref())
 }
 
 fn build_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Menu<tauri::Wry>> {
@@ -55,6 +60,9 @@ fn build_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Menu<tauri::W
             false,
             None::<&str>,
         )?)?;
+    }
+    if let Some(update) = &model.update_label {
+        menu.append(&MenuItem::with_id(app, UPDATE, update, true, None::<&str>)?)?;
     }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(
@@ -155,6 +163,9 @@ pub fn run_action(app: &AppHandle, action: &str) {
         }
         QUIT => {
             tauri::async_runtime::spawn(async move { app::quit(&handle).await });
+        }
+        UPDATE => {
+            tauri::async_runtime::spawn(async move { updater::apply_update(&handle).await });
         }
         _ => {}
     }

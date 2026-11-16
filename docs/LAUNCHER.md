@@ -26,7 +26,7 @@ The bundle identifier is `io.github.rinnyanneko.mochiprep`.
 
 | What | Windows | macOS | Linux |
 |---|---|---|---|
-| `launcher.json` (terms consent, port, autostart, import offered) | `%APPDATA%\io.github.rinnyanneko.mochiprep` | `~/Library/Application Support/io.github.rinnyanneko.mochiprep` | `~/.config/io.github.rinnyanneko.mochiprep` |
+| `launcher.json` (terms consent, port, autostart, import offered, update checks) | `%APPDATA%\io.github.rinnyanneko.mochiprep` | `~/Library/Application Support/io.github.rinnyanneko.mochiprep` | `~/.config/io.github.rinnyanneko.mochiprep` |
 | Backend data (`mochiprep.db`), unless `MOCHIPREP_DATA_DIR` is set | `%APPDATA%\io.github.rinnyanneko.mochiprep` | `~/Library/Application Support/io.github.rinnyanneko.mochiprep` | `~/.local/share/io.github.rinnyanneko.mochiprep` |
 
 The interface window's WebView keeps its own data (the interface's saved preferences) apart from these; on Windows it is `%LOCALAPPDATA%\io.github.rinnyanneko.mochiprep\EBWebView`.
@@ -44,6 +44,17 @@ Consent and launcher settings never go into the backend's SQLite. A missing or c
 - On macOS the launcher has no Dock icon and its menu has no Quit (only Edit, for copy and paste), so Cmd+Q does nothing and Quit is only in the tray, where it asks first.
 - On Linux without a tray (GNOME without the AppIndicator extension) a small panel window with the same items replaces the tray icon. Closing the panel is Quit.
 - Killing the launcher closes the backend's stdin, and the backend shuts down cleanly.
+
+## Updates
+
+Release builds look for a new version at `https://github.com/rinnyanneko/MochiPrep/releases/latest/download/latest.json` once at start and then every 24 hours while the launcher runs. A failed check is logged to stderr and tried again a day later. Debug builds never check. Turning off `Check for updates automatically` in Settings stops the checks (the setting is `checkUpdates` in `launcher.json`, on by default).
+
+A check only finds out what exists: nothing is downloaded or installed until the owner clicks the update item, which shows in the tray (and the no-tray panel) only when a newer release is known.
+
+- Windows installs, the macOS `.app` and a Linux AppImage update themselves: the item reads `Update to v<version>`. Clicking it asks `Stop MochiPrep's backend?` first when Quit would, then downloads the update while the backend still runs, stops the backend, installs and relaunches. A failed download stops nothing; a failed install starts the backend again. Either shows an error dialog. On Windows the installer runs in passive mode (a progress bar, no questions).
+- Any other Linux install (a `.deb` or a distribution package) belongs to the package manager: the item reads `v<version> available` and opens `https://github.com/rinnyanneko/MochiPrep/releases/latest`.
+
+The updater's signing public key is in `tauri.conf.json` (`plugins.updater.pubkey`); an update not signed by its private key is refused.
 
 ## Manual checklist
 
@@ -81,3 +92,8 @@ Run each row on Windows, macOS and Linux before a release. Rows marked OKX need 
 | 28 | Close the import offer while its folder picker is open, then pick a folder | The import is refused (the offer is closed); the backend runs on the empty data folder. |
 | 29 | A backend that dies after starting (kill `mochi-server` alone) | Within 3 s the tray shows `Backend: Error: backend stopped unexpectedly`, followed by the end of its stderr if it wrote any. |
 | 30 | Terms with the keyboard only: Tab into the text, scroll it with the arrow keys or Page Down to the end | The boxes unlock and can be ticked with Space; Continue starts the backend. |
+| 31 | Release build older than the latest release, `Check for updates automatically` on | Shortly after launch the tray (or panel) shows `Update to v<version>`; with no newer release there is no update item. Clicking it with nothing running downloads, restarts once, and the new version runs. |
+| 32 | Linux `.deb` install with a newer release out | The item reads `v<version> available`; clicking it opens the release page and changes nothing. |
+| 33 | Click the update item with the network cut | An error dialog names the download failure; the backend keeps running throughout and the interface still works. |
+| 34 | Click the update item with a paper agent running | `Stop MochiPrep's backend?` asks first; Cancel changes nothing and the agent keeps running. |
+| 35 | Untick `Check for updates automatically`, Save, restart the launcher | No request goes to GitHub (watch with a proxy or firewall log) and no update item appears. |

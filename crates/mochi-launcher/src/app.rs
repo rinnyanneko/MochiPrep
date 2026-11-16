@@ -18,6 +18,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use crate::import_window::{self, should_offer_import, IMPORT};
 use crate::panel::{self, PANEL};
 use crate::tray::refresh_menu;
+use crate::updater;
 use crate::windows::{self, INTERFACE, TERMS};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
@@ -40,6 +41,8 @@ pub struct AppState {
     /// Set while a data import copies, so its window cannot be closed (which would start the
     /// backend into the folder being written).
     pub importing: AtomicBool,
+    /// A newer release the last update check found; `None` until one is found.
+    pub update: Mutex<Option<updater::Available>>,
 }
 
 /// A poisoned lock only means another thread panicked mid-update; the launcher's values are
@@ -70,6 +73,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         quitting: AtomicBool::new(false),
         stopping: AtomicBool::new(false),
         importing: AtomicBool::new(false),
+        update: Mutex::new(None),
     });
     if panel::tray_available() {
         crate::tray::create(app)?;
@@ -84,6 +88,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     }
     let handle = app.clone();
     tauri::async_runtime::spawn(async move { poll(handle).await });
+    updater::start(app);
     Ok(())
 }
 
@@ -115,11 +120,16 @@ pub fn quitting(app: &AppHandle) -> bool {
         .is_some_and(|state| state.quitting.load(Ordering::SeqCst))
 }
 
-/// Exits without touching the backend; only for when none was started (terms declined).
-pub fn exit_now(app: &AppHandle) {
+/// Lets the next exit request through; only the flows that mean to end the launcher set it.
+pub fn mark_quitting(app: &AppHandle) {
     app.state::<AppState>()
         .quitting
         .store(true, Ordering::SeqCst);
+}
+
+/// Exits without touching the backend; only for when none was started (terms declined).
+pub fn exit_now(app: &AppHandle) {
+    mark_quitting(app);
     app.exit(0);
 }
 
@@ -139,7 +149,7 @@ pub fn on_second_launch(app: &AppHandle) {
         // Without this the second launch would look like it did nothing at all.
         let state = app.state::<AppState>();
         let backend = lock(&state.state).clone();
-        let status = menu_model(&backend, None).status_label;
+        let status = menu_model(&backend, None, None).status_label;
         show_error(
             app,
             "MochiPrep is already running",
@@ -317,15 +327,15 @@ async fn ask_to_stop(app: &AppHandle) -> bool {
     answer_rx.await.unwrap_or(false)
 }
 
-/// Claims the single Restart/Quit slot; false if another flow already holds it.
-fn begin_stop_flow(app: &AppHandle) -> bool {
+/// Claims the single Restart/Quit/Update slot; false if another flow already holds it.
+pub fn begin_stop_flow(app: &AppHandle) -> bool {
     app.state::<AppState>()
         .stopping
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
 }
 
-fn end_stop_flow(app: &AppHandle) {
+pub fn end_stop_flow(app: &AppHandle) {
     app.state::<AppState>()
         .stopping
         .store(false, Ordering::SeqCst);
@@ -362,9 +372,7 @@ pub async fn quit(app: &AppHandle) {
         end_stop_flow(app);
         return;
     }
-    app.state::<AppState>()
-        .quitting
-        .store(true, Ordering::SeqCst);
+    mark_quitting(app);
     stop_backend(app).await;
     app.exit(0);
 }
