@@ -41,6 +41,9 @@ pub struct AppState {
     /// Set while a data import copies, so its window cannot be closed (which would start the
     /// backend into the folder being written).
     pub importing: AtomicBool,
+    /// Set while an update downloads or installs, so repeated clicks do not start another.
+    /// Separate from `stopping`, which the update takes only once the download is done.
+    pub updating: AtomicBool,
     /// A newer release the last update check found; `None` until one is found.
     pub update: Mutex<Option<updater::Available>>,
 }
@@ -73,6 +76,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         quitting: AtomicBool::new(false),
         stopping: AtomicBool::new(false),
         importing: AtomicBool::new(false),
+        updating: AtomicBool::new(false),
         update: Mutex::new(None),
     });
     if panel::tray_available() {

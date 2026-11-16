@@ -51,7 +51,7 @@ Release builds look for a new version at `https://github.com/rinnyanneko/MochiPr
 
 A check only finds out what exists: nothing is downloaded or installed until the owner clicks the update item, which shows in the tray (and the no-tray panel) only when a newer release is known.
 
-- Windows installs, the macOS `.app` and a Linux AppImage update themselves: the item reads `Update to v<version>`. Clicking it asks `Stop MochiPrep's backend?` first when Quit would, then downloads the update while the backend still runs, stops the backend, installs and relaunches. A failed download stops nothing; a failed install starts the backend again. Either shows an error dialog. On Windows the installer runs in passive mode (a progress bar, no questions).
+- Windows installs, the macOS `.app` and a Linux AppImage update themselves: the item reads `Update to v<version>`. Clicking it downloads the update while the backend still runs (Restart and Quit keep working meanwhile; a download not done within 15 minutes gives up), then asks `Stop MochiPrep's backend?` when Quit would, stops the backend, installs and relaunches. A failed download stops nothing; a failed install starts the backend again. Either shows an error dialog. A check that gets no answer within 30 s counts as failed. On Windows the installer runs in passive mode (a progress bar, no questions).
 - Any other Linux install (a `.deb` or a distribution package) belongs to the package manager: the item reads `v<version> available` and opens `https://github.com/rinnyanneko/MochiPrep/releases/latest`.
 
 The updater's signing public key is in `tauri.conf.json` (`plugins.updater.pubkey`); an update not signed by its private key is refused.
@@ -95,5 +95,5 @@ Run each row on Windows, macOS and Linux before a release. Rows marked OKX need 
 | 31 | Release build older than the latest release, `Check for updates automatically` on | Shortly after launch the tray (or panel) shows `Update to v<version>`; with no newer release there is no update item. Clicking it with nothing running downloads, restarts once, and the new version runs. |
 | 32 | Linux `.deb` install with a newer release out | The item reads `v<version> available`; clicking it opens the release page and changes nothing. |
 | 33 | Click the update item with the network cut | An error dialog names the download failure; the backend keeps running throughout and the interface still works. |
-| 34 | Click the update item with a paper agent running | `Stop MochiPrep's backend?` asks first; Cancel changes nothing and the agent keeps running. |
+| 34 | Click the update item with a paper agent running | Once the download finishes, `Stop MochiPrep's backend?` asks; Cancel changes nothing and the agent keeps running. During the download, Quit and Restart still work. |
 | 35 | Untick `Check for updates automatically`, Save, restart the launcher | No request goes to GitHub (watch with a proxy or firewall log) and no update item appears. |
