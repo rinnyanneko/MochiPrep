@@ -95,8 +95,11 @@ jobs:
           while IFS=$'\t' read -r asset_id name; do
             case "$name" in
               *.sig)
-                curl -sSfL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+                curl -sSfL --proto '=https' --proto-redir '=https' -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
                   -o "sigs/$name" "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+                ;;
+              *)
+                # Only the updater signatures are needed; every other asset is ignored.
                 ;;
             esac
           done < assets.tsv

@@ -34,7 +34,7 @@ export function parseFootprint(text) {
   const match = pattern('phys_footprint').exec(text) ?? pattern('Footprint').exec(text);
   if (!match) throw new Error('no footprint line in output');
   const unit = match[2].toUpperCase();
-  const scale = unit === 'KB' ? 1024 : unit === 'MB' ? MIB : unit === 'GB' ? 1024 * MIB : 1;
+  const scale = { KB: 1024, MB: MIB, GB: 1024 * MIB }[unit] ?? 1;
   return Math.round(Number(match[1]) * scale);
 }
 
@@ -86,7 +86,8 @@ const round = (value) => Math.round(value * 100) / 100;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function metricName() {
-  return process.platform === 'win32' ? 'workingSet' : process.platform === 'darwin' ? 'footprint' : 'rss';
+  if (process.platform === 'win32') return 'workingSet';
+  return process.platform === 'darwin' ? 'footprint' : 'rss';
 }
 
 function powershell(command) {
@@ -104,33 +105,45 @@ function sampleBytes(pid) {
   }
 }
 
-/** Direct children of every pid, as `Map<parent, pid[]>`. */
-function childMap() {
-  const map = new Map();
-  const add = (parent, pid) => map.set(parent, [...(map.get(parent) ?? []), pid]);
-  if (process.platform === 'win32') {
-    const rows = JSON.parse(
-      powershell('Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress'),
-    );
-    for (const row of [rows].flat()) add(row.ParentProcessId, row.ProcessId);
-  } else if (process.platform === 'darwin') {
-    const table = execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' });
-    for (const line of table.split('\n')) {
-      const [pid, ppid] = line.trim().split(/\s+/).map(Number);
-      if (pid) add(ppid, pid);
-    }
-  } else {
-    for (const entry of readdirSync('/proc')) {
-      if (!/^\d+$/.test(entry)) continue;
-      try {
-        // The command name is parenthesised and may hold spaces, so split after the last ")".
-        const stat = readFileSync(`/proc/${entry}/stat`, 'utf8');
-        add(Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]), Number(entry));
-      } catch {
-        // The process exited between listing and reading.
-      }
+/** [parent, pid] pairs from `Get-CimInstance Win32_Process`. */
+function windowsParentPairs() {
+  const rows = JSON.parse(
+    powershell('Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress'),
+  );
+  return [rows].flat().map((row) => [row.ParentProcessId, row.ProcessId]);
+}
+
+function macParentPairs() {
+  const table = execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' });
+  const pairs = [];
+  for (const line of table.split('\n')) {
+    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+    if (pid) pairs.push([ppid, pid]);
+  }
+  return pairs;
+}
+
+function linuxParentPairs() {
+  const pairs = [];
+  for (const entry of readdirSync('/proc')) {
+    if (!/^\d+$/.test(entry)) continue;
+    try {
+      // The command name is parenthesised and may hold spaces, so split after the last ")".
+      const stat = readFileSync(`/proc/${entry}/stat`, 'utf8');
+      pairs.push([Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]), Number(entry)]);
+    } catch {
+      // The process exited between listing and reading.
     }
   }
+  return pairs;
+}
+
+/** Direct children of every pid, as `Map<parent, pid[]>`. */
+function childMap() {
+  const platformPairs = { win32: windowsParentPairs, darwin: macParentPairs };
+  const pairs = (platformPairs[process.platform] ?? linuxParentPairs)();
+  const map = new Map();
+  for (const [parent, pid] of pairs) map.set(parent, [...(map.get(parent) ?? []), pid]);
   return map;
 }
 
@@ -179,8 +192,10 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--gate') options.gate = true;
-    else if (['--binary', '--port', '--idle', '--out', '--pid'].includes(arg)) options[arg.slice(2)] = argv[(i += 1)];
-    else throw new Error(`unknown argument ${arg}`);
+    else if (['--binary', '--port', '--idle', '--out', '--pid'].includes(arg)) {
+      i += 1;
+      options[arg.slice(2)] = argv[i];
+    } else throw new Error(`unknown argument ${arg}`);
   }
   options.port = Number(options.port);
   options.idle = Number(options.idle);
@@ -258,7 +273,8 @@ function watchLiveFeed(port) {
       markSettled();
     }
   };
-  run();
+  // run() catches everything itself and always settles, so nothing is left to handle here.
+  void run();
   return {
     settled,
     state: () => last,
@@ -333,11 +349,10 @@ async function main() {
 }
 
 if (isMain(import.meta.url)) {
-  main().then(
-    (code) => process.exit(code),
-    (error) => {
-      console.error(`measure-memory: ${error.message}`);
-      process.exit(1);
-    },
-  );
+  try {
+    process.exit(await main());
+  } catch (error) {
+    console.error(`measure-memory: ${error.message}`);
+    process.exit(1);
+  }
 }

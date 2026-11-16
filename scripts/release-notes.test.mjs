@@ -62,3 +62,9 @@ test('checkTag accepts the workspace version and refuses others', () => {
   assert.match(checkTag('0.1.0', toml), /v0\.1\.0/);
   assert.match(checkTag('v0.1.0', '[package]\nversion = "0.1.0"\n'), /workspace\.package/);
 });
+
+test('workspaceVersion tolerates spaces around the version line and ignores later sections', () => {
+  const spaced = '[workspace.package]\r\n  version   =   "1.2.3"  \r\n[package]\nversion = "9.9.9"\n';
+  assert.equal(workspaceVersion(spaced), '1.2.3');
+  assert.equal(workspaceVersion('[workspace.package]\nedition = "2021"\n[package]\nversion = "9.9.9"\n'), null);
+});

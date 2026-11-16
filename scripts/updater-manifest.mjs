@@ -119,7 +119,8 @@ function parseArgs(argv) {
     if (!['--tag', '--assets', '--sigs', '--out'].includes(arg) || argv[i + 1] === undefined) {
       throw new Error(`unexpected argument ${arg}`);
     }
-    options[arg.slice(2)] = argv[(i += 1)];
+    i += 1;
+    options[arg.slice(2)] = argv[i];
   }
   for (const required of ['tag', 'assets', 'sigs']) {
     if (!options[required]) throw new Error(`--${required} is required`);

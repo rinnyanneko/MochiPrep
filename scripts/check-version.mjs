@@ -8,10 +8,19 @@ import { isMain } from './is-main.mjs';
 
 /** The `version` under `[workspace.package]`, or null. */
 export function workspaceVersion(toml) {
-  const section = /^\[workspace\.package\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(toml);
-  if (!section) return null;
-  const match = /^\s*version\s*=\s*"([^"]+)"/m.exec(section[1]);
-  return match ? match[1] : null;
+  // Line by line: a single regex over the whole file can backtrack super-linearly.
+  let inSection = false;
+  for (const line of toml.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('[')) {
+      if (inSection) return null;
+      inSection = trimmed === '[workspace.package]';
+    } else if (inSection) {
+      const match = /^version\s*=\s*"([^"]+)"/.exec(trimmed);
+      if (match) return match[1];
+    }
+  }
+  return null;
 }
 
 /** An error message, or null when the tag is `v` + the workspace version. */

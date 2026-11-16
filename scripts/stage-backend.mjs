@@ -3,10 +3,17 @@
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tripleProblem } from "./triples.mjs";
 
 const triple = process.argv[2];
 if (!triple) {
   console.error("usage: node scripts/stage-backend.mjs <rust-target-triple>");
+  process.exit(1);
+}
+
+const problem = tripleProblem(triple);
+if (problem) {
+  console.error(problem);
   process.exit(1);
 }
 

@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tripleProblem } from "./triples.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 // pnpm forwards a literal "--" when invoked as `pnpm bundle -- ...`.
@@ -14,6 +15,11 @@ const at = args.indexOf("--target");
 const triple = at >= 0 ? args[at + 1] : undefined;
 if (!triple) {
   console.error("usage: pnpm bundle --target <rust-target-triple> [tauri build args]");
+  process.exit(1);
+}
+const problem = tripleProblem(triple);
+if (problem) {
+  console.error(problem);
   process.exit(1);
 }
 
@@ -29,7 +35,7 @@ function run(cmd, cmdArgs) {
 }
 
 run("pnpm", ["build"]);
-run("cargo", ["build", "--release", "-p", "mochi-server", "--target", triple]);
+run("cargo", ["build", "--locked", "--release", "-p", "mochi-server", "--target", triple]);
 run("node", ["scripts/stage-backend.mjs", triple]);
 // The release config turns on updater artifacts, and Tauri fails after bundling when it cannot
 // sign them. Without a signing key a local bundle gets the installers only; a second --config is
