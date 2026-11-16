@@ -7,7 +7,7 @@ OKX Demo Trading, or real OKX accounts. OKX is the only exchange; every other ve
 
 The backend is Rust. Node is only for the web UI and the scripts.
 
-- `packages/shared`: domain types, Zod schemas, indicators. The API contract the web UI uses.
+- `packages/shared`: domain types and indicators. The API contract the web UI uses.
 - `apps/web`: React UI.
 - `crates/mochi-decimal`, `mochi-domain`: decimal math and domain types, instrument specs.
 - `crates/mochi-core`: perp math, fill model, risk engine, paper engine, ledger audit.

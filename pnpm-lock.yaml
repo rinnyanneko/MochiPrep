@@ -85,11 +85,7 @@ importers:
         specifier: ^8.3.0
         version: 8.3.6(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)
 
-  packages/shared:
-    dependencies:
-      zod:
-        specifier: ^4.6.0
-        version: 4.6.7
+  packages/shared: {}
 
 packages:
 
@@ -1714,9 +1710,6 @@ packages:
     engines: {node: '>=20.11'}
     hasBin: true
 
-  zod@4.6.7:
-    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
-
   zustand@5.1.0:
     resolution: {integrity: sha512-ciJZlP48M1PTQbVQq81CGVFxHTLpZNrFjKqwjtCU34AWuXTZT/jrF3p9+fI84Cf1eSCMLapxqBy/SNTfwOBuqA==}
     engines: {node: '>=12.20.0'}
@@ -3178,8 +3171,6 @@ snapshots:
       - msw
 
   why-is-node-running@3.2.1: {}
-
-  zod@4.6.7: {}
 
   zustand@5.1.0(@types/react@19.3.0)(react@19.3.1):
     optionalDependencies:
