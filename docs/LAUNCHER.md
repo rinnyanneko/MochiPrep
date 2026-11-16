@@ -18,6 +18,8 @@ Linux builds need the WebKitGTK and tray libraries. On Debian or Ubuntu:
 
     sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
 
+`mochi-launcher` is a workspace member, so `cargo test --workspace` needs them too. Without them, run `cargo test --workspace --exclude mochi-launcher`. The Linux-only tray check (`panel.rs`, zbus) has not yet been compiled on Linux; build it there once before a release.
+
 ## Where things live
 
 The bundle identifier is `io.github.rinnyanneko.mochiprep`.
@@ -38,6 +40,7 @@ Consent and launcher settings never go into the backend's SQLite. A missing or c
 - The port defaults to 8787 and is set in Settings (1024 to 65535). The launcher never picks another port: a busy port shows `Error: port <p> is in use`.
 - Closing the interface window stops only the window; the backend and its agents keep running.
 - Quit, Restart and a port change that restarts ask `Stop MochiPrep's backend?` first if an agent is running, a real (`OKX_LIVE`) account is armed, or the backend's state cannot be read.
+- On macOS the launcher has no Dock icon and its menu has no Quit (only Edit, for copy and paste), so Cmd+Q does nothing and Quit is only in the tray, where it asks first.
 - On Linux without a tray (GNOME without the AppIndicator extension) a small panel window with the same items replaces the tray icon. Closing the panel is Quit.
 - Killing the launcher closes the backend's stdin, and the backend shuts down cleanly.
 
@@ -72,3 +75,7 @@ Run each row on Windows, macOS and Linux before a release. Rows marked OKX need 
 | 23 | In the interface's devtools: `window.__TAURI_INTERNALS__.invoke('get_settings')` | Refused: the interface window has no launcher command. |
 | 24 | A launcher window fails to build | An error dialog names the window; at first launch a failed terms window quits without starting the backend. |
 | 25 | Memory with the interface closed | Note the working set of the launcher plus `mochi-server`. |
+| 26 | macOS: after launch, with a paper agent running | No Dock icon; Cmd+Q in the interface does not quit; copy and paste work in the interface; the tray's Quit asks first. |
+| 27 | Quit right after launch, while the tray shows `Backend: Starting` | `Stop MochiPrep's backend?` shows at once; Continue quits once the start finishes. |
+| 28 | Close the import offer while its folder picker is open, then pick a folder | The import is refused (the offer is closed); the backend runs on the empty data folder. |
+| 29 | A backend that dies after starting (kill `mochi-server` alone) | Within 3 s the tray shows `Backend: Error: backend stopped unexpectedly`, followed by the end of its stderr if it wrote any. |

@@ -21,7 +21,7 @@ OKX Demo Trading, or real OKX accounts. OKX is the only exchange; every other ve
     pnpm test                 # vitest, all packages, network blocked
     pnpm typecheck
     pnpm test:e2e             # Playwright, needs Chrome
-    cargo test --workspace    # Rust crates
+    cargo test --workspace    # Rust crates; on Linux mochi-launcher needs libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev (or add --exclude mochi-launcher)
     pnpm golden               # regenerate crates/golden from the TypeScript code
 
 Needs Node >= 22.13 (`node:sqlite`). Workspace packages export TypeScript source, so tests, typecheck and `dev` need no build step. `start` bundles the server with esbuild (`apps/server/build.mjs`) to avoid tsx's memory cost; anything the server reads from disk at runtime must be copied into `dist/` there, as migrations are.
