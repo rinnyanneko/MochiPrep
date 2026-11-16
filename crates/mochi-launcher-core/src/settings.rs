@@ -13,6 +13,7 @@ const PORT_ERROR: &str = "Port must be a number from 1024 to 65535";
 #[serde(rename_all = "camelCase", default)]
 pub struct LauncherSettings {
     pub accepted_terms_version: Option<u32>,
+    #[serde(deserialize_with = "lenient_port")]
     pub port: u16,
     pub autostart: bool,
     pub import_offered: bool,
@@ -29,18 +30,24 @@ impl Default for LauncherSettings {
     }
 }
 
+/// An out-of-range or malformed port resets only the port, so a bad edit never costs the consent.
+fn lenient_port<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(v.as_i64()
+        .and_then(|n| u16::try_from(n).ok())
+        .filter(|p| *p >= 1024)
+        .unwrap_or(DEFAULT_PORT))
+}
+
 /// A missing, unreadable or corrupt file yields defaults, which means terms not accepted: consent
 /// is never assumed.
 pub fn load_settings(path: &Path) -> LauncherSettings {
     let Ok(text) = std::fs::read_to_string(path) else {
         return LauncherSettings::default();
     };
-    let Ok(mut s) = serde_json::from_str::<LauncherSettings>(&text) else {
+    let Ok(s) = serde_json::from_str::<LauncherSettings>(&text) else {
         return LauncherSettings::default();
     };
-    if s.port < 1024 {
-        s.port = DEFAULT_PORT;
-    }
     s
 }
 
@@ -136,8 +143,17 @@ mod tests {
         let p = dir.path().join("launcher.json");
         std::fs::write(&p, r#"{"port":80}"#).unwrap();
         assert_eq!(load_settings(&p).port, DEFAULT_PORT);
-        std::fs::write(&p, r#"{"port":70000}"#).unwrap();
-        assert_eq!(load_settings(&p), LauncherSettings::default());
+        for bad in ["70000", "-5", "\"x\""] {
+            std::fs::write(
+                &p,
+                format!(r#"{{"acceptedTermsVersion":1,"autostart":true,"importOffered":true,"port":{bad}}}"#),
+            )
+            .unwrap();
+            let s = load_settings(&p);
+            assert_eq!(s.port, DEFAULT_PORT);
+            assert_eq!(s.accepted_terms_version, Some(1));
+            assert!(s.autostart && s.import_offered);
+        }
     }
 
     #[test]

@@ -42,6 +42,16 @@ fn io<E: fmt::Display>(e: E) -> ImportError {
 /// Copies `source_dir/mochiprep.db` into `target_dir` as a consistent snapshot. Never overwrites
 /// existing data; the new file appears under its final name only once complete.
 pub fn import_data(source_dir: &Path, target_dir: &Path) -> Result<(), ImportError> {
+    import_with(source_dir, target_dir, |from, to| std::fs::rename(from, to))
+}
+
+/// `finalize` is the last step (the rename into place); it is a parameter so tests can make it
+/// fail after the partial file exists and check the cleanup.
+fn import_with(
+    source_dir: &Path,
+    target_dir: &Path,
+    finalize: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), ImportError> {
     if let (Ok(a), Ok(b)) = (source_dir.canonicalize(), target_dir.canonicalize()) {
         if a == b {
             return Err(ImportError::SameFolder);
@@ -58,9 +68,12 @@ pub fn import_data(source_dir: &Path, target_dir: &Path) -> Result<(), ImportErr
     create_private_dir(target_dir)?;
     let partial = target_dir.join(PARTIAL_NAME);
     let result = copy_snapshot(&source_db, &partial)
-        .and_then(|()| std::fs::rename(&partial, &final_path).map_err(io));
+        .and_then(|()| finalize(&partial, &final_path).map_err(io));
     if result.is_err() {
-        let _ = std::fs::remove_file(&partial);
+        // The side files exist only if the partial was ever opened in WAL mode; remove them too.
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(target_dir.join(format!("{PARTIAL_NAME}{suffix}")));
+        }
     }
     result
 }
@@ -77,9 +90,15 @@ fn copy_snapshot(source_db: &Path, partial: &Path) -> Result<(), ImportError> {
     );
     match probe {
         Ok(()) => {}
-        // A file that is not SQLite at all fails the query itself: just as foreign as a
-        // database without the table.
-        Err(rusqlite::Error::QueryReturnedNoRows) | Err(rusqlite::Error::SqliteFailure(..)) => {
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Err(ImportError::NotMochiPrep),
+        // A file that is not SQLite at all is just as foreign as a database without the table;
+        // but busy, locked, I/O and permission failures say nothing about what the file is.
+        Err(rusqlite::Error::SqliteFailure(e, _))
+            if matches!(
+                e.code,
+                rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt
+            ) =>
+        {
             return Err(ImportError::NotMochiPrep)
         }
         Err(other) => return Err(io(other)),
@@ -228,14 +247,32 @@ mod tests {
     fn leaves_no_partial_file_on_failure() {
         let src = tempfile::tempdir().unwrap();
         let dst = tempfile::tempdir().unwrap();
+        drop(make_source(src.path()));
+        // Fail the final rename, after the partial file is complete.
+        let r = import_with(src.path(), dst.path(), |from, _| {
+            assert!(from.exists());
+            Err(std::io::Error::other("boom"))
+        });
+        assert_eq!(r, Err(ImportError::Io("boom".into())));
+        assert!(!dst.path().join("mochiprep.db").exists());
+        let left: Vec<_> = std::fs::read_dir(dst.path()).unwrap().collect();
+        assert!(left.is_empty(), "left behind: {left:?}");
+    }
+
+    #[test]
+    fn a_text_file_is_not_a_mochiprep_database() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
         std::fs::write(
             src.path().join("mochiprep.db"),
-            b"this is not sqlite at all, just text",
+            b"this is not sqlite at all, just text, padded out well past the sqlite header size.....",
         )
         .unwrap();
-        assert!(import_data(src.path(), dst.path()).is_err());
-        assert!(!dst.path().join("mochiprep.db").exists());
-        assert!(!dst.path().join("mochiprep.db.importing").exists());
+        assert_eq!(
+            import_data(src.path(), dst.path()),
+            Err(ImportError::NotMochiPrep)
+        );
+        assert!(std::fs::read_dir(dst.path()).unwrap().next().is_none());
     }
 
     #[test]
