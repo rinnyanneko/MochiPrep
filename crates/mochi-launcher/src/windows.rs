@@ -4,6 +4,7 @@
 use mochi_launcher_core::settings::{save_settings, terms_accepted, TERMS_VERSION};
 use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::app::{self, lock, AppState};
@@ -49,8 +50,12 @@ pub fn open_terms(app: &AppHandle) {
     if read_only {
         builder = builder.initialization_script("window.__MOCHIPREP_TERMS_READ_ONLY__ = true;");
     }
-    let Ok(window) = builder.build() else {
-        return;
+    let window = match builder.build() {
+        Ok(window) => window,
+        Err(error) => {
+            terms_window_failed(app, read_only, &error.to_string());
+            return;
+        }
     };
     let handle = app.clone();
     window.on_window_event(move |event| {
@@ -61,6 +66,24 @@ pub fn open_terms(app: &AppHandle) {
             }
         }
     });
+}
+
+/// Without a terms window there is no way to accept the terms, so at first launch the launcher
+/// explains and quits rather than sitting in the tray with a backend it may never start.
+fn terms_window_failed(app: &AppHandle, read_only: bool, error: &str) {
+    let message = format!("MochiPrep cannot open the risk warning window: {error}");
+    if read_only {
+        app::show_error(app, "Cannot open the risk warning", &message);
+        return;
+    }
+    let handle = app.clone();
+    app.dialog()
+        .message(format!(
+            "{message}. The backend was not started, and MochiPrep will now quit."
+        ))
+        .title("Cannot open the risk warning")
+        .kind(MessageDialogKind::Error)
+        .show(move |_| app::exit_now(&handle));
 }
 
 /// Opens the web interface on the running backend, or focuses it if open. The window is
@@ -84,7 +107,16 @@ pub fn open_interface(app: &AppHandle) {
             Some(backend) => backend.port(),
             None => return,
         };
-        let _ = build_interface(&app, port);
+        if let Err(error) = build_interface(&app, port) {
+            // Two quick clicks race to build the window; the loser's failure is not an error.
+            if app.get_webview_window(INTERFACE).is_none() {
+                app::show_error(
+                    &app,
+                    "Cannot open the interface",
+                    &format!("MochiPrep cannot open the interface window: {error}"),
+                );
+            }
+        }
     });
 }
 
@@ -98,9 +130,19 @@ fn build_interface(app: &AppHandle, port: u16) -> Result<(), Box<dyn std::error:
         .center()
         .on_navigation(move |url| route(&on_navigation, url, port))
         // A second WebView would sit outside this window's navigation rule, so new-window
-        // requests (`target="_blank"` news links) never create one.
+        // requests never create one: web links (`target="_blank"` news links) go to the
+        // browser, and a link to the interface itself loads in this window.
         .on_new_window(move |url, _features| {
-            route(&on_new_window, &url, port);
+            if route(&on_new_window, &url, port) {
+                let handle = on_new_window.clone();
+                // Navigating from inside the WebView's own callback is deferred to a task, so
+                // the WebView is not re-entered while it is still handling the request.
+                tauri::async_runtime::spawn(async move {
+                    if let Some(window) = handle.get_webview_window(INTERFACE) {
+                        let _ = window.navigate(url);
+                    }
+                });
+            }
             NewWindowResponse::Deny
         })
         .build()?;

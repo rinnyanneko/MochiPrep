@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use mochi_launcher_core::client::BackendClient;
 use mochi_launcher_core::model::{
-    needs_confirmation, BackendSnapshot, BackendState, CONFIRM_TEXT, CONFIRM_TITLE,
+    menu_model, needs_confirmation, BackendSnapshot, BackendState, CONFIRM_TEXT, CONFIRM_TITLE,
 };
 use mochi_launcher_core::settings::{load_settings, terms_accepted, LauncherSettings};
 use mochi_launcher_core::supervisor::{self, Backend, BackendCommand};
@@ -33,6 +33,8 @@ pub struct AppState {
     /// Set only by the Quit flows; any other exit request (the last window closing) is refused,
     /// because the launcher lives in the tray.
     pub quitting: AtomicBool,
+    /// Set while a Restart or Quit flow runs, so repeated clicks do not queue a dialog each.
+    pub stopping: AtomicBool,
 }
 
 /// A poisoned lock only means another thread panicked mid-update; the launcher's values are
@@ -59,6 +61,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         state: Mutex::new(BackendState::Stopped),
         snapshot: Mutex::new(None),
         quitting: AtomicBool::new(false),
+        stopping: AtomicBool::new(false),
     });
     crate::tray::create(app)?;
     if accepted {
@@ -93,7 +96,27 @@ pub fn on_second_launch(app: &AppHandle) {
     } else if let Some(terms) = app.get_webview_window(TERMS) {
         let _ = terms.unminimize();
         let _ = terms.set_focus();
+    } else {
+        // Without this the second launch would look like it did nothing at all.
+        let state = app.state::<AppState>();
+        let backend = lock(&state.state).clone();
+        let status = menu_model(&backend, None).status_label;
+        show_error(
+            app,
+            "MochiPrep is already running",
+            &format!("{status}. Use the MochiPrep tray icon to restart the backend or quit."),
+        );
     }
+}
+
+/// A native error dialog; it needs no window, so it works when the launcher's own windows
+/// could not be created.
+pub fn show_error(app: &AppHandle, title: &str, message: &str) {
+    app.dialog()
+        .message(message)
+        .title(title)
+        .kind(MessageDialogKind::Error)
+        .show(|_| {});
 }
 
 /// The backend sits next to the launcher: both build into the same target directory in
@@ -220,7 +243,30 @@ pub async fn confirm_stop(app: &AppHandle) -> bool {
     answer_rx.await.unwrap_or(false)
 }
 
+/// Claims the single Restart/Quit slot; false if another flow already holds it.
+fn begin_stop_flow(app: &AppHandle) -> bool {
+    app.state::<AppState>()
+        .stopping
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
+fn end_stop_flow(app: &AppHandle) {
+    app.state::<AppState>()
+        .stopping
+        .store(false, Ordering::SeqCst);
+}
+
+/// Later Restart clicks are ignored while one Restart or Quit is in progress.
 pub async fn restart(app: &AppHandle) {
+    if !begin_stop_flow(app) {
+        return;
+    }
+    restart_flow(app).await;
+    end_stop_flow(app);
+}
+
+async fn restart_flow(app: &AppHandle) {
     if !confirm_stop(app).await {
         return;
     }
@@ -233,8 +279,13 @@ pub async fn restart(app: &AppHandle) {
     start_backend(app).await;
 }
 
+/// Later Quit clicks are ignored while one Restart or Quit is in progress.
 pub async fn quit(app: &AppHandle) {
+    if !begin_stop_flow(app) {
+        return;
+    }
     if !confirm_stop(app).await {
+        end_stop_flow(app);
         return;
     }
     app.state::<AppState>()
@@ -249,13 +300,13 @@ pub async fn disarm_all(app: &AppHandle) {
         return;
     };
     if let Err(error) = BackendClient::new(port).disarm_all_live().await {
-        app.dialog()
-            .message(format!(
+        show_error(
+            app,
+            "Disarm all failed",
+            &format!(
                 "Some real accounts may still be armed: {error}. Check them in the interface."
-            ))
-            .title("Disarm all failed")
-            .kind(MessageDialogKind::Error)
-            .show(|_| {});
+            ),
+        );
     }
     refresh_snapshot(app).await;
 }
@@ -309,6 +360,9 @@ async fn refresh_snapshot(app: &AppHandle) {
 
 async fn poll(app: AppHandle) {
     let mut ticks = tokio::time::interval(POLL_INTERVAL);
+    // A slow poll (a hung backend takes 5 s per request) must not be followed by a burst of
+    // catch-up ticks.
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticks.tick().await;
         refresh_snapshot(&app).await;
