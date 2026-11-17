@@ -170,7 +170,7 @@ function DisplayCard() {
         <div>
           <span className="mb-1 block text-xs font-semibold text-ink-2">Up and down colors</span>
           <label className="flex h-9 items-center gap-2 text-[13px]">
-            <input type="checkbox" className="accent-[var(--accent)]" checked={flipColors} onChange={(e) => setFlipColors(e.target.checked)} data-testid="flip-colors" />
+            <input type="checkbox" className="accent-[var(--accent)]" checked={flipColors} onChange={(e) => setFlipColors(e.target.checked)} data-testid="flip-colors" />{' '}
             Red for up, green for down
           </label>
           <span className="mt-1 block text-[11px] text-ink-3">

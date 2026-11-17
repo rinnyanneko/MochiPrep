@@ -197,7 +197,7 @@ export const useApp = create<State>((set, get) => ({
     if (topics.includes('instruments')) {
       jobs.push(
         api.get<InstrumentSpecification[]>('/instruments').then((specs) => {
-          specs.forEach(registerInstrument);
+          for (const spec of specs) registerInstrument(spec);
           set({ symbols: specs.map((s) => s.symbol) });
         }),
       );

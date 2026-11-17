@@ -54,7 +54,7 @@ function ConnectDialog({ preset, onClose }: { preset: ExchangeStatus | null; onC
         <label className="flex items-start gap-2 text-xs text-ink-2 sm:col-span-2">
           <input type="checkbox" className="mt-0.5 accent-[var(--accent)]" disabled={!unlocked} checked={remember && unlocked} onChange={(e) => setRemember(e.target.checked)} />
           <span>
-            Save encrypted with my master password
+            Save encrypted with my master password{' '}
             <span className="block text-[11px] text-ink-3">
               {unlocked
                 ? 'Reconnects when you unlock after a restart. Real accounts still start disarmed. Disconnecting deletes the saved key.'

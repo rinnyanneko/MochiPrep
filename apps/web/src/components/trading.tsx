@@ -65,8 +65,15 @@ function shiftPoint(value: string, places: number): string {
     digits += '0'.repeat(point - digits.length);
   }
   const whole = digits.slice(0, point).replace(/^0+(?=\d)/, '') || '0';
-  const rest = digits.slice(point).replace(/0+$/, '');
+  const rest = trimTrailingZeros(digits.slice(point));
   return rest ? `${whole}.${rest}` : whole;
+}
+
+/** A scan, not `/0+$/`: that regex retries from every zero of a long run and goes quadratic. */
+function trimTrailingZeros(s: string): string {
+  let end = s.length;
+  while (end > 0 && s[end - 1] === '0') end--;
+  return s.slice(0, end);
 }
 const isDecimal = (v: string) => /^\d+(\.\d+)?$/.test(v.trim());
 

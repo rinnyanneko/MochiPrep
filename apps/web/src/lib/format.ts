@@ -2,7 +2,7 @@ import { INSTRUMENTS, type SymbolId } from '@mochiprep/shared';
 
 type Num = string | number | null | undefined;
 
-const toNumber = (v: Num) => (v === null || v === undefined || v === '' ? NaN : Number(v));
+const toNumber = (v: Num) => (v === null || v === undefined || v === '' ? Number.NaN : Number(v));
 
 export function money(v: Num, digits = 2): string {
   const n = toNumber(v);

@@ -148,7 +148,7 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
         <label className="flex items-start gap-2 text-xs text-ink-2 sm:col-span-2">
           <input type="checkbox" className="mt-0.5 accent-[var(--accent)]" disabled={source === 'REPLAY'} checked={form.useNews && source === 'LIVE'} onChange={(e) => set({ useNews: e.target.checked })} />
           <span>
-            Read recent news headlines
+            Read recent news headlines{' '}
             <span className="block text-[11px] text-ink-3">
               {source === 'REPLAY' ? 'Live OKX only: real headlines would not match the synthetic tape.' : 'Headlines are unverified third-party text. They can be wrong or written to mislead an AI. Sources are in Settings.'}
             </span>
@@ -168,13 +168,13 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
         {number('Max notional (USDT)', 'maxNotional')}
       </div>
       <label className="mt-3 flex items-center gap-2 text-xs text-ink-2">
-        <input type="checkbox" checked={form.risk.requireStopLoss} onChange={(e) => setRisk({ requireStopLoss: e.target.checked })} className="accent-[var(--accent)]" />
+        <input type="checkbox" checked={form.risk.requireStopLoss} onChange={(e) => setRisk({ requireStopLoss: e.target.checked })} className="accent-[var(--accent)]" />{' '}
         Require a stop loss on new positions
       </label>
       <label className="mt-2 flex items-start gap-2 text-xs text-ink-2">
         <input type="checkbox" checked={form.allowTrailingStop} onChange={(e) => set({ allowTrailingStop: e.target.checked })} className="mt-0.5 accent-[var(--accent)]" />
         <span>
-          Allow trailing stops
+          Allow trailing stops{' '}
           <span className="block text-[11px] text-ink-3">Off: this agent cannot set, change or remove trailing stops.</span>
         </span>
       </label>

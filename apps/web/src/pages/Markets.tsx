@@ -72,7 +72,7 @@ export function MarketsPage() {
         {account && (
           <div className="mb-2 flex flex-wrap items-center gap-3 px-2">
             <label className="flex items-center gap-2 text-xs text-ink-2">
-              <input type="checkbox" checked={showTrades} onChange={(e) => setShowTrades(e.target.checked)} className="accent-[var(--accent)]" />
+              <input type="checkbox" checked={showTrades} onChange={(e) => setShowTrades(e.target.checked)} className="accent-[var(--accent)]" />{' '}
               Show trades
             </label>
             {showTrades && <AccountPicker className="h-8 w-52 text-xs" />}
