@@ -1,145 +1,145 @@
-# 取得 API Key 教學
+# How to get API keys
 
-這份教學帶你申請 MochiPrep 用得到的金鑰。Demo Mode 不需要任何金鑰，想用真實 AI 或連接 OKX 時再來申請就好。
+This guide walks you through the keys MochiPrep can use. Demo Mode needs no key at all. Get keys only when you want a real AI model or want to connect OKX.
 
-> **DYOR：請自行研究。** MochiPrep 不構成財務建議。AI 輸出可能出錯，你要為自己的交易負責。
+> **DYOR: do your own research.** MochiPrep is not financial advice. AI output can be wrong, and you are responsible for your own trades.
 
-各家後台的選單會改版。如果畫面和這裡不同，以官方頁面為準。
+Provider dashboards change their menus from time to time. If what you see differs from this guide, follow the provider's own page.
 
-## 先看這裡：金鑰存在哪
+## Start here: where keys are stored
 
-| 金鑰 | 未設主密碼 | 設了主密碼 |
+| Key | Without a master password | With a master password |
 | --- | --- | --- |
-| AI provider | 本機 SQLite，**未加密**，重啟後保留 | 加密存在 SQLite，重啟後解鎖即載入 |
-| OKX | 只在後端記憶體，重啟後要重新輸入 | 預設同左；連線時勾選即加密保存，解鎖後自動重連（真實帳戶仍需重新 Arm） |
-| Extra headers | 未加密 | **仍未加密** |
+| AI provider | Local SQLite, **unencrypted**, kept across restarts | Encrypted in SQLite, loaded when you unlock after a restart |
+| OKX | Backend memory only; enter it again after a restart | Same by default. Tick the box when connecting to save it encrypted; it reconnects after you unlock (a real account still has to be armed again) |
+| Extra headers | Unencrypted | **Still unencrypted** |
 
-- 金鑰等同密碼，不要貼到聊天室、截圖或 commit 進 git。
-- 沒設主密碼時，AI key 是明文存在 `.mochiprep/`，不要把這個資料夾放進 iCloud、Dropbox 這類同步資料夾。
-- 主密碼在 **Settings > Master password** 設定。它和資料金鑰都不會寫進磁碟，**忘記就無法找回**，只能刪除已保存的金鑰後重新輸入；帳戶和交易紀錄不受影響。設定主密碼前做的備份，裡面仍是明文金鑰。
-- 主密碼保護的是被複製、同步或備份出去的資料庫檔案。MochiPrep 解鎖期間，同一台電腦上的惡意程式仍可能讀到記憶體中的金鑰。
-- 金鑰外流時，立刻到官方後台刪除，再重新建立。
+- Treat keys like passwords. Do not paste them into chats or screenshots, and never commit them to git.
+- Without a master password, AI keys are stored as plain text in MochiPrep's data folder (`.mochiprep/` for a source build; see [the launcher guide](LAUNCHER.md#where-things-live) for installed apps). Do not keep that folder in iCloud, Dropbox or another sync folder.
+- Set the master password in **Settings > Master password**. Neither it nor the data key is ever written to disk, so **a forgotten master password cannot be recovered**. You can only delete the saved keys and enter them again; your accounts and trade history are not affected. Backups made before you set a master password still contain the keys in plain text.
+- The master password protects database files that are copied, synced or backed up. While MochiPrep is unlocked, malware on the same computer could still read the keys from memory.
+- If a key leaks, delete it in the provider's dashboard right away and create a new one.
 
-## AI Provider
+## AI providers
 
-大多數金鑰**只在建立時顯示一次**，請當場複製。AI API 通常按用量計費，並和網頁版的訂閱方案分開計算。agent 每個週期都會呼叫一次，間隔越短費用越高，建議到各家後台設定用量上限。
+Most keys are **shown only once, when you create them**, so copy them right away. AI APIs are usually billed by usage, separately from the provider's chat subscription. An agent calls the model once per cycle, so a shorter interval costs more. Set a spending limit in each provider's dashboard.
 
-通用流程：取得金鑰後，到 MochiPrep 的 **Settings > AI providers > Add provider** 新增，貼上金鑰按 **Save key**，再按 **Test** 確認能連線。
+The general steps: once you have a key, go to **Settings > AI providers > Add provider** in MochiPrep, paste the key, press **Save key**, then press **Test** to check the connection.
 
-模型名稱請填官方文件列出的完整識別碼。想看到成本估算的話，可以填入 provider 目前的每百萬 token 價格，不填也能正常使用。
+Enter the model name as the full identifier listed in the provider's documentation. To see cost estimates, you can enter the provider's current price per million tokens. It works without them too.
 
 ### OpenAI
 
-1. 登入 [API keys 頁面](https://platform.openai.com/api-keys)。
-2. 按 **Create new secret key**，複製金鑰。
-3. 在 MochiPrep 選類型 **OpenAI**，Base URL 留空。
+1. Sign in to the [API keys page](https://platform.openai.com/api-keys).
+2. Press **Create new secret key** and copy the key.
+3. In MochiPrep, choose the type **OpenAI** and leave Base URL empty.
 
 ### Anthropic Claude
 
-1. 登入 [Claude Console 的 API keys 頁面](https://platform.claude.com/settings/keys)。
-2. 建立金鑰，取名並選擇到期時間。金鑰以 `sk-ant-` 開頭。
-3. 在 MochiPrep 選類型 **Anthropic Claude**，Base URL 留空。
+1. Sign in to the [API keys page of the Claude Console](https://platform.claude.com/settings/keys).
+2. Create a key, give it a name and choose when it expires. The key starts with `sk-ant-`.
+3. In MochiPrep, choose the type **Anthropic Claude** and leave Base URL empty.
 
-如果 Create key 按鈕是灰的，可能是你的組織角色沒有權限，請找管理員處理。
+If the Create key button is greyed out, your role in the organization may not allow it. Ask an admin.
 
 ### Google Gemini
 
-1. 登入 [Google AI Studio](https://aistudio.google.com/apikey)。
-2. 建立 API key 並複製。
-3. 在 MochiPrep 選類型 **Google Gemini**，Base URL 留空。
+1. Sign in to [Google AI Studio](https://aistudio.google.com/apikey).
+2. Create an API key and copy it.
+3. In MochiPrep, choose the type **Google Gemini** and leave Base URL empty.
 
 ### DeepSeek
 
-1. 登入 [DeepSeek Platform 的 API keys 頁面](https://platform.deepseek.com/api_keys)。
-2. 建立金鑰並複製。
-3. 在 MochiPrep 選類型 **DeepSeek**，Base URL 留空，模型預設為 `deepseek-flash`。
+1. Sign in to the [API keys page of the DeepSeek Platform](https://platform.deepseek.com/api_keys).
+2. Create a key and copy it.
+3. In MochiPrep, choose the type **DeepSeek** and leave Base URL empty. The default model is `deepseek-flash`.
 
 ### OpenCode
 
-1. 依 [Zen 文件](https://opencode.ai/docs/zen/) 登入 OpenCode Console，加入付款資訊和額度，複製 API key。
-2. 在 MochiPrep 選類型 **OpenCode**，Base URL 留空，模型預設為 `deepseek-v4.1-flash`。
+1. Following the [Zen documentation](https://opencode.ai/docs/zen/), sign in to the OpenCode Console, add billing details and credit, and copy the API key.
+2. In MochiPrep, choose the type **OpenCode** and leave Base URL empty. The default model is `deepseek-v4.1-flash`.
 
-MochiPrep 走 OpenCode 的 Chat Completions 端點，官方說明其他文字模型也能經它轉換使用。名稱帶 `-free` 的免費模型只能在 OpenCode 自家客戶端使用，這裡請選付費模型。完整模型清單見 [Zen 文件](https://opencode.ai/docs/zen/)。
+MochiPrep uses OpenCode's Chat Completions endpoint. OpenCode says other text models can be used through it too. Free models, whose names end in `-free`, work only in OpenCode's own clients, so choose a paid model here. The full model list is in the [Zen documentation](https://opencode.ai/docs/zen/).
 
-### OpenAI 相容服務
+### OpenAI-compatible services
 
-本機模型或其他相容 OpenAI API 的服務，選類型 **OpenAI-compatible**，Base URL 填到 `/v1` 為止，例如 Ollama 的 `http://localhost:11434/v1`。不需要金鑰的本機服務，金鑰欄隨便填一個值即可。
+For local models or any other service compatible with the OpenAI API, choose the type **OpenAI-compatible** and enter the Base URL up to `/v1`, for example `http://localhost:11434/v1` for Ollama. For a local service that needs no key, put any value in the key field.
 
-### 需要特定 Header 的服務
+### Services that need extra headers
 
-有些閘道服務要求額外的 HTTP header，例如 `HTTP-Referer` 或組織 ID。新增 provider 時填在 **Extra headers**，一行一個：
+Some gateways require extra HTTP headers, such as `HTTP-Referer` or an organization ID. Enter them under **Extra headers** when you add the provider, one per line:
 
 ```text
 HTTP-Referer: https://example.com
 X-Title: MochiPrep
 ```
 
-- 和 API key 一樣未加密存在本機，App 只會顯示名稱，不會顯示內容。
-- 編輯時留空會保留原本的值，填入新內容會整組取代。
-- `Authorization`、`x-api-key`、`Content-Type` 這類由 MochiPrep 設定的 header 不能覆蓋。
+- Like API keys, they are stored locally without encryption. The app shows only their names, never their values.
+- When editing, leaving the field empty keeps the current headers, and entering new ones replaces the whole set.
+- Headers that MochiPrep sets itself, such as `Authorization`, `x-api-key` and `Content-Type`, cannot be overridden.
 
 ## OKX
 
-> **真實資金警告：** MochiPrep 的 OKX 下單只用模擬交易所測試過，從未在真實 OKX 上下過單。請先照順序用模擬盤驗證，並閱讀 [Trading on OKX](OKX_TRADING.md)。
+> **Real money warning:** MochiPrep's OKX order handling has only been tested against a simulated exchange. It has never placed an order on real OKX. Verify it on Demo Trading first, step by step, and read [Trading on OKX](OKX_TRADING.md).
 
-你會拿到三個值，全部都要：**API key**、**Secret key**、**Passphrase**。
+You get three values, and you need all of them: the **API key**, the **Secret key** and the **Passphrase**.
 
-Passphrase 是你自己設定的，OKX 無法找回。忘記就只能重新建立一組。
+You choose the Passphrase yourself, and OKX cannot recover it. If you forget it, you have to create a new key.
 
-### 帳戶設定
+### Account settings
 
-連線前先在 OKX 確認，否則 MochiPrep 會拒絕連線：
+Check these in OKX before connecting, or MochiPrep refuses the connection:
 
-- 帳戶模式是 **Futures**，不能是 Spot。
-- 持倉模式是**單向持倉**（net mode），不能是雙向持倉。
+- The account mode is **Futures**, not Spot.
+- The position mode is **one-way** (net mode), not hedge mode.
 
-### 模擬盤金鑰（先做這個）
+### Demo Trading key (do this first)
 
-模擬盤用虛擬資金，不會動到真錢，金鑰也不會因為閒置而失效。
+Demo Trading uses virtual funds, so no real money is involved, and demo keys do not expire when idle.
 
-1. 登入 OKX。
-2. 進入 **Trade > Demo Trading**。
-3. 開啟 **Personal Center > Demo Trading API**。
-4. 按 **Create Demo Trading API Key**，權限勾選 **Trade**，設定 Passphrase。
-5. 複製三個值。
-6. 到 MochiPrep 的 **Settings > OKX trading > Connect OKX**，環境選 **Demo Trading**。
+1. Sign in to OKX.
+2. Go to **Trade > Demo Trading**.
+3. Open **Personal Center > Demo Trading API**.
+4. Press **Create Demo Trading API Key**, tick the **Trade** permission, and set a Passphrase.
+5. Copy the three values.
+6. In MochiPrep, go to **Settings > OKX trading > Connect OKX** and choose the **Demo Trading** environment.
 
-模擬盤金鑰和真實金鑰不能互用。
+Demo keys and real keys are not interchangeable.
 
-### 真實帳戶金鑰
+### Real account key
 
-1. 確認模擬盤已照 [上線前檢查](OKX_TRADING.md#before-your-first-real-order) 驗證完成。
-2. 開啟 OKX 的 [API 管理頁面](https://www.okx.com/account/my-api)，建立新的 API key。
-3. 權限**只勾 Read 和 Trade，絕對不要勾 Withdraw**。有提領權限的金鑰會被 MochiPrep 拒絕。
-4. 設定 Passphrase，並建議綁定你的 IP。
-5. 到 **Settings > OKX trading > Connect OKX**，環境選 **Live**，先把上限設小。
-6. 連線後按 **Arm**，輸入 `TRADE REAL MONEY` 才會開啟真實下單。
+1. Make sure you have finished the [checks before your first real order](OKX_TRADING.md#before-your-first-real-order) on Demo Trading.
+2. Open OKX's [API management page](https://www.okx.com/account/my-api) and create a new API key.
+3. Tick **only Read and Trade. Never tick Withdraw.** MochiPrep refuses any key that can withdraw.
+4. Set a Passphrase. Binding the key to your IP address is recommended.
+5. Go to **Settings > OKX trading > Connect OKX**, choose the **Live** environment, and start with small limits.
+6. After connecting, press **Arm** and type `TRADE REAL MONEY`. Only then are real orders turned on.
 
-請注意兩件事：
+Keep two things in mind:
 
-- **Trade 權限也包含資金劃轉和變更設定**，不只是下單，所以這組金鑰一樣要嚴格保管。
-- **沒綁 IP 的金鑰，閒置 14 天後會失效。** 每把金鑰最多可綁 20 個 IP。家用網路的 IP 可能會變動，變動後金鑰就連不上，要到 OKX 更新。
+- **The Trade permission also covers transferring funds and changing account settings**, not just placing orders, so guard this key just as carefully.
+- **A key without a bound IP address expires after 14 days of inactivity.** Each key can be bound to up to 20 IP addresses. A home internet connection's IP address can change, and the key then stops connecting until you update it in OKX.
 
-建議另開一個 OKX 子帳戶，只放你願意承受損失的資金，再用這個子帳戶建立金鑰。這樣即使金鑰外流或程式出錯，影響範圍也有限。
+Consider opening a separate OKX sub-account that holds only money you can afford to lose, and create the key there. That limits the damage if the key leaks or the software makes a mistake.
 
-## 常見問題
+## Troubleshooting
 
-| 訊息 | 原因 | 解法 |
+| Message | Cause | Fix |
 | --- | --- | --- |
-| `must contain the word 'json'` | 舊版 Test 按鈕的問題 | 更新到最新版 |
-| HTTP 401 / 403（AI provider） | 金鑰錯誤或已撤銷 | 重新貼上，或建立新金鑰 |
-| HTTP 429 | 超過速率限制，或帳戶額度用完 | 檢查餘額和用量，或拉長 agent 間隔 |
-| OKX `50119` | 金鑰不存在，常見於環境選錯 | 確認模擬盤金鑰選 Demo Trading，真實金鑰選 Live |
-| OKX `50123` | 模擬盤金鑰沒有 Trade 權限，或不是在模擬盤建立的 | 在模擬盤重新建立並勾選 Trade |
-| OKX `50102` | 電腦時間誤差超過 30 秒 | 校正系統時間 |
-| `has withdrawal permission` | 金鑰可以提領 | 建立一組沒有 Withdraw 權限的金鑰 |
-| `Set OKX position mode to one-way` | 目前是雙向持倉 | 到 OKX 改成單向持倉 |
-| `is in Spot mode` | 帳戶是現貨模式 | 到 OKX 改成 Futures 模式 |
+| `must contain the word 'json'` | A bug in an older version of the Test button | Update to the latest version |
+| HTTP 401 / 403 (AI provider) | The key is wrong or has been revoked | Paste it again, or create a new key |
+| HTTP 429 | Rate limit reached, or the account is out of credit | Check your balance and usage, or lengthen the agent interval |
+| OKX `50119` | The key does not exist, often because the wrong environment was chosen | Use Demo Trading for a demo key and Live for a real key |
+| OKX `50123` | The demo key lacks the Trade permission, or was not created in Demo Trading | Create it again in Demo Trading with Trade ticked |
+| OKX `50102` | Your computer's clock is off by more than 30 seconds | Correct the system time |
+| `has withdrawal permission` | The key can withdraw | Create a key without the Withdraw permission |
+| `Set OKX position mode to one-way` | The account is in hedge mode | Switch it to one-way mode in OKX |
+| `is in Spot mode` | The account is in Spot mode | Switch it to Futures mode in OKX |
 
-## 官方文件
+## Official documentation
 
-- [OKX API 文件](https://www.okx.com/docs-v5/en/)
+- [OKX API documentation](https://www.okx.com/docs-v5/en/)
 - [OKX API FAQ](https://www.okx.com/en-eu/help/api-faq)
-- [OpenAI：找到你的 API key](https://help.openai.com/en/articles/4936850-where-do-i-find-my-openai-api-key)
-- [Claude：取得 API key](https://platform.claude.com/docs/en/get-api-key)
-- [DeepSeek API 文件](https://api-docs.deepseek.com/)
+- [OpenAI: Where do I find my API key?](https://help.openai.com/en/articles/4936850-where-do-i-find-my-openai-api-key)
+- [Claude: Get an API key](https://platform.claude.com/docs/en/get-api-key)
+- [DeepSeek API documentation](https://api-docs.deepseek.com/)
