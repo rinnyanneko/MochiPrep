@@ -48,6 +48,8 @@ pnpm start
 
 Then open <http://localhost:8787>. The release server embeds the UI and listens on `127.0.0.1` only.
 
+To run it in Docker instead, see [Self-hosting with Docker](docs/SELF_HOSTING.md). The image is built from source with `docker compose up -d`.
+
 The data folder for a source build is `.mochiprep/` in the repository. For development setup, tests and installer builds, see [Development](docs/dev/DEVELOPMENT.md).
 
 ## Getting started
@@ -124,6 +126,7 @@ Charts use [TradingView Lightweight Charts](https://www.tradingview.com/lightwei
 - [Trading on OKX](docs/OKX_TRADING.md)
 - [How paper trading works](docs/PAPER_ENGINE.md)
 - [The desktop launcher](docs/LAUNCHER.md)
+- [Self-hosting with Docker](docs/SELF_HOSTING.md)
 
 For developers:
 

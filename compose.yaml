@@ -1,0 +1,16 @@
+# docker compose up -d        # then open http://localhost:8787
+#
+# The host side is bound to 127.0.0.1, so only this machine can reach the port. Reaching it from
+# another device is unsafe; read docs/SELF_HOSTING.md before changing the port mapping.
+services:
+  mochiprep:
+    build: .
+    image: mochiprep:local
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - mochiprep-data:/data
+    restart: unless-stopped
+
+volumes:
+  mochiprep-data:

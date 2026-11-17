@@ -1,6 +1,5 @@
 use std::future::IntoFuture;
 use std::io::{Read, Write};
-use std::net::Ipv4Addr;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -67,12 +66,13 @@ async fn run() -> ExitCode {
     let state = AppState::new(config.clone(), runtime.clone());
     let streams = state.streams.clone();
 
-    // Loopback only, never 0.0.0.0: the token is the only other thing between the network and
+    // Loopback unless the owner set MOCHIPREP_HOST. Anything else exposes the API beyond this
+    // machine, where the token and the Host/Origin allowlist are all that stand between it and
     // trading keys.
-    let listener = match TcpListener::bind((Ipv4Addr::LOCALHOST, config.port)).await {
+    let listener = match TcpListener::bind((config.host, config.port)).await {
         Ok(listener) => listener,
         Err(error) => {
-            eprintln!("Cannot listen on 127.0.0.1:{}: {error}", config.port);
+            eprintln!("Cannot listen on {}:{}: {error}", config.host, config.port);
             return if error.kind() == std::io::ErrorKind::AddrInUse {
                 ExitCode::from(EXIT_PORT_IN_USE)
             } else {
@@ -90,6 +90,13 @@ async fn run() -> ExitCode {
     };
     println!("{READY_PREFIX}{port} (data: {})", config.data_dir.display());
     let _ = std::io::stdout().flush();
+    // stderr, so it shows wherever errors are captured; stdout stays the launcher's ready line.
+    if !config.host.is_loopback() {
+        eprintln!(
+            "MOCHIPREP_HOST={}: listening beyond this machine. The API token is issued to any client that sends an allowed Host header, so other machines can reach the API.",
+            config.host
+        );
+    }
     if config.offline {
         println!("MOCHIPREP_OFFLINE=1: not connecting to OKX market data or news feeds");
         let _ = std::io::stdout().flush();

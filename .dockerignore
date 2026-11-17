@@ -1,0 +1,15 @@
+# Keep the build context small. The image is built from source inside the Dockerfile, so local
+# build output, dependencies, databases and editor or agent state stay out.
+.git
+.claude
+.mochiprep
+**/node_modules
+target
+**/dist
+docs
+packaging
+e2e
+# Recursive: a database anywhere in the tree can hold unencrypted AI keys.
+**/*.db
+**/*.db-shm
+**/*.db-wal

@@ -1,14 +1,18 @@
 //! Server configuration from the environment, as `apps/server/src/config.ts` reads it.
 
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 
-/// The server only ever binds the loopback address (Node's `host: '127.0.0.1'`).
-pub const HOST: &str = "127.0.0.1";
+/// The address bound unless `MOCHIPREP_HOST` says otherwise (Node's `host: '127.0.0.1'`).
+pub const DEFAULT_HOST: &str = "127.0.0.1";
 
 const DEFAULT_PORT: u16 = 8787;
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// Loopback unless `MOCHIPREP_HOST` is set. Any other address makes the API reachable from
+    /// other machines, so it is the owner's choice.
+    pub host: IpAddr,
     pub port: u16,
     pub data_dir: PathBuf,
     /// Exact `Origin` values a browser may send. Their URL hosts also form the Host allowlist.
@@ -32,17 +36,25 @@ impl Config {
     }
 }
 
-/// Reads `MOCHIPREP_PORT`, `MOCHIPREP_DATA_DIR`, `MOCHIPREP_ALLOWED_ORIGINS` and
+/// Reads `MOCHIPREP_HOST`, `MOCHIPREP_PORT`, `MOCHIPREP_DATA_DIR`, `MOCHIPREP_ALLOWED_ORIGINS` and
 /// `MOCHIPREP_OFFLINE`.
 ///
-/// Panics on a port that is not a number: Node would fail to listen on it too, and a server
-/// silently falling back to another port would leave the web app pointing at nothing.
+/// Panics on a host or port that does not parse: Node would fail to listen on it too, and a server
+/// silently falling back to another address or port would leave the web app pointing at nothing.
 pub fn load_config() -> Config {
     config_from(|name| std::env::var(name).ok())
 }
 
 /// [`load_config`] over any variable lookup, so tests need not touch the process environment.
 pub fn config_from(var: impl Fn(&str) -> Option<String>) -> Config {
+    let host: IpAddr = match var("MOCHIPREP_HOST").filter(|host| !host.trim().is_empty()) {
+        Some(value) => value
+            .trim()
+            .parse()
+            .unwrap_or_else(|_| panic!("MOCHIPREP_HOST must be an IP address, got {value:?}")),
+        None => DEFAULT_HOST.parse().expect("DEFAULT_HOST is an IP address"),
+    };
+
     let port = match var("MOCHIPREP_PORT") {
         Some(value) => value
             .trim()
@@ -65,6 +77,15 @@ pub fn config_from(var: impl Fn(&str) -> Option<String>) -> Config {
         format!("http://localhost:{port}"),
         format!("http://127.0.0.1:{port}"),
     ];
+    // A loopback bind address other than 127.0.0.1 (say ::1) must work in a browser on its own.
+    // A LAN address is never added here: letting other machines in stays an explicit
+    // MOCHIPREP_ALLOWED_ORIGINS entry, and a wildcard (0.0.0.0, ::) is no address to open.
+    if host.is_loopback() {
+        let own = format!("http://{}", SocketAddr::new(host, port));
+        if !allowed_origins.contains(&own) {
+            allowed_origins.push(own);
+        }
+    }
     let extra = var("MOCHIPREP_ALLOWED_ORIGINS").unwrap_or_default();
     allowed_origins.extend(
         extra
@@ -75,6 +96,7 @@ pub fn config_from(var: impl Fn(&str) -> Option<String>) -> Config {
     );
 
     Config {
+        host,
         port,
         data_dir,
         allowed_origins,
@@ -107,6 +129,54 @@ mod tests {
             _ => None,
         })
         .parent_stdin
+    }
+
+    fn host(value: Option<&str>) -> IpAddr {
+        config_from(|name| match name {
+            "MOCHIPREP_HOST" => value.map(String::from),
+            _ => None,
+        })
+        .host
+    }
+
+    #[test]
+    fn host_is_loopback_unless_set() {
+        assert_eq!(host(None), IpAddr::from([127, 0, 0, 1]));
+        assert_eq!(host(Some("")), IpAddr::from([127, 0, 0, 1]));
+        assert_eq!(host(Some(" 0.0.0.0 ")), IpAddr::from([0, 0, 0, 0]));
+        assert_eq!(host(Some("::1")), "::1".parse::<IpAddr>().unwrap());
+    }
+
+    fn origins(host: &str) -> Vec<String> {
+        config_from(|name| match name {
+            "MOCHIPREP_HOST" => Some(host.to_string()),
+            _ => None,
+        })
+        .allowed_origins
+    }
+
+    #[test]
+    fn only_a_loopback_bind_address_becomes_an_allowed_origin() {
+        assert!(origins("::1").contains(&"http://[::1]:8787".to_string()));
+        // A LAN address needs MOCHIPREP_ALLOWED_ORIGINS.
+        assert_eq!(origins("192.168.1.20").len(), 4);
+        // The default is already listed once, and a wildcard is no origin at all.
+        let default = origins("127.0.0.1");
+        assert_eq!(
+            default
+                .iter()
+                .filter(|o| *o == "http://127.0.0.1:8787")
+                .count(),
+            1
+        );
+        assert_eq!(origins("0.0.0.0").len(), 4);
+        assert_eq!(origins("::").len(), 4);
+    }
+
+    #[test]
+    #[should_panic(expected = "MOCHIPREP_HOST must be an IP address")]
+    fn host_must_be_an_ip_address() {
+        host(Some("localhost"));
     }
 
     #[test]
