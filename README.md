@@ -36,7 +36,7 @@ The installers are not code-signed by Windows or Apple, so your system warns you
 
 ## Build from source
 
-You need Node.js 22.13 or newer, pnpm 9 or newer (the repository pins pnpm 11), and a Rust toolchain. Node is only used for the web UI; the backend is Rust.
+You need Node.js 22.13 or newer, pnpm 12 (pinned in `package.json`), and a Rust toolchain. Node is only used for the web UI; the backend is Rust.
 
 ```sh
 git clone https://github.com/rinnyanneko/MochiPrep.git
