@@ -1,0 +1,83 @@
+# Maintainer: rinnyanneko
+#
+# Builds MochiPrep from a tagged release and installs the launcher (mochi-launcher) and the
+# backend (mochi-server) side by side in /usr/bin. The launcher starts mochi-server from its own
+# folder, so both must stay together.
+#
+# Updates: this is a package-managed install, so the launcher only reports a new version and
+# never replaces the files. Update with pacman / your AUR helper.
+#
+# Before makepkg: create the v$pkgver tag on GitHub, then replace the SKIP checksum with the real
+# sha256sum of the release tarball (`updpkgsums`).
+
+pkgname=mochiprep
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Your cute little AI trading companion: local-first, BYOK paper and OKX perpetuals terminal"
+arch=('x86_64' 'aarch64')
+url="https://github.com/rinnyanneko/MochiPrep"
+license=('AGPL-3.0-or-later')
+depends=(
+  'webkit2gtk-4.1'
+  'libayatana-appindicator'
+  'librsvg'
+)
+makedepends=(
+  'rust'          # provides cargo; rust-version is 1.99 (see Cargo.toml)
+  'nodejs'        # >= 22.13
+  'pnpm'          # the repository pins pnpm 11
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+_srcdir="MochiPrep-$pkgver"
+
+prepare() {
+  cd "$_srcdir"
+  pnpm install --frozen-lockfile
+  cargo fetch --locked
+}
+
+build() {
+  cd "$_srcdir"
+  # package() reads target/release, so a CARGO_TARGET_DIR from the user's shell must not move it.
+  export CARGO_TARGET_DIR=target
+  # The web UI must exist before mochi-server compiles: rust-embed reads apps/web/dist.
+  pnpm build
+  cargo build --locked --release -p mochi-server
+  # custom-protocol is what `tauri build` normally turns on. Without it, Tauri treats the build as
+  # a development one (tauri::is_dev) and does not load the bundled interface.
+  cargo build --locked --release -p mochi-launcher --features tauri/custom-protocol
+}
+
+check() {
+  cd "$_srcdir"
+  export CARGO_TARGET_DIR=target
+  cargo test --locked --workspace
+}
+
+package() {
+  cd "$_srcdir"
+
+  install -Dm755 target/release/mochi-launcher "$pkgdir/usr/bin/mochi-launcher"
+  install -Dm755 target/release/mochi-server "$pkgdir/usr/bin/mochi-server"
+
+  install -Dm644 crates/mochi-launcher/icons/128x128.png \
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/mochiprep.png"
+  install -Dm644 crates/mochi-launcher/icons/32x32.png \
+    "$pkgdir/usr/share/icons/hicolor/32x32/apps/mochiprep.png"
+
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/mochiprep.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=MochiPrep
+Comment=$pkgdesc
+Exec=mochi-launcher
+Icon=mochiprep
+Categories=Finance;
+Terminal=false
+EOF
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

@@ -55,6 +55,25 @@ pnpm test:e2e            # Playwright through the real UI, needs Google Chrome i
 
 `mochi-launcher` is a workspace member, so `cargo test --workspace` needs the Linux libraries above. Without them, run `cargo test --workspace --exclude mochi-launcher`.
 
+## Docker
+
+```sh
+docker build -t mochiprep:local .
+docker compose up -d
+```
+
+The Dockerfile has three stages: `node:22` builds `apps/web/dist`, `rust:1.99` builds `mochi-server` with that UI embedded, and `debian:bookworm-slim` runs the binary as a non-root user with `MOCHIPREP_HOST=0.0.0.0`, `MOCHIPREP_PORT=8787` and `MOCHIPREP_DATA_DIR=/data`. `.dockerignore` keeps `target`, `node_modules`, `docs` and the databases out of the build context. The image has not yet been built or tested in this repository; the first build should be checked before the image is advertised.
+
+The host-side bind is in `compose.yaml`. Read [Self-hosting](../SELF_HOSTING.md) before changing it.
+
+## Server environment variables
+
+- `MOCHIPREP_HOST`: bind address, `127.0.0.1` by default. A loopback address (such as `::1`) is added to the allowed origins on its own. A LAN address or a wildcard (`0.0.0.0`, `::`) is not, so other machines need an explicit `MOCHIPREP_ALLOWED_ORIGINS` entry. Any non-loopback value exposes the API beyond this machine (see [Architecture](ARCHITECTURE.md#security-model)).
+- `MOCHIPREP_PORT`: port, `8787` by default.
+- `MOCHIPREP_DATA_DIR`: data folder.
+- `MOCHIPREP_ALLOWED_ORIGINS`: extra comma-separated origins for browsers and the Host allowlist.
+- `MOCHIPREP_OFFLINE=1`: no OKX public feed and no news.
+
 ## Environment variables for the launcher
 
 Development only:
