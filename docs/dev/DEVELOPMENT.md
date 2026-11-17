@@ -4,7 +4,7 @@ This is the developer setup. For what the app does and how to use it, see the [R
 
 ## Requirements
 
-- Node.js 22.13 or newer, with pnpm 9 or newer (the repository pins pnpm 11). Node is only used for the web UI and the scripts.
+- Node.js 22.13 or newer, with pnpm 12 (`packageManager` in `package.json` pins 12.21.0, and the lockfile records it). Node is only used for the web UI and the scripts.
 - A Rust toolchain. The backend is Rust.
 - Google Chrome, only for `pnpm test:e2e`.
 
