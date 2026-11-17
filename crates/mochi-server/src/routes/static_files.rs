@@ -12,7 +12,9 @@ use std::borrow::Cow;
 
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, ETAG, IF_NONE_MATCH};
+use axum::http::header::{
+    CACHE_CONTROL, CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE, ETAG, IF_NONE_MATCH,
+};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use rust_embed::{EmbeddedFile, RustEmbed};
@@ -66,7 +68,11 @@ pub async fn serve(State(state): State<AppState>, request: Request) -> Response 
     if revalidated {
         return (
             StatusCode::NOT_MODIFIED,
-            [(ETAG, etag), (CACHE_CONTROL, CACHE.to_string())],
+            [
+                (ETAG, etag),
+                (CACHE_CONTROL, CACHE.to_string()),
+                (CONTENT_SECURITY_POLICY, "frame-src 'none'".into()),
+            ],
         )
             .into_response();
     }
@@ -85,6 +91,7 @@ pub async fn serve(State(state): State<AppState>, request: Request) -> Response 
     (
         [
             (CONTENT_TYPE, content_type),
+            (CONTENT_SECURITY_POLICY, "frame-src 'none'".into()),
             (CACHE_CONTROL, CACHE.to_string()),
             (ETAG, etag),
             (CONTENT_LENGTH, length.to_string()),

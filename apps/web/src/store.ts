@@ -248,13 +248,25 @@ function onEvent(event: ServerEvent) {
 }
 
 let source: EventSource | null = null;
+let intentionallyDisconnected = false;
+
+export function disconnectBackend() {
+  intentionallyDisconnected = true;
+  source?.close();
+  source = null;
+  forgetToken();
+  useApp.setState({ connected: false });
+}
 let lastEventAt = Date.now();
 const STREAM_SILENCE_MS = 40_000;
 
 async function openStream() {
+  if (intentionallyDisconnected) return;
   source?.close();
   try {
-    source = new EventSource(`/api/events?token=${await getToken()}`);
+    const token = await getToken();
+    if (intentionallyDisconnected) return;
+    source = new EventSource(`/api/events?token=${token}`);
   } catch {
     reconnectStream();
     return;
@@ -274,6 +286,7 @@ async function openStream() {
 }
 
 function reconnectStream() {
+  if (intentionallyDisconnected) return;
   useApp.setState({ connected: false });
   source?.close();
   forgetToken();
@@ -294,7 +307,9 @@ async function boot() {
   }, 5000);
   // Live marks move without engine events, so open PnL is re-read on a timer.
   setInterval(() => {
-    if (useApp.getState().source === 'LIVE' && !document.hidden) void useApp.getState().refresh(['accounts', 'positions']);
+    if (!intentionallyDisconnected && useApp.getState().source === 'LIVE' && !document.hidden) {
+      void useApp.getState().refresh(['accounts', 'positions']);
+    }
   }, 3000);
 }
 

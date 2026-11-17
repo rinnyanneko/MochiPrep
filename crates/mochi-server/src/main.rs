@@ -65,6 +65,7 @@ async fn run() -> ExitCode {
     };
     let state = AppState::new(config.clone(), runtime.clone());
     let streams = state.streams.clone();
+    let shutdown = state.shutdown.clone();
 
     // Loopback unless the owner set MOCHIPREP_HOST. Anything else exposes the API beyond this
     // machine, where the token and the Host/Origin allowlist are all that stand between it and
@@ -106,7 +107,10 @@ async fn run() -> ExitCode {
     let (signalled, on_signal) = oneshot::channel::<()>();
     let server = axum::serve(listener, app(state))
         .with_graceful_shutdown(async move {
-            shutdown_signal(stdin_closed).await;
+            tokio::select! {
+                () = shutdown_signal(stdin_closed) => {}
+                () = shutdown.notified() => {}
+            }
             // Open event streams never finish on their own, and graceful shutdown waits for
             // every response to finish.
             streams.close_all();

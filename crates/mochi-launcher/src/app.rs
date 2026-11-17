@@ -1,6 +1,7 @@
 //! The launcher's state and the flows that change it: start, stop, restart, quit, disarm, and
 //! the poll that keeps the tray honest about a backend that died on its own.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -33,6 +34,8 @@ pub struct AppState {
     pub backend: tokio::sync::Mutex<Option<Backend>>,
     pub state: Mutex<BackendState>,
     pub snapshot: Mutex<SnapshotSlot>,
+    /// Backend ports already registered for the interface capability in this launcher.
+    pub interface_ports: Mutex<HashSet<u16>>,
     /// Set only by the Quit flows; any other exit request (the last window closing) is refused,
     /// because the launcher lives in the tray.
     pub quitting: AtomicBool,
@@ -77,6 +80,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         backend: tokio::sync::Mutex::new(None),
         state: Mutex::new(BackendState::Stopped),
         snapshot: Mutex::new(SnapshotSlot::default()),
+        interface_ports: Mutex::new(HashSet::new()),
         quitting: AtomicBool::new(false),
         stopping: AtomicBool::new(false),
         importing: AtomicBool::new(false),

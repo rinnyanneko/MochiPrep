@@ -16,8 +16,8 @@ pub mod static_files;
 pub mod vault;
 
 use axum::extract::State;
-use axum::http::HeaderMap;
-use axum::routing::get;
+use axum::http::{HeaderMap, StatusCode};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
@@ -30,6 +30,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/session", get(session))
         .route("/api/health", get(health))
         .route("/api/events", get(events::events))
+        .route("/api/shutdown", post(shutdown))
         .merge(state::router())
         .merge(market::router())
         .merge(news::router())
@@ -71,4 +72,9 @@ async fn session(
 
 async fn health() -> Json<Value> {
     Json(json!({ "ok": true }))
+}
+
+async fn shutdown(State(state): State<AppState>) -> StatusCode {
+    state.shutdown.notify_one();
+    StatusCode::ACCEPTED
 }
