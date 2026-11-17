@@ -337,6 +337,10 @@ class Cdp {
     const key = (method) => `${sessionId} ${method}`;
     return {
       send: (method, params = {}) => {
+        // A closed or closing socket would never answer: fail now instead of waiting forever.
+        if (this.#ws.readyState !== WebSocket.OPEN) {
+          return Promise.reject(new Error(`${method}: Chrome closed the connection`));
+        }
         const id = (this.#nextId += 1);
         this.#ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
         return new Promise((resolve, reject) => this.#pending.set(id, { resolve, reject, method }));
@@ -384,7 +388,15 @@ async function launchChrome(executable, profileDir) {
   for (let waited = 0; waited < 30_000; waited += 100) {
     if (chrome.exitCode !== null) break;
     const url = existsSync(portFile) ? parseDevToolsActivePort(readFileSync(portFile, 'utf8')) : null;
-    if (url) return { chrome, exited, cdp: await Cdp.connect(url) };
+    if (url) {
+      try {
+        return { chrome, exited, cdp: await Cdp.connect(url) };
+      } catch (error) {
+        // Without a connection nothing else would ever close this Chrome.
+        chrome.kill();
+        throw error;
+      }
+    }
     await sleep(100);
   }
   chrome.kill();
@@ -581,7 +593,8 @@ async function main() {
     return 0;
   } finally {
     if (browser) {
-      await browser.cdp.session().send('Browser.close').catch(() => {});
+      // Bounded: a Chrome that never answers Browser.close still gets killed below.
+      await Promise.race([browser.cdp.session().send('Browser.close').catch(() => {}), sleep(5000)]);
       browser.cdp.close();
       // Chrome normally exits on Browser.close; a hung one must not outlive the run.
       await Promise.race([browser.exited, sleep(5000)]);
