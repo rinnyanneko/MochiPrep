@@ -12,6 +12,7 @@ import {
   type IPriceLine,
   type ISeriesApi,
   type ISeriesMarkersPluginApi,
+  type MouseEventHandler,
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
@@ -22,6 +23,7 @@ import { money, pnlClass, price as formatPrice, priceDigits, qty, signedMoney } 
 import type { ChartTone, PriceLineSpec, TradeMarker, TradeSummary } from '@/lib/trade-overlay';
 import { cn } from '@/lib/utils';
 import { useApp } from '@/store';
+import { ChartRole } from './chart-pool';
 
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const seconds = (ms: number) => Math.floor(ms / 1000) as UTCTimestamp;
@@ -84,8 +86,8 @@ const LABEL_TONES: Record<ChartTone, string> = {
 };
 
 /**
- * Charts read colors once from CSS and labels once at creation, so a change of theme, color flip
- * or zone rebuilds them. The key names everything that does.
+ * Charts read colors from CSS and label formatters from options, so a change of theme, color flip
+ * or zone has to be applied to them again. The key names everything that does.
  */
 function useLook() {
   const theme = useApp((s) => s.theme);
@@ -96,6 +98,112 @@ function useLook() {
 
 const NO_MARKERS: TradeMarker[] = [];
 const NO_NOTES = new Map<number, Fill[]>();
+
+const priceFormat = (digits: number) => ({ type: 'price', precision: digits, minMove: 10 ** -digits }) as const;
+
+function marketChartOptions(zone: TimeZonePref) {
+  const options = baseOptions(zone);
+  return { ...options, timeScale: { ...options.timeScale, barSpacing: 9 } };
+}
+
+/** One market chart and everything drawn on it, kept for the session by `ChartRole`. */
+interface MarketSlot {
+  chart: IChartApi;
+  series: Record<string, ISeriesApi<any>>;
+  /** The RSI 70 and 30 guides, recolored with the theme. */
+  rsiLevels: IPriceLine[];
+  markers: ISeriesMarkersPluginApi<Time>;
+  drawnLines: Map<string, IPriceLine>;
+  /** The mounted chart's price lines, read by the autoscale provider set once at creation. */
+  lines: PriceLineSpec[];
+  /** The mounted chart's hover handler; the subscription itself is made once, at creation. */
+  onCrosshair: MouseEventHandler<Time> | null;
+}
+
+/** Builds the series and panes; colors and formats come from `styleMarketChart` right after. */
+function buildMarketChart(element: HTMLDivElement, showIndicators: boolean): MarketSlot {
+  const chart = createChart(element, marketChartOptions(useApp.getState().timeZone));
+  const s: Record<string, ISeriesApi<any>> = {};
+  const slot: MarketSlot = { chart, series: s, rsiLevels: [], markers: null!, drawnLines: new Map(), lines: [], onCrosshair: null };
+  s.candles = chart.addSeries(CandlestickSeries, {
+    borderVisible: false,
+    // Keeps TP, SL and limits on screen. Liquidation is usually too far away to include.
+    autoscaleInfoProvider: (base: () => AutoscaleInfo | null) => {
+      const info = base();
+      const prices = slot.lines.filter((line) => line.id !== 'liq').map((line) => line.price);
+      if (!info?.priceRange || prices.length === 0) return info;
+      return {
+        ...info,
+        priceRange: {
+          minValue: Math.min(info.priceRange.minValue, ...prices),
+          maxValue: Math.max(info.priceRange.maxValue, ...prices),
+        },
+      };
+    },
+  });
+  s.volume = chart.addSeries(HistogramSeries, { priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
+  chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+  if (showIndicators) {
+    const overlay = { lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false } as const;
+    s.ema20 = chart.addSeries(LineSeries, overlay);
+    s.ema50 = chart.addSeries(LineSeries, overlay);
+    s.rsi = chart.addSeries(LineSeries, { lineWidth: 2, priceLineVisible: false }, 1);
+    slot.rsiLevels = [70, 30].map((price) => s.rsi!.createPriceLine({ price, lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: '' }));
+    s.macdHist = chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, 2);
+    s.macd = chart.addSeries(LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: false }, 2);
+    s.signal = chart.addSeries(LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: false }, 2);
+  }
+  slot.markers = createSeriesMarkers(s.candles as ISeriesApi<'Candlestick', Time>, []);
+  chart.subscribeCrosshairMove((param) => slot.onCrosshair?.(param));
+  return slot;
+}
+
+/**
+ * Colors, label formatters and price format: what a theme, color flip, zone or symbol change
+ * touches. It also empties the series and resets zoom, scroll and pane sizes, so the chart looks
+ * exactly as a newly created one did before this chart was kept for the session.
+ */
+function styleMarketChart(slot: MarketSlot, zone: TimeZonePref, digits: number) {
+  const { chart, series: s } = slot;
+  const up = css('--rise');
+  const down = css('--fall');
+  const format = priceFormat(digits);
+  chart.applyOptions(marketChartOptions(zone));
+  s.candles!.applyOptions({ upColor: up, downColor: down, wickUpColor: up, wickDownColor: down, priceFormat: format });
+  if (s.ema20) {
+    s.ema20.applyOptions({ color: css('--series-2'), priceFormat: format });
+    s.ema50!.applyOptions({ color: css('--series-3'), priceFormat: format });
+    s.rsi!.applyOptions({ color: css('--series-5') });
+    for (const level of slot.rsiLevels) level.applyOptions({ color: css('--ink-3') });
+    s.macd!.applyOptions({ color: css('--series-2') });
+    s.signal!.applyOptions({ color: css('--series-3') });
+    const panes = chart.panes();
+    panes[0]?.setStretchFactor(5);
+    panes[1]?.setStretchFactor(1.3);
+    panes[2]?.setStretchFactor(1.3);
+  }
+  for (const one of Object.values(s)) one.setData([]);
+  slot.markers.setMarkers([]);
+  chart.panes().forEach((_, pane) => chart.priceScale('right', pane).applyOptions({ autoScale: true }));
+  chart.timeScale().resetTimeScale();
+}
+
+/** What a chart handed back must not show on its next mount: data, lines, markers, a crosshair. */
+function clearMarketChart(slot: MarketSlot) {
+  for (const one of Object.values(slot.series)) one.setData([]);
+  for (const line of slot.drawnLines.values()) slot.series.candles!.removePriceLine(line);
+  slot.drawnLines.clear();
+  slot.markers.setMarkers([]);
+  slot.lines = [];
+  slot.onCrosshair = null;
+  slot.chart.clearCrosshairPosition();
+}
+
+// Markets draws indicators and Trading does not, so they are two roles with a chart each.
+const MARKET_CHARTS = {
+  indicators: new ChartRole((element) => buildMarketChart(element, true)),
+  plain: new ChartRole((element) => buildMarketChart(element, false)),
+};
 
 interface Props {
   candles: Candle[];
@@ -112,11 +220,8 @@ interface Props {
 /** Candles and volume, plus EMA overlays and RSI / MACD panes. The forming bar follows live quotes. */
 export function MarketChart({ candles, symbol, timeframe, quote, showIndicators = true, priceLines = [], markers = NO_MARKERS, notes = NO_NOTES }: Props) {
   const host = useRef<HTMLDivElement>(null);
-  const chart = useRef<IChartApi | null>(null);
-  const series = useRef<Record<string, ISeriesApi<any>>>({});
+  const slot = useRef<MarketSlot | null>(null);
   const lastBar = useRef<Candle | null>(null);
-  const markerPlugin = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
-  const drawnLines = useRef(new Map<string, IPriceLine>());
   const notesRef = useRef(notes);
   notesRef.current = notes;
   const linesRef = useRef(priceLines);
@@ -127,68 +232,29 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
   const digits = priceDigits(symbol);
 
   useEffect(() => {
-    const options = baseOptions(look.zone);
-    const instance = createChart(host.current!, { ...options, timeScale: { ...options.timeScale, barSpacing: 9 } });
-    chart.current = instance;
-    const up = css('--rise');
-    const down = css('--fall');
-    const format = { type: 'price', precision: digits, minMove: 10 ** -digits } as const;
-    const s: Record<string, ISeriesApi<any>> = {};
-    s.candles = instance.addSeries(CandlestickSeries, {
-      upColor: up,
-      downColor: down,
-      wickUpColor: up,
-      wickDownColor: down,
-      borderVisible: false,
-      priceFormat: format,
-      // Keeps TP, SL and limits on screen. Liquidation is usually too far away to include.
-      autoscaleInfoProvider: (base: () => AutoscaleInfo | null) => {
-        const info = base();
-        const prices = linesRef.current.filter((line) => line.id !== 'liq').map((line) => line.price);
-        if (!info?.priceRange || prices.length === 0) return info;
-        return {
-          ...info,
-          priceRange: {
-            minValue: Math.min(info.priceRange.minValue, ...prices),
-            maxValue: Math.max(info.priceRange.maxValue, ...prices),
-          },
-        };
-      },
-    });
-    s.volume = instance.addSeries(HistogramSeries, { priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
-    instance.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-    if (showIndicators) {
-      const overlay = { lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false } as const;
-      s.ema20 = instance.addSeries(LineSeries, { ...overlay, color: css('--series-2'), priceFormat: format });
-      s.ema50 = instance.addSeries(LineSeries, { ...overlay, color: css('--series-3'), priceFormat: format });
-      s.rsi = instance.addSeries(LineSeries, { lineWidth: 2, color: css('--series-5'), priceLineVisible: false }, 1);
-      s.rsi.createPriceLine({ price: 70, color: css('--ink-3'), lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: '' });
-      s.rsi.createPriceLine({ price: 30, color: css('--ink-3'), lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: '' });
-      s.macdHist = instance.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, 2);
-      s.macd = instance.addSeries(LineSeries, { lineWidth: 2, color: css('--series-2'), priceLineVisible: false, lastValueVisible: false }, 2);
-      s.signal = instance.addSeries(LineSeries, { lineWidth: 2, color: css('--series-3'), priceLineVisible: false, lastValueVisible: false }, 2);
-      const panes = instance.panes();
-      panes[0]?.setStretchFactor(5);
-      panes[1]?.setStretchFactor(1.3);
-      panes[2]?.setStretchFactor(1.3);
-    }
-    series.current = s;
-    markerPlugin.current = createSeriesMarkers(s.candles as ISeriesApi<'Candlestick', Time>, []);
-    instance.subscribeCrosshairMove((param) => {
+    const lease = MARKET_CHARTS[showIndicators ? 'indicators' : 'plain'].take(host.current!);
+    const current = lease.slot;
+    slot.current = current;
+    current.lines = linesRef.current;
+    current.onCrosshair = (param) => {
       const bar = typeof param.time === 'number' ? notesRef.current.get(param.time * 1000) : undefined;
       setHovered(bar ?? null);
-    });
-    return () => {
-      instance.remove();
-      chart.current = null;
-      markerPlugin.current = null;
-      drawnLines.current.clear();
     };
+    return () => {
+      clearMarketChart(current);
+      lease.release();
+      slot.current = null;
+      lastBar.current = null;
+    };
+  }, [showIndicators]);
+
+  useEffect(() => {
+    if (slot.current) styleMarketChart(slot.current, look.zone, digits);
   }, [look.key, showIndicators, digits]);
 
   useEffect(() => {
-    const s = series.current;
-    if (!s.candles || candles.length === 0) return;
+    const s = slot.current?.series;
+    if (!s?.candles || candles.length === 0) return;
     const up = css('--rise');
     const down = css('--fall');
     s.candles.setData(candles.map((c) => ({ time: seconds(c.time), open: c.open, high: c.high, low: c.low, close: c.close })));
@@ -213,10 +279,12 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
   }, [candles, look.key, showIndicators, digits]);
 
   useEffect(() => {
-    const target = series.current.candles;
-    if (!target) return;
+    const current = slot.current;
+    const target = current?.series.candles;
+    if (!current || !target) return;
+    current.lines = priceLines;
     const colors = toneColors();
-    const drawn = drawnLines.current;
+    const drawn = current.drawnLines;
     const wanted = new Set(priceLines.map((line) => line.id));
     for (const [id, line] of drawn) {
       if (!wanted.has(id)) {
@@ -232,7 +300,7 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
       else drawn.set(spec.id, target.createPriceLine({ ...options, lineWidth: 1, lineStyle: 2, axisLabelVisible: true }));
     }
     // Lines are not chart data, so the price scale must be told to refit around them.
-    chart.current?.priceScale('right').applyOptions({ autoScale: true });
+    current.chart.priceScale('right').applyOptions({ autoScale: true });
   }, [priceLines, look.key, digits, symbol, showIndicators]);
 
   // The price scale refits without any event, so labels follow it frame by frame.
@@ -240,8 +308,9 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
     let frame = 0;
     const place = () => {
       frame = requestAnimationFrame(place);
-      const target = series.current.candles;
-      const paneHeight = chart.current?.panes()[0]?.getHeight() ?? 0;
+      const current = slot.current;
+      const target = current?.series.candles;
+      const paneHeight = current?.chart.panes()[0]?.getHeight() ?? 0;
       if (!target) return;
       const placed = linesRef.current
         .map((line) => ({ node: labelNodes.current.get(line.id), y: target.priceToCoordinate(line.price) }))
@@ -266,7 +335,7 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
     const colors = toneColors();
     const bars = new Set(candles.map((c) => c.time));
     // A marker off the loaded range has no bar to sit on.
-    markerPlugin.current?.setMarkers(
+    slot.current?.markers.setMarkers(
       markers
         .filter((m) => bars.has(m.barTime))
         .map((m) => ({
@@ -283,7 +352,7 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
 
   useEffect(() => {
     const bar = lastBar.current;
-    const target = series.current.candles;
+    const target = slot.current?.series.candles;
     if (!quote || !bar || !target || quote.symbol !== symbol) return;
     const price = Number(quote.last);
     const size = TIMEFRAME_MS[timeframe];
@@ -346,22 +415,58 @@ export interface EquitySeries {
   points: { ts: number; equity: number }[];
 }
 
+/** The equity chart, kept for the session. Its lines change with the page, so they are not. */
+interface EquitySlot {
+  chart: IChartApi;
+  lines: Map<string, ISeriesApi<'Line'>>;
+  /** The mounted chart's hover handler; the subscription itself is made once, at creation. */
+  onCrosshair: MouseEventHandler<Time> | null;
+}
+
+/** Removing the lines empties the chart; the next mount adds its own. */
+function clearEquityChart(slot: EquitySlot) {
+  for (const handle of slot.lines.values()) slot.chart.removeSeries(handle);
+  slot.lines.clear();
+}
+
+// Dashboard and Arena each draw one; only one page is on screen at a time, so they share it.
+const EQUITY_CHART = new ChartRole((element): EquitySlot => {
+  const chart = createChart(element, baseOptions(useApp.getState().timeZone));
+  const slot: EquitySlot = { chart, lines: new Map(), onCrosshair: null };
+  chart.subscribeCrosshairMove((param) => slot.onCrosshair?.(param));
+  return slot;
+});
+
 /** One line per series on a shared USDT axis, with a legend that reads out the crosshair. */
 export function EquityChart({ series, baseline }: { series: EquitySeries[]; baseline?: number }) {
   const host = useRef<HTMLDivElement>(null);
-  const chart = useRef<IChartApi | null>(null);
-  const handles = useRef(new Map<string, ISeriesApi<'Line'>>());
-  const fitted = useRef(false);
+  const slot = useRef<EquitySlot | null>(null);
   const look = useLook();
   const [hover, setHover] = useState<{ time: number; values: Record<string, number> } | null>(null);
   const key = series.map((s) => s.id).join('|');
 
   useEffect(() => {
-    const instance = createChart(host.current!, baseOptions(look.zone));
-    chart.current = instance;
-    const map = new Map<string, ISeriesApi<'Line'>>();
+    const lease = EQUITY_CHART.take(host.current!);
+    slot.current = lease.slot;
+    return () => {
+      clearEquityChart(lease.slot);
+      lease.slot.onCrosshair = null;
+      lease.slot.chart.clearCrosshairPosition();
+      lease.release();
+      slot.current = null;
+    };
+  }, []);
+
+  // A new set of lines, theme, color flip, zone or baseline starts the lines over, and resets zoom
+  // and scroll, as creating the chart anew did before it was kept for the session.
+  useEffect(() => {
+    const current = slot.current;
+    if (!current) return;
+    const { chart } = current;
+    clearEquityChart(current);
+    chart.applyOptions(baseOptions(look.zone));
     series.forEach((s, i) => {
-      const handle = instance.addSeries(LineSeries, {
+      const handle = chart.addSeries(LineSeries, {
         color: css(s.color),
         lineWidth: 2,
         priceLineVisible: false,
@@ -372,24 +477,25 @@ export function EquityChart({ series, baseline }: { series: EquitySeries[]; base
       if (i === 0 && baseline !== undefined) {
         handle.createPriceLine({ price: baseline, color: css('--ink-3'), lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: '' });
       }
-      map.set(s.id, handle);
+      current.lines.set(s.id, handle);
     });
-    handles.current = map;
-    fitted.current = false;
-    instance.subscribeCrosshairMove((param) => {
+    chart.priceScale('right').applyOptions({ autoScale: true });
+    chart.timeScale().resetTimeScale();
+    current.onCrosshair = (param) => {
       if (!param.time) return setHover(null);
       const values: Record<string, number> = {};
-      for (const [id, handle] of map) {
+      for (const [id, handle] of current.lines) {
         const point = param.seriesData.get(handle) as { value?: number } | undefined;
         if (point?.value !== undefined) values[id] = point.value;
       }
       setHover({ time: (param.time as number) * 1000, values });
-    });
-    return () => instance.remove();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, look.key, baseline]);
 
   useEffect(() => {
+    const current = slot.current;
+    if (!current) return;
     for (const s of series) {
       const seen = new Set<number>();
       const data = s.points.flatMap((p) => {
@@ -398,10 +504,10 @@ export function EquityChart({ series, baseline }: { series: EquitySeries[]; base
         seen.add(time);
         return [{ time, value: p.equity }];
       });
-      handles.current.get(s.id)?.setData(data);
+      current.lines.get(s.id)?.setData(data);
     }
-    if (series.some((s) => s.points.length > 1)) chart.current?.timeScale().fitContent();
-  }, [series]);
+    if (series.some((s) => s.points.length > 1)) current.chart.timeScale().fitContent();
+  }, [series, key, look.key, baseline]);
 
   const latest = useMemo(
     () => Object.fromEntries(series.map((s) => [s.id, s.points[s.points.length - 1]?.equity])),
