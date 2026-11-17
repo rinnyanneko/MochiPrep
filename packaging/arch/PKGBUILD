@@ -29,7 +29,7 @@ makedepends=(
   # an unversioned "rust", which a versioned dependency would refuse.
   'rust'
   'nodejs'        # >= 22.13
-  'pnpm'          # package.json pins pnpm 11; Arch ships a newer pnpm
+  'pnpm'          # any version: pnpm switches to the 12.21.0 that package.json pins
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
