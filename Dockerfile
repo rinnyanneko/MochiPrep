@@ -7,7 +7,8 @@
 # change the port mapping on purpose.
 
 FROM node:22-bookworm-slim AS web
-RUN npm install -g pnpm@11.24.0
+# pnpm needs no install scripts; skipping them keeps a compromised package from running code here.
+RUN npm install -g --ignore-scripts pnpm@11.24.0
 WORKDIR /src
 COPY . .
 RUN pnpm install --frozen-lockfile && pnpm build
