@@ -688,8 +688,12 @@ impl RuntimeHandle {
             .call(move |r| r.exchange_session(&id).map(|s| s.engine.clone()))
             .await?
             .ok_or_else(|| ApiError::bad_request("Connect this account first"))?;
+        // The history pass too, awaited here so a test sees what it read.
         match engine.sync().await {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                let _ = engine.sync_position_history().await;
+                Ok(())
+            }
             Err(error) => {
                 let text = error.to_string();
                 Err(self.call(move |r| r.api_error(text)).await?)

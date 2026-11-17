@@ -3,6 +3,10 @@ use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::path::Path;
 
+/// Migrations the Node backend knew. Its frozen goldens (`schema.json`, `node-created.sqlite`)
+/// stop there; later ones are Rust's own.
+const NODE_MIGRATIONS: usize = 8;
+
 fn golden_path(name: &str) -> String {
     format!("{}/../golden/{name}", env!("CARGO_MANIFEST_DIR"))
 }
@@ -27,7 +31,8 @@ fn migration_names(conn: &Connection) -> Vec<String> {
 
 #[test]
 fn fresh_schema_matches_node() {
-    let conn = open_in_memory().unwrap();
+    let conn = open_in_memory_bare();
+    migrate_with(&conn, &MIGRATIONS[..NODE_MIGRATIONS]).unwrap();
     let mut stmt = conn
         .prepare(
             "SELECT type, name, tbl_name, sql FROM sqlite_master \
@@ -77,8 +82,19 @@ fn opens_node_database_without_reapplying() {
         applied_at(&raw)
     };
     let conn = open_database(&path).unwrap();
-    assert_eq!(applied_at(&conn).len(), 8);
-    assert_eq!(applied_at(&conn), applied_before);
+    // Node's own migrations are kept as they were; only the later ones are applied.
+    let applied = applied_at(&conn);
+    assert_eq!(applied_before.len(), NODE_MIGRATIONS);
+    assert_eq!(applied[..NODE_MIGRATIONS], applied_before[..]);
+    let added: Vec<&str> = applied[NODE_MIGRATIONS..]
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect();
+    let expected: Vec<&str> = MIGRATIONS[NODE_MIGRATIONS..]
+        .iter()
+        .map(|(name, _)| *name)
+        .collect();
+    assert_eq!(added, expected);
     let name: String = conn
         .query_row(
             "SELECT name FROM accounts WHERE id = 'acct_golden'",
@@ -100,19 +116,20 @@ fn applied_at(conn: &Connection) -> Vec<(String, i64)> {
 #[test]
 fn older_schema_gets_only_the_new_migration() {
     let conn = open_in_memory_bare();
-    migrate_with(&conn, &MIGRATIONS[..7]).unwrap();
+    let older = MIGRATIONS.len() - 1;
+    migrate_with(&conn, &MIGRATIONS[..older]).unwrap();
     conn.execute_batch(
         "INSERT INTO providers (id, name, kind, default_model, created_at) \
          VALUES ('p1', 'P', 'mock', 'm', 1)",
     )
     .unwrap();
     let before = migration_names(&conn);
-    assert_eq!(before.len(), 7);
+    assert_eq!(before.len(), older);
 
     migrate_with(&conn, MIGRATIONS).unwrap();
     let after = migration_names(&conn);
     let added: Vec<&String> = after.iter().filter(|n| !before.contains(n)).collect();
-    assert_eq!(added, vec!["008_trailing_stop.sql"]);
+    assert_eq!(added, vec![MIGRATIONS[older].0]);
     let rows: i64 = conn
         .query_row("SELECT COUNT(*) FROM providers", [], |r| r.get(0))
         .unwrap();
@@ -248,4 +265,24 @@ fn sqlite_gives_wal_and_shm_the_main_file_mode() {
         .unwrap();
     assert_eq!(mode(&sibling(&path, "-wal")), 0o640);
     assert_eq!(mode(&sibling(&path, "-shm")), 0o640);
+}
+
+#[test]
+fn exchange_position_history_keys_a_reused_pos_id_by_its_open_time() {
+    let conn = open_in_memory().unwrap();
+    assert!(table_exists(&conn, "exchange_position_history"));
+    conn.execute_batch(
+        "INSERT INTO accounts (id,name,source,initial_balance,wallet_balance,used_margin,
+           realized_pnl,fees_paid,funding_paid,config,created_at)
+         VALUES ('a','A','LIVE','0','0','0','0','0','0','{}',1);
+         INSERT INTO exchange_position_history
+           (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type)
+         VALUES ('a','p',1,'BTC-USDT-SWAP',2,'1','2'),('a','p',3,'BTC-USDT-SWAP',4,'2','2');",
+    )
+    .unwrap();
+    let duplicate = conn.execute(
+        "INSERT INTO exchange_position_history VALUES ('a','p',1,'BTC-USDT-SWAP',5,'3','2')",
+        [],
+    );
+    assert!(duplicate.is_err());
 }

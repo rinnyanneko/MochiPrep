@@ -169,6 +169,10 @@ impl OkxEngine {
                 Held { side, contracts },
             );
         }
+        let mut open_results = Vec::new();
+        for p in &open {
+            open_results.extend(super::history::open_result_of(p, &registry)?);
+        }
         let algos = conditional.into_iter().chain(oco).chain(trailing).collect();
         let protection = self.reconcile_protection(algos, &held).await?;
         self.state().protection = protection.clone();
@@ -197,6 +201,7 @@ impl OkxEngine {
         let point = {
             let mut state = self.state();
             state.positions = positions;
+            state.open_results = open_results;
             state.balance = Some(balance.clone());
             state.last_sync_at = Some(at);
             // Set here, in the same step, so the account never reads as healthy in between.

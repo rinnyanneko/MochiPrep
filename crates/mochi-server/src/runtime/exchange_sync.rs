@@ -46,6 +46,9 @@ struct Saved {
 async fn sync_all(runtime: WeakRuntimeHandle, sessions: Vec<(String, Arc<OkxEngine>)>) {
     for (id, engine) in sessions {
         let result = engine.sync().await.map_err(|error| error.to_string());
+        if result.is_ok() {
+            engine.spawn_position_history();
+        }
         let Some(handle) = runtime.upgrade() else {
             return;
         };

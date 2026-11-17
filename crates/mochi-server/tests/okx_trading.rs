@@ -707,3 +707,102 @@ async fn the_trait_returns_an_unchanged_result_for_a_target_off_the_tick() {
     assert!(posts(&w).is_empty());
     w.state.runtime.shutdown().await;
 }
+
+/// The arena row of an agent alone on its pair: OKX's history and open position, counted only from
+/// when the agent was created.
+#[tokio::test]
+async fn the_arena_reads_an_okx_agents_result_from_okx_history_and_its_open_position() {
+    let w = world(true).await;
+    {
+        let mut okx = w.okx.state();
+        okx.position = Some(
+            json!({
+                "instId": "BTC-USDT-SWAP", "pos": "1", "avgPx": "75000", "markPx": "75420",
+                "upl": "4.2", "realizedPnl": "-0.1", "posId": "9", "lever": "3", "liqPx": "50000", "margin": "10", "mgnMode": "isolated",
+                "cTime": (START + 1_000).to_string(),
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        );
+        for (pos_id, opened, realized) in [
+            ("old", START - 10_000, "50"),
+            ("mine", START + 600, "-1.25"),
+        ] {
+            okx.positions_history.push(
+                json!({
+                    "posId": pos_id, "instId": "BTC-USDT-SWAP", "cTime": opened.to_string(),
+                    "uTime": (opened + 100).to_string(), "realizedPnl": realized, "type": "2",
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+            );
+        }
+    }
+    let set_created = |at: i64| {
+        let runtime = w.state.runtime.clone();
+        async move {
+            runtime
+                .call(move |r| {
+                    r.connection()
+                        .execute(
+                            "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,
+                               account_id,risk,interval_sec,status,running,created_at)
+                             VALUES ('agent_x','X','mock','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,?2)
+                             ON CONFLICT(id) DO UPDATE SET created_at=excluded.created_at",
+                            rusqlite::params![ACCOUNT, at],
+                        )
+                        .unwrap()
+                })
+                .await
+                .unwrap();
+        }
+    };
+    set_created(START + 500).await;
+    // The agent's entry, which opened the position the close records as "mine".
+    w.state
+        .runtime
+        .call(|r| {
+            r.connection()
+                .execute(
+                    "INSERT INTO orders (id,account_id,client_order_id,symbol,side,type,quantity,
+                       leverage,reduce_only,close_position,status,filled_quantity,reserved_margin,
+                       agent_id,created_at,updated_at)
+                     VALUES ('o_x',?1,'cx','BTCUSDT','BUY','MARKET','1',3,0,0,'FILLED','1','0',
+                       'agent_x',?2,?2)",
+                    rusqlite::params![ACCOUNT, START + 650],
+                )
+                .unwrap();
+            r.connection()
+                .execute(
+                    "INSERT INTO fills (id,order_id,account_id,symbol,side,quantity,price,fee,
+                       realized_pnl,liquidity,ts)
+                     VALUES ('f_x','o_x',?1,'BTCUSDT','BUY','1','75000','0','0','TAKER',?2)",
+                    rusqlite::params![ACCOUNT, START + 650],
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    w.clock.fetch_add(60_000, Ordering::SeqCst);
+    w.state.runtime.sync_okx_for_test(ACCOUNT).await.unwrap();
+
+    let (_, arena) = send(&w.state, "GET", "/api/arena", None).await;
+    let row = &arena[0];
+    assert_eq!(row["attribution"], "AGENT");
+    // The close from before the agent existed is not its own. The open position adds what OKX
+    // has realized on it so far (fees, funding) and its unrealized P&L.
+    assert_eq!(row["realizedPnl"], "-1.35");
+    assert_eq!(row["pnl"], "2.85");
+    assert_eq!(row["tradeCount"], 1);
+    assert_eq!(row["winRatePct"], json!(0));
+
+    // Created after the position opened: that position is not its own either.
+    set_created(START + 2_000).await;
+    let (_, arena) = send(&w.state, "GET", "/api/arena", None).await;
+    assert_eq!(arena[0]["pnl"], "0");
+    assert_eq!(arena[0]["realizedPnl"], "0");
+    assert_eq!(arena[0]["tradeCount"], 0);
+    w.state.runtime.shutdown().await;
+}

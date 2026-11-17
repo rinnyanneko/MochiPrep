@@ -13,6 +13,9 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::ids::{iso_string, sign, to_inst_id};
 
+/// The most records one `account/positions-history` page holds (OKX's maximum).
+pub const POSITIONS_HISTORY_PAGE: usize = 100;
+
 pub const OKX_LIVE: &str = "https://www.okx.com";
 pub const OKX_DEMO: &str = "https://openapi.okx.com";
 pub const TIMEOUT_MS: u64 = 8_000;
@@ -515,6 +518,19 @@ impl OkxClient {
         let data = self
             .request("GET", "/api/v5/account/positions?instType=SWAP", None)
             .await?;
+        rows(data)
+    }
+
+    /// Closed and partly closed SWAP positions, newest update first, a page of
+    /// [`POSITIONS_HISTORY_PAGE`] at most. `after` asks for those last updated before it (ms).
+    pub async fn get_positions_history(&self, after: Option<i64>) -> Result<Vec<Row>, OkxError> {
+        let mut path = format!(
+            "/api/v5/account/positions-history?instType=SWAP&limit={POSITIONS_HISTORY_PAGE}"
+        );
+        if let Some(after) = after {
+            path.push_str(&format!("&after={after}"));
+        }
+        let data = self.request("GET", &path, None).await?;
         rows(data)
     }
 

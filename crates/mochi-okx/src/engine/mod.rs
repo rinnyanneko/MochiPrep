@@ -6,6 +6,8 @@
 //! piece of work at a time against the store (in the server, on the runtime task), so network calls
 //! never hold the store and the store never waits on the network.
 
+mod history;
+pub use history::OpenPositionResult;
 mod protection;
 mod refusal;
 mod sync;
@@ -17,7 +19,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use mochi_core::paper::{DailyRisk, PaperStore, StoreFailure};
 use mochi_decimal::Dec;
 use mochi_domain::{
-    default_live_limits, AccountBalance, EntryOrderType, EquityPoint, Fill,
+    default_live_limits, AccountBalance, EntryOrderType, EquityPoint, ExchangePositionRecord, Fill,
     InstrumentSpecification, Order, OrderRequest, OrderResult, OrderSide, OrderStatus, OrderType,
     PaperAccount, PositionSide, PositionView, Protection, Quote, RiskSettings, TrailingKind,
     TrailingStopSpec,
@@ -68,6 +70,14 @@ pub trait LiveRows {
     fn upsert_equity_point(&self, point: &EquityPoint) -> Result<(), StoreFailure>;
     fn list_equity(&self, account_id: &str, limit: usize)
         -> Result<Vec<EquityPoint>, StoreFailure>;
+    fn upsert_position_record(&self, record: &ExchangePositionRecord) -> Result<(), StoreFailure>;
+    fn latest_position_record_at(&self, account_id: &str) -> Result<Option<i64>, StoreFailure>;
+    fn position_history_backfill(&self, account_id: &str) -> Result<Option<i64>, StoreFailure>;
+    fn set_position_history_backfill(
+        &self,
+        account_id: &str,
+        before: Option<i64>,
+    ) -> Result<(), StoreFailure>;
     /// The instrument registry: built-ins first, then added pairs in the order registered
     /// (Node's `listSymbols()` order), so an instId maps back to the symbol Node would pick.
     fn instruments(&self) -> Vec<InstrumentSpecification>;
@@ -138,6 +148,22 @@ impl<S: PaperStore> LiveRows for Rows<'_, S> {
         limit: usize,
     ) -> Result<Vec<EquityPoint>, StoreFailure> {
         self.store.list_equity(account_id, limit)
+    }
+    fn upsert_position_record(&self, record: &ExchangePositionRecord) -> Result<(), StoreFailure> {
+        self.store.upsert_position_record(record)
+    }
+    fn latest_position_record_at(&self, account_id: &str) -> Result<Option<i64>, StoreFailure> {
+        self.store.latest_position_record_at(account_id)
+    }
+    fn position_history_backfill(&self, account_id: &str) -> Result<Option<i64>, StoreFailure> {
+        self.store.position_history_backfill(account_id)
+    }
+    fn set_position_history_backfill(
+        &self,
+        account_id: &str,
+        before: Option<i64>,
+    ) -> Result<(), StoreFailure> {
+        self.store.set_position_history_backfill(account_id, before)
     }
     fn instruments(&self) -> Vec<InstrumentSpecification> {
         self.instruments.to_vec()
@@ -222,6 +248,11 @@ struct State {
     positions: Vec<PositionView>,
     last_sync_at: Option<i64>,
     last_equity_at: i64,
+    /// When the closed-position history was last read.
+    last_history_at: i64,
+    /// A history pass is out.
+    history_running: bool,
+    open_results: Vec<OpenPositionResult>,
     sync_error: Option<String>,
     /// Our protection per symbol, as the last sync read it back from OKX.
     protection: ProtectionMap,
@@ -555,6 +586,21 @@ impl OkxEngine {
     pub async fn sync(self: &Arc<Self>) -> Result<(), EngineError> {
         self.queued(|engine| Box::pin(async move { engine.sync_now().await }))
             .await
+    }
+
+    /// Starts a history pass as a task of its own (see [`OkxEngine::sync_position_history`]).
+    /// Only the arena reads the history, so a failure must not make the account unhealthy (that
+    /// pauses its agents); the pass is tried again after the next sync.
+    pub fn spawn_position_history(self: &Arc<Self>) {
+        let engine = self.clone();
+        tokio::spawn(async move {
+            let _ = engine.sync_position_history().await;
+        });
+    }
+
+    /// What each open position has made so far, as of the last sync.
+    pub fn open_results(&self) -> Vec<OpenPositionResult> {
+        self.state().open_results.clone()
     }
 
     async fn prepare(&self, request: &OrderRequest) -> Result<Prepared, EngineError> {

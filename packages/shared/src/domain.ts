@@ -561,6 +561,13 @@ export interface DecisionRecord {
   isMock: boolean;
 }
 
+/**
+ * Whose result an arena row shows. ACCOUNT: a paper account's whole equity. AGENT: on an exchange
+ * account, positions on the agent's pair that it traded since it was created (OKX history plus the open one). SHARED: another
+ * agent on the same exchange account trades that pair, and one-way mode nets their positions.
+ */
+export type ArenaAttribution = 'ACCOUNT' | 'AGENT' | 'SHARED';
+
 export interface ArenaRow {
   agentId: string;
   agentName: string;
@@ -573,10 +580,15 @@ export interface ArenaRow {
   symbol: SymbolId;
   status: AgentStatus;
   initialBalance: string;
+  /** The account's equity. On an exchange account it includes deposits and other agents' trading. */
   equity: string;
-  returnPct: number;
-  realizedPnl: string;
-  maxDrawdownPct: number;
+  attribution: ArenaAttribution;
+  /** The agent's profit in USDT; null when another agent trades the same pair on its exchange account. */
+  pnl: string | null;
+  /** Null on exchange accounts, whose balance moves with deposits, and for a zero starting balance. */
+  returnPct: number | null;
+  realizedPnl: string | null;
+  maxDrawdownPct: number | null;
   winRatePct: number | null;
   tradeCount: number;
   decisionCount: number;

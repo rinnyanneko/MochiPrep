@@ -347,6 +347,35 @@ impl PaperStore for AuditedStore {
     ) -> Result<Vec<EquityPoint>, StoreFailure> {
         self.inner.list_equity(account_id, limit)
     }
+    fn upsert_position_record(
+        &self,
+        r: &mochi_domain::ExchangePositionRecord,
+    ) -> Result<(), StoreFailure> {
+        self.write("upsert_position_record");
+        self.inner.upsert_position_record(r)
+    }
+    fn list_position_records(
+        &self,
+        account_id: &str,
+        inst_id: &str,
+        since: i64,
+    ) -> Result<Vec<mochi_domain::ExchangePositionRecord>, StoreFailure> {
+        self.inner.list_position_records(account_id, inst_id, since)
+    }
+    fn latest_position_record_at(&self, account_id: &str) -> Result<Option<i64>, StoreFailure> {
+        self.inner.latest_position_record_at(account_id)
+    }
+    fn position_history_backfill(&self, account_id: &str) -> Result<Option<i64>, StoreFailure> {
+        self.inner.position_history_backfill(account_id)
+    }
+    fn set_position_history_backfill(
+        &self,
+        account_id: &str,
+        before: Option<i64>,
+    ) -> Result<(), StoreFailure> {
+        self.write("set_position_history_backfill");
+        self.inner.set_position_history_backfill(account_id, before)
+    }
 }
 
 /// Every path that writes: accounts, a rejected order, a cancel, a fill, protection, a trailing

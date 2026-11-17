@@ -91,10 +91,11 @@ async fn get(state: &AppState, path: &str) -> Value {
 }
 
 /// Runs SQL on the runtime's database.
-async fn sql(state: &AppState, statements: &'static str) {
+async fn sql(state: &AppState, statements: impl Into<String>) {
+    let statements = statements.into();
     state
         .runtime
-        .call(move |runtime| runtime.connection().execute_batch(statements).unwrap())
+        .call(move |runtime| runtime.connection().execute_batch(&statements).unwrap())
         .await
         .unwrap();
 }
@@ -280,6 +281,131 @@ async fn arena_return_is_null_for_a_zero_balance() {
     assert_eq!(arena[0]["estimatedAiCost"], Value::Null);
     // Opening the account recorded its first equity point.
     assert_eq!(arena[0]["curve"][0]["equity"], json!(0));
+    state.runtime.shutdown().await;
+}
+
+/// An OKX account first connected with dust in it, then funded by a transfer, shared by three
+/// agents: two on BTC, one on ETH.
+#[tokio::test]
+async fn arena_attributes_exchange_pnl_per_agent_and_ignores_deposits() {
+    let state = state();
+    let (_, account) = send(
+        &state,
+        "POST",
+        "/api/accounts",
+        Some(r#"{"name":"OKX","source":"LIVE"}"#),
+    )
+    .await;
+    let id = account["id"].as_str().unwrap().to_string();
+    sql(
+        &state,
+        format!(
+            "DELETE FROM equity_history;
+             DELETE FROM ledger_events;
+             UPDATE accounts SET id='acct_x',venue='OKX_LIVE',exchange_uid='42',
+               initial_balance='0.0000000006' WHERE id='{id}';"
+        ),
+    )
+    .await;
+    sql(
+        &state,
+        "INSERT INTO equity_history (account_id,ts,equity,wallet,unrealized) VALUES
+           ('acct_x',10,'0.0000000006','0.0000000006','0'),('acct_x',20,'50','50','0');
+         INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,risk,
+           interval_sec,status,running,created_at) VALUES
+           ('agent_a','A','mock','m','BTCUSDT','15m','','acct_x','{}',900,'IDLE',0,5),
+           ('agent_b','B','mock','m','BTCUSDT','15m','','acct_x','{}',900,'IDLE',0,5),
+           ('agent_c','C','mock','m','ETHUSDT','15m','','acct_x','{}',900,'IDLE',0,5);
+         INSERT INTO orders (id,account_id,client_order_id,symbol,side,type,quantity,leverage,
+           reduce_only,close_position,status,filled_quantity,reserved_margin,agent_id,
+           created_at,updated_at) VALUES
+           ('o_a','acct_x','c3','BTCUSDT','BUY','MARKET','1',1,0,0,'FILLED','1','0','agent_a',8,8),
+           ('o_c1','acct_x','c4','ETHUSDT','BUY','MARKET','1',1,0,0,'FILLED','1','0','agent_c',6,6),
+           ('o_c2','acct_x','c5','ETHUSDT','BUY','MARKET','1',1,0,0,'FILLED','1','0','agent_c',8,8),
+           ('o_c3','acct_x','c6','ETHUSDT','BUY','LIMIT','1',1,0,0,'CANCELED','0','0','agent_c',
+             100000,100000);
+         INSERT INTO fills (id,order_id,account_id,symbol,side,quantity,price,fee,realized_pnl,
+           liquidity,ts) VALUES
+           ('f_a','o_a','acct_x','BTCUSDT','BUY','1','75000','0.01','0','TAKER',8),
+           ('f_c1','o_c1','acct_x','ETHUSDT','BUY','1','3000','0.03','0','TAKER',6),
+           ('f_c2','o_c2','acct_x','ETHUSDT','BUY','1','3000','0.03','0','TAKER',8);
+         -- OKX's history: an ETH position from before agent C existed, two it traded (one closed by
+         -- a stop OKX triggered, so with no local fill), one the owner traded in the OKX app long
+         -- after (C's only order then never filled), and a BTC one.
+         INSERT INTO exchange_position_history
+           (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type) VALUES
+           ('acct_x','e1',3,'ETH-USDT-SWAP',4,'9','2'),
+           ('acct_x','e1',6,'ETH-USDT-SWAP',7,'1.45','2'),
+           ('acct_x','e1',8,'ETH-USDT-SWAP',9,'-0.5','2'),
+           ('acct_x','e1',100000,'ETH-USDT-SWAP',100001,'100','2'),
+           -- Opened by the owner seconds after C's last fill: that fill was another position's.
+           ('acct_x','e1',15000,'ETH-USDT-SWAP',15001,'7','2'),
+           ('acct_x','b1',6,'BTC-USDT-SWAP',7,'5','2');",
+    )
+    .await;
+    let arena = get(&state, "/api/arena").await;
+    let row = |id: &str| {
+        arena
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["agentId"] == id)
+            .unwrap()
+            .clone()
+    };
+
+    // The only agent on ETH owns the ETH positions it traded since it was created, and neither
+    // one from before nor the owner's own. The deposit is in no one's result.
+    let c = row("agent_c");
+    assert_eq!(c["attribution"], "AGENT");
+    assert_eq!(c["equity"], "50");
+    assert_eq!(c["pnl"], "0.95");
+    assert_eq!(c["realizedPnl"], "0.95");
+    assert_eq!(c["returnPct"], Value::Null);
+    assert_eq!(c["maxDrawdownPct"], Value::Null);
+    assert_eq!(c["tradeCount"], 2);
+    assert_eq!(c["winRatePct"], json!(50));
+    assert_eq!(c["curve"], json!([]));
+
+    // One-way mode nets two agents' BTC into one OKX position, so neither result is knowable.
+    for (id, trades) in [("agent_a", 1), ("agent_b", 0)] {
+        let shared = row(id);
+        assert_eq!(shared["attribution"], "SHARED", "{id}");
+        assert_eq!(shared["pnl"], Value::Null, "{id}");
+        assert_eq!(shared["realizedPnl"], Value::Null, "{id}");
+        assert_eq!(shared["returnPct"], Value::Null, "{id}");
+        assert_eq!(shared["winRatePct"], Value::Null, "{id}");
+        assert_eq!(shared["tradeCount"], trades, "{id}");
+    }
+    state.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn arena_paper_rows_keep_account_returns() {
+    let state = state();
+    let (_, account) = send(
+        &state,
+        "POST",
+        "/api/accounts",
+        Some(r#"{"name":"Paper","source":"REPLAY","initialBalance":"1000"}"#),
+    )
+    .await;
+    let id = account["id"].as_str().unwrap().to_string();
+    sql(
+        &state,
+        format!(
+            "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,
+               risk,interval_sec,status,running,created_at)
+             VALUES ('agent_p','P','mock','m','BTCUSDT','15m','','{id}','{{}}',900,'IDLE',0,1)"
+        ),
+    )
+    .await;
+    let arena = get(&state, "/api/arena").await;
+    assert_eq!(arena[0]["attribution"], "ACCOUNT");
+    assert_eq!(arena[0]["pnl"], "0");
+    assert_eq!(arena[0]["returnPct"], json!(0));
+    assert_eq!(arena[0]["maxDrawdownPct"], json!(0));
+    assert_eq!(arena[0]["curve"][0]["equity"], json!(1000));
     state.runtime.shutdown().await;
 }
 

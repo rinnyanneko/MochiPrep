@@ -5,7 +5,8 @@ use std::cell::Cell;
 
 use mochi_core::paper::{PaperStore, StoreFailure, StoreFailureKind};
 use mochi_domain::{
-    DataSource, EquityPoint, Fill, LedgerEvent, Order, PaperAccount, Position, RiskSettings,
+    DataSource, EquityPoint, ExchangePositionRecord, Fill, LedgerEvent, Order, PaperAccount,
+    Position, RiskSettings,
 };
 use rusqlite::{params, Connection, Row};
 use serde::de::DeserializeOwned;
@@ -323,6 +324,18 @@ fn to_equity(r: &Row) -> rusqlite::Result<EquityPoint> {
     })
 }
 
+fn to_position_record(r: &Row) -> rusqlite::Result<ExchangePositionRecord> {
+    Ok(ExchangePositionRecord {
+        account_id: r.get("account_id")?,
+        pos_id: r.get("pos_id")?,
+        opened_at: r.get("opened_at")?,
+        inst_id: r.get("inst_id")?,
+        closed_at: r.get("closed_at")?,
+        realized_pnl: r.get("realized_pnl")?,
+        close_type: r.get("close_type")?,
+    })
+}
+
 fn limit_param(limit: usize) -> i64 {
     i64::try_from(limit).unwrap_or(i64::MAX)
 }
@@ -415,6 +428,8 @@ impl PaperStore for SqlitePaperStore {
             "positions",
             "ledger_events",
             "equity_history",
+            "exchange_position_history",
+            "exchange_history_cursor",
         ] {
             self.run(&format!("DELETE FROM {table} WHERE account_id=?"), [id])?;
         }
@@ -729,6 +744,76 @@ impl PaperStore for SqlitePaperStore {
             "SELECT * FROM (SELECT * FROM equity_history WHERE account_id=? ORDER BY ts DESC LIMIT ?) ORDER BY ts",
             params![account_id, limit_param(limit)],
             to_equity,
+        )
+    }
+
+    fn upsert_position_record(&self, r: &ExchangePositionRecord) -> Result<(), StoreFailure> {
+        self.run(
+            "INSERT INTO exchange_position_history
+               (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type)
+             VALUES (?,?,?,?,?,?,?)
+             ON CONFLICT(account_id,pos_id,opened_at) DO UPDATE SET inst_id=excluded.inst_id,
+               closed_at=excluded.closed_at, realized_pnl=excluded.realized_pnl,
+               close_type=excluded.close_type",
+            params![
+                r.account_id,
+                r.pos_id,
+                r.opened_at,
+                r.inst_id,
+                r.closed_at,
+                r.realized_pnl,
+                r.close_type
+            ],
+        )
+    }
+
+    fn list_position_records(
+        &self,
+        account_id: &str,
+        inst_id: &str,
+        since: i64,
+    ) -> Result<Vec<ExchangePositionRecord>, StoreFailure> {
+        self.query(
+            "SELECT * FROM exchange_position_history WHERE account_id=? AND inst_id=? AND opened_at>=?
+             ORDER BY opened_at, pos_id",
+            params![account_id, inst_id, since],
+            to_position_record,
+        )
+    }
+
+    fn latest_position_record_at(&self, account_id: &str) -> Result<Option<i64>, StoreFailure> {
+        Ok(self
+            .query(
+                "SELECT MAX(closed_at) AS at FROM exchange_position_history WHERE account_id=?",
+                [account_id],
+                |r| r.get::<_, Option<i64>>("at"),
+            )?
+            .into_iter()
+            .next()
+            .flatten())
+    }
+
+    fn position_history_backfill(&self, account_id: &str) -> Result<Option<i64>, StoreFailure> {
+        Ok(self
+            .query(
+                "SELECT backfill_before FROM exchange_history_cursor WHERE account_id=?",
+                [account_id],
+                |r| r.get::<_, Option<i64>>("backfill_before"),
+            )?
+            .into_iter()
+            .next()
+            .flatten())
+    }
+
+    fn set_position_history_backfill(
+        &self,
+        account_id: &str,
+        before: Option<i64>,
+    ) -> Result<(), StoreFailure> {
+        self.run(
+            "INSERT INTO exchange_history_cursor (account_id,backfill_before) VALUES (?,?)
+             ON CONFLICT(account_id) DO UPDATE SET backfill_before=excluded.backfill_before",
+            params![account_id, before],
         )
     }
 }

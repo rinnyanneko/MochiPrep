@@ -447,6 +447,23 @@ pub struct LedgerEvent {
     pub ts: i64,
 }
 
+/// One closed (or partly closed) position on an exchange account, as the exchange reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExchangePositionRecord {
+    pub account_id: String,
+    pub pos_id: String,
+    pub opened_at: i64,
+    /// The exchange's own instrument id (OKX `instId`).
+    pub inst_id: String,
+    /// When the exchange last updated it: the close, or the latest partial close.
+    pub closed_at: i64,
+    /// PnL net of fees, funding and any liquidation penalty.
+    pub realized_pnl: String,
+    /// The exchange's own code for how it closed (OKX `type`), kept for diagnosis.
+    pub close_type: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EquityPoint {
