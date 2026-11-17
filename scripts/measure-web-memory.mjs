@@ -412,7 +412,6 @@ async function main() {
       },
       samples,
     };
-    if (options.out) writeFileSync(options.out, `${JSON.stringify(report, null, 2)}\n`);
     console.log('');
     console.log(formatTable(samples));
     const heapSlope = report.summary.soakPerMinute.JSHeapUsedSize?.slope;
@@ -422,6 +421,15 @@ async function main() {
     console.log(`soak heap slope: ${heapSlope === null || heapSlope === undefined ? '-' : `${Math.round(heapSlope / 1024)} KiB/min`}`);
     console.log(`cycle slopes: ${nodeSlope?.toFixed(1) ?? '-'} nodes/cycle, ${listenerSlope?.toFixed(1) ?? '-'} listeners/cycle`);
     console.log(`max documents: ${report.summary.maxDocuments}`);
+    // Written after printing, so a bad --out path still leaves the results on screen.
+    if (options.out) {
+      try {
+        writeFileSync(options.out, `${JSON.stringify(report, null, 2)}\n`);
+      } catch (error) {
+        console.error(`measure-web-memory: cannot write ${options.out}: ${error.message}`);
+        return 1;
+      }
+    }
     return 0;
   } finally {
     await browser?.close().catch(() => {});
