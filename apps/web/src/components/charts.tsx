@@ -86,14 +86,14 @@ const LABEL_TONES: Record<ChartTone, string> = {
 };
 
 /**
- * Charts read colors from CSS and label formatters from options, so a change of theme, color flip
+ * Charts read colors from CSS and label formatters from options, so a change of theme, direction colors
  * or zone has to be applied to them again. The key names everything that does.
  */
 function useLook() {
   const theme = useApp((s) => s.theme);
-  const flip = useApp((s) => s.flipColors);
+  const colors = useApp((s) => s.directionColors);
   const zone = useApp((s) => s.timeZone);
-  return { zone, key: `${theme}|${flip}|${zone}` };
+  return { zone, key: `${theme}|${JSON.stringify(colors)}|${zone}` };
 }
 
 const NO_MARKERS: TradeMarker[] = [];
@@ -159,7 +159,7 @@ function buildMarketChart(element: HTMLDivElement, showIndicators: boolean): Mar
 }
 
 /**
- * Colors, label formatters and price format: what a theme, color flip, zone or symbol change
+ * Colors, label formatters and price format: what a theme, direction colors, zone or symbol change
  * touches. It also empties the series and resets zoom, scroll and pane sizes, so the chart looks
  * exactly as a newly created one did before this chart was kept for the session.
  */
@@ -379,6 +379,7 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
           className={cn('num pointer-events-none invisible absolute top-0 left-2 z-[5] rounded-md px-1.5 text-[11px] leading-[18px] whitespace-nowrap', LABEL_TONES[line.tone])}
         >
           {line.label}
+          {line.pnl && <span className={cn("ml-2 rounded px-1", LABEL_TONES[line.pnl.tone])}>{line.pnl.text}</span>}
         </span>
       ))}
       {hovered && (
@@ -457,7 +458,7 @@ export function EquityChart({ series, baseline }: { series: EquitySeries[]; base
     };
   }, []);
 
-  // A new set of lines, theme, color flip, zone or baseline starts the lines over, and resets zoom
+  // A new set of lines, theme, direction colors, zone or baseline starts the lines over, and resets zoom
   // and scroll, as creating the chart anew did before it was kept for the session.
   useEffect(() => {
     const current = slot.current;

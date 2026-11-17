@@ -7,6 +7,7 @@ import { useTradeOverlay } from '@/components/useTradeOverlay';
 import { FeedBadge, PageTitle } from '@/components/Shell';
 import { Badge, Card, Segmented, Select, Stat } from '@/components/ui';
 import { api } from '@/lib/api';
+import { isBoolean, isString, oneOf, useRemembered } from '@/lib/remembered';
 import { pct, pnlClass, price } from '@/lib/format';
 import { useApp, useDateTime, useQuery, useSymbols } from '@/store';
 import { useEffect } from 'react';
@@ -29,13 +30,14 @@ export function MarketsPage() {
   const dateTime = useDateTime();
   const source = useApp((s) => s.source);
   const symbols = useSymbols();
-  const [picked, setSymbol] = useState<SymbolId>('BTCUSDT');
+  // A remembered pair that was removed since falls back to BTC.
+  const [picked, setSymbol] = useRemembered<SymbolId>('markets.symbol', 'BTCUSDT', isString);
   const symbol = symbols.includes(picked) ? picked : 'BTCUSDT';
-  const [timeframe, setTimeframe] = useState<Timeframe>('15m');
+  const [timeframe, setTimeframe] = useRemembered<Timeframe>('markets.timeframe', '15m', oneOf(TIMEFRAMES));
   const quote = useApp((s) => s.quotes[source][symbol]);
   const { data: candles, error } = useCandles(symbol, timeframe);
   const account = useCurrentAccount();
-  const [showTrades, setShowTrades] = useState(true);
+  const [showTrades, setShowTrades] = useRemembered('markets.showTrades', true, isBoolean);
   const overlay = useTradeOverlay(showTrades ? account?.id : undefined, symbol, timeframe, quote);
 
   const first = candles?.[Math.max(0, candles.length - Math.round(86_400_000 / { '1m': 60_000, '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000 }[timeframe]))];

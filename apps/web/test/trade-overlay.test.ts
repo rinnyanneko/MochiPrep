@@ -84,16 +84,30 @@ describe('openPnl', () => {
 describe('buildPriceLines', () => {
   it('draws entry with live PnL, TP, SL and liquidation', () => {
     expect(buildPriceLines([position()], [], 'BTCUSDT', 110)).toEqual([
-      { id: 'entry', price: 100, label: 'LONG 2  +20.00 (+40.00%)', tone: 'rise' },
+      { id: 'entry', price: 100, label: 'LONG 2', tone: 'rise', pnl: { text: '+20.00 (+40.00%)', tone: 'rise' } },
       { id: 'tp', price: 120, label: 'TP', tone: 'rise' },
       { id: 'sl', price: 90, label: 'SL', tone: 'fall' },
       { id: 'liq', price: 76, label: 'Liq', tone: 'warn' },
     ]);
   });
 
-  it('turns the entry line red on a loss', () => {
-    const [entry] = buildPriceLines([position()], [], 'BTCUSDT', 90);
-    expect(entry).toMatchObject({ label: 'LONG 2  −20.00 (−40.00%)', tone: 'fall' });
+  it('colors the entry line by direction and only the PnL by result', () => {
+    const [long] = buildPriceLines([position()], [], 'BTCUSDT', 90);
+    expect(long).toMatchObject({ tone: 'rise', pnl: { text: '−20.00 (−40.00%)', tone: 'fall' } });
+    const [short] = buildPriceLines([position({ side: 'SHORT' })], [], 'BTCUSDT', 90);
+    expect(short).toMatchObject({ label: 'SHORT 2', tone: 'fall', pnl: { text: '+20.00 (+40.00%)', tone: 'rise' } });
+  });
+
+  it('draws an active trailing stop at its trigger', () => {
+    const trailing = { kind: 'RATIO', callback: '0.01', activationPrice: null, extreme: '112', triggerPrice: '110.88' } as const;
+    const lines = buildPriceLines([position({ trailingStop: trailing })], [], 'BTCUSDT', 111);
+    expect(lines).toContainEqual({ id: 'trail', price: 110.88, label: 'Trailing SL', tone: 'fall' });
+  });
+
+  it('draws a trailing stop that waits for its activation price there', () => {
+    const waiting = { kind: 'RATIO', callback: '0.01', activationPrice: '115', extreme: null, triggerPrice: null } as const;
+    const lines = buildPriceLines([position({ trailingStop: waiting })], [], 'BTCUSDT', 111);
+    expect(lines).toContainEqual({ id: 'trail', price: 115, label: 'Trailing SL activates', tone: 'info' });
   });
 
   it('keeps the same line id as PnL moves, so the line updates in place', () => {
@@ -107,7 +121,8 @@ describe('buildPriceLines', () => {
   });
 
   it('shows no PnL before a quote arrives', () => {
-    expect(buildPriceLines([position()], [], 'BTCUSDT', null)[0]).toMatchObject({ label: 'LONG 2', tone: 'neutral' });
+    const [entry] = buildPriceLines([position()], [], 'BTCUSDT', null);
+    expect(entry).toEqual({ id: 'entry', price: 100, label: 'LONG 2', tone: 'rise' });
   });
 
   it('draws resting limits, but not filled orders or other pairs', () => {

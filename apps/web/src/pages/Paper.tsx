@@ -8,6 +8,7 @@ import { SignalsCard } from '@/components/SignalsCard';
 import { AccountPicker, ClosedPositionsTable, FillsTable, LedgerTable, OrdersTable, PositionsTable, useCurrentAccount, VenueBadge } from '@/components/trading';
 import { Badge, Button, Card, Dialog, Field, Input, Segmented, Select, Stat, Tabs } from '@/components/ui';
 import { api } from '@/lib/api';
+import { isInteger, isString, oneOf, useRemembered } from '@/lib/remembered';
 import { money, pnlClass, price, qty, signedMoney } from '@/lib/format';
 import { attempt, useApp, useQuery, useSymbols, type AccountView } from '@/store';
 import { useCandles } from './Markets';
@@ -64,12 +65,12 @@ function ResetAccount({ account }: { account: AccountView }) {
 
 function OrderTicket({ account, symbol }: { account: AccountView; symbol: SymbolId }) {
   const quote = useApp((s) => s.quotes[account.source][symbol]);
-  const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
-  const [type, setType] = useState<'MARKET' | 'LIMIT'>('MARKET');
-  const [mode, setMode] = useState<'QTY' | 'MARGIN'>('MARGIN');
-  const [amount, setAmount] = useState('500');
+  const [side, setSide] = useRemembered<'BUY' | 'SELL'>('ticket.side', 'BUY', oneOf(['BUY', 'SELL'] as const));
+  const [type, setType] = useRemembered<'MARKET' | 'LIMIT'>('ticket.type', 'MARKET', oneOf(['MARKET', 'LIMIT'] as const));
+  const [mode, setMode] = useRemembered<'QTY' | 'MARGIN'>('ticket.mode', 'MARGIN', oneOf(['QTY', 'MARGIN'] as const));
+  const [amount, setAmount] = useState(() => mode === 'MARGIN' ? '500' : '');
   const [limit, setLimit] = useState('');
-  const [leverage, setLeverage] = useState(3);
+  const [leverage, setLeverage] = useRemembered('ticket.leverage', 3, (v): v is number => isInteger(v) && v >= 1 && v <= 20);
   const [stop, setStop] = useState('');
   const [target, setTarget] = useState('');
   const [reduceOnly, setReduceOnly] = useState(false);
@@ -184,14 +185,17 @@ function OrderTicket({ account, symbol }: { account: AccountView; symbol: Symbol
   );
 }
 
+const TRADING_TABS = ['positions', 'orders', 'fills', 'closed', 'all', 'ledger'] as const;
+
 export function PaperPage() {
   const account = useCurrentAccount();
   const source = useApp((s) => s.source);
   const symbols = useSymbols();
-  const [picked, setSymbol] = useState<SymbolId>('BTCUSDT');
+  // A remembered pair that was removed since falls back to BTC.
+  const [picked, setSymbol] = useRemembered<SymbolId>('trading.symbol', 'BTCUSDT', isString);
   const symbol = symbols.includes(picked) ? picked : 'BTCUSDT';
-  const [timeframe, setTimeframe] = useState<Timeframe>('5m');
-  const [tab, setTab] = useState('positions');
+  const [timeframe, setTimeframe] = useRemembered<Timeframe>('trading.timeframe', '5m', oneOf(TIMEFRAMES));
+  const [rememberedTab, setTab] = useRemembered('trading.tab', 'positions', oneOf(TRADING_TABS));
   const quote = useApp((s) => s.quotes[source][symbol]);
   const { data: candles } = useCandles(symbol, timeframe, 300);
   const id = account?.id;
@@ -223,6 +227,8 @@ export function PaperPage() {
 
   const b = account.balance;
   const exchange = account.venue !== 'PAPER';
+  // An exchange account has no ledger tab.
+  const tab = exchange && rememberedTab === 'ledger' ? 'positions' : rememberedTab;
   return (
     <>
       <PageTitle
