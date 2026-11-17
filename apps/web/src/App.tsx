@@ -1,22 +1,17 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Shell } from './components/Shell';
-import { AgentsPage } from './pages/Agents';
-import { ArenaPage } from './pages/Arena';
-import { DashboardPage } from './pages/Dashboard';
-import { HistoryPage } from './pages/History';
-import { MarketsPage } from './pages/Markets';
-import { PaperPage } from './pages/Paper';
-import { SettingsPage } from './pages/Settings';
 import { useApp, type Page } from './store';
 
-const PAGES: Record<Page, () => React.ReactNode> = {
-  dashboard: DashboardPage,
-  markets: MarketsPage,
-  agents: AgentsPage,
-  paper: PaperPage,
-  arena: ArenaPage,
-  history: HistoryPage,
-  settings: SettingsPage,
+// Each page is its own chunk, so opening the interface loads only the page in view; the charting
+// library, for one, arrives only with a page that draws a chart.
+const PAGES: Record<Page, React.LazyExoticComponent<() => React.ReactNode>> = {
+  dashboard: lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.DashboardPage }))),
+  markets: lazy(() => import('./pages/Markets').then((m) => ({ default: m.MarketsPage }))),
+  agents: lazy(() => import('./pages/Agents').then((m) => ({ default: m.AgentsPage }))),
+  paper: lazy(() => import('./pages/Paper').then((m) => ({ default: m.PaperPage }))),
+  arena: lazy(() => import('./pages/Arena').then((m) => ({ default: m.ArenaPage }))),
+  history: lazy(() => import('./pages/History').then((m) => ({ default: m.HistoryPage }))),
+  settings: lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage }))),
 };
 
 export function App() {
@@ -29,10 +24,13 @@ export function App() {
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
-  const Current = PAGES[page] ?? DashboardPage;
+  const Current = PAGES[page] ?? PAGES.dashboard;
   return (
     <Shell>
-      <Current />
+      {/* Chunks are local files served by the backend, so the wait is a few milliseconds: no spinner. */}
+      <Suspense fallback={null}>
+        <Current />
+      </Suspense>
     </Shell>
   );
 }
