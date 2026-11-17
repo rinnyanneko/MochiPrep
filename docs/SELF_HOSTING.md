@@ -6,7 +6,7 @@ This runs MochiPrep as a container instead of the desktop app. The data is kept 
 
 ## Run on this machine
 
-You need Docker Engine with Compose v2 and git.
+You need Docker Engine 28.0.0 or newer with Compose v2, and git. Older Docker Engine versions let other machines on the same local network reach ports published to `127.0.0.1`, so the default setup is not host-only there. Check with `docker version`.
 
 ```bash
 git clone https://github.com/rinnyanneko/MochiPrep.git

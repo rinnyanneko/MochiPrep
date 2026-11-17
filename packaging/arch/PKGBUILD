@@ -40,6 +40,8 @@ prepare() {
 
 build() {
   cd "$_srcdir"
+  # package() reads target/release, so a CARGO_TARGET_DIR from the user's shell must not move it.
+  export CARGO_TARGET_DIR=target
   # The web UI must exist before mochi-server compiles: rust-embed reads apps/web/dist.
   pnpm build
   cargo build --locked --release -p mochi-server
@@ -50,6 +52,7 @@ build() {
 
 check() {
   cd "$_srcdir"
+  export CARGO_TARGET_DIR=target
   cargo test --locked --workspace
 }
 
