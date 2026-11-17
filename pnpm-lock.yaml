@@ -193,15 +193,24 @@ importers:
 
   apps/web:
     dependencies:
-      '@fontsource-variable/inter':
-        specifier: ^5.2.0
+      '@fontsource-variable/google-sans':
+        specifier: ^5.3.2
+        version: 5.3.2
+      '@fontsource-variable/intel-one-mono':
+        specifier: ^5.3.0
         version: 5.3.0
-      '@fontsource-variable/jetbrains-mono':
-        specifier: ^5.2.0
-        version: 5.3.0
-      '@fontsource-variable/nunito':
-        specifier: ^5.2.0
-        version: 5.3.0
+      '@fontsource-variable/noto-sans-jp':
+        specifier: ^5.3.1
+        version: 5.3.1
+      '@fontsource-variable/noto-sans-kr':
+        specifier: ^5.3.1
+        version: 5.3.1
+      '@fontsource-variable/noto-sans-sc':
+        specifier: ^5.3.1
+        version: 5.3.1
+      '@fontsource-variable/noto-sans-tc':
+        specifier: ^5.3.1
+        version: 5.3.1
       '@mochiprep/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -427,14 +436,23 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@fontsource-variable/inter@5.3.0':
-    resolution: {integrity: sha512-OupL48va4JNofb97w6NYeF9S7W/kHNKM0Er8Dem5nqi4jeOLrVJDoE8tZEpnMJmtkvNbB1EIPPwHcdkF6b1oUA==}
+  '@fontsource-variable/google-sans@5.3.2':
+    resolution: {integrity: sha512-fN+fO2Ffm+n2G5K+UK4ynP5WrWT+M/dbBs9HZaYcgAT5evhefJJH2MlGj8yMz+8slQmhjWAqPJyJ1sELkUM4Uw==}
 
-  '@fontsource-variable/jetbrains-mono@5.3.0':
-    resolution: {integrity: sha512-F32xpS2NsGYoQi2ADSkKTgpJj7ozajsGgDJ8woTnqjmIB+dxDIqImjl4pXZVEExu8UFZ2ndhmX18EBS/hdz3Lw==}
+  '@fontsource-variable/intel-one-mono@5.3.0':
+    resolution: {integrity: sha512-17GEbVAXrViv621/NeCe4sFDQfJVALdb+U44dsEY6WbAG/NWv4pjjkqTULtIBIvQJDetKExDVcAossqIQ7HsVw==}
 
-  '@fontsource-variable/nunito@5.3.0':
-    resolution: {integrity: sha512-tw0ch7evIDSwoeUy+0XzocYHfbRWLeCRPJy22KgbrLjDLAbNw/fErBiil10Ssrs3Sjr55zaZrr36a975j8cBkQ==}
+  '@fontsource-variable/noto-sans-jp@5.3.1':
+    resolution: {integrity: sha512-/anGvJFc5y36f8DJ+3TSh2+KAvaRLA9PaLUMvneeY5s4j8m+8X4F3lE/sjTuG9YI5BX4sykvCk4TuJMG7ecMRQ==}
+
+  '@fontsource-variable/noto-sans-kr@5.3.1':
+    resolution: {integrity: sha512-f5aty6Qgk2LVU5TjCtXHxiYHqUWYW8f75ll0Chn8ucCqoOlIomcACUwf1V47yUt6wTdWZiGr3dcbQk+zlOspMA==}
+
+  '@fontsource-variable/noto-sans-sc@5.3.1':
+    resolution: {integrity: sha512-UB96JJ17HyD5ehEU7Em0hDdh7fvTMB4B4Hzmq5c4QaNwwSLqTrdM2S+coySeBqCkXwh0DxqXT0b0wMrmzorFpQ==}
+
+  '@fontsource-variable/noto-sans-tc@5.3.1':
+    resolution: {integrity: sha512-gueh+AySNkihE+HvizXLHltxt5/xVFSvw6ISnKTlpb/lG5QQm6u/KwuempTJ/jDYMST3xwiERYTTyseoJ/Kxew==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -1992,11 +2010,17 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@fontsource-variable/inter@5.3.0': {}
+  '@fontsource-variable/google-sans@5.3.2': {}
 
-  '@fontsource-variable/jetbrains-mono@5.3.0': {}
+  '@fontsource-variable/intel-one-mono@5.3.0': {}
 
-  '@fontsource-variable/nunito@5.3.0': {}
+  '@fontsource-variable/noto-sans-jp@5.3.1': {}
+
+  '@fontsource-variable/noto-sans-kr@5.3.1': {}
+
+  '@fontsource-variable/noto-sans-sc@5.3.1': {}
+
+  '@fontsource-variable/noto-sans-tc@5.3.1': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:

@@ -1,7 +1,10 @@
 @import 'tailwindcss';
-@import '@fontsource-variable/inter';
-@import '@fontsource-variable/nunito';
-@import '@fontsource-variable/jetbrains-mono';
+@import '@fontsource-variable/google-sans';
+@import '@fontsource-variable/intel-one-mono';
+@import '@fontsource-variable/noto-sans-tc';
+@import '@fontsource-variable/noto-sans-sc';
+@import '@fontsource-variable/noto-sans-jp';
+@import '@fontsource-variable/noto-sans-kr';
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
@@ -103,10 +106,44 @@
   --color-warn-soft: var(--warn-soft);
   --color-info: var(--info);
   --color-info-soft: var(--info-soft);
-  --font-sans: 'Inter Variable', system-ui, sans-serif;
-  --font-display: 'Nunito Variable', 'Inter Variable', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+  --font-sans: 'Google Sans Variable', 'Noto Sans TC Variable', 'Noto Sans SC Variable', 'Noto Sans JP Variable', 'Noto Sans KR Variable', system-ui, sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: 'Intel One Mono Variable', 'Noto Sans TC Variable', 'Noto Sans SC Variable', 'Noto Sans JP Variable', 'Noto Sans KR Variable', ui-monospace, monospace;
   --radius-card: 18px;
+}
+
+/* Shared Han characters need the regional glyph form of the text's declared language. */
+:lang(zh-TW),
+:lang(zh-HK),
+:lang(zh-MO),
+:lang(zh-Hant) {
+  --font-sans: 'Google Sans Variable', 'Noto Sans TC Variable', system-ui, sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: 'Intel One Mono Variable', 'Noto Sans TC Variable', ui-monospace, monospace;
+}
+
+:lang(zh-CN),
+:lang(zh-SG),
+:lang(zh-Hans) {
+  --font-sans: 'Google Sans Variable', 'Noto Sans SC Variable', system-ui, sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: 'Intel One Mono Variable', 'Noto Sans SC Variable', ui-monospace, monospace;
+}
+
+:lang(ja) {
+  --font-sans: 'Google Sans Variable', 'Noto Sans JP Variable', system-ui, sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: 'Intel One Mono Variable', 'Noto Sans JP Variable', ui-monospace, monospace;
+}
+
+:lang(ko) {
+  --font-sans: 'Google Sans Variable', 'Noto Sans KR Variable', system-ui, sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: 'Intel One Mono Variable', 'Noto Sans KR Variable', ui-monospace, monospace;
+}
+
+:where([lang]) {
+  font-family: var(--font-sans);
 }
 
 html,
@@ -123,7 +160,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-.num {
+.num,
+code,
+pre,
+kbd,
+samp {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
