@@ -5,7 +5,9 @@
 # folder, so both must stay together.
 #
 # Updates: this is a package-managed install, so the launcher only reports a new version and
-# never replaces the files. Update with pacman / your AUR helper.
+# never replaces the files. Update by running makepkg -si again with a newer PKGBUILD.
+#
+# Every dependency below is in Arch's official repositories, so makepkg -s installs them.
 #
 # Before makepkg: create the v$pkgver tag on GitHub, then replace the SKIP checksum with the real
 # sha256sum of the release tarball (`updpkgsums`).
@@ -23,9 +25,11 @@ depends=(
   'librsvg'
 )
 makedepends=(
-  'rust'          # provides cargo; rust-version is 1.99 (see Cargo.toml)
+  # Needs 1.99 or newer (Cargo.toml rust-version). Left unversioned on purpose: rustup provides
+  # an unversioned "rust", which a versioned dependency would refuse.
+  'rust'
   'nodejs'        # >= 22.13
-  'pnpm'          # the repository pins pnpm 11
+  'pnpm'          # any version: pnpm switches to the 12.21.0 that package.json pins
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')

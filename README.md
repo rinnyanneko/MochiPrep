@@ -18,6 +18,20 @@ Download the build for your system from the [latest GitHub release](https://gith
 | macOS | `.dmg`, one per CPU type (Apple silicon or Intel) |
 | Linux | `.deb` (`sudo apt install ./MochiPrep_*.deb`) or `.AppImage` (`chmod +x MochiPrep_*.AppImage`, then run it) |
 
+### Arch Linux
+
+The [PKGBUILD](packaging/arch/PKGBUILD) builds MochiPrep from the release source. It is not on the AUR yet. Download it into an empty folder, then run:
+
+```bash
+sudo pacman -S --needed base-devel
+```
+
+```bash
+makepkg -si
+```
+
+`makepkg` installs everything the build needs from the official repositories, then builds and installs the package. The build compiles Rust code, so it takes several minutes.
+
 Your data lives in your operating system's application data folder. See [the launcher guide](docs/LAUNCHER.md#where-things-live) for the exact paths. Nothing else is required: no Docker, no account, no paid service.
 
 ### Unsigned builds
@@ -32,6 +46,7 @@ The installers are not code-signed by Windows or Apple, so your system warns you
 
 - Windows, macOS and the Linux AppImage update from the tray. When a newer release exists, the menu shows an update item. Clicking it downloads, installs and restarts.
 - A `.deb` updates through your package manager. The tray only shows that a new version exists and opens the release page.
+- The Arch package updates when you run `makepkg -si` again with a newer PKGBUILD. The tray only shows that a new version exists.
 - The launcher checks for a new version at start and every 24 hours. Turn this off with **Check for updates automatically** in Settings.
 
 ## Build from source
