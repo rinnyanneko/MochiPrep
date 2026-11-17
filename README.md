@@ -48,9 +48,7 @@ pnpm start
 
 Then open <http://localhost:8787>. The release server embeds the UI and listens on `127.0.0.1` only.
 
-For development, run `pnpm dev` instead and open <http://localhost:5173>. To build the installers yourself, run `pnpm bundle -- --target <triple>`.
-
-The data folder for a source build is `.mochiprep/` in the repository. Set `MOCHIPREP_PORT` or `MOCHIPREP_WEB_PORT` to change the development ports.
+The data folder for a source build is `.mochiprep/` in the repository. For development setup, tests and installer builds, see [Development](docs/dev/DEVELOPMENT.md).
 
 ## Getting started
 
@@ -126,3 +124,10 @@ Charts use [TradingView Lightweight Charts](https://www.tradingview.com/lightwei
 - [Trading on OKX](docs/OKX_TRADING.md)
 - [How paper trading works](docs/PAPER_ENGINE.md)
 - [The desktop launcher](docs/LAUNCHER.md)
+
+For developers:
+
+- [Development](docs/dev/DEVELOPMENT.md)
+- [Architecture](docs/dev/ARCHITECTURE.md)
+- [Desktop launcher (development)](docs/dev/LAUNCHER.md)
+- [Roadmap](docs/dev/ROADMAP.md)
