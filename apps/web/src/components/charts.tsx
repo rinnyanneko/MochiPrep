@@ -44,7 +44,7 @@ function baseOptions(zone: TimeZonePref) {
     layout: {
       background: { type: ColorType.Solid, color: 'transparent' },
       textColor: css('--ink-3'),
-      fontFamily: 'JetBrains Mono Variable, monospace',
+      fontFamily: css('--font-mono'),
       fontSize: 11,
       // Required by the Lightweight Charts license: it must credit and link to TradingView.
       attributionLogo: true,
