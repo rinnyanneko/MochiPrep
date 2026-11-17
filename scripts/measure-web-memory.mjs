@@ -7,12 +7,22 @@
 //   pnpm build && cargo build --release --locked -p mochi-server
 //   node scripts/measure-web-memory.mjs [--offline] [--source LIVE|REPLAY] [--soak 10] [--cycles 20]
 //        [--port 8989] [--settle 3] [--sample-every 60] [--dwell 1] [--demo] [--snapshot file]
-//        [--cycle-pages markets,agents]
+//        [--cycle-pages markets,agents] [--chrome path]
 //        [--binary path] [--out report.json]
+//
+// Chrome is driven over a bare DevTools protocol connection, not through Playwright. Playwright
+// turns on the Network domain for every page, and with it the renderer keeps a copy of every
+// response body (its default cap is far above anything a run fetches) in case a client asks for it. Every API answer the
+// interface fetched was then held in the renderer and read as the interface's own growth: about
+// half of the 0.29 MiB a full page tour seemed to add, none of which a user's browser holds.
+// --chrome names the Chrome executable; by default the usual install locations are tried.
 //
 // Scenario: sample after load on the Dashboard; visit every page, sampling each once settled; stay
 // on Markets for --soak minutes, sampling every --sample-every seconds; cycle through every page
 // --cycles times (or only the --cycle-pages listed), sampling every five cycles and at the end.
+// A page listed twice in a row (--cycle-pages agents,agents) stays put for the same wall time as
+// a two-page switch, since setting the hash it already has fires no hashchange: that is the
+// control which separates growth over time from growth per page switch.
 // Every sample forces a garbage collection first, so it counts what is retained, not what is
 // merely waiting to be collected.
 //
@@ -20,14 +30,15 @@
 // REPLAY; otherwise the source defaults to LIVE. --demo presses "Try Demo Mode" after load so the
 // pages have accounts, agents and charts to draw rather than empty states. --snapshot writes a V8
 // heap snapshot at the start of the soak (as <name>-soak-start) and another at its end, so what
-// the steady state holds, and what the soak adds, can be read.
+// the steady state holds, and what the soak adds, can be read; around the page cycles it writes
+// one after the warm-up cycles (<name>-cycles-10) and one at the end (<name>-cycles-end).
 //
 // On Windows the working set and private bytes of the Chrome processes are read too (renderer,
 // GPU, browser, utilities), since canvases and GPU textures do not show up in the JS heap.
 //
 // Exit codes: 0 measured, 1 the backend or browser did not start or a sample failed.
 import { execFileSync, spawn } from 'node:child_process';
-import { createWriteStream, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -48,7 +59,7 @@ export const mib = (bytes) => (bytes === undefined || bytes === null ? null : Ma
 
 export function parseArgs(argv) {
   const options = { offline: false, demo: false, soak: 10, cycles: 20, port: DEFAULT_PORT, settle: 3, sampleEvery: 60, dwell: 1 };
-  const valued = { '--source': 'source', '--soak': 'soak', '--cycles': 'cycles', '--port': 'port', '--settle': 'settle', '--sample-every': 'sampleEvery', '--dwell': 'dwell', '--out': 'out', '--binary': 'binary', '--snapshot': 'snapshot', '--cycle-pages': 'cyclePages' };
+  const valued = { '--source': 'source', '--soak': 'soak', '--cycles': 'cycles', '--port': 'port', '--settle': 'settle', '--sample-every': 'sampleEvery', '--dwell': 'dwell', '--out': 'out', '--binary': 'binary', '--snapshot': 'snapshot', '--cycle-pages': 'cyclePages', '--chrome': 'chrome' };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--offline') options.offline = true;
@@ -169,12 +180,16 @@ export function formatTable(samples) {
   return lines.join('\n');
 }
 
-/** Where the soak-start snapshot goes: beside the end one, `x.heapsnapshot` -> `x-soak-start.heapsnapshot`. */
-export function soakStartSnapshot(file) {
+/** A further snapshot beside the --snapshot one: `x.heapsnapshot` with "cycles-end" -> `x-cycles-end.heapsnapshot`. */
+export function siblingSnapshot(file, suffix) {
   const dot = file.lastIndexOf('.');
   const slash = Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\'));
-  return dot > slash ? `${file.slice(0, dot)}-soak-start${file.slice(dot)}` : `${file}-soak-start`;
+  return dot > slash ? `${file.slice(0, dot)}-${suffix}${file.slice(dot)}` : `${file}-${suffix}`;
 }
+export const soakStartSnapshot = (file) => siblingSnapshot(file, 'soak-start');
+
+/** The cycle after which the warm-up (first chunk loads, JIT tier-up) is taken to be over. */
+export const WARM_CYCLE = 10;
 
 // ---- Processes --------------------------------------------------------------------------
 
@@ -262,6 +277,120 @@ function gitCommit() {
   }
 }
 
+/** Where Chrome is usually installed, most likely first. */
+export function chromeCandidates(platform, env) {
+  if (platform === 'win32') {
+    const roots = [env.ProgramFiles, env['ProgramFiles(x86)'], env.LOCALAPPDATA].filter(Boolean);
+    return roots.map((root) => join(root, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+  }
+  if (platform === 'darwin') return ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'];
+  return ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/opt/google/chrome/chrome'];
+}
+
+/** Chrome's DevToolsActivePort file: the port on the first line, the browser target's path on the second. */
+export function parseDevToolsActivePort(text) {
+  const [port, path] = text.split(/\r?\n/);
+  if (!/^\d+$/.test(port ?? '') || !path?.startsWith('/devtools/browser/')) return null;
+  return `ws://127.0.0.1:${port}${path}`;
+}
+
+/**
+ * The few DevTools protocol calls this script makes, over one WebSocket to the browser target.
+ * Page commands go through a flattened session, so one connection carries both.
+ */
+class Cdp {
+  #ws;
+  #nextId = 0;
+  #pending = new Map();
+  #listeners = new Map();
+
+  static async connect(url) {
+    const ws = new WebSocket(url);
+    await new Promise((resolve, reject) => {
+      ws.addEventListener('open', resolve, { once: true });
+      ws.addEventListener('error', () => reject(new Error(`cannot connect to Chrome at ${url}`)), { once: true });
+    });
+    return new Cdp(ws);
+  }
+
+  constructor(ws) {
+    this.#ws = ws;
+    ws.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (message.id !== undefined) {
+        const call = this.#pending.get(message.id);
+        this.#pending.delete(message.id);
+        if (message.error) call?.reject(new Error(`${call.method}: ${message.error.message}`));
+        else call?.resolve(message.result);
+        return;
+      }
+      for (const listener of this.#listeners.get(`${message.sessionId ?? ''} ${message.method}`) ?? []) listener(message.params);
+    });
+    ws.addEventListener('close', () => {
+      for (const call of this.#pending.values()) call.reject(new Error(`${call.method}: Chrome closed the connection`));
+      this.#pending.clear();
+    });
+  }
+
+  /** A handle shaped like a Playwright CDPSession: send, on, off. No session id means the browser. */
+  session(sessionId = '') {
+    const key = (method) => `${sessionId} ${method}`;
+    return {
+      send: (method, params = {}) => {
+        const id = (this.#nextId += 1);
+        this.#ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+        return new Promise((resolve, reject) => this.#pending.set(id, { resolve, reject, method }));
+      },
+      on: (method, listener) => {
+        if (!this.#listeners.has(key(method))) this.#listeners.set(key(method), new Set());
+        this.#listeners.get(key(method)).add(listener);
+      },
+      off: (method, listener) => this.#listeners.get(key(method))?.delete(listener),
+    };
+  }
+
+  close() {
+    this.#ws.close();
+  }
+}
+
+async function launchChrome(executable, profileDir) {
+  // Playwright's own headless set, less --enable-automation: no background throttling, so timers
+  // run as they would in a window someone is looking at.
+  const args = [
+    `--user-data-dir=${profileDir}`,
+    '--remote-debugging-port=0',
+    '--headless',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-extensions',
+    '--disable-component-update',
+    '--disable-sync',
+    '--disable-default-apps',
+    '--disable-background-networking',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--mute-audio',
+    '--hide-scrollbars',
+    // Precise memory info, or performance.memory is rounded and bucketed to hide it from pages.
+    '--enable-precise-memory-info',
+    'about:blank',
+  ];
+  const chrome = spawn(executable, args, { stdio: 'ignore' });
+  const exited = new Promise((resolve) => chrome.once('exit', resolve));
+  chrome.once('error', () => {});
+  const portFile = join(profileDir, 'DevToolsActivePort');
+  for (let waited = 0; waited < 30_000; waited += 100) {
+    if (chrome.exitCode !== null) break;
+    const url = existsSync(portFile) ? parseDevToolsActivePort(readFileSync(portFile, 'utf8')) : null;
+    if (url) return { chrome, exited, cdp: await Cdp.connect(url) };
+    await sleep(100);
+  }
+  chrome.kill();
+  throw new Error(`Chrome (${executable}) did not open its DevTools port`);
+}
+
 async function takeSnapshot(session, file) {
   const out = createWriteStream(file);
   // A write error (a missing folder, a full disk) must reject here, so main's cleanup still
@@ -288,9 +417,11 @@ async function main() {
   if (!existsSync(binary)) throw new Error(`${binary} not found: run pnpm build, then cargo build --release --locked -p mochi-server`);
   if (!(await portIsFree(options.port))) throw new Error(`port ${options.port} is in use; pick another with --port`);
 
-  // Loaded only here, so the pure helpers above can be tested without a browser installed.
-  const { chromium } = await import('@playwright/test');
+  const chromePath = options.chrome ?? chromeCandidates(process.platform, process.env).find((path) => existsSync(path));
+  if (!chromePath || !existsSync(chromePath)) throw new Error('Chrome not found: install it or pass --chrome path');
+
   const dataDir = mkdtempSync(join(tmpdir(), 'mochi-web-memory-'));
+  const profileDir = mkdtempSync(join(tmpdir(), 'mochi-web-memory-chrome-'));
   let child;
   let browser;
   try {
@@ -298,35 +429,36 @@ async function main() {
     child = started.child;
     await started.ready;
 
-    // Precise memory info, or performance.memory is rounded and bucketed to hide it from pages.
-    browser = await chromium.launch({ channel: 'chrome', args: ['--enable-precise-memory-info'] });
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    browser = await launchChrome(chromePath, profileDir);
+    const browserSession = browser.cdp.session();
+    const { targetInfos } = await browserSession.send('Target.getTargets');
+    const blank = targetInfos.find((t) => t.type === 'page');
+    const targetId = blank?.targetId ?? (await browserSession.send('Target.createTarget', { url: 'about:blank' })).targetId;
+    const { sessionId } = await browserSession.send('Target.attachToTarget', { targetId, flatten: true });
+    const session = browser.cdp.session(sessionId);
+    await session.send('Page.enable');
+    await session.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
     // The source is read from localStorage once, at store creation, so it must be there before load.
-    await context.addInitScript((source) => {
-      try {
-        localStorage.setItem('mochi.source', source);
-      } catch {
-        /* A refused storage write leaves the default source, which the report then shows. */
-      }
-    }, options.source);
-    const page = await context.newPage();
-    const session = await context.newCDPSession(page);
+    await session.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `try { localStorage.setItem('mochi.source', ${JSON.stringify(options.source)}); } catch { /* a refused write leaves the default source, which the report shows */ }`,
+    });
     await session.send('Performance.enable');
     await session.send('HeapProfiler.enable');
-    const browserSession = await browser.newBrowserCDPSession();
+    const evaluate = async (expression) => {
+      const { result, exceptionDetails } = await session.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+      if (exceptionDetails) throw new Error(`page script failed: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`);
+      return result.value;
+    };
 
     const started_at = Date.now();
     const samples = [];
     const sample = async (label, extra = {}) => {
       await session.send('HeapProfiler.collectGarbage');
       const { metrics } = await session.send('Performance.getMetrics');
-      const perfMemory = await page.evaluate(() => {
-        const m = performance.memory;
-        return m ? { used: m.usedJSHeapSize, total: m.totalJSHeapSize } : null;
-      });
+      const perfMemory = await evaluate('performance.memory ? { used: performance.memory.usedJSHeapSize, total: performance.memory.totalJSHeapSize } : null');
       const entry = {
         label,
-        page: await page.evaluate(() => location.hash.slice(1) || 'dashboard'),
+        page: await evaluate("location.hash.slice(1) || 'dashboard'"),
         elapsedMinutes: Math.round(((Date.now() - started_at) / 60_000) * 100) / 100,
         ...extra,
         ...pickMetrics(metrics),
@@ -337,17 +469,24 @@ async function main() {
       console.log(`${label}: heap ${mib(entry.JSHeapUsedSize)} MiB, ${entry.Nodes} nodes, ${entry.JSEventListeners} listeners, renderer ${mib(entry.processes.renderer?.workingSet) ?? '-'} MiB`);
       return entry;
     };
-    const go = async (name) => {
-      // The app routes on hashchange; a reload would throw away exactly the state being measured.
-      await page.evaluate((hash) => {
-        location.hash = hash;
-      }, name);
-    };
+    // The app routes on hashchange; a reload would throw away exactly the state being measured.
+    const go = (name) => evaluate(`location.hash = ${JSON.stringify(name)}`);
 
-    await page.goto(`http://127.0.0.1:${options.port}/#dashboard`, { waitUntil: 'load' });
+    const loaded = new Promise((resolve) => session.on('Page.loadEventFired', resolve));
+    await session.send('Page.navigate', { url: `http://127.0.0.1:${options.port}/#dashboard` });
+    await loaded;
     await sleep(options.settle * 1000);
     if (options.demo) {
-      await page.getByTestId('try-demo').click({ timeout: 15_000 });
+      // Waits for the button, as the Welcome card renders only once the accounts are fetched.
+      const clicked = await evaluate(`new Promise((resolve) => {
+        const until = Date.now() + 15000;
+        const tryClick = () => {
+          const button = document.querySelector('[data-testid="try-demo"]');
+          if (button) { button.click(); resolve(true); } else if (Date.now() > until) resolve(false); else setTimeout(tryClick, 100);
+        };
+        tryClick();
+      })`);
+      if (!clicked) throw new Error('the Try Demo Mode button did not appear');
       await sleep(options.settle * 1000);
     }
     await sample('load:dashboard', { phase: 'load' });
@@ -391,14 +530,19 @@ async function main() {
       if (cycle % 5 === 0 || cycle === options.cycles) {
         await sleep(options.settle * 1000);
         await sample(`cycles:${cycle}`, { phase: 'cycles', cycle });
+        // A pair of snapshots around the post-warm-up cycles shows what each page switch leaves behind.
+        if (options.snapshot && cycle === WARM_CYCLE && options.cycles > WARM_CYCLE) await takeSnapshot(session, siblingSnapshot(options.snapshot, `cycles-${cycle}`));
+        if (options.snapshot && cycle === options.cycles) await takeSnapshot(session, siblingSnapshot(options.snapshot, 'cycles-end'));
       }
     }
 
     const soak = samples.filter((s) => s.phase === 'soak');
     const cycles = samples.filter((s) => s.phase === 'cycles');
-    const rendererOf = (s) => s.processes?.renderer?.workingSet;
-    const withRenderer = (list) => list.map((s) => ({ ...s, rendererWorkingSet: rendererOf(s) }));
-    const metrics = ['JSHeapUsedSize', 'Nodes', 'JSEventListeners', 'Documents', 'LayoutObjects', 'rendererWorkingSet'];
+    // Private bytes as well as the working set: Windows trims and refills the working set on its
+    // own schedule, while private bytes only move when the renderer allocates or frees.
+    const withRenderer = (list) =>
+      list.map((s) => ({ ...s, rendererWorkingSet: s.processes?.renderer?.workingSet, rendererPrivateBytes: s.processes?.renderer?.privateBytes }));
+    const metrics = ['JSHeapUsedSize', 'Nodes', 'JSEventListeners', 'Documents', 'LayoutObjects', 'rendererWorkingSet', 'rendererPrivateBytes'];
     const summarize = (list, x) => Object.fromEntries(metrics.map((m) => [m, growth(withRenderer(list), m, x)]));
     const report = {
       target: `${process.platform}-${process.arch}`,
@@ -417,9 +561,13 @@ async function main() {
     const heapSlope = report.summary.soakPerMinute.JSHeapUsedSize?.slope;
     const nodeSlope = report.summary.cyclesPerCycle.Nodes?.slope;
     const listenerSlope = report.summary.cyclesPerCycle.JSEventListeners?.slope;
+    const privateSlope = report.summary.cyclesPerCycle.rendererPrivateBytes?.slope;
+    const cycleHeapSlope = report.summary.cyclesPerCycle.JSHeapUsedSize?.slope;
     console.log('');
     console.log(`soak heap slope: ${heapSlope === null || heapSlope === undefined ? '-' : `${Math.round(heapSlope / 1024)} KiB/min`}`);
     console.log(`cycle slopes: ${nodeSlope?.toFixed(1) ?? '-'} nodes/cycle, ${listenerSlope?.toFixed(1) ?? '-'} listeners/cycle`);
+    const perCycle = (bytes) => (bytes === null || bytes === undefined ? '-' : `${(bytes / 1024).toFixed(1)} KiB/cycle`);
+    console.log(`cycle slopes: renderer private ${perCycle(privateSlope)}, JS heap ${perCycle(cycleHeapSlope)}`);
     console.log(`max documents: ${report.summary.maxDocuments}`);
     // Written after printing, so a bad --out path still leaves the results on screen.
     if (options.out) {
@@ -432,11 +580,18 @@ async function main() {
     }
     return 0;
   } finally {
-    await browser?.close().catch(() => {});
+    if (browser) {
+      await browser.cdp.session().send('Browser.close').catch(() => {});
+      browser.cdp.close();
+      // Chrome normally exits on Browser.close; a hung one must not outlive the run.
+      await Promise.race([browser.exited, sleep(5000)]);
+      browser.chrome.kill();
+    }
     child?.kill();
     // Windows can hold SQLite files for a moment after the process dies.
     await sleep(300);
     rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 }
 

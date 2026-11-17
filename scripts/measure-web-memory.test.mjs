@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DEFAULT_PORT, formatTable, groupProcesses, growth, mib, parseArgs, parseProcessJson, pickMetrics, slope, soakStartSnapshot } from './measure-web-memory.mjs';
+import { chromeCandidates, DEFAULT_PORT, formatTable, groupProcesses, growth, mib, parseArgs, parseProcessJson, parseDevToolsActivePort, pickMetrics, siblingSnapshot, slope, soakStartSnapshot } from './measure-web-memory.mjs';
 
 test('parseArgs defaults: live source, port 8989, 10 minute soak, 20 cycles', () => {
   const options = parseArgs([]);
@@ -100,4 +100,31 @@ test('parseArgs --cycle-pages takes a subset of the pages and refuses unknown on
 test('soakStartSnapshot names the first snapshot beside the second', () => {
   assert.equal(soakStartSnapshot('out/live.heapsnapshot'), 'out/live-soak-start.heapsnapshot');
   assert.equal(soakStartSnapshot(String.raw`C:\a.b\live`), String.raw`C:\a.b\live-soak-start`);
+});
+
+test('parseDevToolsActivePort reads the port and browser path, and refuses anything else', () => {
+  assert.equal(parseDevToolsActivePort('53111\n/devtools/browser/abc-123'), 'ws://127.0.0.1:53111/devtools/browser/abc-123');
+  assert.equal(parseDevToolsActivePort('53111\r\n/devtools/browser/abc\r\n'), 'ws://127.0.0.1:53111/devtools/browser/abc');
+  // Chrome writes the file in two steps; a half-written one must read as "not yet".
+  assert.equal(parseDevToolsActivePort('53111'), null);
+  assert.equal(parseDevToolsActivePort(''), null);
+  assert.equal(parseDevToolsActivePort('x\n/devtools/browser/abc'), null);
+});
+
+test('chromeCandidates lists the install locations of each platform', () => {
+  const windows = chromeCandidates('win32', { ProgramFiles: String.raw`C:\PF`, LOCALAPPDATA: String.raw`C:\L` });
+  assert.equal(windows.length, 2);
+  assert.match(windows[0], /PF.Google.Chrome.Application.chrome\.exe$/);
+  assert.match(chromeCandidates('darwin', {})[0], /Google Chrome\.app/);
+  assert.ok(chromeCandidates('linux', {}).includes('/usr/bin/google-chrome'));
+});
+
+test('parseArgs --chrome takes a path', () => {
+  assert.equal(parseArgs(['--chrome', 'C:/chrome.exe']).chrome, 'C:/chrome.exe');
+  assert.equal(parseArgs([]).chrome, undefined);
+});
+
+test('siblingSnapshot names the cycle snapshots beside the --snapshot one', () => {
+  assert.equal(siblingSnapshot('out/tour.heapsnapshot', 'cycles-end'), 'out/tour-cycles-end.heapsnapshot');
+  assert.equal(siblingSnapshot('out/tour', 'cycles-10'), 'out/tour-cycles-10');
 });
