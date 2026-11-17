@@ -291,7 +291,7 @@ async fn sends_a_well_formed_isolated_order_with_exchange_side_protection() {
     );
     assert_eq!(
         legs[1],
-        json!({ "attachAlgoClOrdId": legs[1]["attachAlgoClOrdId"], "tpTriggerPx": "77000", "tpOrdPx": "-1" })
+        json!({ "attachAlgoClOrdId": legs[1]["attachAlgoClOrdId"], "tpTriggerPx": "77000", "tpOrdPx": "-1", "sz": "0.1" })
     );
     // Key order on the wire, as Node builds the body.
     let keys: Vec<_> = sent.as_object().unwrap().keys().cloned().collect();

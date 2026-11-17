@@ -1115,7 +1115,7 @@ async fn a_position_on_the_other_side_never_shows_the_old_algos_as_in_force_and_
 }
 
 #[tokio::test]
-async fn entry_with_a_trailing_stop_sends_it_in_attach_algo_ords_with_attach_algo_cl_ord_id() {
+async fn entry_with_fixed_stop_defers_trailing_until_fill() {
     let h = connect(Vec::new()).await;
     let trailing = ratio("0.01");
     let mut request = order();
@@ -1125,8 +1125,14 @@ async fn entry_with_a_trailing_stop_sends_it_in_attach_algo_ords_with_attach_alg
         h.okx.state().placed[0]["attachAlgoOrds"],
         json!([
             { "attachAlgoClOrdId": to_algo_cl_ord_id(&format!("{}:sl", entry.id)), "slTriggerPx": "74000", "slOrdPx": "-1" },
-            { "attachAlgoClOrdId": to_algo_cl_ord_id(&format!("{}:trail", entry.id)), "callbackRatio": "0.01" },
         ])
+    );
+    assert_eq!(entry.status, OrderStatus::Filled);
+    assert_eq!(h.algo_placed().len(), 1);
+    assert_eq!(h.algo_placed()[0]["ordType"], "move_order_stop");
+    assert_eq!(
+        h.algo_placed()[0]["algoClOrdId"],
+        to_algo_cl_ord_id(&format!("{}:trail", entry.id))
     );
     assert_eq!(
         h.engine.protection_of("BTCUSDT"),
@@ -1622,4 +1628,421 @@ async fn an_attached_stop_listed_larger_than_its_fill_never_retires_the_older_st
     h.sync().await;
     assert!(h.canceled().is_empty());
     assert_eq!(live_stops(&h).len(), 2);
+}
+
+#[tokio::test]
+async fn combined_entry_keeps_fixed_stop_and_target_while_trailing_response_is_lost() {
+    let h = connect(Vec::new()).await;
+    let mut request = order();
+    request.take_profit = Some("78000".into());
+    request.trailing_stop = Some(ratio("0.015"));
+    h.okx.state().lose_next_algo_response = true;
+    let result = h.engine.place_order(request.clone()).await.unwrap();
+    assert_eq!(result.order.status, OrderStatus::Filled);
+    assert_eq!(result.fills.len(), 1);
+    assert_eq!(
+        h.okx.state().placed[0]["attachAlgoOrds"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(h.okx.state().placed[0]["attachAlgoOrds"][1]["sz"], "0.1");
+    h.sync().await;
+    let duplicate = h.engine.place_order(request).await.unwrap();
+    assert!(duplicate.duplicate);
+    assert_eq!(h.okx.state().placed.len(), 1);
+    assert_eq!(h.algo_placed().len(), 1);
+    assert_eq!(
+        h.engine.protection_of("BTCUSDT"),
+        Protection {
+            stop_loss: Some("74000".into()),
+            take_profit: Some("78000".into()),
+            trailing_stop: Some(ratio("0.015")),
+        }
+    );
+    assert!(h.canceled().is_empty());
+}
+
+#[tokio::test]
+async fn deferred_trailing_waits_for_limit_fill_without_expiring() {
+    let h = connect(Vec::new()).await;
+    h.okx.state().rest_limit_orders = true;
+    let mut request = order();
+    request.order_type = EntryOrderType::Limit;
+    request.price = Some("74500".into());
+    request.trailing_stop = Some(ratio("0.01"));
+    let entry = h.engine.place_order(request).await.unwrap().order;
+    h.advance(120_000);
+    h.sync().await;
+    assert!(h.algo_placed().is_empty());
+    assert_eq!(
+        h.order_row(&format!("{}:trail", entry.id)).status,
+        OrderStatus::Open
+    );
+    h.okx.state().fill_resting();
+    h.sync().await;
+    h.sync().await;
+    assert_eq!(h.algo_placed().len(), 1);
+    assert_eq!(
+        h.engine.protection_of("BTCUSDT").trailing_stop,
+        Some(ratio("0.01"))
+    );
+}
+
+#[tokio::test]
+async fn deferred_trailing_starts_tracking_when_activation_was_reached_while_waiting() {
+    let h = connect(Vec::new()).await;
+    h.okx.state().rest_limit_orders = true;
+    let mut request = order();
+    request.order_type = EntryOrderType::Limit;
+    request.price = Some("74500".into());
+    request.trailing_stop = Some(TrailingStopSpec {
+        activation_price: Some("76000".into()),
+        ..ratio("0.01")
+    });
+    h.engine.place_order(request).await.unwrap();
+    *h.prices.lock().unwrap() = ("76999".into(), "77001".into(), "77000".into());
+    h.okx.state().fill_resting();
+    h.sync().await;
+    let submitted = h.algo_placed();
+    assert_eq!(submitted.len(), 1);
+    assert!(submitted[0].get("activePx").is_none());
+    assert_eq!(
+        h.engine.protection_of("BTCUSDT").trailing_stop,
+        Some(ratio("0.01"))
+    );
+}
+
+async fn deferred_limit() -> (Harness, Order) {
+    let h = connect(Vec::new()).await;
+    h.okx.state().rest_limit_orders = true;
+    let mut request = order();
+    request.order_type = EntryOrderType::Limit;
+    request.price = Some("74500".into());
+    request.trailing_stop = Some(ratio("0.01"));
+    let entry = h.engine.place_order(request).await.unwrap().order;
+    (h, entry)
+}
+
+#[tokio::test]
+async fn deferred_trailing_is_canceled_when_parent_never_fills() {
+    let (h, entry) = deferred_limit().await;
+    let key = mochi_okx::to_cl_ord_id(&entry.client_order_id);
+    h.okx
+        .state()
+        .orders
+        .get_mut(&key)
+        .unwrap()
+        .insert("state".into(), json!("canceled"));
+    h.sync().await;
+    assert!(h.algo_placed().is_empty());
+    assert_eq!(
+        h.order_row(&format!("{}:trail", entry.id)).status,
+        OrderStatus::Canceled
+    );
+}
+
+#[tokio::test]
+async fn deferred_trailing_reports_partial_cancel_without_a_confirmed_fixed_stop() {
+    let (h, entry) = deferred_limit().await;
+    let key = mochi_okx::to_cl_ord_id(&entry.client_order_id);
+    {
+        let mut state = h.okx.state();
+        state.fill_resting();
+        let order = state.orders.get_mut(&key).unwrap();
+        order.insert("state".into(), json!("canceled"));
+        order.insert("accFillSz".into(), json!("0.05"));
+        state.algos.clear();
+    }
+    let id = format!("{}:trail", entry.id);
+    h.sync().await;
+    assert_eq!(h.order_row(&id).status, OrderStatus::Open);
+    h.advance(10_000);
+    h.sync().await;
+    assert!(h.algo_placed().is_empty());
+    let row = h.order_row(&id);
+    assert_eq!(row.status, OrderStatus::Canceled);
+    assert!(row
+        .reject_reason
+        .unwrap()
+        .contains("did not confirm the fixed stop"));
+}
+
+#[tokio::test]
+async fn deferred_trailing_never_attaches_to_a_flat_or_reopened_or_ambiguous_position() {
+    for scenario in ["flat", "reopen", "missing-trade-id", "cross", "flip"] {
+        let (h, entry) = deferred_limit().await;
+        h.okx.state().fill_resting();
+        {
+            let mut state = h.okx.state();
+            if scenario == "flat" {
+                state.position = None;
+            } else {
+                let p = state.position.as_mut().unwrap();
+                match scenario {
+                    "reopen" => {
+                        p.insert("uTime".into(), json!("1800000000100"));
+                        p.insert("tradeId".into(), json!("999"));
+                    }
+                    "missing-trade-id" => {
+                        p.remove("tradeId");
+                    }
+                    "cross" => {
+                        p.insert("mgnMode".into(), json!("cross"));
+                    }
+                    "flip" => {
+                        p.insert("pos".into(), json!("-0.1"));
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+        h.sync().await;
+        if scenario == "flat" {
+            assert_eq!(
+                h.order_row(&format!("{}:trail", entry.id)).status,
+                OrderStatus::Open
+            );
+            h.advance(10_000);
+            h.sync().await;
+        }
+        assert!(h.algo_placed().is_empty(), "{scenario}");
+        let trail = h.order_row(&format!("{}:trail", entry.id));
+        assert_eq!(trail.status, OrderStatus::Canceled, "{scenario}");
+        assert!(trail
+            .reject_reason
+            .unwrap()
+            .starts_with("Deferred trailing canceled:"));
+    }
+}
+
+#[tokio::test]
+async fn deferred_trailing_refusal_leaves_fixed_stop_in_force_and_is_never_retried() {
+    let h = connect(Vec::new()).await;
+    h.okx.state().reject_next_algo = Some(Refusal::new("51000", "trailing rejected"));
+    let mut request = order();
+    request.trailing_stop = Some(ratio("0.01"));
+    let entry = h.engine.place_order(request).await.unwrap().order;
+    h.sync().await;
+    assert_eq!(entry.status, OrderStatus::Filled);
+    assert_eq!(h.algo_placed().len(), 1);
+    assert_eq!(
+        h.order_row(&format!("{}:trail", entry.id)).status,
+        OrderStatus::Rejected
+    );
+    assert_eq!(
+        h.engine.protection_of("BTCUSDT").stop_loss.as_deref(),
+        Some("74000")
+    );
+    assert!(h.canceled().is_empty());
+}
+
+#[tokio::test]
+async fn deferred_trailing_survives_disarming_before_fill() {
+    let (h, _) = deferred_limit().await;
+    h.disarm();
+    h.okx.state().fill_resting();
+    h.sync().await;
+    assert_eq!(h.algo_placed().len(), 1);
+    assert_eq!(
+        h.engine.protection_of("BTCUSDT").stop_loss.as_deref(),
+        Some("74000")
+    );
+}
+
+fn restart(h: &Harness) -> Arc<OkxEngine> {
+    let clock = h.clock.clone();
+    let client = OkxClient::new(fake::credentials(), Venue::OkxLive, h.sync_down.clone())
+        .with_base_url("https://okx.invalid")
+        .with_clock(move || clock.load(Ordering::SeqCst));
+    let clock = h.clock.clone();
+    let prices = h.prices.clone();
+    let now = h.clock.clone();
+    let armed = h.armed.clone();
+    OkxEngine::new(OkxEngineDeps {
+        account_id: ACCOUNT.into(),
+        venue: Venue::OkxLive,
+        client,
+        store: h.store.clone(),
+        get_quote: Arc::new(move |symbol| {
+            let (bid, ask, last) = prices.lock().unwrap().clone();
+            Some(Quote {
+                source: DataSource::Live,
+                symbol: symbol.into(),
+                bid,
+                ask,
+                mark: last.clone(),
+                last,
+                mark_estimated: false,
+                funding_rate: None,
+                next_funding_time: None,
+                ts: clock.load(Ordering::SeqCst),
+            })
+        }),
+        now: Arc::new(move || now.load(Ordering::SeqCst)),
+        is_armed: Arc::new(move || armed.load(Ordering::SeqCst)),
+        new_id: Arc::new(|prefix| {
+            format!(
+                "{prefix}_restart_{}",
+                NEXT_KEY.fetch_add(1, Ordering::SeqCst)
+            )
+        }),
+    })
+}
+
+#[tokio::test]
+async fn restart_resumes_unsent_trailing_intent_after_terminal_partial_fill() {
+    let (h, entry) = deferred_limit().await;
+    h.okx.state().fill_resting();
+    let key = mochi_okx::to_cl_ord_id(&entry.client_order_id);
+    {
+        let mut state = h.okx.state();
+        let remote = state.orders.get_mut(&key).unwrap();
+        remote.insert("state".into(), json!("canceled"));
+        remote.insert("accFillSz".into(), json!("0.05"));
+        state
+            .position
+            .as_mut()
+            .unwrap()
+            .insert("pos".into(), json!("0.05"));
+    }
+    let engine = restart(&h);
+    engine.sync().await.unwrap();
+    engine.sync().await.unwrap();
+    assert_eq!(h.algo_placed().len(), 1);
+    assert_eq!(h.algo_placed()[0]["sz"], "0.05");
+    assert_eq!(
+        h.order_row(&format!("{}:trail", entry.id)).quantity,
+        "0.0005"
+    );
+}
+
+#[tokio::test]
+async fn restart_never_resends_a_trailing_submission_marked_started_before_send() {
+    let (h, entry) = deferred_limit().await;
+    h.okx.state().fill_resting();
+    // Simulate the durable boundary immediately before a process crash: it is impossible
+    // to know whether the request left the process, so only lookup is permissible.
+    h.store(|s| {
+        s.connection()
+            .execute(
+                "UPDATE orders SET reject_reason=? WHERE id=?",
+                (
+                    "Awaiting confirmation: deferred trailing submission started",
+                    format!("{}:trail", entry.id),
+                ),
+            )
+            .unwrap()
+    });
+    let engine = restart(&h);
+    engine.sync().await.unwrap();
+    h.advance(61_000);
+    engine.sync().await.unwrap();
+    assert!(h.algo_placed().is_empty());
+    assert_eq!(
+        h.order_row(&format!("{}:trail", entry.id)).status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(
+        engine.protection_of("BTCUSDT").stop_loss.as_deref(),
+        Some("74000")
+    );
+}
+
+#[tokio::test]
+async fn restart_looks_up_accepted_trailing_without_resending() {
+    let h = connect(Vec::new()).await;
+    let mut request = order();
+    request.trailing_stop = Some(ratio("0.01"));
+    let entry = h.engine.place_order(request).await.unwrap().order;
+    h.store(|s| {
+        s.connection()
+            .execute(
+                "UPDATE orders SET exchange_order_id=NULL, reject_reason=? WHERE id=?",
+                (
+                    "Awaiting confirmation: deferred trailing submission started",
+                    format!("{}:trail", entry.id),
+                ),
+            )
+            .unwrap()
+    });
+    let engine = restart(&h);
+    engine.sync().await.unwrap();
+    assert_eq!(h.algo_placed().len(), 1);
+    assert_eq!(
+        engine.protection_of("BTCUSDT").trailing_stop,
+        Some(ratio("0.01"))
+    );
+}
+
+#[tokio::test]
+async fn deferred_trailing_rechecks_position_after_looking_up_the_parent() {
+    let (h, entry) = deferred_limit().await;
+    h.okx.state().fill_resting();
+    h.store(|s| {
+        s.connection()
+            .execute(
+                "UPDATE orders SET status='FILLED', filled_quantity=quantity WHERE id=?",
+                [&entry.id],
+            )
+            .unwrap()
+    });
+    let hold = h.okx.hold_next("GET", "/trade/order");
+    let engine = h.engine.clone();
+    let sync = tokio::spawn(async move { engine.sync().await });
+    tokio::time::timeout(std::time::Duration::from_secs(2), hold.reached())
+        .await
+        .unwrap();
+    h.okx
+        .state()
+        .position
+        .as_mut()
+        .unwrap()
+        .insert("tradeId".into(), json!("999"));
+    hold.release();
+    sync.await.unwrap().unwrap();
+    assert_eq!(
+        h.order_row(&format!("{}:trail", entry.id)).status,
+        OrderStatus::Canceled
+    );
+    assert!(h.algo_placed().is_empty());
+}
+
+#[tokio::test]
+async fn explicit_trailing_removal_cancels_unsent_intent_but_keep_trailing_preserves_it() {
+    let (h, entry) = deferred_limit().await;
+    // A position opens outside MochiPrep while the entry is resting.
+    let other = Harness::with_position().await;
+    h.okx.state().position = other.okx.state().position.clone();
+    h.sync().await;
+    let id = format!("{}:trail", entry.id);
+
+    h.engine
+        .set_protection_with(
+            ACCOUNT,
+            "BTCUSDT",
+            Protection {
+                stop_loss: None,
+                take_profit: None,
+                trailing_stop: None,
+            },
+            true,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(h.order_row(&id).status, OrderStatus::Open);
+    h.set(Protection {
+        stop_loss: None,
+        take_profit: None,
+        trailing_stop: None,
+    })
+    .await
+    .unwrap();
+    assert_eq!(h.order_row(&id).status, OrderStatus::Canceled);
+    h.okx.state().fill_resting();
+    h.sync().await;
+    assert!(h.algo_placed().is_empty());
 }

@@ -170,7 +170,7 @@ impl OkxEngine {
             );
         }
         let algos = conditional.into_iter().chain(oco).chain(trailing).collect();
-        let protection = self.reconcile_protection(algos, &held).await?;
+        let protection = self.reconcile_protection(algos, &mut held).await?;
         self.state().protection = protection.clone();
         let (positions, balance) = {
             let account_id = account_id.clone();

@@ -92,6 +92,7 @@ pub struct FakeState {
     /// Requests to hold at the transport, each once; see [`FakeOkx::hold_next`].
     holds: Vec<Arc<Hold>>,
     algo_seq: u64,
+    trade_seq: u64,
 }
 
 impl Default for FakeState {
@@ -127,6 +128,7 @@ impl Default for FakeState {
             resting: Vec::new(),
             holds: Vec::new(),
             algo_seq: 0,
+            trade_seq: 0,
         }
     }
 }
@@ -523,6 +525,42 @@ fn place(state: &mut FakeState, order: Value) -> Result<HttpReply, String> {
     if let Some(refusal) = state.reject_row_next.take() {
         return Ok(ok(json!([refusal_row(&refusal, "ordId")])));
     }
+    if let Some(legs) = order.get("attachAlgoOrds").and_then(Value::as_array) {
+        let trailing = legs
+            .iter()
+            .any(|l| l.get("callbackRatio").is_some() || l.get("callbackSpread").is_some());
+        let fixed = legs.iter().any(|l| l.get("slTriggerPx").is_some());
+        if trailing && fixed {
+            return Ok(answer(
+                json!([refusal_row(
+                    &Refusal::new(
+                        "54091",
+                        "You can only attach one SL when placing a trailing stop order."
+                    ),
+                    "ordId"
+                )]),
+                "1",
+                "",
+            ));
+        }
+        if legs.len() > 1
+            && legs
+                .iter()
+                .any(|l| l.get("tpTriggerPx").is_some() && l.get("sz").is_none())
+        {
+            return Ok(answer(
+                json!([refusal_row(
+                    &Refusal::new(
+                        "51089",
+                        "The size of the TP order among split TPs attached cannot be empty"
+                    ),
+                    "ordId"
+                )]),
+                "1",
+                "",
+            ));
+        }
+    }
     let mut order = object(&order);
     let ord_id = state.placed.len().to_string();
     order.insert("ordId".into(), json!(ord_id));
@@ -559,9 +597,13 @@ fn fill(state: &mut FakeState, order: &Row) {
     let sz = order.get("sz").cloned().unwrap_or(Value::Null);
     let buy = order.get("side") == Some(&json!("buy"));
     let mut filled = Row::new();
+    state.trade_seq += 1;
+    let trade_id = state.trade_seq.to_string();
+    filled.insert("tradeId".into(), json!(trade_id));
     filled.insert("ordId".into(), ord_id);
     filled.insert("clOrdId".into(), cl_ord_id.clone());
     filled.insert("state".into(), json!("filled"));
+    filled.insert("fillTime".into(), json!("1800000000000"));
     filled.insert("accFillSz".into(), sz.clone());
     filled.insert("avgPx".into(), json!(PRICE));
     filled.insert("fee".into(), json!("-0.05"));
@@ -587,7 +629,7 @@ fn fill(state: &mut FakeState, order: &Row) {
     } else {
         Some(object(&json!({
             "instId": order.get("instId"), "pos": size.to_fixed(), "avgPx": PRICE, "markPx": PRICE,
-            "upl": "0", "lever": "3", "liqPx": "50000", "margin": "10", "mgnMode": "isolated",
+            "upl": "0", "lever": "3", "liqPx": "50000", "margin": "10", "mgnMode": "isolated", "posSide": "net", "tradeId": trade_id, "uTime": "1800000000001", "cTime": "1800000000000",
         })))
     };
     // Attached algos go live on the fill. They are left alone when the position closes, so the

@@ -138,6 +138,8 @@ pub enum OrdType {
 #[serde(rename_all = "camelCase")]
 pub struct AttachAlgoOrd {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub sz: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub attach_algo_cl_ord_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sl_trigger_px: Option<String>,

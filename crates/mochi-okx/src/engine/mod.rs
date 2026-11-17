@@ -620,7 +620,14 @@ impl OkxEngine {
         // Written before anything is sent, so a crash can never leave an order we do not know
         // about.
         let row = order.clone();
-        self.rows(move |rows| Ok(rows.insert_order(&row)?)).await?;
+        self.rows(move |rows| {
+            rows.transaction(&mut || {
+                rows.insert_order(&row)?;
+                protection::record_deferred_trailing(rows, &row)?;
+                Ok(())
+            })
+        })
+        .await?;
 
         let inst_id = to_inst_id(&order.symbol);
         let cl_ord_id = to_cl_ord_id(&order.client_order_id);
@@ -809,9 +816,8 @@ fn trailing_fields(spec: &TrailingStopSpec, leg: &mut AttachAlgoOrd) {
 }
 
 /// One attachAlgoOrds element per leg, each tagged with the id of the local row that will track it
-/// once the entry fills (`<order id>:sl`, `:tp`, `:trail`), so every attached algo can be found by
-/// its algoClOrdId. Whether OKX keeps separate SL and TP elements apart is UNCONFIRMED (Demo
-/// check).
+/// once the entry fills (`<order id>:sl`, `:tp`, `:trail`). A trailing stop combined with
+/// another protection leg is submitted separately after the fill, never as a second attached SL.
 fn to_body(order: &Order, inst_id: &str, cl_ord_id: &str, sz: String) -> PlaceOrderBody {
     let mut algo = Vec::new();
     if !order.reduce_only {
@@ -830,10 +836,20 @@ fn to_body(order: &Order, inst_id: &str, cl_ord_id: &str, sz: String) -> PlaceOr
                 attach_algo_cl_ord_id: tag("tp"),
                 tp_trigger_px: Some(target),
                 tp_ord_px: Some("-1".into()),
+                // Separate SL and TP elements use OKX's split-TP contract.
+                sz: order
+                    .attached_stop_loss
+                    .as_ref()
+                    .filter(|s| !s.is_empty())
+                    .map(|_| sz.clone()),
                 ..Default::default()
             });
         }
-        if let Some(spec) = &order.attached_trailing_stop {
+        if let Some(spec) = order
+            .attached_trailing_stop
+            .as_ref()
+            .filter(|_| !protection::defer_trailing(order))
+        {
             let mut leg = AttachAlgoOrd {
                 attach_algo_cl_ord_id: tag("trail"),
                 ..Default::default()
