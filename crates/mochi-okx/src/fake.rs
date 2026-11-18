@@ -69,6 +69,7 @@ pub struct FakeState {
     pub position: Option<Row>,
     /// `account/positions-history` rows, in any order; served newest `uTime` first.
     pub positions_history: Vec<Row>,
+    pub execution_history: Vec<Row>,
     /// Makes `account/positions-history` fail.
     pub history_down: bool,
     /// Answers this many more `account/positions-history` requests, then fails them.
@@ -120,6 +121,7 @@ impl Default for FakeState {
             orders: IndexMap::new(),
             position: None,
             positions_history: Vec::new(),
+            execution_history: Vec::new(),
             history_down: false,
             history_answers_left: None,
             simulated_headers: Vec::new(),
@@ -312,6 +314,21 @@ impl FakeOkx {
             return Ok(ok(json!([{ "details": [{
                 "ccy": "USDT", "eq": state.equity, "availEq": state.equity, "upl": "0",
             }] }])));
+        }
+        if ends("/trade/fills-history") {
+            let bill = |row: &Row| text(row.get("billId")).and_then(|id| id.parse::<u64>().ok());
+            let after = param("after").and_then(|id| id.parse::<u64>().ok());
+            let limit = param("limit")
+                .and_then(|limit| limit.parse::<usize>().ok())
+                .unwrap_or(100);
+            let mut rows: Vec<_> = state
+                .execution_history
+                .iter()
+                .filter(|row| after.is_none_or(|after| bill(row).is_some_and(|id| id < after)))
+                .collect();
+            rows.sort_by_key(|row| std::cmp::Reverse(bill(row)));
+            rows.truncate(limit);
+            return Ok(ok(json!(rows)));
         }
         if ends("/account/positions-history") {
             let exhausted = match &mut state.history_answers_left {

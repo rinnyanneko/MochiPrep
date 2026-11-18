@@ -4,8 +4,8 @@
 //! transaction. The methods mirror `packages/core/src/paper/store.ts` one for one.
 
 use mochi_domain::{
-    DataSource, EquityPoint, ExchangePositionRecord, Fill, LedgerEvent, Order, PaperAccount,
-    Position,
+    DataSource, EquityPoint, ExchangeExecutionCursor, ExchangePositionRecord, Fill, LedgerEvent,
+    Order, PaperAccount, Position,
 };
 
 /// A storage error. The engine's reaction is the same whatever the cause (roll back and report),
@@ -117,6 +117,18 @@ pub trait PaperStore {
         -> Result<Vec<EquityPoint>, StoreFailure>;
 
     /// Inserts the record, or replaces the one with its account, posId and open time.
+    fn execution_cursor(&self, account_id: &str) -> Result<ExchangeExecutionCursor, StoreFailure>;
+    fn save_execution_cursor(
+        &self,
+        account_id: &str,
+        cursor: &ExchangeExecutionCursor,
+    ) -> Result<(), StoreFailure>;
+    fn record_exchange_execution(
+        &self,
+        order_id: &str,
+        trade_id: &str,
+        executed_at: i64,
+    ) -> Result<(), StoreFailure>;
     fn upsert_position_record(&self, record: &ExchangePositionRecord) -> Result<(), StoreFailure>;
     /// Every record on `inst_id` opened at or after `since`, oldest first.
     fn list_position_records(

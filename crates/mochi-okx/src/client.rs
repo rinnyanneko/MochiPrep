@@ -15,6 +15,7 @@ use crate::ids::{iso_string, sign, to_inst_id};
 
 /// The most records one `account/positions-history` page holds (OKX's maximum).
 pub const POSITIONS_HISTORY_PAGE: usize = 100;
+pub(crate) const EXECUTION_HISTORY_PAGE: usize = 100;
 
 pub const OKX_LIVE: &str = "https://www.okx.com";
 pub const OKX_DEMO: &str = "https://openapi.okx.com";
@@ -532,6 +533,19 @@ impl OkxClient {
         }
         let data = self.request("GET", &path, None).await?;
         rows(data)
+    }
+
+    /// Individual executions from OKX's three-month SWAP history, paged by bill ID.
+    pub(crate) async fn get_execution_history(
+        &self,
+        after: Option<u64>,
+    ) -> Result<Vec<Row>, OkxError> {
+        let mut path =
+            format!("/api/v5/trade/fills-history?instType=SWAP&limit={EXECUTION_HISTORY_PAGE}");
+        if let Some(after) = after {
+            path.push_str(&format!("&after={after}"));
+        }
+        rows(self.request("GET", &path, None).await?)
     }
 
     pub async fn set_leverage(&self, inst_id: &str, lever: u32) -> Result<(), OkxError> {

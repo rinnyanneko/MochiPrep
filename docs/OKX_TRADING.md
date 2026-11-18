@@ -70,8 +70,8 @@ An exchange account's balance moves with deposits and transfers, so the arena sh
 
 - Closed positions come from OKX's position history (`account/positions-history`), read once a minute and kept in MochiPrep, because OKX keeps only three months. Each counts OKX's `realizedPnl`, which includes fees and funding. Stops, take profits and closes made in the OKX app count too. A long history is read over several minutes.
 - The open position on the agent's pair adds what OKX has realized on it so far (fees, funding, partial closes) and its unrealized P&L.
-- A position counts only if it opened after the agent was created, and MochiPrep recorded a fill of one of the agent's orders on that pair while it was open: from 5 seconds before OKX's open time to a minute after its last update. The fill time counts, not when the order was placed. A position you open and close yourself in the OKX app is left out. So is one opened before the agent existed, even if the agent later trades it.
-- If another agent on the same account trades the same pair, one-way mode merges their positions, so the arena shows no P&L for either. Give each agent its own pair, or its own account.
+- A confirmed opening-side execution from one of the agent's orders must fall inside an isolated net position's exchange timestamps. An order that is only partially filled still provides execution evidence. MochiPrep uses OKX's execution time even if reconciliation happened later. Ambiguous overlapping lifetimes cannot establish ownership. MochiPrep records recent executions immediately and backfills OKX's three-month transaction history in bounded pages. Executions that OKX can no longer supply stay outside the reported total. The result covers the whole net position, including manual activity that changes it.
+- Agents configured for the same account and pair do not get separate P&L. Confirmed participation by another agent also marks the P&L as shared after that agent is moved or deleted.
 
 Not yet confirmed against OKX:
 

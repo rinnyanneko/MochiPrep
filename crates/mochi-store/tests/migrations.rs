@@ -281,8 +281,45 @@ fn exchange_position_history_keys_a_reused_pos_id_by_its_open_time() {
     )
     .unwrap();
     let duplicate = conn.execute(
-        "INSERT INTO exchange_position_history VALUES ('a','p',1,'BTC-USDT-SWAP',5,'3','2')",
+        "INSERT INTO exchange_position_history (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type) VALUES ('a','p',1,'BTC-USDT-SWAP',5,'3','2')",
         [],
     );
     assert!(duplicate.is_err());
+}
+
+#[test]
+fn execution_evidence_upgrade_reopens_completed_position_history_backfill() {
+    let conn = open_in_memory_bare();
+    let old = &MIGRATIONS[..MIGRATIONS.len() - 1];
+    migrate_with(&conn, old).unwrap();
+    conn.execute_batch(
+        "INSERT INTO accounts (id,name,source,initial_balance,wallet_balance,used_margin,
+           realized_pnl,fees_paid,funding_paid,config,created_at)
+         VALUES ('a','A','LIVE','0','0','0','0','0','0','{}',1);
+         INSERT INTO exchange_position_history
+           (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type)
+         VALUES ('a','p',1,'BTC-USDT-SWAP',10,'1','2'),('a','p',11,'BTC-USDT-SWAP',20,'2','2');
+         INSERT INTO exchange_history_cursor(account_id,backfill_before) VALUES ('a',NULL);",
+    )
+    .unwrap();
+    migrate_with(&conn, MIGRATIONS).unwrap();
+    let before: Option<i64> = conn
+        .query_row(
+            "SELECT backfill_before FROM exchange_history_cursor WHERE account_id='a'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(before, Some(21));
+    let history: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM exchange_position_history WHERE opening_side IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        history, 2,
+        "keep older records without guessing their direction"
+    );
 }

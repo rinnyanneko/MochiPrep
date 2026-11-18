@@ -719,7 +719,7 @@ async fn the_arena_reads_an_okx_agents_result_from_okx_history_and_its_open_posi
             json!({
                 "instId": "BTC-USDT-SWAP", "pos": "1", "avgPx": "75000", "markPx": "75420",
                 "upl": "4.2", "realizedPnl": "-0.1", "posId": "9", "lever": "3", "liqPx": "50000", "margin": "10", "mgnMode": "isolated",
-                "cTime": (START + 1_000).to_string(),
+                "cTime": (START + 1_000).to_string(), "uTime": (START + 1_100).to_string(), "posSide": "net",
             })
             .as_object()
             .unwrap()
@@ -733,6 +733,7 @@ async fn the_arena_reads_an_okx_agents_result_from_okx_history_and_its_open_posi
                 json!({
                     "posId": pos_id, "instId": "BTC-USDT-SWAP", "cTime": opened.to_string(),
                     "uTime": (opened + 100).to_string(), "realizedPnl": realized, "type": "2",
+                    "mgnMode": "isolated", "posSide": "net", "direction": "long",
                 })
                 .as_object()
                 .unwrap()
@@ -770,8 +771,17 @@ async fn the_arena_reads_an_okx_agents_result_from_okx_history_and_its_open_posi
                        leverage,reduce_only,close_position,status,filled_quantity,reserved_margin,
                        agent_id,created_at,updated_at)
                      VALUES ('o_x',?1,'cx','BTCUSDT','BUY','MARKET','1',3,0,0,'FILLED','1','0',
-                       'agent_x',?2,?2)",
-                    rusqlite::params![ACCOUNT, START + 650],
+                       'agent_x',?2,?2),
+                            ('o_open',?1,'co','BTCUSDT','BUY','MARKET','1',3,0,0,'FILLED','1','0',
+                       'agent_x',?3,?3)",
+                    rusqlite::params![ACCOUNT, START + 650, START + 1_050],
+                )
+                .unwrap();
+            r.connection()
+                .execute(
+                    "INSERT INTO exchange_order_executions (order_id,trade_id,executed_at)
+                     VALUES ('o_x','51',?1),('o_open','52',?2)",
+                    rusqlite::params![START + 650, START + 1_050],
                 )
                 .unwrap();
             r.connection()
@@ -805,4 +815,187 @@ async fn the_arena_reads_an_okx_agents_result_from_okx_history_and_its_open_posi
     assert_eq!(arena[0]["realizedPnl"], "0");
     assert_eq!(arena[0]["tradeCount"], 0);
     w.state.runtime.shutdown().await;
+}
+
+/// A partially filled or late-confirmed order has an exchange execution even when its
+/// local aggregate fill is missing or recorded much later.
+async fn exchange_arena_recovers_execution(remote_state: &str, position_closed: bool) {
+    let w = world(false).await;
+    let archived = remote_state == "archived";
+    let opened = START + 100;
+    let inst = "BTC-USDT-SWAP";
+    let cl_ord_id = mochi_okx::ids::to_cl_ord_id("arena-entry");
+    {
+        let mut okx = w.okx.state();
+        okx.orders.insert(
+            cl_ord_id.clone(),
+            json!({
+                "ordId": "10", "clOrdId": cl_ord_id, "instId": inst, "state": remote_state,
+                "accFillSz": "1", "avgPx": "75000", "fee": "0", "pnl": "0", "side": "buy",
+                "tradeId": "100", "fillTime": opened.to_string(), "fillSz": "1",
+                "tdMode": "isolated", "posSide": "net",
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        );
+        if archived {
+            for bill in 1..=302 {
+                okx.execution_history.push(
+                    json!({
+                        "billId": bill.to_string(), "ordId": if bill <= 2 { "10" } else { "other" },
+                        "instId": inst, "tradeId": bill.to_string(), "posSide": "net", "side": "buy",
+                        "fillTime": (opened + bill).to_string(), "ts": (START + 4_000_000).to_string(),
+                    }).as_object().unwrap().clone()
+                );
+            }
+        }
+        if position_closed {
+            okx.positions_history.push(
+                json!({
+                    "posId": "p1", "instId": inst, "cTime": opened.to_string(),
+                    "uTime": (opened + 500).to_string(), "realizedPnl": "2.5", "type": "2",
+                    "mgnMode": "isolated", "posSide": "net", "direction": "long",
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+            );
+        } else {
+            okx.position = Some(
+                json!({
+                    "posId": "p1", "instId": inst, "cTime": opened.to_string(),
+                    "uTime": opened.to_string(), "tradeId": "100", "pos": "1",
+                    "realizedPnl": "0", "upl": "2.5", "avgPx": "75000", "markPx": "75250",
+                    "lever": "3", "margin": "10", "mgnMode": "isolated", "posSide": "net", "direction": "long",
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+            );
+        }
+    }
+    w.state
+        .runtime
+        .call(move |r| {
+            let conn = r.connection();
+            conn.execute(
+                "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,
+                   account_id,risk,interval_sec,status,running,created_at)
+                 VALUES ('agent_x','X','mock','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,?2)",
+                rusqlite::params![ACCOUNT, START],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO orders (id,account_id,client_order_id,symbol,side,type,quantity,
+                   leverage,reduce_only,close_position,status,filled_quantity,reserved_margin,
+                   agent_id,created_at,updated_at,exchange_order_id)
+                 VALUES ('o_x',?1,'arena-entry','BTCUSDT','BUY','LIMIT','1',3,0,0,?3,?4,'0',
+                   'agent_x',?2,?2,?5)",
+                rusqlite::params![
+                    ACCOUNT,
+                    START,
+                    if archived { "FILLED" } else { "OPEN" },
+                    if archived { "1" } else { "0" },
+                    archived.then_some("10"),
+                ],
+            )
+            .unwrap();
+        })
+        .await
+        .unwrap();
+    w.clock.fetch_add(240_000, Ordering::SeqCst);
+    w.state.runtime.sync_okx_for_test(ACCOUNT).await.unwrap();
+
+    if archived {
+        let (_, first) = send(&w.state, "GET", "/api/arena", None).await;
+        assert_eq!(first[0]["pnl"], "0", "old fills are beyond the first pass");
+        let pending = mochi_okx::ids::to_cl_ord_id("pending-entry");
+        w.okx.state().orders.insert(
+            pending.clone(),
+            json!({ "state": "live", "accFillSz": "0" })
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        w.state
+            .runtime
+            .call(|r| {
+                r.connection().execute(
+                "INSERT INTO orders (id,account_id,client_order_id,symbol,side,type,quantity,
+                   leverage,reduce_only,close_position,status,filled_quantity,reserved_margin,
+                   agent_id,created_at,updated_at)
+                 VALUES ('o_pending',?1,'pending-entry','BTCUSDT','BUY','LIMIT','1',3,0,0,
+                         'OPEN','0','0','agent_x',?2,?2)",
+                rusqlite::params![ACCOUNT, START],
+            ).unwrap();
+            })
+            .await
+            .unwrap();
+        w.clock.fetch_add(60_000, Ordering::SeqCst);
+        w.state.runtime.sync_okx_for_test(ACCOUNT).await.unwrap();
+        let (_, stalled) = send(&w.state, "GET", "/api/arena", None).await;
+        assert_eq!(
+            stalled[0]["pnl"], "0",
+            "a missing exchange order ID must not advance the cursor"
+        );
+
+        w.okx.state().orders.insert(
+            pending,
+            json!({ "state": "canceled", "ordId": "20", "accFillSz": "0" })
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        w.clock.fetch_add(60_000, Ordering::SeqCst);
+        w.state.runtime.sync_okx_for_test(ACCOUNT).await.unwrap();
+        let count = w
+            .state
+            .runtime
+            .call(|r| {
+                r.connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM exchange_order_executions WHERE order_id='o_x'",
+                        [],
+                        |row| row.get::<_, usize>(0),
+                    )
+                    .unwrap()
+            })
+            .await
+            .unwrap();
+        assert_eq!(count, 2, "record each individual exchange execution");
+    }
+    let (_, arena) = send(&w.state, "GET", "/api/arena", None).await;
+    assert_eq!(arena[0]["pnl"], "2.5");
+    let fills = w
+        .state
+        .runtime
+        .call(|r| {
+            r.connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM fills WHERE order_id = 'o_x'",
+                    [],
+                    |row| row.get::<_, usize>(0),
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(fills, usize::from(position_closed && !archived));
+    w.state.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn arena_backfills_all_old_order_executions_after_a_bounded_history_pass() {
+    exchange_arena_recovers_execution("archived", true).await;
+}
+
+#[tokio::test]
+async fn arena_counts_a_position_opened_by_a_partially_filled_limit_order() {
+    exchange_arena_recovers_execution("partially_filled", false).await;
+}
+
+#[tokio::test]
+async fn arena_counts_a_position_closed_before_late_confirmation() {
+    exchange_arena_recovers_execution("filled", true).await;
 }

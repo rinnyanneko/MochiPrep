@@ -286,8 +286,7 @@ async fn arena_return_is_null_for_a_zero_balance() {
 
 /// An OKX account first connected with dust in it, then funded by a transfer, shared by three
 /// agents: two on BTC, one on ETH.
-#[tokio::test]
-async fn arena_attributes_exchange_pnl_per_agent_and_ignores_deposits() {
+async fn exchange_arena_fixture() -> AppState {
     let state = state();
     let (_, account) = send(
         &state,
@@ -329,6 +328,8 @@ async fn arena_attributes_exchange_pnl_per_agent_and_ignores_deposits() {
            ('f_a','o_a','acct_x','BTCUSDT','BUY','1','75000','0.01','0','TAKER',8),
            ('f_c1','o_c1','acct_x','ETHUSDT','BUY','1','3000','0.03','0','TAKER',6),
            ('f_c2','o_c2','acct_x','ETHUSDT','BUY','1','3000','0.03','0','TAKER',8);
+         INSERT INTO exchange_order_executions (order_id,trade_id,executed_at) VALUES
+           ('o_a','1',8),('o_c1','2',6),('o_c2','3',8);
          -- OKX's history: an ETH position from before agent C existed, two it traded (one closed by
          -- a stop OKX triggered, so with no local fill), one the owner traded in the OKX app long
          -- after (C's only order then never filled), and a BTC one.
@@ -340,9 +341,16 @@ async fn arena_attributes_exchange_pnl_per_agent_and_ignores_deposits() {
            ('acct_x','e1',100000,'ETH-USDT-SWAP',100001,'100','2'),
            -- Opened by the owner seconds after C's last fill: that fill was another position's.
            ('acct_x','e1',15000,'ETH-USDT-SWAP',15001,'7','2'),
-           ('acct_x','b1',6,'BTC-USDT-SWAP',7,'5','2');",
+           ('acct_x','b1',6,'BTC-USDT-SWAP',7,'5','2');
+         UPDATE exchange_position_history SET opening_side='BUY';",
     )
     .await;
+    state
+}
+
+#[tokio::test]
+async fn arena_attributes_exchange_pnl_per_agent_and_ignores_deposits() {
+    let state = exchange_arena_fixture().await;
     let arena = get(&state, "/api/arena").await;
     let row = |id: &str| {
         arena
@@ -377,6 +385,58 @@ async fn arena_attributes_exchange_pnl_per_agent_and_ignores_deposits() {
         assert_eq!(shared["winRatePct"], Value::Null, "{id}");
         assert_eq!(shared["tradeCount"], trades, "{id}");
     }
+    state.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn arena_ignores_manual_positions_adjacent_to_an_agent_execution() {
+    let state = exchange_arena_fixture().await;
+    sql(
+        &state,
+        "INSERT INTO exchange_position_history
+           (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type) VALUES
+           ('acct_x','e1',5,'ETH-USDT-SWAP',5,'11','2'),
+           ('acct_x','e1',10,'ETH-USDT-SWAP',11,'22','2');
+         UPDATE exchange_position_history SET opening_side='BUY';",
+    )
+    .await;
+    let arena = get(&state, "/api/arena").await;
+    let c = arena
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["agentId"] == "agent_c")
+        .unwrap();
+    assert_eq!(c["pnl"], "0.95");
+    assert_eq!(c["tradeCount"], 2);
+    state.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn arena_preserves_shared_position_after_one_agent_is_deleted() {
+    let state = exchange_arena_fixture().await;
+    sql(
+        &state,
+        "UPDATE exchange_position_history SET closed_at=10 WHERE pos_id='b1';
+         INSERT INTO orders (id,account_id,client_order_id,symbol,side,type,quantity,leverage,
+           reduce_only,close_position,status,filled_quantity,reserved_margin,agent_id,
+           created_at,updated_at) VALUES
+           ('o_b','acct_x','cb','BTCUSDT','BUY','MARKET','1',1,0,0,'FILLED','1','0','agent_b',9,9);
+         INSERT INTO fills (id,order_id,account_id,symbol,side,quantity,price,fee,realized_pnl,
+           liquidity,ts) VALUES ('f_b','o_b','acct_x','BTCUSDT','BUY','1','75000','0','0','TAKER',9);
+         INSERT INTO exchange_order_executions (order_id,trade_id,executed_at) VALUES ('o_b','4',9);
+         DELETE FROM agents WHERE id='agent_b';",
+    )
+    .await;
+    let arena = get(&state, "/api/arena").await;
+    let a = arena
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["agentId"] == "agent_a")
+        .unwrap();
+    assert_eq!(a["attribution"], "SHARED");
+    assert_eq!(a["pnl"], Value::Null);
     state.runtime.shutdown().await;
 }
 

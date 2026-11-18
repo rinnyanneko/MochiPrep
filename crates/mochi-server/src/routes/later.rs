@@ -250,26 +250,8 @@ fn paper_result(
     })
 }
 
-/// How far a fill's local time may fall before OKX's open time and still be the fill that opened
-/// the position: OKX's clock and this computer's differ.
-const CLOCK_SKEW_MS: i64 = 5_000;
-/// How long after OKX's last update a closing fill may be recorded: fills are recorded by the
-/// sync that sees them, which can run late.
-const RECORD_LAG_MS: i64 = 60_000;
-
-/// An agent's result on an exchange account: what its positions on its pair made.
-///
-/// The account's equity cannot be used: a deposit, or a transfer from the funding account, moves
-/// it as much as a trade does. Nor can local fills: a stop or take profit OKX triggers, or a close
-/// in the OKX app, leaves none. So closed positions come from OKX's position history
-/// (`realizedPnl`, which includes fees and funding), and the open one from the last sync.
-///
-/// A position is the agent's when it opened after the agent was created and a fill of one of the
-/// agent's orders on the pair was recorded while it was open (by fill time, not order time, so a
-/// limit order that rests a while still counts, and the closing fill of the agent's previous
-/// position does not). One the owner opened and closed in the OKX app is not. All of this holds
-/// only while no other agent on the account trades the pair: one-way mode nets them into one
-/// position.
+/// Arena P&L is the net position result from OKX, attributed only when a known opening-side
+/// execution falls in one exchange lifetime. Local aggregate fill times are reconciliation times.
 fn exchange_result(
     runtime: &Runtime,
     account: &PaperAccount,
@@ -277,14 +259,10 @@ fn exchange_result(
     agents: &[rows::Agent],
 ) -> Result<RowResult, ApiError> {
     let conn = runtime.connection();
-    let shared = agents.iter().any(|other| {
-        other.id != agent.id && other.account_id == account.id && other.symbol == agent.symbol
-    });
-    if shared {
-        // Which orders it placed is all that still belongs to it.
+    let shared_row = || -> Result<RowResult, ApiError> {
         let trade_count = rows::count_agent_fills(conn, &account.id, &agent.id)
             .map_err(|e| runtime.api_error(e))?;
-        return Ok(RowResult {
+        Ok(RowResult {
             attribution: Attribution::Shared,
             pnl: None,
             return_pct: None,
@@ -293,57 +271,103 @@ fn exchange_result(
             win_rate_pct: None,
             trade_count,
             curve: Vec::new(),
-        });
-    }
-    let filled = rows::agent_fill_times(conn, &account.id, &agent.id, &agent.symbol)
-        .map_err(|e| runtime.api_error(e))?;
-    let owned = |opened_at: i64, until: i64| {
-        opened_at >= agent.created_at
-            && filled.iter().any(|&at| {
-                at >= opened_at - CLOCK_SKEW_MS && at <= until.saturating_add(RECORD_LAG_MS)
-            })
+        })
     };
+    if agents.iter().any(|other| {
+        other.id != agent.id && other.account_id == account.id && other.symbol == agent.symbol
+    }) {
+        return shared_row();
+    }
+
+    let executions = rows::agent_executions(conn, &account.id, &agent.symbol)
+        .map_err(|e| runtime.api_error(e))?;
     let open: Vec<_> = runtime
         .exchange_open_results(&account.id)
         .unwrap_or_default()
         .into_iter()
         .filter(|o| o.symbol == agent.symbol)
         .collect();
+    let history = runtime
+        .engine()
+        .store()
+        .list_position_records(&account.id, &mochi_okx::ids::to_inst_id(&agent.symbol), 0)
+        .map_err(|e| runtime.api_error(e))?;
+
+    struct Lifetime<'a> {
+        opened_at: i64,
+        until: i64,
+        opening_side: Option<&'a str>,
+        realized: &'a str,
+        unrealized: Option<&'a str>,
+    }
+    let mut lifetimes: Vec<_> = history
+        .iter()
+        .filter(|record| {
+            !open
+                .iter()
+                .any(|o| o.pos_id == record.pos_id && o.opened_at == Some(record.opened_at))
+        })
+        .map(|record| Lifetime {
+            opened_at: record.opened_at,
+            until: record.closed_at,
+            opening_side: record.opening_side.as_deref(),
+            realized: &record.realized_pnl,
+            unrealized: None,
+        })
+        .collect();
+    lifetimes.extend(open.iter().filter_map(|position| {
+        Some(Lifetime {
+            opened_at: position.opened_at?,
+            until: position.updated_at?,
+            opening_side: position.opening_side.as_deref(),
+            realized: &position.realized_pnl,
+            unrealized: Some(&position.unrealized_pnl),
+        })
+    }));
+    lifetimes.sort_by_key(|position| position.opened_at);
 
     let zero = || Dec::parse("0").expect("0 is a decimal");
     let (mut realized, mut unrealized) = (zero(), zero());
     let mut net = Vec::new();
-    let history = runtime
-        .engine()
-        .store()
-        .list_position_records(
-            &account.id,
-            &mochi_okx::ids::to_inst_id(&agent.symbol),
-            agent.created_at,
-        )
-        .map_err(|e| runtime.api_error(e))?;
-    for record in &history {
-        // A partly closed position still open: its realized part is in its open result.
-        let still_open = open
-            .iter()
-            .any(|o| o.pos_id == record.pos_id && o.opened_at == Some(record.opened_at));
-        if still_open || !owned(record.opened_at, record.closed_at) {
+    let mut prior_end = 0_i64;
+    for (index, position) in lifetimes.iter().enumerate() {
+        // Discard evidence in the overlap of two lifetimes, including a same-ms boundary.
+        let start = position.opened_at.max(prior_end.saturating_add(1));
+        prior_end = prior_end.max(position.until);
+        let end = lifetimes.get(index + 1).map_or(position.until, |next| {
+            position.until.min(next.opened_at.saturating_sub(1))
+        });
+        if position.opened_at < agent.created_at || start > end {
             continue;
         }
-        let value = decimal(&record.realized_pnl)?;
-        net.push(to_number(&value));
-        realized = realized.add(&value);
-    }
-    // Without a session the open position is unknown, so only the closed result shows. Without an
-    // open time from OKX, no agent can be said to own it.
-    for position in &open {
-        if position
-            .opened_at
-            .is_some_and(|opened_at| owned(opened_at, i64::MAX))
-        {
-            realized = realized.add(&decimal(&position.realized_pnl)?);
-            unrealized = unrealized.add(&decimal(&position.unrealized_pnl)?);
+        let Some(opening_side) = position.opening_side else {
+            continue;
+        };
+        let first = executions.partition_point(|trade| trade.at < start);
+        let last = executions.partition_point(|trade| trade.at <= end);
+        let trades = &executions[first..last];
+        if !trades.iter().any(|trade| {
+            trade.agent_id == agent.id && !trade.reduce_only && trade.side == opening_side
+        }) {
+            continue;
         }
+        // Ambiguous boundary fills cannot establish ownership, but possible co-participation
+        // from another agent is enough to withhold the entire position's P&L.
+        let possible_start = executions.partition_point(|trade| trade.at < position.opened_at);
+        let possible_end = executions.partition_point(|trade| trade.at <= position.until);
+        if executions[possible_start..possible_end]
+            .iter()
+            .any(|trade| trade.agent_id != agent.id)
+        {
+            return shared_row();
+        }
+        let value = decimal(position.realized)?;
+        if let Some(open_pnl) = position.unrealized {
+            unrealized = unrealized.add(&decimal(open_pnl)?);
+        } else {
+            net.push(to_number(&value));
+        }
+        realized = realized.add(&value);
     }
     Ok(RowResult {
         attribution: Attribution::Agent,

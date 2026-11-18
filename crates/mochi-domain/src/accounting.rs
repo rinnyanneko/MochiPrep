@@ -447,6 +447,15 @@ pub struct LedgerEvent {
     pub ts: i64,
 }
 
+/// A resumable scan of execution bills, newest to oldest. The completed head advances only
+/// once a scan reaches the previously completed bills or the end of the exchange's history.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExchangeExecutionCursor {
+    pub completed_bill: Option<String>,
+    pub scan_head: Option<String>,
+    pub scan_after: Option<String>,
+}
+
 /// One closed (or partly closed) position on an exchange account, as the exchange reports it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -462,6 +471,8 @@ pub struct ExchangePositionRecord {
     pub realized_pnl: String,
     /// The exchange's own code for how it closed (OKX `type`), kept for diagnosis.
     pub close_type: String,
+    /// BUY or SELL for a confirmed isolated net position.
+    pub opening_side: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

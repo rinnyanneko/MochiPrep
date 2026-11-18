@@ -14,8 +14,8 @@ use mochi_core::paper::{
 };
 use mochi_domain::registry::Instruments;
 use mochi_domain::{
-    DataSource, EquityPoint, Fill, LedgerEvent, Order, OrderRequest, OrderStatus, PaperAccount,
-    Position, Protection, Quote,
+    DataSource, EquityPoint, ExchangeExecutionCursor, Fill, LedgerEvent, Order, OrderRequest,
+    OrderStatus, PaperAccount, Position, Protection, Quote,
 };
 use mochi_store::{open_database, open_in_memory, SqlitePaperStore};
 use serde_json::json;
@@ -347,6 +347,26 @@ impl PaperStore for AuditedStore {
     ) -> Result<Vec<EquityPoint>, StoreFailure> {
         self.inner.list_equity(account_id, limit)
     }
+    fn execution_cursor(&self, account_id: &str) -> Result<ExchangeExecutionCursor, StoreFailure> {
+        self.inner.execution_cursor(account_id)
+    }
+    fn save_execution_cursor(
+        &self,
+        account_id: &str,
+        cursor: &ExchangeExecutionCursor,
+    ) -> Result<(), StoreFailure> {
+        self.inner.save_execution_cursor(account_id, cursor)
+    }
+    fn record_exchange_execution(
+        &self,
+        order_id: &str,
+        trade_id: &str,
+        executed_at: i64,
+    ) -> Result<(), StoreFailure> {
+        self.inner
+            .record_exchange_execution(order_id, trade_id, executed_at)
+    }
+
     fn upsert_position_record(
         &self,
         r: &mochi_domain::ExchangePositionRecord,

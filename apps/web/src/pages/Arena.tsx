@@ -54,7 +54,7 @@ export function ArenaPage() {
           Short-term returns do not predict future performance.
           {capitals.size > 1 && ' Starting capital differs between these agents, so compare returns, not USDT.'}
           {onExchange &&
-            " OKX agents show only the P&L of positions they traded on their own pair, from OKX's position history: deposits, transfers and your own trades in the OKX app are not theirs. Two agents on the same pair of one account cannot be told apart."}
+            " For OKX agents, P&L reflects the whole net position on their pair, including any manual trades that change it. Deposits and transfers do not count toward P&L. Agents sharing that pair and account have no separate P&L."}
         </span>
       </div>
       {rows.length === 0 ? (

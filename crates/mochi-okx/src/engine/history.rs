@@ -2,16 +2,22 @@
 //! arena reads both to tell what an agent's pair made without counting deposits and transfers,
 //! which move the account's equity just as much.
 
-use mochi_domain::ExchangePositionRecord;
+use std::collections::HashMap;
+
+use mochi_domain::{ExchangePositionRecord, OrderSide};
 
 use super::sync::js_number;
-use super::{dec, EngineError, OkxEngine, Registry};
-use crate::client::{nullish_text, truthy_text, Row, POSITIONS_HISTORY_PAGE};
+use super::{dec, is_leg, EngineError, OkxEngine, Registry};
+use crate::client::{
+    nullish_text, truthy_text, Row, EXECUTION_HISTORY_PAGE, POSITIONS_HISTORY_PAGE,
+};
+use crate::ids::to_inst_id;
 
 /// How often the history is read.
 const HISTORY_EVERY_MS: i64 = 60_000;
 /// Pages read per pass. A longer history is read over several passes.
 const HISTORY_PAGES: usize = 10;
+const EXECUTION_PAGES: usize = 3;
 
 /// An open position's result so far, as OKX reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +26,8 @@ pub struct OpenPositionResult {
     pub pos_id: String,
     /// OKX's `cTime`; `None` when OKX gave none, and then no agent can be said to own it.
     pub opened_at: Option<i64>,
+    pub updated_at: Option<i64>,
+    pub opening_side: Option<String>,
     /// OKX's `realizedPnl` on the open position: fees, funding and partial closes so far.
     pub realized_pnl: String,
     pub unrealized_pnl: String,
@@ -92,17 +100,150 @@ impl OkxEngine {
             }
         }
 
+        let account_for_records = account_id.clone();
         self.rows(move |rows| {
             rows.transaction(&mut || {
                 for record in &records {
                     rows.upsert_position_record(record)?;
                 }
-                rows.set_position_history_backfill(&account_id, backfill)?;
+                rows.set_position_history_backfill(&account_for_records, backfill)?;
                 Ok(())
             })
         })
         .await?;
+        let execution_result = self.read_execution_history(&account_id).await;
         self.state().last_history_at = now;
+        execution_result
+    }
+
+    /// In each pass, continue the active scan until its old watermark or the end of retention.
+    /// The cursor commits with each page so an interruption cannot create a gap or repeat a trade.
+    async fn read_execution_history(&self, account_id: &str) -> Result<(), EngineError> {
+        let account = account_id.to_string();
+        let mut cursor = self
+            .rows(move |rows| Ok(rows.execution_cursor(&account)?))
+            .await?;
+        let completed = cursor
+            .completed_bill
+            .as_deref()
+            .and_then(|id| id.parse::<u64>().ok());
+        for _ in 0..EXECUTION_PAGES {
+            let after = cursor
+                .scan_after
+                .as_deref()
+                .and_then(|id| id.parse::<u64>().ok());
+            let page = self.deps.client.get_execution_history(after).await?;
+            let bills = page
+                .iter()
+                .map(|row| {
+                    row.get("billId")
+                        .and_then(|id| id.as_str())
+                        .and_then(|id| id.parse::<u64>().ok())
+                        .ok_or_else(|| {
+                            EngineError::message("OKX execution history is missing a bill ID")
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let oldest = bills.iter().copied().min();
+            if let Some(newest) = bills.iter().copied().max() {
+                if after.is_some_and(|after| newest >= after) {
+                    return Err(EngineError::message(
+                        "OKX execution history pagination did not advance",
+                    ));
+                }
+                cursor.scan_head.get_or_insert_with(|| newest.to_string());
+            }
+            let complete = page.len() < EXECUTION_HISTORY_PAGE
+                || completed
+                    .zip(oldest)
+                    .is_some_and(|(completed, oldest)| oldest <= completed);
+            if complete {
+                if let Some(newest) = cursor.scan_head.take() {
+                    if completed.is_none_or(|old| newest.parse::<u64>().is_ok_and(|new| new > old))
+                    {
+                        cursor.completed_bill = Some(newest);
+                    }
+                }
+                cursor.scan_after = None;
+            } else {
+                cursor.scan_after = oldest.map(|id| id.to_string());
+            }
+
+            let account = account_id.to_string();
+            let next = cursor.clone();
+            let progressed = self
+                .rows(move |rows| {
+                    let mut progressed = false;
+                    rows.transaction(&mut || {
+                        // The parent is stored before submission. If its venue ID has not arrived,
+                        // do not move the cursor past a fill that may be its execution.
+                        if !page.is_empty()
+                            && rows.list_open_orders(&account)?.iter().any(|order| {
+                                order.agent_id.is_some()
+                                    && !is_leg(order)
+                                    && order.exchange_order_id.as_deref().is_none_or(str::is_empty)
+                            })
+                        {
+                            return Ok(());
+                        }
+                        let mut ids: Vec<_> = page
+                            .iter()
+                            .filter_map(|r| nullish_text(r.get("ordId")))
+                            .filter(|id| !id.is_empty())
+                            .collect();
+                        ids.sort_unstable();
+                        ids.dedup();
+                        let orders = rows.find_orders_by_exchange_ids(&account, &ids)?;
+                        let by_identity: HashMap<_, _> = orders
+                            .iter()
+                            .filter(|order| order.agent_id.is_some() && !is_leg(order))
+                            .filter_map(|order| {
+                                Some((
+                                    (
+                                        order.exchange_order_id.as_deref()?,
+                                        to_inst_id(&order.symbol),
+                                    ),
+                                    order,
+                                ))
+                            })
+                            .collect();
+                        // Reprocess the overlapping page: an order may now have an exchange ID
+                        // that it lacked on the previous pass. The execution primary key dedupes it.
+                        for fill in &page {
+                            let Some(id) = fill.get("ordId").and_then(|v| v.as_str()) else {
+                                continue;
+                            };
+                            let Some(inst) = nullish_text(fill.get("instId")) else {
+                                continue;
+                            };
+                            let Some(order) = by_identity.get(&(id, inst)) else {
+                                continue;
+                            };
+                            let side = if order.side == OrderSide::Buy {
+                                "buy"
+                            } else {
+                                "sell"
+                            };
+                            if fill.get("posSide").and_then(|v| v.as_str()) != Some("net")
+                                || fill.get("side").and_then(|v| v.as_str()) != Some(side)
+                            {
+                                continue;
+                            }
+                            if let Some((trade_id, at)) = execution_of(fill) {
+                                rows.record_exchange_execution(&order.id, &trade_id, at)?;
+                            }
+                        }
+                        rows.save_execution_cursor(&account, &next)?;
+                        progressed = true;
+                        Ok(())
+                    })?;
+                    Ok(progressed)
+                })
+                .await?;
+            if complete || !progressed {
+                break;
+            }
+        }
         Ok(())
     }
 
@@ -161,10 +302,21 @@ enum Read {
     Stopped(i64),
 }
 
+pub(super) fn execution_of(row: &Row) -> Option<(String, i64)> {
+    let trade_id = row.get("tradeId")?.as_str()?.parse::<u64>().ok()?;
+    let executed_at = row.get("fillTime")?.as_str()?.parse::<i64>().ok()?;
+    (trade_id > 0 && executed_at > 0).then(|| (trade_id.to_string(), executed_at))
+}
+
 /// A whole number of milliseconds from an OKX time field.
 pub(super) fn okx_time(row: &Row, field: &str) -> Option<i64> {
     let value = js_number(row.get(field));
     (value.is_finite() && value > 0.0 && value.fract() == 0.0).then_some(value as i64)
+}
+
+fn isolated_net(row: &Row) -> bool {
+    row.get("mgnMode").and_then(|v| v.as_str()) == Some("isolated")
+        && row.get("posSide").and_then(|v| v.as_str()) == Some("net")
 }
 
 /// One history row, kept whether or not its pair is in the registry.
@@ -185,6 +337,14 @@ fn record_of(row: &Row, account_id: &str) -> Result<ExchangePositionRecord, Engi
         closed_at: okx_time(row, "uTime").ok_or_else(|| missing("uTime"))?,
         realized_pnl: dec(&realized)?.to_fixed(),
         close_type: nullish_text(row.get("type")).unwrap_or_default(),
+        opening_side: match (
+            isolated_net(row),
+            row.get("direction").and_then(|v| v.as_str()),
+        ) {
+            (true, Some("long")) => Some("BUY".into()),
+            (true, Some("short")) => Some("SELL".into()),
+            _ => None,
+        },
     })
 }
 
@@ -204,6 +364,19 @@ pub(super) fn open_result_of(
         symbol: spec.symbol.clone(),
         pos_id: nullish_text(row.get("posId")).unwrap_or_default(),
         opened_at: okx_time(row, "cTime"),
+        updated_at: okx_time(row, "uTime"),
+        opening_side: if isolated_net(row) {
+            let size = dec(&amount("pos")?)?;
+            if size.is_zero() {
+                None
+            } else if size.is_negative() {
+                Some("SELL".into())
+            } else {
+                Some("BUY".into())
+            }
+        } else {
+            None
+        },
         realized_pnl: amount("realizedPnl")?,
         unrealized_pnl: amount("upl")?,
     }))

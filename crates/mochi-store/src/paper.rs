@@ -5,8 +5,8 @@ use std::cell::Cell;
 
 use mochi_core::paper::{PaperStore, StoreFailure, StoreFailureKind};
 use mochi_domain::{
-    DataSource, EquityPoint, ExchangePositionRecord, Fill, LedgerEvent, Order, PaperAccount,
-    Position, RiskSettings,
+    DataSource, EquityPoint, ExchangeExecutionCursor, ExchangePositionRecord, Fill, LedgerEvent,
+    Order, PaperAccount, Position, RiskSettings,
 };
 use rusqlite::{params, Connection, Row};
 use serde::de::DeserializeOwned;
@@ -333,6 +333,7 @@ fn to_position_record(r: &Row) -> rusqlite::Result<ExchangePositionRecord> {
         closed_at: r.get("closed_at")?,
         realized_pnl: r.get("realized_pnl")?,
         close_type: r.get("close_type")?,
+        opening_side: r.get("opening_side")?,
     })
 }
 
@@ -430,6 +431,7 @@ impl PaperStore for SqlitePaperStore {
             "equity_history",
             "exchange_position_history",
             "exchange_history_cursor",
+            "exchange_execution_cursor",
         ] {
             self.run(&format!("DELETE FROM {table} WHERE account_id=?"), [id])?;
         }
@@ -747,14 +749,57 @@ impl PaperStore for SqlitePaperStore {
         )
     }
 
+    fn execution_cursor(&self, account_id: &str) -> Result<ExchangeExecutionCursor, StoreFailure> {
+        Ok(self.query(
+            "SELECT completed_bill,scan_head,scan_after FROM exchange_execution_cursor WHERE account_id=?",
+            [account_id],
+            |row| Ok(ExchangeExecutionCursor {
+                completed_bill: row.get(0)?,
+                scan_head: row.get(1)?,
+                scan_after: row.get(2)?,
+            }),
+        )?.into_iter().next().unwrap_or_default())
+    }
+    fn save_execution_cursor(
+        &self,
+        account_id: &str,
+        cursor: &ExchangeExecutionCursor,
+    ) -> Result<(), StoreFailure> {
+        self.run(
+            "INSERT INTO exchange_execution_cursor(account_id,completed_bill,scan_head,scan_after)
+             VALUES (?,?,?,?) ON CONFLICT(account_id) DO UPDATE SET
+             completed_bill=excluded.completed_bill, scan_head=excluded.scan_head,
+             scan_after=excluded.scan_after",
+            params![
+                account_id,
+                cursor.completed_bill,
+                cursor.scan_head,
+                cursor.scan_after
+            ],
+        )
+    }
+
+    fn record_exchange_execution(
+        &self,
+        order_id: &str,
+        trade_id: &str,
+        executed_at: i64,
+    ) -> Result<(), StoreFailure> {
+        self.run(
+            "INSERT OR IGNORE INTO exchange_order_executions (order_id,trade_id,executed_at)
+             VALUES (?,?,?)",
+            params![order_id, trade_id, executed_at],
+        )
+    }
+
     fn upsert_position_record(&self, r: &ExchangePositionRecord) -> Result<(), StoreFailure> {
         self.run(
             "INSERT INTO exchange_position_history
-               (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type)
-             VALUES (?,?,?,?,?,?,?)
+               (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type,opening_side)
+             VALUES (?,?,?,?,?,?,?,?)
              ON CONFLICT(account_id,pos_id,opened_at) DO UPDATE SET inst_id=excluded.inst_id,
                closed_at=excluded.closed_at, realized_pnl=excluded.realized_pnl,
-               close_type=excluded.close_type",
+               close_type=excluded.close_type, opening_side=excluded.opening_side",
             params![
                 r.account_id,
                 r.pos_id,
@@ -762,7 +807,8 @@ impl PaperStore for SqlitePaperStore {
                 r.inst_id,
                 r.closed_at,
                 r.realized_pnl,
-                r.close_type
+                r.close_type,
+                r.opening_side
             ],
         )
     }

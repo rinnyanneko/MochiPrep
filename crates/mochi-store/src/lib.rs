@@ -54,6 +54,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "009_exchange_position_history.sql",
         include_str!("../migrations/009_exchange_position_history.sql"),
     ),
+    (
+        "010_exchange_execution_evidence.sql",
+        include_str!("../migrations/010_exchange_execution_evidence.sql"),
+    ),
 ];
 
 #[derive(Debug, thiserror::Error)]

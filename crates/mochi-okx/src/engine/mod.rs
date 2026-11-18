@@ -19,10 +19,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use mochi_core::paper::{DailyRisk, PaperStore, StoreFailure};
 use mochi_decimal::Dec;
 use mochi_domain::{
-    default_live_limits, AccountBalance, EntryOrderType, EquityPoint, ExchangePositionRecord, Fill,
-    InstrumentSpecification, Order, OrderRequest, OrderResult, OrderSide, OrderStatus, OrderType,
-    PaperAccount, PositionSide, PositionView, Protection, Quote, RiskSettings, TrailingKind,
-    TrailingStopSpec,
+    default_live_limits, AccountBalance, EntryOrderType, EquityPoint, ExchangeExecutionCursor,
+    ExchangePositionRecord, Fill, InstrumentSpecification, Order, OrderRequest, OrderResult,
+    OrderSide, OrderStatus, OrderType, PaperAccount, PositionSide, PositionView, Protection, Quote,
+    RiskSettings, TrailingKind, TrailingStopSpec,
 };
 
 use protection::{Miss, ProtectionMap};
@@ -70,6 +70,18 @@ pub trait LiveRows {
     fn upsert_equity_point(&self, point: &EquityPoint) -> Result<(), StoreFailure>;
     fn list_equity(&self, account_id: &str, limit: usize)
         -> Result<Vec<EquityPoint>, StoreFailure>;
+    fn execution_cursor(&self, account_id: &str) -> Result<ExchangeExecutionCursor, StoreFailure>;
+    fn save_execution_cursor(
+        &self,
+        account_id: &str,
+        cursor: &ExchangeExecutionCursor,
+    ) -> Result<(), StoreFailure>;
+    fn record_exchange_execution(
+        &self,
+        order_id: &str,
+        trade_id: &str,
+        executed_at: i64,
+    ) -> Result<(), StoreFailure>;
     fn upsert_position_record(&self, record: &ExchangePositionRecord) -> Result<(), StoreFailure>;
     fn latest_position_record_at(&self, account_id: &str) -> Result<Option<i64>, StoreFailure>;
     fn position_history_backfill(&self, account_id: &str) -> Result<Option<i64>, StoreFailure>;
@@ -148,6 +160,25 @@ impl<S: PaperStore> LiveRows for Rows<'_, S> {
         limit: usize,
     ) -> Result<Vec<EquityPoint>, StoreFailure> {
         self.store.list_equity(account_id, limit)
+    }
+    fn execution_cursor(&self, account_id: &str) -> Result<ExchangeExecutionCursor, StoreFailure> {
+        self.store.execution_cursor(account_id)
+    }
+    fn save_execution_cursor(
+        &self,
+        account_id: &str,
+        cursor: &ExchangeExecutionCursor,
+    ) -> Result<(), StoreFailure> {
+        self.store.save_execution_cursor(account_id, cursor)
+    }
+    fn record_exchange_execution(
+        &self,
+        order_id: &str,
+        trade_id: &str,
+        executed_at: i64,
+    ) -> Result<(), StoreFailure> {
+        self.store
+            .record_exchange_execution(order_id, trade_id, executed_at)
     }
     fn upsert_position_record(&self, record: &ExchangePositionRecord) -> Result<(), StoreFailure> {
         self.store.upsert_position_record(record)

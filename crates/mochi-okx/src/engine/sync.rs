@@ -74,6 +74,11 @@ impl OkxEngine {
             // Live or partly filled: still working on OKX.
             _ => {}
         }
+        let execution = if filled.gt(&super::zero()) && order.agent_id.is_some() {
+            super::history::execution_of(&remote)
+        } else {
+            None
+        };
         let row = order.clone();
         let attached =
             row.status != OrderStatus::Open && filled.gt(&super::zero()) && !row.reduce_only;
@@ -88,6 +93,9 @@ impl OkxEngine {
         self.rows(move |rows| {
             rows.transaction(&mut || {
                 rows.save_order(&row)?;
+                if let Some((trade_id, at)) = &execution {
+                    rows.record_exchange_execution(&row.id, trade_id, *at)?;
+                }
                 if attached {
                     record_attached(rows, &row, &filled, at)?;
                 }

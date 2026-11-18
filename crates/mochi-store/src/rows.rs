@@ -236,18 +236,34 @@ pub fn decision_stats(conn: &Connection, agent_id: &str) -> Result<DecisionStats
     })
 }
 
-/// When each fill of the agent's own orders on `symbol` in the account was recorded.
-pub fn agent_fill_times(
+pub struct AgentExecution {
+    pub agent_id: String,
+    pub at: i64,
+    pub side: String,
+    pub reduce_only: bool,
+}
+
+/// Keep deleted or moved agents' executions in the result. The immutable order owns the evidence,
+/// independent of any current agent configuration or local aggregate fill.
+pub fn agent_executions(
     conn: &Connection,
     account_id: &str,
-    agent_id: &str,
     symbol: &str,
-) -> Result<Vec<i64>, StoreError> {
+) -> Result<Vec<AgentExecution>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT fills.ts FROM fills JOIN orders ON orders.id = fills.order_id
-         WHERE fills.account_id=? AND orders.agent_id=? AND fills.symbol=? ORDER BY fills.ts",
+        "SELECT orders.agent_id, fills.executed_at, orders.side, orders.reduce_only
+         FROM exchange_order_executions AS fills JOIN orders ON orders.id = fills.order_id
+         WHERE orders.account_id=? AND orders.symbol=? AND orders.agent_id IS NOT NULL
+         ORDER BY fills.executed_at",
     )?;
-    let rows = stmt.query_map(params![account_id, agent_id, symbol], |row| row.get(0))?;
+    let rows = stmt.query_map(params![account_id, symbol], |row| {
+        Ok(AgentExecution {
+            agent_id: row.get(0)?,
+            at: row.get(1)?,
+            side: row.get(2)?,
+            reduce_only: row.get(3)?,
+        })
+    })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
