@@ -7,7 +7,7 @@ use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, OnceLock};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use regex::Regex;
 use rusqlite::Connection;
@@ -15,6 +15,7 @@ use tokio::sync::{oneshot, Mutex};
 
 pub const SETTING: &str = "operationLogRetention";
 pub const DEFAULT_RETENTION: i32 = 10;
+const RETENTION_RETRY_DELAY: Duration = Duration::from_secs(60);
 
 pub fn retention(db: &Connection) -> Result<i32, mochi_store::StoreError> {
     Ok(mochi_store::get_setting::<i32>(db, SETTING)?
@@ -69,25 +70,34 @@ impl OperationLog {
             .open(dir.join(".writer.lock"))?;
         lease.try_lock().map_err(io::Error::from)?;
         let timestamp = mochi_okx::iso_string(now()).replace(':', "-");
-        let latest = tempfile::NamedTempFile::new_in(&dir)?;
-        let mut writer = Writer {
-            _lease: lease,
-            archive_path: dir.join(format!(
-                "session-{timestamp}-{}.log",
-                uuid::Uuid::new_v4().simple()
-            )),
-            latest: latest.as_file().try_clone()?,
-            archive: None,
-            dir,
-        };
-        writer.apply_retention(count)?;
-        writer.latest = latest
-            .persist(writer.dir.join("latest.log"))
+        let archive_path = dir.join(format!(
+            "session-{timestamp}-{}.log",
+            uuid::Uuid::new_v4().simple()
+        ));
+        // Leave the archive outside the retention scan until latest.log is in place.
+        let archive = (count != 0)
+            .then(|| tempfile::NamedTempFile::new_in(&dir))
+            .transpose()?;
+        let latest = tempfile::NamedTempFile::new_in(&dir)?
+            .persist(dir.join("latest.log"))
             .map_err(|error| error.error)?;
+        let archive = archive
+            .map(|file| {
+                file.persist_noclobber(&archive_path)
+                    .map_err(|error| error.error)
+            })
+            .transpose()?;
+        let writer = Writer {
+            _lease: lease,
+            dir,
+            archive_path,
+            latest,
+            archive,
+        };
         let (commands, input) = mpsc::channel();
         let worker = thread::Builder::new()
             .name("operation-log".into())
-            .spawn(move || writer.run(input))?;
+            .spawn(move || writer.run(input, count))?;
         let log = Self {
             commands,
             worker: Some(worker),
@@ -141,12 +151,36 @@ impl Drop for OperationLog {
 }
 
 impl Writer {
-    fn run(mut self, input: mpsc::Receiver<Command>) {
-        for command in input {
+    fn run(mut self, input: mpsc::Receiver<Command>, mut retention: i32) {
+        let mut retry_at = Some(Instant::now());
+        loop {
+            let command = if let Some(at) = retry_at {
+                let delay = at.saturating_duration_since(Instant::now());
+                if delay.is_zero() {
+                    retry_at = self.apply_retention(retention).err().map(|error| {
+                        tracing::warn!(%error, "Could not apply operation log retention");
+                        Instant::now() + RETENTION_RETRY_DELAY
+                    });
+                    continue;
+                }
+                match input.recv_timeout(delay) {
+                    Ok(command) => command,
+                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            } else {
+                let Ok(command) = input.recv() else { break };
+                command
+            };
             match command {
                 Command::Record(line) => self.record(&line),
                 Command::Retain(count, reply) => {
-                    let _ = reply.send(self.apply_retention(count));
+                    retention = count;
+                    let result = self.apply_retention(retention);
+                    retry_at = result
+                        .is_err()
+                        .then(|| Instant::now() + RETENTION_RETRY_DELAY);
+                    let _ = reply.send(result);
                 }
                 Command::Flush(reply) => {
                     let _ = reply.send(());
@@ -245,6 +279,43 @@ fn remove_archive(path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn failed_latest_replacement_preserves_the_previous_archive() {
+        let data = tempfile::tempdir().unwrap();
+        let first = OperationLog::open(data.path(), 1).unwrap();
+        first.record(format_args!("keep this run"));
+        first.flush().await;
+        drop(first);
+        let logs = data.path().join("logs");
+        let archives = || {
+            fs::read_dir(&logs)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with("session-")
+                })
+                .collect::<Vec<_>>()
+        };
+        let previous = archives().pop().unwrap();
+        let previous_contents = fs::read(&previous).unwrap();
+        let latest = logs.join("latest.log");
+        fs::remove_file(&latest).unwrap();
+        fs::create_dir(&latest).unwrap();
+
+        assert!(OperationLog::open(data.path(), 1).is_err());
+        assert_eq!(archives(), std::slice::from_ref(&previous));
+        assert_eq!(fs::read(&previous).unwrap(), previous_contents);
+
+        fs::remove_dir(latest).unwrap();
+        let next = OperationLog::open(data.path(), 1).unwrap();
+        next.flush().await;
+        assert!(!previous.exists());
+        assert_eq!(archives().len(), 1);
+    }
 
     #[tokio::test]
     async fn logs_follow_retention_changes_and_keep_unmanaged_files() {
