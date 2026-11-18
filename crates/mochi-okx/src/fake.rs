@@ -53,6 +53,12 @@ pub struct FakeState {
     pub down: bool,
     /// Applies the next order on the exchange, then loses the response.
     pub lose_next_response: bool,
+    /// Applies the next order before returning OKX's ambiguous timeout code.
+    pub timeout_next_response: bool,
+    pub fail_lookup_after_timeout: bool,
+    /// Fails the first positions read after the next reduce-only order fills.
+    pub fail_positions_after_reduce: bool,
+    fail_next_positions: bool,
     /// Loses the next order before it reaches the exchange.
     pub drop_next_request: bool,
     pub reject_next: Option<Refusal>,
@@ -106,6 +112,10 @@ impl Default for FakeState {
             equity: "1000".into(),
             down: false,
             lose_next_response: false,
+            timeout_next_response: false,
+            fail_lookup_after_timeout: false,
+            fail_positions_after_reduce: false,
+            fail_next_positions: false,
             drop_next_request: false,
             reject_next: None,
             reject_row_next: None,
@@ -342,6 +352,9 @@ impl FakeOkx {
             return Ok(ok(json!(rows)));
         }
         if ends("/account/positions") {
+            if std::mem::take(&mut state.fail_next_positions) {
+                return Ok(answer(json!([]), "50001", "Systems are busy"));
+            }
             let positions: Vec<_> = state
                 .other_positions
                 .iter()
@@ -616,6 +629,19 @@ fn place(state: &mut FakeState, order: Value) -> Result<HttpReply, String> {
         state.resting.push(order);
     } else {
         fill(state, &order);
+        if order.get("reduceOnly") == Some(&json!(true))
+            && std::mem::take(&mut state.fail_positions_after_reduce)
+        {
+            state.fail_next_positions = true;
+        }
+    }
+    if std::mem::take(&mut state.timeout_next_response) {
+        if std::mem::take(&mut state.fail_lookup_after_timeout) {
+            state.lookup_error_code = Some("50001".into());
+        }
+        let mut reply = answer(json!([]), "50004", "API endpoint request timeout");
+        reply.status = 400;
+        return Ok(reply);
     }
     if state.lose_next_response {
         state.lose_next_response = false;

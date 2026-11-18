@@ -224,7 +224,7 @@ export function OrdersTable({ orders, cancellable, exchange, emptyText }: { orde
           <td className="font-semibold">{o.symbol}</td>
           <td className="font-semibold">{orderSide(o.side)}</td>
           <td>{ORDER_LABEL[o.type]}{o.reduceOnly ? <span className="text-ink-3"> · reduce</span> : ''}</td>
-          <td className="num">{o.closePosition && !exchange ? 'Position' : qty(o.quantity)}</td>
+          <td className="num">{exchange ? o.quantity : o.closePosition ? 'Position' : qty(o.quantity)}</td>
           <td className="num">{price(o.avgFillPrice ?? o.price ?? o.triggerPrice, o.symbol)}</td>
           <td title={o.rejectReason ?? undefined}>
             <Badge tone={ORDER_TONE[o.status]}>{o.status}</Badge>

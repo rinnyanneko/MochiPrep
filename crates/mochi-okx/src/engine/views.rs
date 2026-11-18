@@ -12,7 +12,7 @@ use crate::client::{nullish_text, truthy_text, Row};
 
 /// Node's `Number(p.lever) || 1`. Leverage is whole in MochiPrep, so a fractional OKX value is
 /// rounded down, and never below 1.
-fn leverage_of(position: &Row) -> u32 {
+pub(super) fn leverage_of(position: &Row) -> u32 {
     let lever = js_number(position.get("lever"));
     if lever.is_nan() || lever < 1.0 {
         1

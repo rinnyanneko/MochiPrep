@@ -160,6 +160,7 @@ test('separate OKX take profits show the size of each order', async ({ page }) =
     json: [
       { id: 'first-target', quantity: '0.0005', triggerPrice: '78000' },
       { id: 'second-target', quantity: '0.001', triggerPrice: '79000' },
+      { id: 'small-target', quantity: '0.0000003', triggerPrice: '80000' },
     ].map((target) => ({
       ...target,
       symbol: 'BTCUSDT',
@@ -178,8 +179,9 @@ test('separate OKX take profits show the size of each order', async ({ page }) =
   await page.getByRole('button', { name: 'Trading', exact: true }).click();
   await page.getByLabel('Paper account').selectOption({ label: 'Demo terminal (OKX demo)' });
   await expect(page.getByRole('heading', { name: 'OKX Trading' })).toBeVisible();
-  await page.getByRole('tab', { name: 'Pending orders (2)' }).click();
+  await page.getByRole('tab', { name: 'Pending orders (3)' }).click();
   const table = page.getByRole('table');
   await expect(table.getByRole('cell', { name: '0.0005', exact: true })).toBeVisible();
   await expect(table.getByRole('cell', { name: '0.001', exact: true })).toBeVisible();
+  await expect(table.getByRole('cell', { name: '0.0000003', exact: true })).toBeVisible();
 });

@@ -556,10 +556,10 @@ impl OkxClient {
             OkxError::Unknown("OKX acknowledged the order without a result row".into())
         })?;
         if row.get("sCode") != Some(&json!("0")) {
-            return Err(OkxError::Rejection {
-                code: nullish_text(row.get("sCode")).unwrap_or_else(|| "order".into()),
-                message: nullish_text(row.get("sMsg")).unwrap_or_else(|| "Order refused".into()),
-            });
+            return Err(exchange_error(
+                nullish_text(row.get("sCode")).unwrap_or_else(|| "order".into()),
+                nullish_text(row.get("sMsg")).unwrap_or_else(|| "Order refused".into()),
+            ));
         }
         Ok(nullish_text(row.get("ordId")).unwrap_or_default())
     }
@@ -582,11 +582,10 @@ impl OkxClient {
             OkxError::Unknown("OKX acknowledged the algo order without a result row".into())
         })?;
         if row.get("sCode") != Some(&json!("0")) {
-            return Err(OkxError::Rejection {
-                code: nullish_text(row.get("sCode")).unwrap_or_else(|| "algo".into()),
-                message: nullish_text(row.get("sMsg"))
-                    .unwrap_or_else(|| "Algo order refused".into()),
-            });
+            return Err(exchange_error(
+                nullish_text(row.get("sCode")).unwrap_or_else(|| "algo".into()),
+                nullish_text(row.get("sMsg")).unwrap_or_else(|| "Algo order refused".into()),
+            ));
         }
         Ok(nullish_text(row.get("algoId")).unwrap_or_default())
     }
@@ -691,14 +690,27 @@ fn read_answer(reply: HttpReply) -> Result<Vec<Value>, OkxError> {
         .and_then(Value::as_array)
         .and_then(|data| data.first());
     let row_field = |key: &str| row.and_then(|row| truthy_text(row.get(key)));
-    Err(OkxError::Rejection {
-        code: row_field("sCode")
+    let code = if json.get("code") == Some(&json!("50004")) {
+        "50004".into()
+    } else {
+        row_field("sCode")
             .or_else(|| truthy_text(json.get("code")))
-            .unwrap_or_else(|| status.to_string()),
-        message: row_field("sMsg")
+            .unwrap_or_else(|| status.to_string())
+    };
+    Err(exchange_error(
+        code,
+        row_field("sMsg")
             .or_else(|| truthy_text(json.get("msg")))
             .unwrap_or_else(|| "Request refused".into()),
-    })
+    ))
+}
+
+fn exchange_error(code: String, message: String) -> OkxError {
+    if code == "50004" {
+        OkxError::Unknown(format!("OKX {code}: {message}"))
+    } else {
+        OkxError::Rejection { code, message }
+    }
 }
 
 /// A JS value as `String(value)`, when it is one OKX could send as a field.

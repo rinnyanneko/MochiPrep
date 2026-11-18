@@ -36,6 +36,12 @@ pub(super) struct PositionSnapshot {
 }
 
 impl PositionSnapshot {
+    pub(super) fn forget(&mut self, inst_id: &str) {
+        self.open
+            .retain(|row| row.get("instId").and_then(Value::as_str) != Some(inst_id));
+        self.held.remove(inst_id);
+    }
+
     pub(super) fn new(rows: Vec<Row>) -> Result<Self, EngineError> {
         let mut open = Vec::new();
         let mut held = HashMap::new();

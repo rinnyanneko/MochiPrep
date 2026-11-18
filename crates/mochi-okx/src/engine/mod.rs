@@ -300,6 +300,17 @@ struct Prepared {
     equity: Vec<EquityPoint>,
 }
 
+impl Prepared {
+    fn take_duplicate(&mut self) -> Option<OrderResult> {
+        let (order, fills) = self.prior.take()?;
+        Some(OrderResult {
+            order,
+            fills,
+            duplicate: true,
+        })
+    }
+}
+
 impl OkxEngine {
     pub fn new(deps: OkxEngineDeps) -> Arc<Self> {
         Arc::new(OkxEngine {
@@ -444,8 +455,15 @@ impl OkxEngine {
         self: &Arc<Self>,
         request: OrderRequest,
     ) -> Result<OrderResult, EngineError> {
-        self.queued(move |engine| Box::pin(async move { engine.submit(request).await }))
-            .await
+        self.queued(move |engine| {
+            Box::pin(async move {
+                let prepared = engine
+                    .prepare(&request.account_id, &request.client_order_id)
+                    .await?;
+                engine.submit(request, None, prepared).await
+            })
+        })
+        .await
     }
 
     /// Reduce-only market close of a fraction. Works even when disarmed: exits must always be
@@ -465,10 +483,14 @@ impl OkxEngine {
         );
         self.queued(move |engine| {
             Box::pin(async move {
-                let request = engine
+                let mut prepared = engine.prepare(&account_id, &client_order_id).await?;
+                if let Some(prior) = prepared.take_duplicate() {
+                    return Ok(prior);
+                }
+                let (request, position) = engine
                     .close_request(account_id, symbol, fraction, client_order_id)
                     .await?;
-                engine.submit(request).await
+                engine.submit(request, Some(position), prepared).await
             })
         })
         .await
@@ -480,42 +502,48 @@ impl OkxEngine {
         symbol: String,
         fraction: f64,
         client_order_id: String,
-    ) -> Result<OrderRequest, EngineError> {
-        let position = self
-            .positions()
-            .into_iter()
-            .find(|p| p.position.symbol == symbol)
-            .ok_or_else(|| EngineError::message(format!("No open {symbol} position")))?;
-        let position = position.position;
-        let held = dec(&position.quantity)?;
-        let quantity = if fraction >= 1.0 {
-            held
+    ) -> Result<(OrderRequest, (PositionSide, Dec)), EngineError> {
+        let registry = self.registry().await?;
+        let spec = registry.get(&symbol)?;
+        // The cached size can predate a fill or an unanswered reduce-only order.
+        let positions = self.deps.client.get_positions().await?;
+        let (position, signed) =
+            protection::isolated_net_position(&positions, &to_inst_id(&symbol))
+                .ok_or_else(|| EngineError::message(format!("No open {symbol} position")))?;
+        let (side, contracts) = if signed.is_negative() {
+            (PositionSide::Short, signed.neg())
         } else {
-            let registry = self.registry().await?;
-            let step = dec(&registry.get(&symbol)?.quantity_step)?;
+            (PositionSide::Long, signed)
+        };
+        let held = contracts.mul(&dec(&spec.venue_contract_value)?);
+        let quantity = if fraction >= 1.0 {
+            held.clone()
+        } else {
+            let step = dec(&spec.quantity_step)?;
             held.mul(&Dec::from_js_number(fraction))
                 .floor_to_step(&step)
                 .map_err(|_| EngineError::message("Invalid quantity step"))?
         };
-        Ok(OrderRequest {
+        let request = OrderRequest {
             account_id,
             client_order_id,
             symbol,
-            side: match position.side {
+            side: match side {
                 PositionSide::Long => OrderSide::Sell,
                 PositionSide::Short => OrderSide::Buy,
             },
             order_type: EntryOrderType::Market,
             quantity: quantity.to_fixed(),
             price: None,
-            leverage: position.leverage,
+            leverage: views::leverage_of(position),
             reduce_only: Some(true),
             stop_loss: None,
             take_profit: None,
             trailing_stop: None,
             agent_id: None,
             decision_id: None,
-        })
+        };
+        Ok((request, (side, held)))
     }
 
     pub async fn cancel_order(self: &Arc<Self>, order_id: &str) -> Result<(), EngineError> {
@@ -590,37 +618,34 @@ impl OkxEngine {
         .await
     }
 
-    async fn submit(&self, request: OrderRequest) -> Result<OrderResult, EngineError> {
-        let prepared = self
-            .prepare(&request.account_id, &request.client_order_id)
-            .await?;
-        if let Some((order, fills)) = prepared.prior {
-            return Ok(OrderResult {
-                order,
-                fills,
-                duplicate: true,
-            });
+    async fn submit(
+        &self,
+        request: OrderRequest,
+        fresh_position: Option<(PositionSide, Dec)>,
+        mut prepared: Prepared,
+    ) -> Result<OrderResult, EngineError> {
+        if let Some(prior) = prepared.take_duplicate() {
+            return Ok(prior);
         }
         let registry = &prepared.registry;
         let mut order = self.build_order(&request);
         align_to_tick(&mut order, registry)?;
-        let position = self
-            .positions()
-            .into_iter()
-            .find(|p| p.position.symbol == request.symbol);
+        let position = match fresh_position {
+            Some(position) => Some(position),
+            None => self
+                .positions()
+                .into_iter()
+                .find(|p| p.position.symbol == request.symbol)
+                .map(|p| dec(&p.position.quantity).map(|qty| (p.position.side, qty)))
+                .transpose()?,
+        };
         if order.reduce_only {
-            if let Some(position) = &position {
-                order.quantity = dec(&order.quantity)?
-                    .min(&dec(&position.position.quantity)?)
-                    .to_fixed();
+            if let Some((_, held)) = &position {
+                order.quantity = dec(&order.quantity)?.min(held).to_fixed();
             }
         }
 
-        let refusal = self.pre_trade_refusal(
-            &order,
-            position.as_ref().map(|p| p.position.side),
-            &prepared,
-        )?;
+        let refusal = self.pre_trade_refusal(&order, position.map(|(side, _)| side), &prepared)?;
         let contracts = to_contracts(&order, registry)?;
         if refusal.is_some() || contracts.lte(&zero()) {
             let reason = refusal.unwrap_or_else(|| "INVALID_QUANTITY: below one lot".into());

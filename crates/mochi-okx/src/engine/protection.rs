@@ -229,71 +229,128 @@ pub(super) fn last_trade_id(row: &Row) -> Option<u64> {
         .filter(|id| *id > 0)
 }
 
-/// Prove that the earlier entry still belongs to the current net position. A bounded
-/// response is accepted only when it contains the entire recent history for this instrument.
-fn additive_fills(
-    rows: &[Row],
-    first_trade: u64,
-    last_trade: u64,
+fn fill_time(row: &Row) -> Option<i64> {
+    row.get("fillTime")?
+        .as_str()?
+        .parse()
+        .ok()
+        .filter(|at| *at > 0)
+}
+
+type ReachedExits = HashMap<String, String>;
+
+fn remember_reached_exit(exits: &mut ReachedExits, row: &Order) {
+    if row.order_type != OrderType::Market
+        || !row.reduce_only
+        || row.trigger_price.is_none()
+        || !matches!(row.status, OrderStatus::Filled | OrderStatus::Canceled)
+        || !dec(&row.filled_quantity).is_ok_and(|size| size.gt(&super::zero()))
+    {
+        return;
+    }
+    if let Some((parent, exchange_id)) =
+        deferred_parent_id(row, Leg::Tp).zip(row.exchange_order_id.as_ref())
+    {
+        exits.insert(exchange_id.clone(), parent.to_owned());
+    }
+}
+
+struct PositionHistory<'a> {
+    fills: &'a [Row],
+    trade: u64,
     side: PositionSide,
-) -> Option<bool> {
-    if rows.len() >= RECENT_FILLS_LIMIT {
-        return None;
-    }
-    let time = |row: &Row| {
-        row.get("fillTime")
-            .and_then(Value::as_str)
-            .and_then(|time| time.parse::<i64>().ok())
-            .filter(|time| *time > 0)
-    };
-    let trade_time = |id| {
-        rows.iter()
-            .find(|row| last_trade_id(row) == Some(id))
-            .and_then(time)
-    };
-    let (first, last) = trade_time(first_trade).zip(trade_time(last_trade))?;
-    if first > last {
-        return None;
-    }
-    let open_type = match side {
-        PositionSide::Long => "3",
-        PositionSide::Short => "4",
-    };
-    for row in rows {
-        let at = time(row)?;
-        // Ordinary trade IDs order fills within one millisecond. Special IDs such as negative
-        // liquidation and ADL IDs cannot establish that a fill was outside the interval.
-        let outside = last_trade_id(row)
-            .is_some_and(|id| (at == first && id < first_trade) || (at == last && id > last_trade));
-        if at < first || at > last || outside {
-            continue;
+    contracts: &'a Dec,
+    reached_exits: &'a ReachedExits,
+}
+
+impl PositionHistory<'_> {
+    fn contains_entry_fill(&self, first_trade: u64, parent: &str) -> Option<bool> {
+        let trade_time = |id| {
+            self.fills
+                .iter()
+                .find(|row| last_trade_id(row) == Some(id))
+                .and_then(fill_time)
+        };
+        let (first, last) = trade_time(first_trade).zip(trade_time(self.trade))?;
+        if first > last {
+            return None;
         }
-        if row.get("posSide").and_then(Value::as_str) != Some("net")
-            || row.get("subType").and_then(Value::as_str) != Some(open_type)
-        {
-            return Some(false);
+        let (open_type, close_type) = match self.side {
+            PositionSide::Long => ("3", "5"),
+            PositionSide::Short => ("4", "6"),
+        };
+        let mut changes = Vec::new();
+        let mut has_sibling_exit = false;
+        for row in self.fills {
+            let at = fill_time(row)?;
+            let trade = last_trade_id(row);
+            // Negative liquidation and ADL IDs cannot order fills within a millisecond.
+            if at < first
+                || at > last
+                || trade.is_some_and(|id| {
+                    (at == first && id < first_trade) || (at == last && id > self.trade)
+                })
+            {
+                continue;
+            }
+            if row.get("posSide").and_then(Value::as_str) != Some("net") {
+                return Some(false);
+            }
+            let opening = row.get("subType").and_then(Value::as_str) == Some(open_type);
+            if !opening {
+                let sibling = row
+                    .get("ordId")
+                    .and_then(Value::as_str)
+                    .and_then(|id| self.reached_exits.get(id))
+                    .is_some_and(|origin| origin != parent);
+                if !sibling || row.get("subType").and_then(Value::as_str) != Some(close_type) {
+                    return Some(false);
+                }
+                has_sibling_exit = true;
+            }
+            changes.push((trade?, row, opening));
         }
+        if has_sibling_exit {
+            // A confirmed exit for another entry may reduce its own allocation. Walk back
+            // from the observed size to rule out a fully closed and later reopened position.
+            changes.sort_unstable_by_key(|(trade, _, _)| *trade);
+            let mut contracts = self.contracts.clone();
+            for (_, row, opening) in changes.into_iter().rev() {
+                if !contracts.gt(&super::zero()) {
+                    return Some(false);
+                }
+                let size = dec(row.get("fillSz")?.as_str()?).ok()?;
+                if !size.gt(&super::zero()) {
+                    return None;
+                }
+                contracts = if opening {
+                    contracts.sub(&size)
+                } else {
+                    contracts.add(&size)
+                };
+            }
+            return Some(!contracts.is_negative());
+        }
+        Some(true)
     }
-    Some(true)
 }
 
 /// Count only the parent's fills that still belong to the observed position. The order's
 /// cumulative size also includes executions that may have been closed before a later fill.
 fn proven_entry_contracts(
-    fills: &[Row],
+    history: &PositionHistory<'_>,
     order_id: &str,
+    parent_id: &str,
     entry_trade: u64,
-    position_trade: u64,
-    side: PositionSide,
     expected: &Dec,
 ) -> Option<Dec> {
-    if fills.len() >= RECENT_FILLS_LIMIT {
+    if history.fills.len() >= RECENT_FILLS_LIMIT {
         return None;
     }
     let mut total = super::zero();
     let mut remaining = super::zero();
     let mut trades = HashSet::new();
-    for fill in fills {
+    for fill in history.fills {
         if fill.get("ordId").and_then(Value::as_str) != Some(order_id) {
             continue;
         }
@@ -306,14 +363,17 @@ fn proven_entry_contracts(
             return None;
         }
         total = total.add(&size);
-        if additive_fills(fills, trade, position_trade, side)? {
+        if history.contains_entry_fill(trade, parent_id)? {
             remaining = remaining.add(&size);
         }
     }
     (trades.contains(&entry_trade) && total.eq_value(expected)).then_some(remaining)
 }
 
-fn isolated_net_position<'a>(positions: &'a [Row], inst_id: &str) -> Option<(&'a Row, Dec)> {
+pub(super) fn isolated_net_position<'a>(
+    positions: &'a [Row],
+    inst_id: &str,
+) -> Option<(&'a Row, Dec)> {
     positions.iter().find_map(|position| {
         if position.get("instId").and_then(Value::as_str) != Some(inst_id)
             || !isolated_net(position)
@@ -1127,6 +1187,7 @@ impl OkxEngine {
         row: &mut Order,
         registry: &Registry,
         snapshot: &mut PositionSnapshot,
+        reached_exits: &ReachedExits,
     ) -> Result<(), EngineError> {
         let leg =
             leg_of(row).ok_or_else(|| EngineError::message("Invalid deferred protection leg"))?;
@@ -1270,12 +1331,23 @@ impl OkxEngine {
                     .await;
             };
             let fills = self.deps.client.recent_fills(&inst_id).await?;
-            let filled = match proven_entry_contracts(
-                &fills,
-                order_id,
-                entry_trade,
-                position_trade,
+            let observed_contracts = if short {
+                signed_size.neg()
+            } else {
+                signed_size.clone()
+            };
+            let history = PositionHistory {
+                fills: &fills,
+                trade: position_trade,
                 side,
+                contracts: &observed_contracts,
+                reached_exits,
+            };
+            let filled = match proven_entry_contracts(
+                &history,
+                order_id,
+                &parent.id,
+                entry_trade,
                 &expected,
             ) {
                 Some(quantity) if quantity.gt(&super::zero()) => quantity,
@@ -1292,7 +1364,7 @@ impl OkxEngine {
             };
             *snapshot = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
             let same_trade = isolated_net_position(&snapshot.open, &inst_id).filter(|(p, size)| {
-                last_trade_id(p) == Some(position_trade) && size.is_negative() == short
+                last_trade_id(p) == Some(position_trade) && size.eq_value(&signed_size)
             });
             let Some((_, size)) = same_trade else {
                 return Ok(());
@@ -1320,6 +1392,11 @@ impl OkxEngine {
         if leg == Leg::Tp {
             let target = dec(row.trigger_price.as_deref().unwrap_or_default())?;
             if reached(&target) {
+                // OKX timestamps are in milliseconds. Equality doesn't establish
+                // that the ticker price was observed after the last execution.
+                if !fill_time(remote).is_some_and(|at| quote.ts > at) {
+                    return Ok(());
+                }
                 return self
                     .submit_reached_target(row, &inst_id, registry, side, snapshot)
                     .await;
@@ -1408,19 +1485,26 @@ impl OkxEngine {
         let client_id = to_cl_ord_id(&row.client_order_id);
         let body = to_body(row, inst_id, &client_id, contracts.to_fixed());
         match self.send(row, inst_id, &body).await {
-            Ok(()) => {}
             Err(error @ EngineError::Okx(OkxError::Rejection { .. })) => {
                 row.status = OrderStatus::Rejected;
                 row.reject_reason = Some(error.to_string());
                 return self.save(row.clone()).await;
             }
-            Err(error) => {
-                row.reject_reason = Some(format!("Awaiting confirmation: {error}"));
-                self.save(row.clone()).await?;
+            result => {
+                // An unanswered market order may already have changed the position.
+                snapshot.forget(inst_id);
+                self.state()
+                    .positions
+                    .retain(|p| p.position.symbol != row.symbol);
+                if let Err(error) = result {
+                    row.reject_reason = Some(format!("Awaiting confirmation: {error}"));
+                    self.save(row.clone()).await?;
+                }
             }
         }
+        self.sync_order(row, registry).await?;
         *snapshot = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
-        self.sync_order(row, registry).await
+        Ok(())
     }
 
     /// Called only for a row absent from the pending lists, so a refused lookup is read as "not
@@ -1498,6 +1582,10 @@ impl OkxEngine {
         let mut rows: Vec<Order> = open.into_iter().filter(is_leg).collect();
         let open_count = rows.len();
         let open_ids: HashSet<String> = rows.iter().map(|r| r.id.clone()).collect();
+        let mut reached_exits = ReachedExits::new();
+        for row in &recent {
+            remember_reached_exit(&mut reached_exits, row);
+        }
         rows.extend(
             recent
                 .into_iter()
@@ -1564,8 +1652,9 @@ impl OkxEngine {
                 continue;
             }
             if is_deferred(slot) {
-                self.submit_deferred_protection(slot, &registry, snapshot)
+                self.submit_deferred_protection(slot, &registry, snapshot, &reached_exits)
                     .await?;
+                remember_reached_exit(&mut reached_exits, slot);
                 if is_leg(slot) && slot.status == OrderStatus::Open && !is_deferred(slot) {
                     if let Some(remote) = self.lookup_algo(&slot.id).await? {
                         if remote
