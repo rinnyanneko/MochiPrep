@@ -67,6 +67,8 @@ pub struct FakeState {
     /// Orders by clOrdId.
     pub orders: IndexMap<String, Row>,
     pub position: Option<Row>,
+    /// Additional rows returned alongside the position managed by mock order fills.
+    pub other_positions: Vec<Row>,
     /// `account/positions-history` rows, in any order; served newest `uTime` first.
     pub positions_history: Vec<Row>,
     pub execution_history: Vec<Row>,
@@ -120,6 +122,7 @@ impl Default for FakeState {
             placed: Vec::new(),
             orders: IndexMap::new(),
             position: None,
+            other_positions: Vec::new(),
             positions_history: Vec::new(),
             execution_history: Vec::new(),
             history_down: false,
@@ -358,11 +361,12 @@ impl FakeOkx {
             return Ok(ok(json!(rows)));
         }
         if ends("/account/positions") {
-            let positions = match &state.position {
-                Some(position) => json!([position]),
-                None => json!([]),
-            };
-            return Ok(ok(positions));
+            let positions: Vec<_> = state
+                .position
+                .iter()
+                .chain(&state.other_positions)
+                .collect();
+            return Ok(ok(json!(positions)));
         }
         if ends("/account/set-leverage") {
             state.leverage_calls.push(parse(&body)?);

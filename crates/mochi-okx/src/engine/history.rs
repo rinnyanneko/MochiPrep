@@ -29,8 +29,8 @@ pub struct OpenPositionResult {
     pub updated_at: Option<i64>,
     pub opening_side: Option<String>,
     /// OKX's `realizedPnl` on the open position: fees, funding and partial closes so far.
-    pub realized_pnl: String,
-    pub unrealized_pnl: String,
+    pub realized_pnl: Option<String>,
+    pub unrealized_pnl: Option<String>,
 }
 
 /// Clears the in-flight flag however a pass ends.
@@ -377,7 +377,7 @@ pub(super) fn open_result_of(
         } else {
             None
         },
-        realized_pnl: amount("realizedPnl")?,
-        unrealized_pnl: amount("upl")?,
+        realized_pnl: amount("realizedPnl").ok(),
+        unrealized_pnl: amount("upl").ok(),
     }))
 }

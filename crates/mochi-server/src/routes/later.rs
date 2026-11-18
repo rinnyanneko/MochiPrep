@@ -297,7 +297,7 @@ fn exchange_result(
         opened_at: i64,
         until: i64,
         opening_side: Option<&'a str>,
-        realized: &'a str,
+        realized: Option<&'a str>,
         unrealized: Option<&'a str>,
         completed: bool,
     }
@@ -313,8 +313,8 @@ fn exchange_result(
             opened_at: record.opened_at,
             until: record.closed_at,
             opening_side: record.opening_side.as_deref(),
-            realized: &record.realized_pnl,
-            unrealized: None,
+            realized: Some(&record.realized_pnl),
+            unrealized: Some("0"),
             completed: matches!(record.close_type.as_str(), "2" | "3" | "6"),
         })
         .collect();
@@ -323,8 +323,8 @@ fn exchange_result(
             opened_at: position.opened_at?,
             until: position.updated_at?,
             opening_side: Some(position.opening_side.as_deref()?),
-            realized: &position.realized_pnl,
-            unrealized: Some(&position.unrealized_pnl),
+            realized: position.realized_pnl.as_deref(),
+            unrealized: position.unrealized_pnl.as_deref(),
             completed: false,
         })
     }));
@@ -332,6 +332,7 @@ fn exchange_result(
 
     let zero = || Dec::parse("0").expect("0 is a decimal");
     let (mut realized, mut unrealized) = (zero(), zero());
+    let (mut realized_available, mut unrealized_available) = (true, true);
     let mut net = Vec::new();
     let mut prior_end = 0_i64;
     for (index, position) in lifetimes.iter().enumerate() {
@@ -365,19 +366,27 @@ fn exchange_result(
         {
             return shared_row();
         }
-        let value = decimal(position.realized)?;
         if let Some(open_pnl) = position.unrealized {
             unrealized = unrealized.add(&decimal(open_pnl)?);
-        } else if position.completed {
+        } else {
+            unrealized_available = false;
+        }
+        let Some(realized_pnl) = position.realized else {
+            realized_available = false;
+            continue;
+        };
+        let value = decimal(realized_pnl)?;
+        if position.completed {
             net.push(to_number(&value));
         }
         realized = realized.add(&value);
     }
     Ok(RowResult {
         attribution: Attribution::Agent,
-        pnl: Some(realized.add(&unrealized).to_fixed()),
+        pnl: (realized_available && unrealized_available)
+            .then(|| realized.add(&unrealized).to_fixed()),
         return_pct: None,
-        realized_pnl: Some(realized.to_fixed()),
+        realized_pnl: realized_available.then(|| realized.to_fixed()),
         max_drawdown_pct: None,
         win_rate_pct: win_rate_pct(&net).map(js_number_raw),
         trade_count: net.len(),

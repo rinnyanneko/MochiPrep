@@ -1125,8 +1125,63 @@ async fn open_results_carry_what_okx_reports_for_the_open_position() {
     assert_eq!(open[0].symbol, "BTCUSDT");
     assert_eq!(open[0].pos_id, "77");
     assert_eq!(open[0].opened_at, Some(1_700_000_000_000));
-    assert_eq!(open[0].realized_pnl, "-0.3");
-    assert_eq!(open[0].unrealized_pnl, "4.2");
+    assert_eq!(open[0].realized_pnl.as_deref(), Some("-0.3"));
+    assert_eq!(open[0].unrealized_pnl.as_deref(), Some("4.2"));
+}
+
+#[tokio::test]
+async fn malformed_arena_pnl_does_not_hide_open_positions_or_other_results() {
+    let h = connect_default().await;
+    let btc = json!({
+        "instId": "BTC-USDT-SWAP", "pos": "1", "avgPx": "75000", "markPx": "75000",
+        "upl": "4.2", "realizedPnl": "invalid", "posId": "77",
+        "cTime": "1700000000000", "uTime": "1700000000010",
+        "lever": "3", "mgnMode": "isolated", "posSide": "net",
+    })
+    .as_object()
+    .unwrap()
+    .clone();
+    let mut eth = btc.clone();
+    eth.insert("instId".into(), json!("ETH-USDT-SWAP"));
+    eth.insert("posId".into(), json!("78"));
+    eth.insert("realizedPnl".into(), json!("0.5"));
+    {
+        let mut okx = h.okx.state();
+        okx.position = Some(btc);
+        okx.other_positions.push(eth);
+    }
+    h.engine.sync().await.unwrap();
+    let positions = h.engine.positions();
+    assert_eq!(positions.len(), 2);
+    assert!(positions.iter().any(|p| p.position.symbol == "BTCUSDT"));
+    let results = h.engine.open_results();
+    let btc = results.iter().find(|p| p.symbol == "BTCUSDT").unwrap();
+    assert_eq!(btc.pos_id, "77");
+    assert_eq!(btc.realized_pnl, None);
+    let eth = results.iter().find(|p| p.symbol == "ETHUSDT").unwrap();
+    assert_eq!(eth.realized_pnl.as_deref(), Some("0.5"));
+    assert!(h.engine.healthy());
+
+    for (upl, expected) in [("invalid", None), ("6", Some("6"))] {
+        {
+            let mut state = h.okx.state();
+            let btc = state.position.as_mut().unwrap();
+            btc.insert("pos".into(), json!("2"));
+            btc.insert("upl".into(), json!(upl));
+            btc.insert("realizedPnl".into(), json!("0.75"));
+        }
+        h.engine.sync().await.unwrap();
+        let current = h.engine.positions();
+        let btc = current
+            .iter()
+            .find(|p| p.position.symbol == "BTCUSDT")
+            .unwrap();
+        assert_eq!(btc.position.quantity, "0.02");
+        let results = h.engine.open_results();
+        let btc = results.iter().find(|p| p.symbol == "BTCUSDT").unwrap();
+        assert_eq!(btc.realized_pnl.as_deref(), Some("0.75"));
+        assert_eq!(btc.unrealized_pnl.as_deref(), expected);
+    }
 }
 
 #[tokio::test]
