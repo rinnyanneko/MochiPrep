@@ -2320,6 +2320,147 @@ async fn removing_a_deferred_target_cannot_execute_it_during_an_unknown_stop_rep
     assert_eq!(target.reject_reason.as_deref(), Some("Removed"));
 }
 
+async fn partial_target() -> (Harness, Order, Row, Row) {
+    let (h, entry) = resting_target().await;
+    let (filled_order, full_position) = {
+        let mut okx = h.okx.state();
+        okx.fill_resting();
+        let order = okx
+            .orders
+            .get_mut(&mochi_okx::to_cl_ord_id(&entry.client_order_id))
+            .unwrap();
+        let filled = order.clone();
+        order.insert("state".into(), json!("partially_filled"));
+        order.insert("accFillSz".into(), json!("0.05"));
+        let position = okx.position.as_mut().unwrap();
+        let full = position.clone();
+        position.insert("pos".into(), json!("0.05"));
+        (filled, full)
+    };
+    h.sync().await;
+    assert_eq!(h.order_row(&entry.id).status, OrderStatus::Open);
+    assert_eq!(h.view().position.quantity, "0.0005");
+    (h, entry, filled_order, full_position)
+}
+
+#[tokio::test]
+async fn a_partial_entry_cannot_submit_a_removed_target_when_it_finishes_during_the_edit() {
+    let (h, entry, filled_order, full_position) = partial_target().await;
+    h.advance(2);
+    *h.prices.lock().unwrap() = ("78099".into(), "78101".into(), "78100".into());
+    let hold = h.okx.hold_next("POST", "/trade/order-algo");
+    let engine = h.engine.clone();
+    let edit = tokio::spawn(async move {
+        engine
+            .set_protection(ACCOUNT, "BTCUSDT", stop("74500"), None, None)
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), hold.reached())
+        .await
+        .unwrap();
+    {
+        let mut okx = h.okx.state();
+        okx.orders.insert(
+            mochi_okx::to_cl_ord_id(&entry.client_order_id),
+            filled_order,
+        );
+        okx.position = Some(full_position);
+        okx.lose_next_algo_response = true;
+    }
+    hold.release();
+    edit.await.unwrap().unwrap();
+    assert_eq!(h.order_row(&entry.id).status, OrderStatus::Filled);
+    assert_eq!(h.okx.state().placed.len(), 1);
+    assert_eq!(h.view().position.quantity, "0.001");
+    let target = h.order_row(&format!("{}:deferred:tp", entry.id));
+    assert_eq!(target.status, OrderStatus::Canceled);
+    assert_eq!(target.reject_reason.as_deref(), Some("Removed"));
+}
+
+#[tokio::test]
+async fn a_stop_edit_rechecks_position_identity_after_reading_an_entry() {
+    let (h, entry, _, _) = partial_target().await;
+    let hold = h.okx.hold_next("GET", "/trade/order");
+    let engine = h.engine.clone();
+    let edit = tokio::spawn(async move {
+        engine
+            .set_protection(ACCOUNT, "BTCUSDT", stop("74500"), None, None)
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), hold.reached())
+        .await
+        .unwrap();
+    h.okx
+        .state()
+        .position
+        .as_mut()
+        .unwrap()
+        .insert("tradeId".into(), json!("42"));
+    hold.release();
+    let error = edit.await.unwrap().unwrap_err();
+    assert!(error.to_string().contains("position changed"), "{error}");
+    assert!(h.algo_placed().is_empty());
+    assert_eq!(
+        h.order_row(&format!("{}:deferred:tp", entry.id)).status,
+        OrderStatus::Open
+    );
+}
+
+#[tokio::test]
+async fn a_retained_stop_must_still_protect_the_whole_position_before_trailing_is_removed() {
+    for (shrink_stop, raise_liquidation) in [(true, false), (false, true), (false, false)] {
+        let h = Harness::with_position().await;
+        h.set(Protection {
+            trailing_stop: Some(ratio("0.01")),
+            ..stop("74000")
+        })
+        .await
+        .unwrap();
+        let fixed = h
+            .protection_rows()
+            .into_iter()
+            .find(|row| row.order_type == OrderType::StopMarket)
+            .unwrap();
+        {
+            let mut okx = h.okx.state();
+            if shrink_stop {
+                okx.algos
+                    .get_mut(&to_algo_cl_ord_id(&fixed.id))
+                    .unwrap()
+                    .insert("sz".into(), json!("0.05"));
+            }
+            if raise_liquidation {
+                okx.position
+                    .as_mut()
+                    .unwrap()
+                    .insert("liqPx".into(), json!("74200"));
+            }
+        }
+        let placed = h.algo_placed().len();
+        let result = h
+            .set(Protection {
+                take_profit: (shrink_stop || raise_liquidation).then(|| "78000".into()),
+                ..stop("74000")
+            })
+            .await;
+        if shrink_stop || raise_liquidation {
+            let error = result.unwrap_err().to_string();
+            let expected = if shrink_stop {
+                "cover the entire"
+            } else {
+                "before liquidation"
+            };
+            assert!(error.contains(expected), "{error}");
+            assert_eq!(h.algo_placed().len(), placed);
+            assert!(h.canceled().is_empty());
+            assert!(h.engine.protection_of("BTCUSDT").trailing_stop.is_some());
+        } else {
+            assert!(result.unwrap().after.trailing_stop.is_none());
+            assert_eq!(h.canceled().len(), 1);
+        }
+    }
+}
+
 #[tokio::test]
 async fn a_deferred_target_only_sizes_the_parent_fills_from_the_current_position() {
     let (h, entry) = resting_target().await;

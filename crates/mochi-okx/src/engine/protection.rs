@@ -14,9 +14,9 @@ use mochi_core::protection_change::{
 };
 use mochi_decimal::Dec;
 use mochi_domain::{
-    default_live_limits, ExternalProtection, ExternalProtectionKind, Order, OrderSide, OrderStatus,
-    OrderType, PositionSide, PositionView, Protection, RiskSettings, TrailingStopSpec,
-    CANCEL_PENDING_PREFIX,
+    default_live_limits, ExternalProtection, ExternalProtectionKind, InstrumentSpecification,
+    Order, OrderSide, OrderStatus, OrderType, PositionSide, PositionView, Protection, RiskSettings,
+    TrailingStopSpec, CANCEL_PENDING_PREFIX,
 };
 use serde_json::Value;
 
@@ -501,6 +501,35 @@ fn live_trigger(row: &Order, algo: &Row) -> Option<String> {
         Leg::Trail => return None,
     };
     num(algo.get(field)).filter(|price| price != "0")
+}
+
+fn live_algo_matches(algo: &Row, leg: Leg, order: &Order) -> Result<bool, EngineError> {
+    if !algo
+        .get("state")
+        .and_then(Value::as_str)
+        .is_some_and(|state| ALIVE_STATES.contains(&state))
+    {
+        return Ok(false);
+    }
+    let price_matches = |field, expected| {
+        let remote = truthy_text(algo.get(field)).filter(|value| value != "0");
+        same_price(expected, remote.as_deref()).map_err(decimal_error)
+    };
+    match leg {
+        Leg::Sl => price_matches("slTriggerPx", order.trigger_price.as_deref()),
+        Leg::Tp => price_matches("tpTriggerPx", order.trigger_price.as_deref()),
+        Leg::Trail => {
+            let Some(spec) = spec_of(order) else {
+                return Ok(false);
+            };
+            let field = match spec.kind {
+                mochi_domain::TrailingKind::Ratio => "callbackRatio",
+                mochi_domain::TrailingKind::Spread => "callbackSpread",
+            };
+            Ok(price_matches(field, Some(&spec.callback))?
+                && price_matches("activePx", spec.activation_price.as_deref())?)
+        }
+    }
 }
 
 /// What an algo is, for display, built only from its numeric fields.
@@ -1001,30 +1030,15 @@ impl OkxEngine {
             .stop_loss
             .as_deref()
             .filter(|_| changed.contains(&Leg::Sl));
-        if checked.is_some() || new_stop.is_some() {
-            let remote = self.deps.client.get_positions().await?;
-            let (row, side, contracts) =
-                super::select_close(&remote, &symbol, Some(&position.position.id))
-                    .map_err(|_| position_changed())?;
-            let size = dec(&position.position.quantity)?;
-            if !size.eq_value(&contracts.mul(&dec(&spec.venue_contract_value)?)) {
-                return Err(position_changed());
-            }
-            if let Some(stop) = new_stop {
-                let stop = dec(stop)?;
-                let liquidation =
-                    dec(&truthy_text(row.get("liqPx")).unwrap_or_else(|| "0".into()))?;
-                let before_liquidation = match side {
-                    PositionSide::Long => stop.gt(&liquidation),
-                    PositionSide::Short => stop.lt(&liquidation),
-                };
-                if !liquidation.is_zero() && !before_liquidation {
-                    return Err(EngineError::message(
-                        "Stop loss must trigger before liquidation",
-                    ));
-                }
-            }
-        }
+        let retained_stop = if changed.contains(&Leg::Trail)
+            && target.trailing_stop.is_none()
+            && target.stop_loss.is_some()
+            && new_stop.is_none()
+        {
+            Some(old.leg(Leg::Sl).ok_or_else(position_changed)?)
+        } else {
+            None
+        };
         let source = Source {
             account_id,
             symbol: symbol.clone(),
@@ -1034,13 +1048,24 @@ impl OkxEngine {
             agent_id,
             decision_id,
         };
-        // An explicitly removed, unsent target may otherwise execute during the sync
-        // that looks up an unknown placement. Its removal is independent of the
-        // stop replacement; retire the unsent exit before submitting any legs.
-        if !retain.take_profit && target.take_profit.is_none() {
-            self.retire_deferred(&source, vec![(Leg::Tp, REMOVED)], true)
+        // A partially filled entry already belongs to this edit. Remove its unsent
+        // target before an unanswered placement can cause sync to see the final fill.
+        let removed_targets = if !retain.take_profit && target.take_profit.is_none() {
+            self.deferred_to_retire(&source, vec![(Leg::Tp, REMOVED)], true)
+                .await?
+        } else {
+            Vec::new()
+        };
+        // Read the position after the entry lookups, before persisting changes or
+        // submitting an algo based on the previously selected position.
+        if let Some(fixed) = retained_stop {
+            self.check_retained_stop(fixed, &position, &context.registry, &position_changed)
+                .await?;
+        } else if checked.is_some() || new_stop.is_some() || !removed_targets.is_empty() {
+            self.check_protection_position(&position, spec, new_stop, &position_changed)
                 .await?;
         }
+        self.retire_deferred(removed_targets).await?;
 
         // Place new legs before cancelling live algos, so swapping a stop for a
         // trailing stop can never leave the position with neither.
@@ -1106,20 +1131,20 @@ impl OkxEngine {
                 // More than one per-entry order can share a leg. An explicit removal
                 // clears all of them, while a preserved field never reaches this branch.
                 let account = self.deps.account_id.clone();
-                let symbol = symbol.clone();
+                let order_symbol = symbol.clone();
                 let leg = *leg;
                 let closing_side = if position.position.side == PositionSide::Long {
                     OrderSide::Sell
                 } else {
                     OrderSide::Buy
                 };
-                let active = self
+                let active: Vec<Order> = self
                     .rows(move |rows| {
                         Ok(rows
                             .list_open_orders(&account)?
                             .into_iter()
                             .filter(|row| {
-                                row.symbol == symbol
+                                row.symbol == order_symbol
                                     && row.side == closing_side
                                     && leg_of(row) == Some(leg)
                                     && row
@@ -1130,6 +1155,21 @@ impl OkxEngine {
                             .collect())
                     })
                     .await?;
+                if let Some(fixed) = retained_stop
+                    .filter(|_| leg == Leg::Trail && !active.is_empty() && changed.len() > 1)
+                {
+                    // Other edits may have made exchange calls since preflight.
+                    if let Err(error) = self
+                        .check_retained_stop(fixed, &position, &context.registry, &position_changed)
+                        .await
+                    {
+                        let _ = self.sync_now().await;
+                        return Err(EngineError::ProtectionChange {
+                            message: error.to_string(),
+                            after: Box::new(self.protection_of(&symbol)),
+                        });
+                    }
+                }
                 self.cancel_rows(active, Some(REMOVED)).await?;
                 continue;
             }
@@ -1158,7 +1198,8 @@ impl OkxEngine {
         if !retain.take_profit && target.take_profit.is_some() {
             deferred.push((Leg::Tp, REPLACED));
         }
-        self.retire_deferred(&source, deferred, false).await?;
+        let retired = self.deferred_to_retire(&source, deferred, false).await?;
+        self.retire_deferred(retired).await?;
 
         let confirmed = self.sync_now().await.is_ok();
         // Every placement was accepted; if the view could not be refreshed, `after` may still be
@@ -1170,14 +1211,75 @@ impl OkxEngine {
         })
     }
 
-    async fn retire_deferred(
+    async fn check_protection_position(
+        &self,
+        position: &PositionView,
+        spec: &InstrumentSpecification,
+        stop: Option<&str>,
+        changed: &impl Fn() -> EngineError,
+    ) -> Result<Dec, EngineError> {
+        let position = &position.position;
+        let remote = self.deps.client.get_positions().await?;
+        let (row, side, contracts) =
+            super::select_close(&remote, &position.symbol, Some(&position.id))
+                .map_err(|_| changed())?;
+        let size = dec(&position.quantity)?;
+        if !size.eq_value(&contracts.mul(&dec(&spec.venue_contract_value)?)) {
+            return Err(changed());
+        }
+        if let Some(stop) = stop {
+            let stop = dec(stop)?;
+            let liquidation = dec(&truthy_text(row.get("liqPx")).unwrap_or_else(|| "0".into()))?;
+            let before_liquidation = match side {
+                PositionSide::Long => stop.gt(&liquidation),
+                PositionSide::Short => stop.lt(&liquidation),
+            };
+            if !liquidation.is_zero() && !before_liquidation {
+                return Err(EngineError::message(
+                    "Stop loss must trigger before liquidation",
+                ));
+            }
+        }
+        Ok(contracts)
+    }
+
+    async fn check_retained_stop(
+        &self,
+        fixed: &Order,
+        position: &PositionView,
+        registry: &Registry,
+        changed: &impl Fn() -> EngineError,
+    ) -> Result<(), EngineError> {
+        let spec = registry.get(&position.position.symbol)?;
+        let contracts = self
+            .check_protection_position(position, spec, fixed.trigger_price.as_deref(), changed)
+            .await?;
+        // Read size and price together after the position lookup. An unchanged
+        // trigger alone does not establish full coverage.
+        let algo = self.lookup_algo(&fixed.id).await?.ok_or_else(changed)?;
+        if !live_algo_matches(&algo, Leg::Sl, fixed)? {
+            return Err(changed());
+        }
+        let (listed, recorded) = sizes(fixed, &algo, registry);
+        if !listed
+            .zip(recorded)
+            .is_some_and(|(live, local)| live.min(&local).gte(&contracts))
+        {
+            return Err(EngineError::message(
+                "The retained stop loss does not cover the entire OKX position",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn deferred_to_retire(
         &self,
         source: &Source,
         legs: Vec<(Leg, &'static str)>,
         check_exchange: bool,
-    ) -> Result<(), EngineError> {
+    ) -> Result<Vec<(Order, &'static str)>, EngineError> {
         if legs.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let account = source.account_id.clone();
         let symbol = source.symbol.clone();
@@ -1209,10 +1311,11 @@ impl OkxEngine {
                 Ok(candidates)
             })
             .await?;
-        for (mut pending, parent, reason) in candidates {
-            let settled = if check_exchange && parent.status == OrderStatus::Open {
-                // A fill can already be visible at OKX even though its local order
-                // is still open. Leave targets for orders that are genuinely resting.
+        let mut retired = Vec::new();
+        for (pending, parent, reason) in candidates {
+            let retire = if check_exchange && parent.status == OrderStatus::Open {
+                // The current position may already contain some or all of this
+                // order. Truly unfilled entries keep their own future take profit.
                 let remote = self
                     .deps
                     .client
@@ -1221,19 +1324,36 @@ impl OkxEngine {
                         &to_cl_ord_id(&parent.client_order_id),
                     )
                     .await?;
+                let state = remote
+                    .as_ref()
+                    .and_then(|row| row.get("state"))
+                    .and_then(Value::as_str);
+                let filled = remote
+                    .as_ref()
+                    .and_then(|row| truthy_text(row.get("accFillSz")))
+                    .map(|size| dec(&size))
+                    .transpose()?;
                 matches!(
-                    remote
-                        .as_ref()
-                        .and_then(|row| row.get("state"))
-                        .and_then(Value::as_str),
-                    Some("filled" | "canceled" | "mmp_canceled")
-                )
+                    state,
+                    Some("partially_filled" | "filled" | "canceled" | "mmp_canceled")
+                ) || filled.is_some_and(|size| size.gt(&super::zero()))
+                    || dec(&parent.filled_quantity)?.gt(&super::zero())
             } else {
                 parent.status != OrderStatus::Open
             };
-            if settled {
-                self.close_row(&mut pending, reason).await?;
+            if retire {
+                retired.push((pending, reason));
             }
+        }
+        Ok(retired)
+    }
+
+    async fn retire_deferred(
+        &self,
+        retired: Vec<(Order, &'static str)>,
+    ) -> Result<(), EngineError> {
+        for (mut pending, reason) in retired {
+            self.close_row(&mut pending, reason).await?;
         }
         Ok(())
     }
@@ -1762,32 +1882,7 @@ impl OkxEngine {
         let Some(algo) = self.lookup_algo(&order.id).await? else {
             return Ok(false);
         };
-        if !algo
-            .get("state")
-            .and_then(Value::as_str)
-            .is_some_and(|state| ALIVE_STATES.contains(&state))
-        {
-            return Ok(false);
-        }
-        let price_matches = |field, expected| {
-            let remote = truthy_text(algo.get(field)).filter(|value| value != "0");
-            same_price(expected, remote.as_deref()).map_err(decimal_error)
-        };
-        match leg {
-            Leg::Sl => price_matches("slTriggerPx", order.trigger_price.as_deref()),
-            Leg::Tp => price_matches("tpTriggerPx", order.trigger_price.as_deref()),
-            Leg::Trail => {
-                let Some(spec) = spec_of(order) else {
-                    return Ok(false);
-                };
-                let field = match spec.kind {
-                    mochi_domain::TrailingKind::Ratio => "callbackRatio",
-                    mochi_domain::TrailingKind::Spread => "callbackSpread",
-                };
-                Ok(price_matches(field, Some(&spec.callback))?
-                    && price_matches("activePx", spec.activation_price.as_deref())?)
-            }
-        }
+        live_algo_matches(&algo, leg, order)
     }
 
     /// A row OKX lists live: it carries the algoId and no stale reason.
