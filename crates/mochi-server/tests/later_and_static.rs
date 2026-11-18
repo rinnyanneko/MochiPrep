@@ -743,3 +743,77 @@ async fn arena_ignores_cross_margin_boundaries_and_only_counts_full_closes() {
     assert_eq!(c["winRatePct"], 0);
     state.runtime.shutdown().await;
 }
+
+/// Local fills alone, exits, and ambiguous exchange boundaries cannot establish ownership.
+#[tokio::test]
+async fn arena_requires_unambiguous_opening_execution_evidence() {
+    for (change, pnl, trades, win_rate) in [
+        (
+            "DELETE FROM exchange_order_executions",
+            "0",
+            0,
+            Value::Null,
+        ),
+        (
+            "UPDATE orders SET reduce_only=1 WHERE agent_id='agent_c'",
+            "0",
+            0,
+            Value::Null,
+        ),
+        (
+            "UPDATE orders SET side='SELL' WHERE agent_id='agent_c'",
+            "0",
+            0,
+            Value::Null,
+        ),
+        (
+            "UPDATE agents SET created_at=8 WHERE id='agent_c'",
+            "-0.5",
+            1,
+            json!(0),
+        ),
+        (
+            "UPDATE exchange_position_history SET closed_at=8 WHERE opened_at=6",
+            "1.45",
+            1,
+            json!(100),
+        ),
+        (
+            "UPDATE exchange_position_history SET opening_side=NULL WHERE opened_at=6",
+            "-0.5",
+            1,
+            json!(0),
+        ),
+        (
+            "UPDATE exchange_position_history SET realized_pnl='0' WHERE opened_at IN (6,8)",
+            "0",
+            2,
+            json!(0),
+        ),
+        (
+            "UPDATE exchange_position_history SET realized_pnl='0.000000000000000001' WHERE opened_at=6;\n             UPDATE exchange_position_history SET realized_pnl='-0.000000000000000002' WHERE opened_at=8",
+            "-0.000000000000000001",
+            2,
+            json!(50),
+        ),
+    ] {
+        let state = exchange_arena_fixture().await;
+        sql(&state, change).await;
+        let arena = get(&state, "/api/arena").await;
+        let row = arena
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["agentId"] == "agent_c")
+            .unwrap();
+        assert_eq!(row["attribution"], "AGENT", "{change}");
+        assert_eq!(row["pnl"], pnl, "{change}");
+        assert_eq!(row["realizedPnl"], pnl, "{change}");
+        assert_eq!(row["tradeCount"], trades, "{change}");
+        assert_eq!(row["winRatePct"], win_rate, "{change}");
+        assert_eq!(row["returnPct"], Value::Null, "{change}");
+        assert_eq!(row["maxDrawdownPct"], Value::Null, "{change}");
+        assert_eq!(row["curve"], json!([]), "{change}");
+        state.runtime.shutdown().await;
+    }
+}

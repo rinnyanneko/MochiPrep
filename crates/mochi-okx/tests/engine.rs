@@ -1162,3 +1162,59 @@ async fn a_sync_leaves_the_history_to_its_own_pass() {
     h.engine.sync().await.unwrap();
     assert_eq!(history_calls(&h), before);
 }
+
+#[tokio::test]
+async fn malformed_position_history_is_atomic_and_can_be_retried_immediately() {
+    for (field, value) in [
+        ("posId", json!("")),
+        ("instId", json!("")),
+        ("cTime", json!("0")),
+        ("cTime", json!("1.5")),
+        ("uTime", Value::Null),
+        ("realizedPnl", json!("invalid")),
+    ] {
+        let h = connect_default().await;
+        let good = closed("good", "BTC-USDT-SWAP", 1000, 3000, "1.25");
+        let mut bad = closed("bad", "BTC-USDT-SWAP", 1000, 2000, "-2");
+        bad.insert(field.into(), value.clone());
+        h.okx.state().positions_history = vec![good.clone(), bad];
+        assert!(h.engine.sync_position_history().await.is_err(), "{field}={value}");
+        assert!(recorded(&h, "BTC-USDT-SWAP").is_empty(), "{field}={value}");
+
+        // A failed validation must release the running flag and leave the throttle unset.
+        h.okx.state().positions_history = vec![good];
+        h.engine.sync_position_history().await.unwrap();
+        let records = recorded(&h, "BTC-USDT-SWAP");
+        assert_eq!(records.len(), 1, "{field}={value}");
+        assert_eq!(records[0].pos_id, "good");
+        assert_eq!(records[0].realized_pnl, "1.25");
+    }
+}
+
+#[tokio::test]
+async fn history_only_attributes_verified_isolated_net_directions() {
+    let h = connect_default().await;
+    for (index, (mode, side, direction, expected)) in [
+        ("isolated", "net", "long", Some("BUY")),
+        ("isolated", "net", "short", Some("SELL")),
+        ("cross", "net", "long", None),
+        ("isolated", "long", "long", None),
+        ("isolated", "net", "unknown", None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = format!("direction_{index}");
+        let mut record = closed(&id, "BTC-USDT-SWAP", 1000, 2000, "-0.125");
+        record.insert("mgnMode".into(), json!(mode));
+        record.insert("posSide".into(), json!(side));
+        record.insert("direction".into(), json!(direction));
+        h.okx.state().positions_history = vec![record];
+        h.clock.fetch_add(60_000, Ordering::SeqCst);
+        h.engine.sync_position_history().await.unwrap();
+        let records = recorded(&h, "BTC-USDT-SWAP");
+        let saved = records.iter().find(|r| r.pos_id == id).unwrap();
+        assert_eq!(saved.opening_side.as_deref(), expected, "{mode}/{side}/{direction}");
+        assert_eq!(saved.realized_pnl, "-0.125");
+    }
+}

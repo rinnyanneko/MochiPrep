@@ -23,4 +23,41 @@ describe('compareArenaRows', () => {
       'shared',
     ]);
   });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'treats a non-finite return (%s) as unavailable and ranks by P&L',
+    (returnPct) => {
+      const rows = [row('unknown', returnPct, null), row('profit', returnPct, '12'), row('paper', -99, '-999')];
+      expect(rows.sort(compareArenaRows).map((r) => r.name)).toEqual(['paper', 'profit', 'unknown']);
+    },
+  );
+
+  it.each(['NaN', 'Infinity', '-Infinity', 'not a decimal', null])(
+    'places unavailable P&L (%s) after a known loss in either argument order',
+    (pnl) => {
+      const unavailable = row('unavailable', null, pnl);
+      const loss = row('loss', null, '-100');
+      expect(compareArenaRows(unavailable, loss)).toBeGreaterThan(0);
+      expect(compareArenaRows(loss, unavailable)).toBeLessThan(0);
+      expect(compareArenaRows(unavailable, row('shared', null, null))).toBe(0);
+    },
+  );
+
+  it('orders decimal profits numerically, including zero and small losses', () => {
+    const rows = [row('two', null, '2'), row('loss', null, '-0.0001'), row('ten', null, '10'), row('zero', null, '0')];
+    expect(rows.sort(compareArenaRows).map((r) => r.name)).toEqual(['ten', 'two', 'zero', 'loss']);
+  });
+
+  it('preserves creation order for equal returns regardless of P&L', () => {
+    const rows = [row('first', 2, '-100'), row('second', 2, '100'), row('third', 2, null)];
+    expect([...rows].sort(compareArenaRows)).toEqual(rows);
+    expect(compareArenaRows(rows[0], rows[1])).toBe(0);
+  });
+
+  it('preserves creation order for equal decimal P&L and unavailable metrics', () => {
+    const rows = [row('first', null, '1.00'), row('second', null, '1'), row('third', null, null), row('fourth', null, null)];
+    expect([...rows].sort(compareArenaRows)).toEqual(rows);
+    expect(compareArenaRows(rows[0], rows[1])).toBe(0);
+  });
+
 });
