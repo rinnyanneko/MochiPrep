@@ -741,6 +741,7 @@ async fn arena_ignores_cross_margin_boundaries_and_only_counts_full_closes() {
     assert_eq!(c["realizedPnl"], "0.95");
     assert_eq!(c["tradeCount"], 1);
     assert_eq!(c["winRatePct"], 0);
+    assert_eq!(c.get("pnl"), Some(&Value::Null));
     state.runtime.shutdown().await;
 }
 

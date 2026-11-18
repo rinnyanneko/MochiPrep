@@ -309,13 +309,18 @@ fn exchange_result(
                 .iter()
                 .any(|o| o.pos_id == record.pos_id && o.opened_at == Some(record.opened_at))
         })
-        .map(|record| Lifetime {
-            opened_at: record.opened_at,
-            until: record.closed_at,
-            opening_side: record.opening_side.as_deref(),
-            realized: Some(&record.realized_pnl),
-            unrealized: Some("0"),
-            completed: matches!(record.close_type.as_str(), "2" | "3" | "6"),
+        .map(|record| {
+            let completed = matches!(record.close_type.as_str(), "2" | "3" | "6");
+            Lifetime {
+                opened_at: record.opened_at,
+                until: record.closed_at,
+                opening_side: record.opening_side.as_deref(),
+                realized: Some(&record.realized_pnl),
+                // A partial close records realized P&L but needs the live position
+                // snapshot to know what the remainder is worth.
+                unrealized: completed.then_some("0"),
+                completed,
+            }
         })
         .collect();
     lifetimes.extend(open.iter().filter_map(|position| {
