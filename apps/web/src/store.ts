@@ -44,6 +44,7 @@ interface State {
   agents: Agent[];
   providers: ProviderView[];
   decisions: DecisionRecord[];
+  historyDecisionId: string | null;
   arena: ArenaRow[];
   exchange: ExchangeStatus[];
   /** Suggestions waiting for the user. */
@@ -61,7 +62,7 @@ interface State {
   lastFillAt: number;
   lastAlertAt: number;
 
-  setPage(page: Page): void;
+  setPage(page: Page, historyDecisionId?: string): void;
   setSource(source: DataSource): void;
   setAccountId(id: string | null): void;
   toggleTheme(): void;
@@ -110,6 +111,7 @@ export const useApp = create<State>((set, get) => ({
   agents: [],
   providers: [],
   decisions: [],
+  historyDecisionId: null,
   arena: [],
   exchange: [],
   signals: [],
@@ -125,9 +127,9 @@ export const useApp = create<State>((set, get) => ({
   lastFillAt: 0,
   lastAlertAt: 0,
 
-  setPage(page) {
+  setPage(page, historyDecisionId) {
     location.hash = page;
-    set({ page });
+    set({ page, historyDecisionId: page === 'history' ? historyDecisionId ?? null : null });
   },
   setSource(source) {
     remember('mochi.source', source);

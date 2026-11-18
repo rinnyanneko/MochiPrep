@@ -11,7 +11,7 @@ function Decisions() {
   const accounts = useSourceAccounts();
   const ids = new Set(accounts.map((a) => a.id));
   const [outcome, setOutcome] = useRemembered<DecisionOutcome | ''>('history.outcome', '', oneOf(['', ...OUTCOME_OPTIONS.map((o) => o.value)]));
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState(() => useApp.getState().historyDecisionId);
   const { data } = useQuery(() => api.get<DecisionRecord[]>('/decisions?limit=1000'), [], ['decisions']);
   const decisions = (data ?? []).filter((d) => ids.has(d.accountId) && (!outcome || d.outcome === outcome));
   const current = decisions.find((d) => d.id === selected) ?? decisions[0];

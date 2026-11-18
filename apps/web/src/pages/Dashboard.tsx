@@ -133,7 +133,10 @@ export function DashboardPage() {
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <DecisionList
                   decisions={decisions.filter((d) => scopeIds.has(d.accountId)).slice(0, 12)}
-                  onSelect={() => setPage('history')}
+                  onSelect={(decision) => {
+                    writeRemembered('history.outcome', '');
+                    setPage('history', decision.id);
+                  }}
                   emptyText="No decisions yet. Start an agent, then press play."
                 />
               </div>
