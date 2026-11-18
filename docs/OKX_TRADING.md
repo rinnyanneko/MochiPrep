@@ -65,6 +65,7 @@ Live trailing stops and protection changes have not been verified on OKX Demo Tr
 8. **Stop size with stacked entries.** When two entries fill into one position, it is not confirmed how OKX reports each attached stop's size. MochiPrep keeps every entry's stop until a stop sized to the whole position replaces them.
 9. **Extra full-position stop.** It is not confirmed whether OKX accepts one more stop sized to the whole position beside the per-entry stops. If it refuses, the per-entry stops stay in force.
 10. **Oversized stop at trigger.** It is not confirmed whether OKX trims or rejects a triggered reduce-only stop that is larger than the remaining position. If it rejects, part of the position may stay open after its stop triggers.
+11. **Net-mode fill classification.** The OKX fills endpoint documents subtypes `3` and `4` for opening long and short. MochiPrep requires these explicit open subtypes before using a newer fill to confirm that an earlier entry still belongs to the current position. Demo testing is needed to confirm which subtypes OKX returns for adds to an isolated net swap position. [OKX fills endpoint](https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-transaction-details-last-3-days)
 
 ## Trading pairs
 

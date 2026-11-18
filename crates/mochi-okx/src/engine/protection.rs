@@ -692,7 +692,7 @@ impl OkxEngine {
         self: &Arc<Self>,
         account_id: &str,
         symbol: &str,
-        mut protection: Protection,
+        protection: Protection,
         retain: ProtectionRetention,
         agent_id: Option<String>,
         decision_id: Option<String>,
@@ -700,15 +700,6 @@ impl OkxEngine {
         let (account_id, symbol) = (account_id.to_string(), symbol.to_string());
         self.queued(move |engine| {
             Box::pin(async move {
-                if retain.trailing_stop || retain.take_profit {
-                    let current = engine.protection_of(&symbol);
-                    if retain.trailing_stop {
-                        protection.trailing_stop = current.trailing_stop;
-                    }
-                    if retain.take_profit {
-                        protection.take_profit = current.take_profit;
-                    }
-                }
                 engine
                     .apply_protection(
                         account_id,
@@ -763,15 +754,24 @@ impl OkxEngine {
             .ok_or_else(|| EngineError::message(format!("No open {symbol} position")))?;
         let context = self.context().await?;
         let tick = dec(&context.registry.get(&symbol)?.price_tick)?;
+        let before = self.protection_of(&symbol);
         let target = Protection {
             stop_loss: align(&requested.stop_loss, &tick)?,
-            take_profit: align(&requested.take_profit, &tick)?,
-            trailing_stop: requested
-                .trailing_stop
-                .map(|spec| align_trailing(spec, &tick))
-                .transpose()?,
+            // Retained legs keep their exchange prices and sizes even if the tick changed.
+            take_profit: if retain.take_profit {
+                before.take_profit.clone()
+            } else {
+                align(&requested.take_profit, &tick)?
+            },
+            trailing_stop: if retain.trailing_stop {
+                before.trailing_stop.clone()
+            } else {
+                requested
+                    .trailing_stop
+                    .map(|spec| align_trailing(spec, &tick))
+                    .transpose()?
+            },
         };
-        let before = self.protection_of(&symbol);
         if let Some(refusal) = self.protection_refusal(&position, &before, &target, &context)? {
             return Err(EngineError::Message(refusal));
         }

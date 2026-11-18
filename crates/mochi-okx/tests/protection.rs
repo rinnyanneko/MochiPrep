@@ -2195,9 +2195,45 @@ async fn each_resting_entry_keeps_its_take_profit_when_both_fill_before_sync() {
             (json!("79000"), json!("0.1"))
         ]
     );
+    let live_targets = || {
+        h.okx
+            .state()
+            .algos
+            .values()
+            .filter(|algo| algo.get("tpTriggerPx").is_some() && algo["state"] == "live")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let before = live_targets();
+    assert_eq!(before.len(), 2);
+    h.store
+        .inner
+        .lock()
+        .unwrap()
+        .1
+        .iter_mut()
+        .find(|spec| spec.symbol == "BTCUSDT")
+        .unwrap()
+        .price_tick = "75".into();
+    h.engine
+        .set_protection_with(
+            ACCOUNT,
+            "BTCUSDT",
+            stop("74025"),
+            mochi_okx::engine::ProtectionRetention {
+                take_profit: true,
+                trailing_stop: true,
+            },
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(live_targets(), before);
+
     // Clearing the target explicitly removes both per-entry take profits.
     assert!(h
-        .set(stop("74000"))
+        .set(stop("74025"))
         .await
         .unwrap()
         .after
