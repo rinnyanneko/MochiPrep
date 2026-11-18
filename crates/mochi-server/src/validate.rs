@@ -117,6 +117,7 @@ pub struct CreateAccountInput {
 pub struct ClosePositionInput {
     pub fraction: f64,
     pub client_order_id: String,
+    pub position_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -361,6 +362,7 @@ fn close_position(input: Input) -> Checked {
     };
     fields.required("fraction", |v| check_number(v, &fraction));
     fields.required("clientOrderId", |v| check_string(v, &CLIENT_ORDER_ID));
+    fields.optional("positionId", |v| check_string(v, &CLIENT_ORDER_ID));
     fields.strict()
 }
 

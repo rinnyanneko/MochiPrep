@@ -7,6 +7,7 @@ import type {
   Fill,
   LedgerEvent,
   Order,
+  OrderResult,
   Position,
   PositionView,
   Protection,
@@ -171,7 +172,11 @@ function ProtectionExtras({ p }: { p: PositionView }) {
 export function PositionsTable({ positions, actions = true, editable = true, accountNames }: { positions: PositionView[]; actions?: boolean; editable?: boolean; accountNames?: Map<string, string> }) {
   const [editing, setEditing] = useState<PositionView | null>(null);
   const close = (p: PositionView, fraction: number) =>
-    attempt(() => api.post(`/positions/${p.accountId}/${p.symbol}/close`, { fraction, clientOrderId: `ui:${crypto.randomUUID()}` }));
+    attempt(async () => {
+      const result = await api.post<OrderResult>(`/positions/${p.accountId}/${p.symbol}/close`, { fraction, positionId: p.id, clientOrderId: `ui:${crypto.randomUUID()}` });
+      if (result.order.status === 'REJECTED') throw new Error(result.order.rejectReason ?? 'Close order was rejected');
+      return result;
+    });
   return (
     <>
       <Table
@@ -182,7 +187,7 @@ export function PositionsTable({ positions, actions = true, editable = true, acc
           <tr key={p.id} data-testid="position-row">
             {accountNames && <td className="text-ink-2">{accountNames.get(p.accountId)}</td>}
             <td className="font-semibold">{p.symbol}</td>
-            <td>{sideBadge(p.side)}</td>
+            <td>{sideBadge(p.side)}{p.marginMode && <span className="ml-1 text-xs capitalize text-ink-3">{p.marginMode}</span>}</td>
             <td className="num">{qty(p.quantity)}</td>
             <td className="num">{price(p.entryPrice, p.symbol)}</td>
             <td className="num">{price(p.markPrice, p.symbol)}</td>
@@ -196,11 +201,13 @@ export function PositionsTable({ positions, actions = true, editable = true, acc
             <td className={cn('num font-semibold', pnlClass(p.unrealizedPnl))}>{signedMoney(p.unrealizedPnl)}</td>
             {actions && (
               <td>
-                <div className="flex justify-end gap-1">
+                {p.closeSupported === false ? (
+                  <div className="text-right text-xs text-ink-3">Close in OKX</div>
+                ) : <div className="flex justify-end gap-1">
                   {editable && <Button size="icon" variant="ghost" aria-label={`Edit stop and target for ${p.symbol}`} onClick={() => setEditing(p)}><Pencil /></Button>}
                   <Button size="sm" onClick={() => close(p, 0.5)}>Close 50%</Button>
                   <Button size="sm" variant="danger" onClick={() => close(p, 1)}>Close</Button>
-                </div>
+                </div>}
               </td>
             )}
           </tr>

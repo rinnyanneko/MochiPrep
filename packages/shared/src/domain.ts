@@ -271,6 +271,8 @@ export interface Position {
 }
 
 export interface PositionView extends Position {
+  marginMode?: string;
+  closeSupported?: boolean;
   markPrice: string | null;
   unrealizedPnl: string;
   stopLoss: string | null;

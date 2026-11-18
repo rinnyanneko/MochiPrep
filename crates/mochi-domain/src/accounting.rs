@@ -321,6 +321,10 @@ pub struct Position {
 pub struct PositionView {
     #[serde(flatten)]
     pub position: Position,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub margin_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub close_supported: Option<bool>,
     pub mark_price: Option<String>,
     pub unrealized_pnl: String,
     pub stop_loss: Option<String>,

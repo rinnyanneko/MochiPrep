@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use mochi_domain::{EquityPoint, Fill, Liquidity, Order, OrderStatus, PositionSide};
 use serde_json::Value;
 
-use super::protection::{last_trade_id, record_attached, Held};
+use super::protection::{is_reached_exit, last_trade_id, record_attached, Held};
 use super::{
     dec, is_leg, EngineError, OkxEngine, Registry, EQUITY_EVERY_MS, NEVER_ARRIVED_AFTER_MS,
 };
@@ -56,7 +56,7 @@ impl PositionSnapshot {
                 (PositionSide::Long, size)
             };
             let inst_id = nullish_text(row.get("instId")).unwrap_or_default();
-            if isolated_net(&row) || !held.contains_key(&inst_id) {
+            if isolated_net(&row) {
                 held.insert(
                     inst_id,
                     Held {
@@ -75,13 +75,16 @@ impl PositionSnapshot {
         let mut keys = HashMap::new();
         let mut seen = HashSet::new();
         for row in &self.open {
+            if !isolated_net(row) {
+                continue;
+            }
             let inst_id = nullish_text(row.get("instId")).unwrap_or_default();
             let Some(spec) = registry.symbol_of_inst_id(&inst_id) else {
                 continue;
             };
             if !seen.insert(&spec.symbol) {
                 keys.remove(&spec.symbol);
-            } else if isolated_net(row) {
+            } else {
                 if let Some(held) = self.held.get(&inst_id) {
                     if let Some(trade_id) = held.trade_id {
                         keys.insert(spec.symbol.clone(), (trade_id, held.side));
@@ -99,6 +102,16 @@ pub(super) fn isolated_net(row: &Row) -> bool {
 }
 
 impl OkxEngine {
+    pub(super) async fn pending_protection(&self) -> Result<Vec<Row>, EngineError> {
+        let client = &self.deps.client;
+        let (conditional, oco, trailing) = tokio::try_join!(
+            client.get_pending_algos(PendingAlgoType::Conditional),
+            client.get_pending_algos(PendingAlgoType::Oco),
+            client.get_pending_algos(PendingAlgoType::MoveOrderStop),
+        )?;
+        Ok(conditional.into_iter().chain(oco).chain(trailing).collect())
+    }
+
     /// Brings one local order in line with OKX. A lookup that fails is an error: the order is
     /// left as it is, never given up on.
     pub(super) async fn sync_order(
@@ -118,7 +131,7 @@ impl OkxEngine {
         let Some(remote) = remote else {
             // Only OKX's own "order does not exist", and only once the order has had time to
             // arrive, closes it.
-            if at - order.created_at >= NEVER_ARRIVED_AFTER_MS {
+            if !is_reached_exit(order) && at - order.created_at >= NEVER_ARRIVED_AFTER_MS {
                 order.status = OrderStatus::Canceled;
                 order.reject_reason = Some("OKX has no record of this order".into());
                 order.updated_at = at;
@@ -212,19 +225,18 @@ impl OkxEngine {
             }
         }
         let client = &self.deps.client;
-        let (usdt, remote, algos) =
-            tokio::join!(client.get_usdt_balance(), client.get_positions(), async {
-                let (conditional, oco, trailing) = tokio::try_join!(
-                    client.get_pending_algos(PendingAlgoType::Conditional),
-                    client.get_pending_algos(PendingAlgoType::Oco),
-                    client.get_pending_algos(PendingAlgoType::MoveOrderStop),
-                )?;
-                Ok::<_, EngineError>(conditional.into_iter().chain(oco).chain(trailing).collect())
-            },);
-        let usdt = usdt?;
+        let (usdt, remote, algos) = tokio::join!(
+            client.get_usdt_balance(),
+            client.get_positions(),
+            self.pending_protection(),
+        );
+        let mut usdt = usdt?;
         let mut snapshot = PositionSnapshot::new(remote?)?;
         let protection = match algos {
-            Ok(algos) => self.reconcile_protection(algos, &mut snapshot).await,
+            Ok(algos) => {
+                self.reconcile_protection(algos, &mut snapshot, &mut usdt)
+                    .await
+            }
             Err(error) => Err(error),
         };
         let keys = snapshot.protection_keys(&registry);
@@ -278,7 +290,7 @@ impl OkxEngine {
             state.last_sync_at = Some(at);
             // Set here, in the same step, so the account never reads as healthy in between.
             state.sync_error = order_error.as_ref().map(ToString::to_string);
-            (at - state.last_equity_at >= EQUITY_EVERY_MS).then(|| {
+            (order_error.is_none() && at - state.last_equity_at >= EQUITY_EVERY_MS).then(|| {
                 state.last_equity_at = at;
                 EquityPoint {
                     account_id: account_id.clone(),

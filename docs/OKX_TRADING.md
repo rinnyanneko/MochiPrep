@@ -30,7 +30,7 @@ Go through these steps in order, and stop at the first surprise.
 | Unknown outcome | If OKX does not answer, MochiPrep looks the order up by its client ID. It is **never sent again**. |
 | Stop All | Stops every agent and disarms real orders. Open positions and their stop losses stay on OKX. |
 
-Closing is available while disarmed. MochiPrep reads the current OKX position before sizing the close.
+Closing isolated net positions is available while disarmed. The close request identifies the selected row; MochiPrep checks that identity and size against OKX before sizing and again before submission. OKX accepts an instrument and margin mode on its order endpoint, so this check cannot lock the position against trades happening after the last read. Close cross-margin positions in OKX.
 
 An agent in Suggest mode can run without arming, because it places no orders. Accepting a suggestion needs an armed account, except for a close, and the risk checks run again at that moment.
 

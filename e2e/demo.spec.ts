@@ -66,7 +66,9 @@ test('market data to agent decision to risk to paper order to position to PnL in
   // Spread, slippage and the entry fee mean a fresh long is immediately below starting equity.
   await expect.poll(async () => usdt(await page.getByTestId('account-equity').textContent())).toBeLessThan(10_000);
 
+  const closing = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/close'));
   await page.getByRole('button', { name: 'Close', exact: true }).click();
+  expect((await closing).postDataJSON().positionId).toEqual(expect.any(String));
   await expect(page.getByTestId('position-row')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Settings' }).click();

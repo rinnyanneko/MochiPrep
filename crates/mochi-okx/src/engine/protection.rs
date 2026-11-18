@@ -221,6 +221,14 @@ pub(crate) struct Held {
     pub trade_id: Option<u64>,
 }
 
+impl PartialEq for Held {
+    fn eq(&self, other: &Self) -> bool {
+        self.side == other.side
+            && self.trade_id == other.trade_id
+            && self.contracts.eq_value(&other.contracts)
+    }
+}
+
 pub(super) fn last_trade_id(row: &Row) -> Option<u64> {
     row.get("tradeId")
         .and_then(Value::as_str)?
@@ -239,17 +247,19 @@ fn fill_time(row: &Row) -> Option<i64> {
 
 type ReachedExits = HashMap<String, String>;
 
+pub(super) fn is_reached_exit(row: &Order) -> bool {
+    row.order_type == OrderType::Market
+        && row.reduce_only
+        && row.trigger_price.is_some()
+        && deferred_parent_id(row, Leg::Tp).is_some()
+}
+
 fn remember_reached_exit(exits: &mut ReachedExits, row: &Order) {
-    if row.order_type != OrderType::Market
-        || !row.reduce_only
-        || row.trigger_price.is_none()
-        || !matches!(row.status, OrderStatus::Filled | OrderStatus::Canceled)
-        || !dec(&row.filled_quantity).is_ok_and(|size| size.gt(&super::zero()))
-    {
+    if !is_reached_exit(row) || row.status == OrderStatus::Rejected {
         return;
     }
-    if let Some((parent, exchange_id)) =
-        deferred_parent_id(row, Leg::Tp).zip(row.exchange_order_id.as_ref())
+    if let Some((parent, exchange_id)) = deferred_parent_id(row, Leg::Tp)
+        .zip(row.exchange_order_id.as_ref().filter(|id| !id.is_empty()))
     {
         exits.insert(exchange_id.clone(), parent.to_owned());
     }
@@ -846,7 +856,7 @@ impl OkxEngine {
         let position = self
             .positions()
             .into_iter()
-            .find(|p| p.position.symbol == symbol)
+            .find(|p| p.position.symbol == symbol && p.close_supported == Some(true))
             .ok_or_else(|| EngineError::message(format!("No open {symbol} position")))?;
         let context = self.context().await?;
         let tick = dec(&context.registry.get(&symbol)?.price_tick)?;
@@ -1213,6 +1223,11 @@ impl OkxEngine {
         let inst_id = to_inst_id(&row.symbol);
         let confirming = self.now().saturating_sub(parent.updated_at) < POSITION_MISSING_MS;
         let context = self.context().await?;
+        let awaiting_sibling = context.open_orders.iter().any(|other| {
+            other.symbol == row.symbol
+                && is_reached_exit(other)
+                && other.exchange_order_id.as_deref().is_none_or(str::is_empty)
+        });
         if let Some(replacement) = context.open_orders.iter().find(|other| {
             other.symbol == row.symbol
                 && other.created_at >= parent.updated_at
@@ -1351,6 +1366,9 @@ impl OkxEngine {
                 &expected,
             ) {
                 Some(quantity) if quantity.gt(&super::zero()) => quantity,
+                // An unattributed reduction could belong to our own unanswered exit.
+                // Let lookup identify it before rejecting another entry's intent.
+                _ if awaiting_sibling => return Ok(()),
                 // The position and parent can become visible before the fills endpoint catches up.
                 None if confirming => return Ok(()),
                 _ => {
@@ -1385,6 +1403,7 @@ impl OkxEngine {
             return Ok(());
         }
         let last = dec(&quote.last)?;
+        let after_fill = fill_time(remote).is_some_and(|at| quote.ts > at);
         let reached = |target: &Dec| match side {
             PositionSide::Long => last.gte(target),
             PositionSide::Short => last.lte(target),
@@ -1394,7 +1413,7 @@ impl OkxEngine {
             if reached(&target) {
                 // OKX timestamps are in milliseconds. Equality doesn't establish
                 // that the ticker price was observed after the last execution.
-                if !fill_time(remote).is_some_and(|at| quote.ts > at) {
+                if !after_fill {
                     return Ok(());
                 }
                 return self
@@ -1407,6 +1426,9 @@ impl OkxEngine {
             // flag may still be false on restart, so use the fresh quote directly, not last sync.
             if let Some(activation) = spec.activation_price.as_deref() {
                 if reached(&dec(activation)?) {
+                    if !after_fill {
+                        return Ok(());
+                    }
                     // OKX starts tracking immediately when no activation price is passed.
                     spec.activation_price = None;
                 }
@@ -1565,7 +1587,48 @@ impl OkxEngine {
         &self,
         algos: Vec<Row>,
         snapshot: &mut PositionSnapshot,
+        balance: &mut Option<Row>,
     ) -> Result<ProtectionMap, EngineError> {
+        match self
+            .reconcile_protection_pass(algos, snapshot, true)
+            .await?
+        {
+            Some(result) => Ok(result),
+            None => {
+                // A market exit can retire algos or outlive a closed position. The original
+                // protection snapshot cannot be associated with the newer positions.
+                let refreshed = self.pending_protection().await;
+                let post_exit = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
+                let position_changed = snapshot.held != post_exit.held;
+                *snapshot = post_exit;
+                let refreshed = if position_changed {
+                    let refreshed = self.pending_protection().await?;
+                    let latest = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
+                    let changed_again = snapshot.held != latest.held;
+                    *snapshot = latest;
+                    if changed_again {
+                        return Err(EngineError::message(
+                            "Position changed during protection readback",
+                        ));
+                    }
+                    refreshed
+                } else {
+                    refreshed?
+                };
+                *balance = self.deps.client.get_usdt_balance().await?;
+                self.reconcile_protection_pass(refreshed, snapshot, false)
+                    .await?
+                    .ok_or_else(|| EngineError::message("Protection changed during readback"))
+            }
+        }
+    }
+
+    async fn reconcile_protection_pass(
+        &self,
+        algos: Vec<Row>,
+        snapshot: &mut PositionSnapshot,
+        submit_deferred: bool,
+    ) -> Result<Option<ProtectionMap>, EngineError> {
         let at = self.now();
         let account_id = self.deps.account_id.clone();
         let (open, recent, registry) = self
@@ -1647,13 +1710,19 @@ impl OkxEngine {
 
         // The pending lists have already confirmed any matching submitted algo. An unsent
         // deferred row has no exchange order to reconcile until its one permitted placement.
+        let mut market_exit = false;
         for (i, slot) in rows.iter_mut().enumerate().take(open_count) {
             if slot.status != OrderStatus::Open || alive.iter().any(|(a, _)| *a == i) {
                 continue;
             }
             if is_deferred(slot) {
+                if !submit_deferred {
+                    continue;
+                }
                 self.submit_deferred_protection(slot, &registry, snapshot, &reached_exits)
                     .await?;
+                market_exit |=
+                    slot.order_type == OrderType::Market && slot.status != OrderStatus::Rejected;
                 remember_reached_exit(&mut reached_exits, slot);
                 if is_leg(slot) && slot.status == OrderStatus::Open && !is_deferred(slot) {
                     if let Some(remote) = self.lookup_algo(&slot.id).await? {
@@ -1688,6 +1757,9 @@ impl OkxEngine {
                 self.close_row(row, "OKX has no record of this algo")
                     .await?;
             }
+        }
+        if market_exit {
+            return Ok(None);
         }
 
         let held = &snapshot.held;
@@ -1905,7 +1977,7 @@ impl OkxEngine {
             }
         }
         self.state().cancel_error = failure;
-        Ok(result)
+        Ok(Some(result))
     }
 
     /// Places one algo for `newest`'s leg at `level`, the most protective in its group, on

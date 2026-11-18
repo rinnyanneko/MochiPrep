@@ -28,7 +28,8 @@ use protection::{Miss, ProtectionMap};
 use tokio::sync::oneshot;
 
 use crate::client::{
-    AttachAlgoOrd, BoxFuture, OkxClient, OkxError, OrdType, PlaceOrderBody, Side, TdMode, Venue,
+    AttachAlgoOrd, BoxFuture, OkxClient, OkxError, OrdType, PlaceOrderBody, Row, Side, TdMode,
+    Venue,
 };
 use crate::ids::{to_algo_cl_ord_id, to_cl_ord_id, to_inst_id};
 
@@ -300,6 +301,13 @@ struct Prepared {
     equity: Vec<EquityPoint>,
 }
 
+struct SelectedClose {
+    id: String,
+    side: PositionSide,
+    contracts: Dec,
+    held: Dec,
+}
+
 impl Prepared {
     fn take_duplicate(&mut self) -> Option<OrderResult> {
         let (order, fills) = self.prior.take()?;
@@ -476,6 +484,19 @@ impl OkxEngine {
         fraction: f64,
         client_order_id: &str,
     ) -> Result<OrderResult, EngineError> {
+        self.close_selected_position(account_id, symbol, fraction, client_order_id, None)
+            .await
+    }
+
+    pub async fn close_selected_position(
+        self: &Arc<Self>,
+        account_id: &str,
+        symbol: &str,
+        fraction: f64,
+        client_order_id: &str,
+        position_id: Option<&str>,
+    ) -> Result<OrderResult, EngineError> {
+        let position_id = position_id.map(str::to_owned);
         let (account_id, symbol, client_order_id) = (
             account_id.to_string(),
             symbol.to_string(),
@@ -488,7 +509,13 @@ impl OkxEngine {
                     return Ok(prior);
                 }
                 let (request, position) = engine
-                    .close_request(account_id, symbol, fraction, client_order_id)
+                    .close_request(
+                        account_id,
+                        symbol,
+                        fraction,
+                        client_order_id,
+                        position_id.as_deref(),
+                    )
                     .await?;
                 engine.submit(request, Some(position), prepared).await
             })
@@ -502,19 +529,13 @@ impl OkxEngine {
         symbol: String,
         fraction: f64,
         client_order_id: String,
-    ) -> Result<(OrderRequest, (PositionSide, Dec)), EngineError> {
+        position_id: Option<&str>,
+    ) -> Result<(OrderRequest, SelectedClose), EngineError> {
         let registry = self.registry().await?;
         let spec = registry.get(&symbol)?;
         // The cached size can predate a fill or an unanswered reduce-only order.
         let positions = self.deps.client.get_positions().await?;
-        let (position, signed) =
-            protection::isolated_net_position(&positions, &to_inst_id(&symbol))
-                .ok_or_else(|| EngineError::message(format!("No open {symbol} position")))?;
-        let (side, contracts) = if signed.is_negative() {
-            (PositionSide::Short, signed.neg())
-        } else {
-            (PositionSide::Long, signed)
-        };
+        let (position, side, contracts) = select_close(&positions, &symbol, position_id)?;
         let held = contracts.mul(&dec(&spec.venue_contract_value)?);
         let quantity = if fraction >= 1.0 {
             held.clone()
@@ -543,7 +564,15 @@ impl OkxEngine {
             agent_id: None,
             decision_id: None,
         };
-        Ok((request, (side, held)))
+        Ok((
+            request,
+            SelectedClose {
+                id: views::position_id(position, side),
+                side,
+                contracts,
+                held,
+            },
+        ))
     }
 
     pub async fn cancel_order(self: &Arc<Self>, order_id: &str) -> Result<(), EngineError> {
@@ -621,7 +650,7 @@ impl OkxEngine {
     async fn submit(
         &self,
         request: OrderRequest,
-        fresh_position: Option<(PositionSide, Dec)>,
+        fresh_position: Option<SelectedClose>,
         mut prepared: Prepared,
     ) -> Result<OrderResult, EngineError> {
         if let Some(prior) = prepared.take_duplicate() {
@@ -630,8 +659,8 @@ impl OkxEngine {
         let registry = &prepared.registry;
         let mut order = self.build_order(&request);
         align_to_tick(&mut order, registry)?;
-        let position = match fresh_position {
-            Some(position) => Some(position),
+        let position = match &fresh_position {
+            Some(position) => Some((position.side, position.held.clone())),
             None => self
                 .positions()
                 .into_iter()
@@ -669,6 +698,23 @@ impl OkxEngine {
         let inst_id = to_inst_id(&order.symbol);
         let cl_ord_id = to_cl_ord_id(&order.client_order_id);
         let body = to_body(&order, &inst_id, &cl_ord_id, contracts.to_fixed());
+        if let Some(selected) = fresh_position {
+            // OKX's order endpoint has no position-version condition. Recheck just before
+            // dispatch to narrow the window in which a concurrent trade can change the position.
+            let checked = async {
+                let positions = self.deps.client.get_positions().await?;
+                let (_, _, current) = select_close(&positions, &order.symbol, Some(&selected.id))?;
+                if !current.eq_value(&selected.contracts) {
+                    return Err(close_changed());
+                }
+                Ok::<_, EngineError>(())
+            }
+            .await;
+            if let Err(error) = checked {
+                self.finish_rejected(order, error.to_string()).await?;
+                return Err(error);
+            }
+        }
         match self.send(&mut order, &inst_id, &body).await {
             Ok(()) => {}
             Err(EngineError::Okx(OkxError::Rejection { code, message })) => {
@@ -784,6 +830,56 @@ impl OkxEngine {
             duplicate: false,
         })
     }
+}
+
+fn close_changed() -> EngineError {
+    EngineError::message("The selected OKX position has changed. Refresh and try again.")
+}
+
+fn select_close<'a>(
+    positions: &'a [Row],
+    symbol: &str,
+    position_id: Option<&str>,
+) -> Result<(&'a Row, PositionSide, Dec), EngineError> {
+    let inst_id = to_inst_id(symbol);
+    let mut matches = positions.iter().filter_map(|p| {
+        if p.get("instId").and_then(serde_json::Value::as_str) != Some(inst_id.as_str()) {
+            return None;
+        }
+        let signed = dec(p.get("pos")?.as_str()?).ok()?;
+        let side = views::position_side(p, signed.is_negative());
+        let selected = match position_id {
+            Some(id) => views::position_id(p, side) == id,
+            None => sync::isolated_net(p),
+        };
+        if !selected || signed.is_zero() {
+            return None;
+        }
+        let contracts = if signed.is_negative() {
+            signed.neg()
+        } else {
+            signed
+        };
+        Some((p, side, contracts))
+    });
+    let found = matches.next().ok_or_else(|| {
+        if position_id.is_some() {
+            close_changed()
+        } else {
+            EngineError::message(format!("No open {symbol} position"))
+        }
+    })?;
+    if matches.next().is_some() {
+        return Err(EngineError::message(
+            "Several OKX positions match. Select a position to close.",
+        ));
+    }
+    if !sync::isolated_net(found.0) {
+        return Err(EngineError::message(
+            "Only isolated net positions can be closed in MochiPrep. Close this position in OKX.",
+        ));
+    }
+    Ok(found)
 }
 
 /// The first equity point of the UTC day, else the current equity.

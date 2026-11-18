@@ -868,7 +868,7 @@ async fn reads_positions_and_balance_from_okx() {
     let positions = h.engine.positions();
     assert_eq!(positions.len(), 1);
     let view = serde_json::to_value(&positions[0]).unwrap();
-    assert_eq!(view["id"], "okx:BTC-USDT-SWAP");
+    assert_eq!(view["id"], "okx:BTC-USDT-SWAP:isolated:LONG::1");
     assert_eq!(view["side"], "LONG");
     assert_eq!(view["quantity"], "0.001");
     assert_eq!(view["entryPrice"], "75000");

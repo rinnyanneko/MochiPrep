@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
-use mochi_core::paper::{DailyRisk, ProtectionResult};
+use mochi_core::paper::{DailyRisk, PaperStore, ProtectionResult};
 use mochi_domain::{
     AccountBalance, AccountVenue, Order, OrderRequest, OrderResult, PaperAccount, PositionView,
     Protection,
@@ -59,6 +59,7 @@ pub trait ExecutionEngine: Send + Sync {
         symbol: String,
         fraction: f64,
         client_order_id: String,
+        position_id: Option<String>,
     ) -> BoxFuture<'_, Result<OrderResult, ApiError>>;
     fn positions(&self, account_id: String) -> BoxFuture<'_, Result<Vec<PositionView>, ApiError>>;
     fn open_orders(&self, account_id: String) -> BoxFuture<'_, Result<Vec<Order>, ApiError>>;
@@ -390,10 +391,39 @@ impl ExecutionEngine for PaperExecution {
         symbol: String,
         fraction: f64,
         client_order_id: String,
+        position_id: Option<String>,
     ) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
         Box::pin(async move {
             self.runtime
                 .call(move |r| {
+                    if let Some(id) = position_id {
+                        let store = r.engine().store();
+                        if let Some(order) = store
+                            .get_order_by_client_id(&account_id, &client_order_id)
+                            .map_err(|e| r.api_error(e))?
+                        {
+                            let fills = store
+                                .list_fills_by_order(&order.id)
+                                .map_err(|e| r.api_error(e))?;
+                            return Ok(OrderResult {
+                                order,
+                                fills,
+                                duplicate: true,
+                            });
+                        }
+                        let positions = r
+                            .engine()
+                            .position_views(&account_id)
+                            .map_err(|e| r.api_error(e))?;
+                        if !positions
+                            .iter()
+                            .any(|p| p.position.id == id && p.position.symbol == symbol)
+                        {
+                            return Err(ApiError::conflict(
+                                "The selected position has changed. Refresh and try again.",
+                            ));
+                        }
+                    }
                     r.engine_mut()
                         .close_position(&account_id, &symbol, fraction, &client_order_id)
                         .map_err(|e| r.api_error(e))
@@ -540,11 +570,20 @@ impl ExecutionEngine for OkxExecution {
         symbol: String,
         fraction: f64,
         client_order_id: String,
+        position_id: Option<String>,
     ) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
         Box::pin(async move {
+            let position_id = position_id
+                .ok_or_else(|| ApiError::bad_request("Select an OKX position to close."))?;
             let result = self
                 .engine
-                .close_position(&account_id, &symbol, fraction, &client_order_id)
+                .close_selected_position(
+                    &account_id,
+                    &symbol,
+                    fraction,
+                    &client_order_id,
+                    Some(&position_id),
+                )
                 .await;
             self.answer(result).await
         })

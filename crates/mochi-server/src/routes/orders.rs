@@ -112,7 +112,13 @@ async fn close(
     let symbol = validate::parse_symbol(&symbol)?;
     let engine = state.runtime.execution(&account_id).await?;
     let result = engine
-        .close_position(account_id, symbol, input.fraction, input.client_order_id)
+        .close_position(
+            account_id,
+            symbol,
+            input.fraction,
+            input.client_order_id,
+            input.position_id,
+        )
         .await?;
     state.runtime.invalidate(TRADED).await?;
     Ok(Json(to_json(result)?))

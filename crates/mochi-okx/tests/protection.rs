@@ -81,6 +81,7 @@ struct Harness {
     engine: Arc<OkxEngine>,
     store: Arc<Local>,
     clock: Arc<AtomicI64>,
+    quote_time: Arc<AtomicI64>,
     armed: Arc<AtomicBool>,
     prices: Arc<Mutex<(String, String, String)>>,
     sync_down: Arc<SyncDown>,
@@ -129,6 +130,7 @@ async fn connect(extra: Vec<InstrumentSpecification>) -> Harness {
         inner: Mutex::new((store, instruments)),
     });
     let clock = Arc::new(AtomicI64::new(START));
+    let quote_time = Arc::new(AtomicI64::new(0));
     let armed = Arc::new(AtomicBool::new(true));
     let prices = Arc::new(Mutex::new((
         "74999".to_string(),
@@ -152,7 +154,7 @@ async fn connect(extra: Vec<InstrumentSpecification>) -> Harness {
         client,
         store: store.clone(),
         get_quote: {
-            let (clock, prices) = (clock.clone(), prices.clone());
+            let (clock, prices, quote_time) = (clock.clone(), prices.clone(), quote_time.clone());
             Arc::new(move |symbol: &str| {
                 let (bid, ask, last) = prices.lock().unwrap().clone();
                 Some(Quote {
@@ -165,7 +167,10 @@ async fn connect(extra: Vec<InstrumentSpecification>) -> Harness {
                     mark_estimated: false,
                     funding_rate: Some("0".into()),
                     next_funding_time: None,
-                    ts: clock.load(Ordering::SeqCst),
+                    ts: match quote_time.load(Ordering::SeqCst) {
+                        0 => clock.load(Ordering::SeqCst),
+                        at => at,
+                    },
                 })
             })
         },
@@ -187,6 +192,7 @@ async fn connect(extra: Vec<InstrumentSpecification>) -> Harness {
         engine,
         store,
         clock,
+        quote_time,
         armed,
         prices,
         sync_down,
@@ -1710,9 +1716,21 @@ async fn deferred_trailing_starts_tracking_when_activation_was_reached_while_wai
         activation_price: Some("76000".into()),
         ..ratio("0.01")
     });
-    h.engine.place_order(request).await.unwrap();
+    let entry = h.engine.place_order(request).await.unwrap().order;
     *h.prices.lock().unwrap() = ("76999".into(), "77001".into(), "77000".into());
     h.okx.state().fill_resting();
+    let client_id = mochi_okx::to_cl_ord_id(&entry.client_order_id);
+    h.okx.state().orders[&client_id].insert("fillTime".into(), json!((START + 1).to_string()));
+    h.quote_time.store(START, Ordering::SeqCst);
+    h.sync().await;
+    assert!(
+        h.algo_placed().is_empty(),
+        "the pre-fill quote cannot activate trailing"
+    );
+    h.advance(2);
+    h.sync().await;
+    assert!(h.algo_placed().is_empty());
+    h.quote_time.store(START + 2, Ordering::SeqCst);
     h.sync().await;
     let submitted = h.algo_placed();
     assert_eq!(submitted.len(), 1);
@@ -2448,6 +2466,130 @@ async fn both_reached_targets_close_their_own_entries_even_after_a_failed_refres
             .iter()
             .all(|order| order["sz"] == "0.1" && order["reduceOnly"] == true));
     }
+}
+
+#[tokio::test]
+async fn another_reached_target_keeps_its_allocation_when_the_first_is_partially_filled() {
+    let (h, first) = resting_target().await;
+    let mut request = order();
+    request.order_type = EntryOrderType::Limit;
+    request.price = Some("74500".into());
+    request.take_profit = Some("79000".into());
+    let second = h.engine.place_order(request).await.unwrap().order;
+    h.okx.state().fill_resting();
+    h.advance(1);
+    *h.prices.lock().unwrap() = ("79999".into(), "80001".into(), "80000".into());
+
+    let post = h.okx.hold_next("POST", "/trade/order");
+    let engine = h.engine.clone();
+    let sync = tokio::spawn(async move { engine.sync().await });
+    let timeout = std::time::Duration::from_secs(2);
+    tokio::time::timeout(timeout, post.reached()).await.unwrap();
+    let lookup = h.okx.hold_next("GET", "/trade/order");
+    post.release();
+    tokio::time::timeout(timeout, lookup.reached())
+        .await
+        .unwrap();
+    let first_id = format!("{}:deferred:tp", first.id);
+    {
+        let mut okx = h.okx.state();
+        let key = mochi_okx::to_cl_ord_id(&first_id);
+        okx.orders[&key].insert("state".into(), json!("partially_filled"));
+        okx.orders[&key].insert("accFillSz".into(), json!("0.05"));
+        okx.orders[&key].insert("fillSz".into(), json!("0.05"));
+        okx.recent_fills
+            .last_mut()
+            .unwrap()
+            .insert("fillSz".into(), json!("0.05"));
+        okx.position
+            .as_mut()
+            .unwrap()
+            .insert("pos".into(), json!("0.15"));
+    }
+    lookup.release();
+    sync.await.unwrap().unwrap();
+    assert_eq!(h.order_row(&first_id).status, OrderStatus::Open);
+    assert_eq!(
+        h.order_row(&format!("{}:deferred:tp", second.id)).status,
+        OrderStatus::Filled
+    );
+    assert_eq!(h.okx.state().placed.last().unwrap()["sz"], "0.1");
+    assert_eq!(h.okx.state().position.as_ref().unwrap()["pos"], "0.05");
+}
+
+#[tokio::test]
+async fn an_unattributed_market_exit_leaves_the_other_target_pending_until_lookup() {
+    let (h, first) = resting_target().await;
+    let mut request = order();
+    request.order_type = EntryOrderType::Limit;
+    request.price = Some("74500".into());
+    request.take_profit = Some("79000".into());
+    let second = h.engine.place_order(request).await.unwrap().order;
+    h.okx.state().fill_resting();
+    h.okx.state().lose_next_response = true;
+    h.advance(1);
+    *h.prices.lock().unwrap() = ("79999".into(), "80001".into(), "80000".into());
+    let post = h.okx.hold_next("POST", "/trade/order");
+    let engine = h.engine.clone();
+    let sync = tokio::spawn(async move { engine.sync().await });
+    let timeout = std::time::Duration::from_secs(2);
+    tokio::time::timeout(timeout, post.reached()).await.unwrap();
+    let lookup = h.okx.hold_next("GET", "/trade/order");
+    post.release();
+    tokio::time::timeout(timeout, lookup.reached())
+        .await
+        .unwrap();
+    let key = mochi_okx::to_cl_ord_id(&format!("{}:deferred:tp", first.id));
+    let pending = h.okx.state().orders.swap_remove(&key).unwrap();
+    lookup.release();
+    sync.await.unwrap().unwrap();
+    let second_id = format!("{}:deferred:tp", second.id);
+    assert_eq!(h.order_row(&second_id).status, OrderStatus::Open);
+    assert_eq!(h.okx.state().placed.len(), 3);
+    h.advance(60_001);
+    h.sync().await;
+    assert_eq!(h.order_row(&second_id).status, OrderStatus::Open);
+    assert_eq!(h.okx.state().placed.len(), 3);
+    h.okx.state().orders.insert(key, pending);
+    h.sync().await;
+    assert_eq!(h.order_row(&second_id).status, OrderStatus::Filled);
+    assert_eq!(h.okx.state().placed.len(), 4);
+}
+
+#[tokio::test]
+async fn a_reopened_position_never_displays_protection_read_before_a_market_target() {
+    let (h, _) = resting_target().await;
+    h.okx.state().fill_resting();
+    h.advance(1);
+    *h.prices.lock().unwrap() = ("78099".into(), "78101".into(), "78100".into());
+    let post = h.okx.hold_next("POST", "/trade/order");
+    let engine = h.engine.clone();
+    let sync = tokio::spawn(async move { engine.sync().await });
+    let timeout = std::time::Duration::from_secs(2);
+    tokio::time::timeout(timeout, post.reached()).await.unwrap();
+    let refresh = h.okx.hold_next("GET", "/trade/orders-algo-pending");
+    post.release();
+    tokio::time::timeout(timeout, refresh.reached())
+        .await
+        .unwrap();
+    {
+        let mut okx = h.okx.state();
+        assert!(okx.position.is_none());
+        let mut reopened = long_position();
+        reopened.insert("tradeId".into(), json!("3"));
+        okx.position = Some(reopened);
+        okx.equity = "950".into();
+        okx.algos.clear();
+    }
+    refresh.release();
+    sync.await.unwrap().unwrap();
+    assert!(h.view().position.id.ends_with(":3"));
+    assert_eq!(h.view().stop_loss, None);
+    assert_eq!(h.engine.balance().unwrap().equity, "950");
+    h.okx.state().algo_lookup_down = true;
+    assert!(h.engine.sync().await.is_err());
+    assert!(h.view().position.id.ends_with(":3"));
+    assert_eq!(h.view().stop_loss, None);
 }
 
 #[tokio::test]

@@ -471,7 +471,7 @@ impl PaperStore for SqlitePaperStore {
 
     fn save_order(&self, o: &Order) -> Result<(), StoreFailure> {
         self.run(
-            "UPDATE orders SET type=?, close_position=?, quantity=?, status=?, filled_quantity=?, avg_fill_price=?, reserved_margin=?, trailing_extreme=?, reject_reason=?, exchange_order_id=?, created_at=?, updated_at=? WHERE id=?",
+            "UPDATE orders SET type=?, close_position=?, quantity=?, status=?, filled_quantity=?, avg_fill_price=?, reserved_margin=?, trailing_activation_price=?, trailing_extreme=?, reject_reason=?, exchange_order_id=?, created_at=?, updated_at=? WHERE id=?",
             params![
                 enum_text(&o.order_type),
                 i64::from(o.close_position),
@@ -480,6 +480,7 @@ impl PaperStore for SqlitePaperStore {
                 o.filled_quantity,
                 o.avg_fill_price,
                 o.reserved_margin,
+                o.trailing_activation_price,
                 o.trailing_extreme,
                 o.reject_reason,
                 o.exchange_order_id,

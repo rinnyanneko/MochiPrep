@@ -1240,8 +1240,18 @@ async fn a_disarmed_real_account_can_still_exit_while_sync_with_okx_is_lost() {
     assert_eq!(w.statuses().await[0]["armed"], false);
     let placed = w.placed();
     let engine = w.rt.execution(&account.id).await.unwrap();
+    let position_id = engine.positions(account.id.clone()).await.unwrap()[0]
+        .position
+        .id
+        .clone();
     let result = engine
-        .close_position(account.id.clone(), "BTCUSDT".into(), 1.0, "exit-1".into())
+        .close_position(
+            account.id.clone(),
+            "BTCUSDT".into(),
+            1.0,
+            "exit-1".into(),
+            Some(position_id),
+        )
         .await
         .unwrap();
     let result = serde_json::to_value(result).unwrap();
@@ -2021,15 +2031,28 @@ async fn reconnect_keeps_reduce_only_exit_available_when_okx_protection_reads_fa
     assert!(!w.agent(&agent).await.running);
     w.rt.sync_exchanges().await.unwrap();
     assert!(!w.agent(&agent).await.running);
+    let (_, positions) = w
+        .send(
+            "GET",
+            &format!("/api/accounts/{}/positions", account.id),
+            None,
+        )
+        .await;
+    assert_eq!(positions[0]["symbol"], "BTCUSDT");
+    assert_eq!(positions[0]["side"], "LONG");
+    assert!(positions[0]["id"].as_str().is_some_and(|id| !id.is_empty()));
+    let placed = w.placed();
     let (status, result) = w
         .send(
             "POST",
             &format!("/api/positions/{}/BTCUSDT/close", account.id),
-            Some(json!({ "fraction": 1, "clientOrderId": "degraded-close" })),
+            Some(json!({ "fraction": 1, "clientOrderId": "degraded-close", "positionId": positions[0]["id"] })),
         )
         .await;
     assert_eq!(status, 200, "{result}");
     assert_eq!(result["order"]["status"], "FILLED");
+    assert_eq!(result["order"]["reduceOnly"], true);
+    assert_eq!(w.placed(), placed + 1);
     assert!(w.okx.state().position.is_none());
     w.rt.shutdown().await;
 }

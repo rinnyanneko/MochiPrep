@@ -116,6 +116,8 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
                 }
             };
             views.push(PositionView {
+                margin_mode: None,
+                close_supported: None,
                 mark_price: quote.map(|q| q.mark),
                 unrealized_pnl,
                 stop_loss,

@@ -228,7 +228,8 @@ async fn positions_and_balance_of_a_connected_okx_account_come_from_okx() {
     assert_eq!(status, 200);
     let positions = positions.as_array().unwrap();
     assert_eq!(positions.len(), 1);
-    assert_eq!(positions[0]["id"], "okx:BTC-USDT-SWAP");
+    assert_eq!(positions[0]["id"], "okx:BTC-USDT-SWAP:isolated:LONG::1");
+    assert_eq!(positions[0]["marginMode"], "isolated");
     assert_eq!(positions[0]["quantity"], "0.001");
     assert_eq!(positions[0]["side"], "LONG");
 
@@ -257,11 +258,18 @@ async fn a_disarmed_okx_account_can_still_close_and_cancel_refusals_keep_node_te
         (400, json!({ "error": format!("Order {id} is FILLED") }))
     );
 
+    let (_, positions) = send(
+        &w.state,
+        "GET",
+        &format!("/api/accounts/{ACCOUNT}/positions"),
+        None,
+    )
+    .await;
     let (status, closed) = send(
         &w.state,
         "POST",
         &format!("/api/positions/{ACCOUNT}/BTCUSDT/close"),
-        Some(json!({ "fraction": 1, "clientOrderId": "close" })),
+        Some(json!({ "fraction": 1, "clientOrderId": "close", "positionId": positions[0]["id"] })),
     )
     .await;
     assert_eq!(status, 200);
@@ -274,13 +282,118 @@ async fn a_disarmed_okx_account_can_still_close_and_cancel_refusals_keep_node_te
         &w.state,
         "POST",
         &format!("/api/positions/{ACCOUNT}/ETHUSDT/close"),
-        Some(json!({ "fraction": 1, "clientOrderId": "close-2" })),
+        Some(
+            json!({ "fraction": 1, "clientOrderId": "close-2", "positionId": positions[0]["id"] }),
+        ),
     )
     .await;
     assert_eq!(
         (status, error),
-        (400, json!({ "error": "No open ETHUSDT position" }))
+        (
+            400,
+            json!({ "error": "The selected OKX position has changed. Refresh and try again." })
+        )
     );
+    w.state.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn manual_okx_close_never_substitutes_the_isolated_position_for_a_selected_cross_position() {
+    let w = world(true).await;
+    send(&w.state, "POST", "/api/orders", Some(order("a"))).await;
+    {
+        let mut okx = w.okx.state();
+        let mut cross = okx.position.as_ref().unwrap().clone();
+        cross.insert("mgnMode".into(), json!("cross"));
+        cross.insert("pos".into(), json!("-0.2"));
+        cross.insert("posId".into(), json!("cross-position"));
+        okx.other_positions.push(cross);
+    }
+    w.state.runtime.sync_exchanges().await.unwrap();
+    let path = format!("/api/accounts/{ACCOUNT}/positions");
+    let (_, positions) = send(&w.state, "GET", &path, None).await;
+    let positions = positions.as_array().unwrap();
+    let cross = positions
+        .iter()
+        .find(|p| p["marginMode"] == "cross")
+        .unwrap();
+    let isolated = positions
+        .iter()
+        .find(|p| p["marginMode"] == "isolated")
+        .unwrap();
+    assert_ne!(cross["id"], isolated["id"]);
+    assert!(cross["stopLoss"].is_null());
+    let close_path = format!("/api/positions/{ACCOUNT}/BTCUSDT/close");
+    for body in [
+        json!({ "fraction": 1, "clientOrderId": "no-position" }),
+        json!({ "fraction": 1, "clientOrderId": "cross", "positionId": cross["id"] }),
+    ] {
+        assert_eq!(send(&w.state, "POST", &close_path, Some(body)).await.0, 400);
+        assert_eq!(w.okx.state().placed.len(), 1);
+    }
+    w.okx
+        .state()
+        .position
+        .as_mut()
+        .unwrap()
+        .insert("tradeId".into(), json!("99"));
+    let body = json!({ "fraction": 1, "clientOrderId": "stale", "positionId": isolated["id"] });
+    assert_eq!(send(&w.state, "POST", &close_path, Some(body)).await.0, 400);
+    assert_eq!(w.okx.state().placed.len(), 1);
+    w.state.runtime.sync_exchanges().await.unwrap();
+    let (_, fresh) = send(&w.state, "GET", &path, None).await;
+    let isolated = fresh
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["marginMode"] == "isolated")
+        .unwrap();
+    let first_check = w.okx.hold_next("GET", "/account/positions");
+    let final_check = w.okx.hold_next("GET", "/account/positions");
+    let body = json!({ "fraction": 1, "clientOrderId": "changed-before-send", "positionId": isolated["id"] });
+    let ((status, _), ()) = tokio::join!(send(&w.state, "POST", &close_path, Some(body)), async {
+        let timeout = std::time::Duration::from_secs(2);
+        tokio::time::timeout(timeout, first_check.reached())
+            .await
+            .unwrap();
+        first_check.release();
+        tokio::time::timeout(timeout, final_check.reached())
+            .await
+            .unwrap();
+        w.okx
+            .state()
+            .position
+            .as_mut()
+            .unwrap()
+            .insert("tradeId".into(), json!("100"));
+        final_check.release();
+    });
+    assert_eq!(status, 400);
+    assert_eq!(w.okx.state().placed.len(), 1);
+    w.state.runtime.sync_exchanges().await.unwrap();
+    let (_, fresh) = send(&w.state, "GET", &path, None).await;
+    let isolated = fresh
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["marginMode"] == "isolated")
+        .unwrap();
+    let body = json!({ "fraction": 1, "clientOrderId": "isolated", "positionId": isolated["id"] });
+    assert_eq!(
+        send(&w.state, "POST", &close_path, Some(body.clone()))
+            .await
+            .0,
+        200
+    );
+    let (status, retry) = send(&w.state, "POST", &close_path, Some(body)).await;
+    assert_eq!(status, 200);
+    assert_eq!(retry["duplicate"], true);
+    {
+        let okx = w.okx.state();
+        assert!(okx.position.is_none());
+        assert_eq!(okx.other_positions[0]["pos"], "-0.2");
+        assert_eq!(okx.placed.len(), 2);
+    }
     w.state.runtime.shutdown().await;
 }
 

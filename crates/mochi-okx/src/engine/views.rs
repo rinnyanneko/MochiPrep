@@ -6,7 +6,7 @@ use mochi_domain::{
 };
 
 use super::protection::{effective_of, ProtectionMap};
-use super::sync::js_number;
+use super::sync::{isolated_net, js_number};
 use super::{dec, zero, EngineError, LiveRows, OkxEngine, Registry};
 use crate::client::{nullish_text, truthy_text, Row};
 
@@ -18,6 +18,33 @@ pub(super) fn leverage_of(position: &Row) -> u32 {
         1
     } else {
         lever.min(f64::from(u32::MAX)) as u32
+    }
+}
+
+/// posId can be reused after a close. Include the observed trade and direction so a stale
+/// close request cannot select a newer position on the same instrument and margin mode.
+pub(super) fn position_id(row: &Row, side: PositionSide) -> String {
+    let field = |name| {
+        row.get(name)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+    };
+    let side = super::side_text(side);
+    format!(
+        "okx:{}:{}:{side}:{}:{}",
+        field("instId"),
+        field("mgnMode"),
+        field("posId"),
+        field("tradeId"),
+    )
+}
+
+pub(super) fn position_side(row: &Row, negative: bool) -> PositionSide {
+    match row.get("posSide").and_then(serde_json::Value::as_str) {
+        Some("short") => PositionSide::Short,
+        Some("long") => PositionSide::Long,
+        _ if negative => PositionSide::Short,
+        _ => PositionSide::Long,
     }
 }
 
@@ -36,24 +63,28 @@ impl OkxEngine {
             return Ok(Vec::new());
         };
         let symbol = spec.symbol.clone();
-        let in_force = effective_of(protection, &symbol);
-        let read_back = protection.get(&symbol);
+        let read_back = isolated_net(p).then(|| protection.get(&symbol)).flatten();
+        let in_force = if read_back.is_some() {
+            effective_of(protection, &symbol)
+        } else {
+            mochi_domain::Protection {
+                stop_loss: None,
+                take_profit: None,
+                trailing_stop: None,
+            }
+        };
         let pos = nullish_text(p.get("pos")).unwrap_or_else(|| "undefined".into());
         let size = dec(&pos)?;
+        let side = position_side(p, size.is_negative());
         let size = if size.is_negative() { size.neg() } else { size };
         let quantity = size.mul(&dec(&spec.venue_contract_value)?).to_fixed();
         let entry = rows
             .list_orders(account_id, 200)?
             .into_iter()
             .find(|o| o.symbol == symbol && !o.reduce_only && o.status == OrderStatus::Filled);
-        let side = if js_number(p.get("pos")) > 0.0 {
-            PositionSide::Long
-        } else {
-            PositionSide::Short
-        };
         Ok(vec![PositionView {
             position: Position {
-                id: format!("okx:{inst_id}"),
+                id: position_id(p, side),
                 account_id: account_id.to_string(),
                 symbol,
                 side,
@@ -72,6 +103,8 @@ impl OkxEngine {
                 opened_at: entry.map_or(now, |o| o.created_at),
                 closed_at: None,
             },
+            margin_mode: nullish_text(p.get("mgnMode")),
+            close_supported: Some(isolated_net(p)),
             mark_price: truthy_text(p.get("markPx")),
             unrealized_pnl: truthy_text(p.get("upl")).unwrap_or_else(|| "0".into()),
             stop_loss: in_force.stop_loss,
