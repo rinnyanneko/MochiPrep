@@ -724,7 +724,8 @@ async fn arena_ignores_cross_margin_boundaries_and_only_counts_full_closes() {
     let state = exchange_arena_fixture().await;
     sql(
         &state,
-        "UPDATE exchange_position_history SET close_type='1' WHERE pos_id='e1' AND opened_at=6;
+        "UPDATE exchange_position_history SET close_type='5' WHERE pos_id='e1' AND opened_at=6;
+         UPDATE exchange_position_history SET close_type='6' WHERE pos_id='e1' AND opened_at=8;
          INSERT INTO exchange_position_history
            (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type,opening_side)
          VALUES ('acct_x','cross',5,'ETH-USDT-SWAP',50,'10','2',NULL);",

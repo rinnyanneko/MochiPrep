@@ -315,7 +315,7 @@ fn exchange_result(
             opening_side: record.opening_side.as_deref(),
             realized: &record.realized_pnl,
             unrealized: None,
-            completed: matches!(record.close_type.as_str(), "2" | "3"),
+            completed: matches!(record.close_type.as_str(), "2" | "3" | "6"),
         })
         .collect();
     lifetimes.extend(open.iter().filter_map(|position| {
