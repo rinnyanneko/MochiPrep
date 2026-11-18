@@ -15,6 +15,7 @@ use tokio::time::sleep;
 
 /// How long open requests get to finish after a shutdown signal.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+const LOG_SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
 
 /// Tokio worker threads. The work is I/O-bound, the ledger and SQLite run in one runtime task, and
 /// the vault KDF uses the separate blocking pool, so two workers are enough; each extra worker
@@ -105,6 +106,9 @@ async fn run() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if let Some(log) = &operation_logs {
+        log.backend_started(retention);
+    }
     let mut state = AppState::new(config.clone(), runtime.clone());
     state.operation_logs = operation_logs.clone();
     let streams = state.streams.clone();
@@ -154,7 +158,12 @@ async fn run() -> ExitCode {
     runtime.shutdown().await;
     if let Some(log) = operation_logs {
         log.record(format_args!("backend stopped"));
-        log.flush().await;
+        if tokio::time::timeout(LOG_SHUTDOWN_GRACE, log.shutdown())
+            .await
+            .is_err()
+        {
+            eprintln!("Operation log did not finish before shutdown");
+        }
     }
     if let Err(error) = served {
         eprintln!("Server error: {error}");

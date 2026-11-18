@@ -5,7 +5,7 @@ use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, OnceLock};
+use std::sync::{mpsc, Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -33,13 +33,15 @@ struct Writer {
 
 pub struct OperationLog {
     commands: mpsc::Sender<Command>,
-    worker: Option<thread::JoinHandle<()>>,
-    pub(crate) settings: Mutex<()>,
+    finished: Mutex<Option<oneshot::Receiver<()>>>,
+    pub(crate) settings: Arc<Mutex<()>>,
 }
+
+type RetentionReply = oneshot::Sender<io::Result<()>>;
 
 enum Command {
     Record(String),
-    Retain(i32, oneshot::Sender<io::Result<()>>),
+    Retain(i32, Option<RetentionReply>),
     Flush(oneshot::Sender<()>),
     #[cfg(feature = "test-seams")]
     Pause(oneshot::Sender<()>, mpsc::Receiver<()>),
@@ -95,22 +97,33 @@ impl OperationLog {
             archive,
         };
         let (commands, input) = mpsc::channel();
-        let worker = thread::Builder::new()
+        let (done, finished) = oneshot::channel();
+        let settings = Arc::new(Mutex::new(()));
+        let retention_settings = settings.clone();
+        thread::Builder::new()
             .name("operation-log".into())
-            .spawn(move || writer.run(input, count))?;
-        let log = Self {
+            .spawn(move || {
+                writer.run(input, &retention_settings);
+                let _ = done.send(());
+            })?;
+        Ok(Self {
             commands,
-            worker: Some(worker),
-            settings: Mutex::new(()),
-        };
-        log.record(format_args!("backend started"));
-        Ok(log)
+            finished: Mutex::new(Some(finished)),
+            settings,
+        })
+    }
+
+    pub fn backend_started(&self, count: i32) {
+        self.record(format_args!("backend started"));
+        if self.commands.send(Command::Retain(count, None)).is_err() {
+            tracing::warn!("Operation log writer stopped");
+        }
     }
 
     pub(crate) async fn apply_retention(&self, count: i32) -> io::Result<()> {
         let (reply, result) = oneshot::channel();
         self.commands
-            .send(Command::Retain(count, reply))
+            .send(Command::Retain(count, Some(reply)))
             .map_err(|_| io::Error::other("Log writer stopped"))?;
         result
             .await
@@ -131,6 +144,15 @@ impl OperationLog {
         }
     }
 
+    pub async fn shutdown(&self) {
+        let mut finished = self.finished.lock().await;
+        if let Some(done) = finished.as_mut() {
+            let _ = self.commands.send(Command::Stop);
+            let _ = done.await;
+            *finished = None;
+        }
+    }
+
     #[cfg(feature = "test-seams")]
     pub async fn pause_writer_for_test(&self) -> mpsc::Sender<()> {
         let (paused, waiting) = oneshot::channel();
@@ -144,23 +166,25 @@ impl OperationLog {
 impl Drop for OperationLog {
     fn drop(&mut self) {
         let _ = self.commands.send(Command::Stop);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
     }
 }
 
 impl Writer {
-    fn run(mut self, input: mpsc::Receiver<Command>, mut retention: i32) {
-        let mut retry_at = Some(Instant::now());
+    fn run(mut self, input: mpsc::Receiver<Command>, settings: &Mutex<()>) {
+        let mut retry: Option<(i32, Instant)> = None;
         loop {
-            let command = if let Some(at) = retry_at {
+            let command = if let Some((retention, at)) = retry {
                 let delay = at.saturating_duration_since(Instant::now());
                 if delay.is_zero() {
-                    retry_at = self.apply_retention(retention).err().map(|error| {
-                        tracing::warn!(%error, "Could not apply operation log retention");
-                        Instant::now() + RETENTION_RETRY_DELAY
-                    });
+                    // The settings route owns this lock from before committing a
+                    // new count until the writer has applied it.
+                    retry = match settings.try_lock() {
+                        Ok(_guard) => self.apply_retention(retention).err().map(|error| {
+                            tracing::warn!(%error, "Could not apply operation log retention");
+                            (retention, Instant::now() + RETENTION_RETRY_DELAY)
+                        }),
+                        Err(_) => Some((retention, Instant::now() + RETENTION_RETRY_DELAY)),
+                    };
                     continue;
                 }
                 match input.recv_timeout(delay) {
@@ -174,12 +198,12 @@ impl Writer {
             };
             match command {
                 Command::Record(line) => self.record(&line),
-                Command::Retain(count, reply) => {
-                    retention = count;
-                    let result = self.apply_retention(retention);
-                    retry_at = result
+                Command::Retain(count, None) => retry = Some((count, Instant::now())),
+                Command::Retain(count, Some(reply)) => {
+                    let result = self.apply_retention(count);
+                    retry = result
                         .is_err()
-                        .then(|| Instant::now() + RETENTION_RETRY_DELAY);
+                        .then(|| (count, Instant::now() + RETENTION_RETRY_DELAY));
                     let _ = reply.send(result);
                 }
                 Command::Flush(reply) => {
@@ -285,7 +309,7 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         let first = OperationLog::open(data.path(), 1).unwrap();
         first.record(format_args!("keep this run"));
-        first.flush().await;
+        first.shutdown().await;
         drop(first);
         let logs = data.path().join("logs");
         let archives = || {
@@ -312,9 +336,56 @@ mod tests {
 
         fs::remove_dir(latest).unwrap();
         let next = OperationLog::open(data.path(), 1).unwrap();
+        assert!(previous.exists());
+        next.backend_started(1);
         next.flush().await;
         assert!(!previous.exists());
         assert_eq!(archives().len(), 1);
+        next.shutdown().await;
+    }
+
+    #[cfg(feature = "test-seams")]
+    #[tokio::test(start_paused = true)]
+    async fn a_stalled_writer_does_not_make_drop_wait() {
+        let data = tempfile::tempdir().unwrap();
+        let log = OperationLog::open(data.path(), -1).unwrap();
+        let resume = log.pause_writer_for_test().await;
+        assert!(tokio::time::timeout(Duration::from_secs(1), log.shutdown())
+            .await
+            .is_err());
+        let (dropped, done) = mpsc::channel();
+        let owner = thread::spawn(move || {
+            drop(log);
+            let _ = dropped.send(());
+        });
+        // Release a stalled writer even if a regression makes Drop block.
+        let result = tokio::task::spawn_blocking(move || done.recv_timeout(Duration::from_secs(2)))
+            .await
+            .unwrap();
+        drop(resume);
+        owner.join().unwrap();
+        assert!(
+            result.is_ok(),
+            "dropping the log must not wait for the writer"
+        );
+    }
+
+    #[tokio::test]
+    async fn older_retention_waits_for_a_committed_setting_handoff() {
+        let data = tempfile::tempdir().unwrap();
+        let dir = data.path().join("logs");
+        fs::create_dir(&dir).unwrap();
+        let prior =
+            dir.join("session-2026-01-01T00-00-00.000Z-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.log");
+        fs::write(&prior, "previous session").unwrap();
+        let log = OperationLog::open(data.path(), 1).unwrap();
+        let settings = log.settings.lock().await;
+        // Simulate the route saving keep-all while the initial policy is due.
+        log.backend_started(1);
+        log.apply_retention(-1).await.unwrap();
+        drop(settings);
+        log.shutdown().await;
+        assert!(prior.exists());
     }
 
     #[tokio::test]
@@ -343,6 +414,7 @@ mod tests {
         );
         let duplicate = OperationLog::open(dir.path(), -1);
         assert!(duplicate.is_err_and(|error| error.kind() == io::ErrorKind::WouldBlock));
+        first.shutdown().await;
         drop(first);
 
         let current = OperationLog::open(dir.path(), -1).unwrap();
@@ -361,5 +433,6 @@ mod tests {
         let latest = fs::read(logs.join("latest.log")).unwrap();
         assert_eq!(fs::read(archives().pop().unwrap()).unwrap(), latest);
         assert!(String::from_utf8(latest).unwrap().contains("latest only"));
+        current.shutdown().await;
     }
 }

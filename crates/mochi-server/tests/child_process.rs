@@ -16,7 +16,7 @@ fn free_port() -> u16 {
         .port()
 }
 
-fn spawn(port: u16, data: &std::path::Path, parent_mode: bool) -> Child {
+fn backend_command(port: u16, data: &std::path::Path, parent_mode: bool) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_mochi-server"));
     command
         .env("MOCHIPREP_OFFLINE", "1")
@@ -29,7 +29,11 @@ fn spawn(port: u16, data: &std::path::Path, parent_mode: bool) -> Child {
     if parent_mode {
         command.env("MOCHIPREP_PARENT_STDIN", "1");
     }
-    command.spawn().unwrap()
+    command
+}
+
+fn spawn(port: u16, data: &std::path::Path, parent_mode: bool) -> Child {
+    backend_command(port, data, parent_mode).spawn().unwrap()
 }
 
 /// Returns the reader too: dropping it would close the pipe, and the server's next println
@@ -50,6 +54,47 @@ fn wait_for_exit(child: &mut Child, within: Duration) -> Option<std::process::Ex
         std::thread::sleep(Duration::from_millis(50));
     }
     None
+}
+
+#[test]
+fn failed_runtime_start_does_not_prune_a_previous_archive() {
+    let data = tempfile::tempdir().unwrap();
+    let logs = data.path().join("logs");
+    std::fs::create_dir(&logs).unwrap();
+    let prior = logs.join("session-2026-01-01T00-00-00.000Z-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.log");
+    std::fs::write(&prior, "previous session\n").unwrap();
+    let db = mochi_store::open_database(&data.path().join("mochiprep.db")).unwrap();
+    mochi_store::set_setting(&db, mochi_server::operation_log::SETTING, &1).unwrap();
+    mochi_store::set_setting(&db, "replay.cursor", &"bad cursor").unwrap();
+    drop(db);
+
+    let mut child = backend_command(free_port(), data.path(), false)
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let status = wait_for_exit(&mut child, Duration::from_secs(10));
+    if status.is_none() {
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+    assert!(!status
+        .expect("invalid replay cursor prevents startup")
+        .success());
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert!(
+        stderr.contains("Cannot start:") && stderr.contains("invalid type: string"),
+        "{stderr}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(prior).unwrap(),
+        "previous session\n"
+    );
 }
 
 #[test]
