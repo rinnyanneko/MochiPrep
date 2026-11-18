@@ -115,10 +115,16 @@ async fn authenticated_operations_are_logged_without_request_data_and_retention_
         send(router.clone(), action(false)).await.0,
         StatusCode::UNAUTHORIZED
     );
-    assert_eq!(
-        send(router.clone(), action(true)).await.0,
-        StatusCode::NO_CONTENT
-    );
+    let log = state.operation_logs.as_ref().unwrap();
+    let resume = log.pause_writer_for_test().await;
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        send(router.clone(), action(true)),
+    )
+    .await;
+    drop(resume);
+    assert_eq!(response.unwrap().0, StatusCode::NO_CONTENT);
+    log.flush().await;
     let logs = directory.path().join("logs");
     let latest = std::fs::read_to_string(logs.join("latest.log")).unwrap();
     assert!(latest.contains("POST /api/test/log/{id} -> 204"));
@@ -145,7 +151,81 @@ async fn authenticated_operations_are_logged_without_request_data_and_retention_
         send(router.clone(), retention(-2)).await.0,
         StatusCode::BAD_REQUEST
     );
-    assert_eq!(send(router.clone(), retention(0)).await.0, StatusCode::OK);
+    assert_eq!(send(router.clone(), retention(-1)).await.0, StatusCode::OK);
+    let archive = std::fs::read_dir(&logs)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("session-")
+        })
+        .unwrap();
+    state
+        .runtime
+        .call(|r| {
+            r.connection().execute_batch(
+                "CREATE TRIGGER refuse_retention BEFORE INSERT ON settings
+         WHEN NEW.key='operationLogRetention'
+         BEGIN SELECT RAISE(ABORT, 'test write failure'); END;",
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!send(router.clone(), retention(0)).await.0.is_success());
+    assert!(archive.exists());
+    assert_eq!(
+        state
+            .runtime
+            .call(|r| mochi_server::operation_log::retention(r.connection()))
+            .await
+            .unwrap()
+            .unwrap(),
+        -1
+    );
+    state
+        .runtime
+        .call(|r| {
+            r.connection()
+                .execute_batch("DROP TRIGGER refuse_retention")
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let resume = log.pause_writer_for_test().await;
+    let update = tokio::spawn(send(router.clone(), retention(0)));
+    let timeout = std::time::Duration::from_secs(2);
+    tokio::time::timeout(timeout, async {
+        loop {
+            let count = state
+                .runtime
+                .call(|r| mochi_server::operation_log::retention(r.connection()))
+                .await
+                .unwrap()
+                .unwrap();
+            if count == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        archive.exists(),
+        "the worker is still paused after the DB commit"
+    );
+    update.abort();
+    drop(resume);
+    tokio::time::timeout(timeout, async {
+        while archive.exists() {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
     assert_eq!(
         std::fs::read_dir(&logs)
             .unwrap()

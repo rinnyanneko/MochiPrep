@@ -90,7 +90,6 @@ async fn guard_request(State(guard): State<Arc<Guard>>, request: Request, next: 
             path.as_str(),
             response.status().as_u16()
         ));
-        log.flush().await;
     }
     response
 }

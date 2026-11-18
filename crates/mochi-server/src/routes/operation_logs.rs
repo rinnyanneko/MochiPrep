@@ -52,20 +52,31 @@ async fn update(
             "Operation logs are unavailable",
         )
     })?;
-    let _settings = log.settings.lock().await;
-    log.apply_retention(retention).await.map_err(|_| {
+    // An HTTP disconnect must not interrupt the handoff after persistence.
+    tokio::spawn(async move {
+        let _settings = log.settings.lock().await;
+        // Committing the preference authorizes irreversible pruning, including on restart.
+        state
+            .runtime
+            .call(move |runtime| {
+                mochi_store::set_setting(runtime.connection(), operation_log::SETTING, &retention)
+                    .map_err(|error| runtime.api_error(error))
+            })
+            .await??;
+        log.apply_retention(retention).await.map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Log retention was saved, but could not be applied on disk. Retry to finish.",
+            )
+        })
+    })
+    .await
+    .map_err(|_| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Could not apply log retention on disk",
+            "Could not update log retention",
         )
-    })?;
-    state
-        .runtime
-        .call(move |runtime| {
-            mochi_store::set_setting(runtime.connection(), operation_log::SETTING, &retention)
-                .map_err(|error| runtime.api_error(error))
-        })
-        .await??;
+    })??;
     Ok(Json(Preference {
         retention,
         available: true,

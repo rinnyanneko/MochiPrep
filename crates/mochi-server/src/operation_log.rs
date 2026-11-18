@@ -40,6 +40,8 @@ enum Command {
     Record(String),
     Retain(i32, oneshot::Sender<io::Result<()>>),
     Flush(oneshot::Sender<()>),
+    #[cfg(feature = "test-seams")]
+    Pause(oneshot::Sender<()>, mpsc::Receiver<()>),
     Stop,
 }
 
@@ -118,6 +120,15 @@ impl OperationLog {
             let _ = done.await;
         }
     }
+
+    #[cfg(feature = "test-seams")]
+    pub async fn pause_writer_for_test(&self) -> mpsc::Sender<()> {
+        let (paused, waiting) = oneshot::channel();
+        let (release, resume) = mpsc::channel();
+        self.commands.send(Command::Pause(paused, resume)).unwrap();
+        waiting.await.unwrap();
+        release
+    }
 }
 
 impl Drop for OperationLog {
@@ -139,6 +150,11 @@ impl Writer {
                 }
                 Command::Flush(reply) => {
                     let _ = reply.send(());
+                }
+                #[cfg(feature = "test-seams")]
+                Command::Pause(paused, resume) => {
+                    let _ = paused.send(());
+                    let _ = resume.recv();
                 }
                 Command::Stop => break,
             }

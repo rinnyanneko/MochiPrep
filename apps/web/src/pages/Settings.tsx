@@ -212,7 +212,7 @@ function OperationLogsCard() {
           <Field label="Dated logs to keep" hint="0 keeps only latest.log. −1 keeps every dated log.">
             <Input type="number" min={-1} step={1} value={text} disabled={saving} onChange={(event) => setDraft(event.target.value)} />
           </Field>
-          <Button disabled={saving || !valid || retention === data.retention} onClick={save}>Save log retention</Button>
+          <Button disabled={saving || !valid} onClick={save}>Save log retention</Button>
         </div>
       )}
     </Card>
