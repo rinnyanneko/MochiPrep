@@ -179,6 +179,14 @@ pub struct RuntimeHandle {
 impl RuntimeHandle {
     /// Builds the runtime and spawns its task. Must be called inside a tokio runtime.
     pub fn start(options: RuntimeOptions) -> Result<Self, StartError> {
+        Self::start_with_operation_log(options, || None)
+    }
+
+    /// Publishes the log files after fallible runtime initialization and before processing events.
+    pub fn start_with_operation_log(
+        options: RuntimeOptions,
+        open_log: impl FnOnce() -> Option<Arc<crate::operation_log::OperationLog>>,
+    ) -> Result<Self, StartError> {
         let live = LiveChannels {
             quotes: options.live_quotes,
             statuses: options.live_statuses,
@@ -192,7 +200,7 @@ impl RuntimeHandle {
             options.kdf,
             options.okx,
         )?;
-        runtime.operation_logs = options.operation_logs;
+        runtime.operation_logs = options.operation_logs.or_else(open_log);
         let events = runtime.events.sender();
         let (commands, inbox) = mpsc::channel(COMMAND_QUEUE);
         let handle = RuntimeHandle { commands, events };

@@ -31,6 +31,11 @@ struct Writer {
     archive: Option<File>,
 }
 
+pub struct LogDirectory {
+    dir: PathBuf,
+    lease: File,
+}
+
 pub struct OperationLog {
     commands: mpsc::Sender<Command>,
     finished: Mutex<Option<oneshot::Receiver<()>>>,
@@ -57,8 +62,8 @@ fn now() -> i64 {
         .unwrap_or(i64::MAX)
 }
 
-impl OperationLog {
-    pub fn open(data_dir: &Path, count: i32) -> io::Result<Self> {
+impl LogDirectory {
+    pub fn acquire(data_dir: &Path) -> io::Result<Self> {
         let dir = data_dir.join("logs");
         fs::create_dir_all(&dir)?;
         if !fs::symlink_metadata(&dir)?.is_dir() {
@@ -71,6 +76,11 @@ impl OperationLog {
             .write(true)
             .open(dir.join(".writer.lock"))?;
         lease.try_lock().map_err(io::Error::from)?;
+        Ok(Self { dir, lease })
+    }
+
+    pub fn open(self, count: i32) -> io::Result<OperationLog> {
+        let Self { dir, lease } = self;
         let timestamp = mochi_okx::iso_string(now()).replace(':', "-");
         let archive_path = dir.join(format!(
             "session-{timestamp}-{}.log",
@@ -106,11 +116,17 @@ impl OperationLog {
                 writer.run(input, &retention_settings);
                 let _ = done.send(());
             })?;
-        Ok(Self {
+        Ok(OperationLog {
             commands,
             finished: Mutex::new(Some(finished)),
             settings,
         })
+    }
+}
+
+impl OperationLog {
+    pub fn open(data_dir: &Path, count: i32) -> io::Result<Self> {
+        LogDirectory::acquire(data_dir)?.open(count)
     }
 
     pub fn backend_started(&self, count: i32) {

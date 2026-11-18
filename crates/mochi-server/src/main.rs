@@ -81,8 +81,8 @@ async fn run() -> ExitCode {
             -1
         }
     };
-    let operation_logs = match operation_log::OperationLog::open(&config.data_dir, retention) {
-        Ok(log) => Some(Arc::new(log)),
+    let log_directory = match operation_log::LogDirectory::acquire(&config.data_dir) {
+        Ok(directory) => Some(directory),
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
             eprintln!("Another backend is using this data directory");
             return ExitCode::FAILURE;
@@ -93,13 +93,22 @@ async fn run() -> ExitCode {
         }
     };
     // Public market data only: the feed never holds or sends a credential.
-    let mut options = if config.offline {
+    let options = if config.offline {
         RuntimeOptions::new(db)
     } else {
         RuntimeOptions::with_live_feed(db, OkxPublicFeed::new(REST_BASE, WS_URL))
     };
-    options.operation_logs = operation_logs.clone();
-    let runtime = match RuntimeHandle::start(options) {
+    let mut operation_logs = None;
+    let runtime = match RuntimeHandle::start_with_operation_log(options, || {
+        operation_logs = log_directory.and_then(|directory| match directory.open(retention) {
+            Ok(log) => Some(Arc::new(log)),
+            Err(error) => {
+                eprintln!("Cannot open operation logs: {error}");
+                None
+            }
+        });
+        operation_logs.clone()
+    }) {
         Ok(runtime) => runtime,
         Err(error) => {
             eprintln!("Cannot start: {error}");

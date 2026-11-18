@@ -57,14 +57,25 @@ fn wait_for_exit(child: &mut Child, within: Duration) -> Option<std::process::Ex
 }
 
 #[test]
-fn failed_runtime_start_does_not_prune_a_previous_archive() {
+fn failed_runtime_start_leaves_previous_logs_and_archive_slots_intact() {
+    for retention in [0, 2] {
+        assert_logs_survive_failed_start(retention);
+    }
+}
+
+fn assert_logs_survive_failed_start(retention: i32) {
     let data = tempfile::tempdir().unwrap();
     let logs = data.path().join("logs");
     std::fs::create_dir(&logs).unwrap();
     let prior = logs.join("session-2026-01-01T00-00-00.000Z-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.log");
-    std::fs::write(&prior, "previous session\n").unwrap();
-    let db = mochi_store::open_database(&data.path().join("mochiprep.db")).unwrap();
-    mochi_store::set_setting(&db, mochi_server::operation_log::SETTING, &1).unwrap();
+    let latest = logs.join("latest.log");
+    std::fs::write(&latest, "previous session\n").unwrap();
+    if retention != 0 {
+        std::fs::copy(&latest, &prior).unwrap();
+    }
+    let db_path = data.path().join("mochiprep.db");
+    let db = mochi_store::open_database(&db_path).unwrap();
+    mochi_store::set_setting(&db, mochi_server::operation_log::SETTING, &retention).unwrap();
     mochi_store::set_setting(&db, "replay.cursor", &"bad cursor").unwrap();
     drop(db);
 
@@ -92,9 +103,37 @@ fn failed_runtime_start_does_not_prune_a_previous_archive() {
         "{stderr}"
     );
     assert_eq!(
-        std::fs::read_to_string(prior).unwrap(),
+        std::fs::read_to_string(&latest).unwrap(),
         "previous session\n"
     );
+    let archives = || {
+        std::fs::read_dir(&logs)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name.to_string_lossy().starts_with("session-"))
+            .count()
+    };
+    assert_eq!(archives(), usize::from(retention != 0));
+    if retention != 0 {
+        let db = mochi_store::open_database(&db_path).unwrap();
+        mochi_store::set_setting(&db, "replay.cursor", &0_i64).unwrap();
+        drop(db);
+        let mut next = spawn(free_port(), data.path(), true);
+        let (line, _stdout) = first_line(next.stdout.take().unwrap());
+        drop(next.stdin.take());
+        let status = wait_for_exit(&mut next, Duration::from_secs(10));
+        if status.is_none() {
+            next.kill().unwrap();
+            next.wait().unwrap();
+        }
+        assert!(line.starts_with(READY_PREFIX), "{line}");
+        assert!(status.expect("successful startup shuts down").success());
+        assert_eq!(archives(), 2);
+        assert_eq!(
+            std::fs::read_to_string(prior).unwrap(),
+            "previous session\n"
+        );
+    }
 }
 
 #[test]
