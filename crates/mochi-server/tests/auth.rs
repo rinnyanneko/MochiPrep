@@ -482,3 +482,44 @@ fn offline_only_when_asked() {
     assert!(!offline("0"));
     assert!(!offline(""));
 }
+
+#[tokio::test]
+async fn shutdown_only_accepts_an_authenticated_post_from_an_allowed_origin() {
+    let state = state();
+    let router = app(state.clone());
+    let post = || Request::post("/api/shutdown").header("host", HOST);
+    let (status, _) = send(router.clone(), post().body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let foreign = post()
+        .header("origin", "https://example.com")
+        .header("authorization", bearer(&state))
+        .body(Body::empty())
+        .unwrap();
+    let (status, _) = send(router.clone(), foreign).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let get = get("/api/shutdown")
+        .header("authorization", bearer(&state))
+        .body(Body::empty())
+        .unwrap();
+    let (status, _) = send(router.clone(), get).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(
+        tokio::time::timeout(std::time::Duration::ZERO, state.shutdown.notified())
+            .await
+            .is_err()
+    );
+
+    let authorized = post()
+        .header("origin", format!("http://{HOST}"))
+        .header("authorization", bearer(&state))
+        .body(Body::empty())
+        .unwrap();
+    let (status, _) = send(router, authorized).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    tokio::time::timeout(std::time::Duration::from_secs(1), state.shutdown.notified())
+        .await
+        .expect("shutdown signalled");
+    state.runtime.shutdown().await;
+}
