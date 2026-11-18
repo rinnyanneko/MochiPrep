@@ -299,9 +299,11 @@ fn exchange_result(
         opening_side: Option<&'a str>,
         realized: &'a str,
         unrealized: Option<&'a str>,
+        completed: bool,
     }
     let mut lifetimes: Vec<_> = history
         .iter()
+        .filter(|record| record.opening_side.is_some())
         .filter(|record| {
             !open
                 .iter()
@@ -313,15 +315,17 @@ fn exchange_result(
             opening_side: record.opening_side.as_deref(),
             realized: &record.realized_pnl,
             unrealized: None,
+            completed: matches!(record.close_type.as_str(), "2" | "3"),
         })
         .collect();
     lifetimes.extend(open.iter().filter_map(|position| {
         Some(Lifetime {
             opened_at: position.opened_at?,
             until: position.updated_at?,
-            opening_side: position.opening_side.as_deref(),
+            opening_side: Some(position.opening_side.as_deref()?),
             realized: &position.realized_pnl,
             unrealized: Some(&position.unrealized_pnl),
+            completed: false,
         })
     }));
     lifetimes.sort_by_key(|position| position.opened_at);
@@ -364,7 +368,7 @@ fn exchange_result(
         let value = decimal(position.realized)?;
         if let Some(open_pnl) = position.unrealized {
             unrealized = unrealized.add(&decimal(open_pnl)?);
-        } else {
+        } else if position.completed {
             net.push(to_number(&value));
         }
         realized = realized.add(&value);

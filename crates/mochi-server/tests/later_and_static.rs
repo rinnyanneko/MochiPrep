@@ -718,3 +718,27 @@ async fn unknown_host_static_403() {
     }
     state.runtime.shutdown().await;
 }
+
+#[tokio::test]
+async fn arena_ignores_cross_margin_boundaries_and_only_counts_full_closes() {
+    let state = exchange_arena_fixture().await;
+    sql(
+        &state,
+        "UPDATE exchange_position_history SET close_type='1' WHERE pos_id='e1' AND opened_at=6;
+         INSERT INTO exchange_position_history
+           (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type,opening_side)
+         VALUES ('acct_x','cross',5,'ETH-USDT-SWAP',50,'10','2',NULL);",
+    )
+    .await;
+    let arena = get(&state, "/api/arena").await;
+    let c = arena
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["agentId"] == "agent_c")
+        .unwrap();
+    assert_eq!(c["realizedPnl"], "0.95");
+    assert_eq!(c["tradeCount"], 1);
+    assert_eq!(c["winRatePct"], 0);
+    state.runtime.shutdown().await;
+}
