@@ -9,6 +9,7 @@ import { VaultCard } from '@/components/VaultCard';
 import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Select, Textarea } from '@/components/ui';
 import { api } from '@/lib/api';
 import { formatDateTime, listTimeZones, resolveTimeZone } from '@/lib/display';
+import { COLOR_PRESETS, directionPalette, type ColorPreset } from '@/lib/direction-colors';
 import { pct } from '@/lib/format';
 import { attempt, useApp } from '@/store';
 
@@ -148,9 +149,11 @@ function ProviderRow({ provider, onEdit }: { provider: ProviderView; onEdit(): v
 
 function DisplayCard() {
   const timeZone = useApp((s) => s.timeZone);
-  const flipColors = useApp((s) => s.flipColors);
+  const colors = useApp((s) => s.directionColors);
+  const theme = useApp((s) => s.theme);
+  const palette = directionPalette(colors, theme);
   const setTimeZone = useApp((s) => s.setTimeZone);
-  const setFlipColors = useApp((s) => s.setFlipColors);
+  const setColors = useApp((s) => s.setDirectionColors);
   const zones = useMemo(() => listTimeZones().filter((zone) => zone !== 'UTC'), []);
   const now = Date.now();
 
@@ -169,10 +172,24 @@ function DisplayCard() {
         </Field>
         <div>
           <span className="mb-1 block text-xs font-semibold text-ink-2">Up and down colors</span>
-          <label className="flex h-9 items-center gap-2 text-[13px]">
-            <input type="checkbox" className="accent-[var(--accent)]" checked={flipColors} onChange={(e) => setFlipColors(e.target.checked)} data-testid="flip-colors" />{' '}
-            Red for up, green for down
-          </label>
+          <Select aria-label="Up and down color preset" value={colors.preset} onChange={(e) => {
+            if (e.target.value === 'custom') setColors({ preset: 'custom', ...palette });
+            else setColors({ preset: e.target.value as ColorPreset });
+          }}>
+            {COLOR_PRESETS.map((preset) => <option key={preset} value={preset}>{preset.split('-').map((name) => name[0]!.toUpperCase() + name.slice(1)).join(' / ')}</option>)}
+            <option value="custom">Custom</option>
+          </Select>
+          <div className="mt-2 flex gap-4">
+            {(['rise', 'fall'] as const).map((direction) => <label key={direction} className="flex items-center gap-2 text-xs text-ink-2">
+              {direction === 'rise' ? 'Up / Long' : 'Down / Short'}
+              <input type="color" aria-label={direction === 'rise' ? 'Up color' : 'Down color'} value={palette[direction]}
+                onChange={(e) => {
+                  const current = useApp.getState();
+                  setColors({ preset: 'custom', ...directionPalette(current.directionColors, current.theme), [direction]: e.target.value });
+                }}
+                className="h-8 w-10 cursor-pointer rounded border border-line bg-surface-2" />
+            </label>)}
+          </div>
           <span className="mt-1 block text-[11px] text-ink-3">
             Applies to prices, PnL, long and short, and charts:{' '}
             <span className="num font-semibold text-rise">{pct(1.25)}</span> <span className="num font-semibold text-fall">{pct(-1.25)}</span>. Warnings and errors stay red.

@@ -20,7 +20,9 @@ import type {
   VaultStatus,
 } from '@mochiprep/shared';
 import { api, forgetToken, getToken } from './lib/api';
-import { formatDateTime, parseColorFlip, parseTimeZone, type TimeZonePref } from './lib/display';
+import { formatDateTime, parseTimeZone, type TimeZonePref } from './lib/display';
+
+import { applyDirectionColors, parseDirectionColors, type DirectionColors } from './lib/direction-colors';
 
 export type Page = 'dashboard' | 'markets' | 'agents' | 'paper' | 'arena' | 'history' | 'settings';
 export type AccountView = PaperAccount & { balance: AccountBalance };
@@ -42,6 +44,7 @@ interface State {
   agents: Agent[];
   providers: ProviderView[];
   decisions: DecisionRecord[];
+  historyDecisionId: string | null;
   arena: ArenaRow[];
   exchange: ExchangeStatus[];
   /** Suggestions waiting for the user. */
@@ -54,18 +57,17 @@ interface State {
   accountId: string | null;
   theme: 'dark' | 'light';
   timeZone: TimeZonePref;
-  /** Red for up and green for down, as many Asian markets show it. */
-  flipColors: boolean;
+  directionColors: DirectionColors;
   toasts: Toast[];
   lastFillAt: number;
   lastAlertAt: number;
 
-  setPage(page: Page): void;
+  setPage(page: Page, historyDecisionId?: string): void;
   setSource(source: DataSource): void;
   setAccountId(id: string | null): void;
   toggleTheme(): void;
   setTimeZone(zone: TimeZonePref): void;
-  setFlipColors(flip: boolean): void;
+  setDirectionColors(colors: DirectionColors): void;
   toast(level: Toast['level'], message: string): void;
   dismissToast(id: number): void;
   refreshState(): Promise<void>;
@@ -89,11 +91,6 @@ const remember = (key: string, value: string) => {
   }
 };
 
-const applyColors = (flip: boolean) => {
-  if (flip) document.documentElement.dataset.colors = 'flip';
-  else delete document.documentElement.dataset.colors;
-};
-
 /** Formats a timestamp in the chosen zone, and re-renders the caller when the choice changes. Every time shown goes through it. */
 export function useDateTime() {
   const zone = useApp((s) => s.timeZone);
@@ -114,6 +111,7 @@ export const useApp = create<State>((set, get) => ({
   agents: [],
   providers: [],
   decisions: [],
+  historyDecisionId: null,
   arena: [],
   exchange: [],
   signals: [],
@@ -124,14 +122,14 @@ export const useApp = create<State>((set, get) => ({
   accountId: null,
   theme: remembered('mochi.theme', 'dark') as 'dark' | 'light',
   timeZone: parseTimeZone(recall('mochi.timeZone')),
-  flipColors: parseColorFlip(recall('mochi.flipColors')),
+  directionColors: parseDirectionColors(recall('mochi.directionColors'), recall('mochi.flipColors')),
   toasts: [],
   lastFillAt: 0,
   lastAlertAt: 0,
 
-  setPage(page) {
+  setPage(page, historyDecisionId) {
     location.hash = page;
-    set({ page });
+    set({ page, historyDecisionId: page === 'history' ? historyDecisionId ?? null : null });
   },
   setSource(source) {
     remember('mochi.source', source);
@@ -147,16 +145,18 @@ export const useApp = create<State>((set, get) => ({
     const theme = get().theme === 'dark' ? 'light' : 'dark';
     remember('mochi.theme', theme);
     document.documentElement.dataset.theme = theme;
+    applyDirectionColors(get().directionColors, theme);
     set({ theme });
   },
   setTimeZone(timeZone) {
     remember('mochi.timeZone', timeZone);
     set({ timeZone });
   },
-  setFlipColors(flipColors) {
-    remember('mochi.flipColors', flipColors ? '1' : '0');
-    applyColors(flipColors);
-    set({ flipColors });
+  setDirectionColors(colors) {
+    const directionColors = parseDirectionColors(JSON.stringify(colors), null);
+    remember('mochi.directionColors', JSON.stringify(directionColors));
+    applyDirectionColors(directionColors, get().theme);
+    set({ directionColors });
   },
   toast(level, message) {
     const id = ++toastId;
@@ -295,7 +295,7 @@ function reconnectStream() {
 
 async function boot() {
   document.documentElement.dataset.theme = useApp.getState().theme;
-  applyColors(useApp.getState().flipColors);
+  applyDirectionColors(useApp.getState().directionColors, useApp.getState().theme);
   useApp.getState().setSource(useApp.getState().source);
   await openStream();
   // A proxy can keep a dead stream looking open, so silence counts as a disconnect.

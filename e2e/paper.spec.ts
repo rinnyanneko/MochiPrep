@@ -48,4 +48,17 @@ test('a replay paper account trades end to end: order, trailing stop, close, led
 
   await page.getByRole('button', { name: 'Trade History' }).click();
   await expect(page.getByTestId('ledger-audit')).toHaveText('Ledger balances match');
+
+  // Account changes must remount the ticket and load only that account's preferences.
+  await page.getByRole('button', { name: 'Trading', exact: true }).click();
+  await page.getByTestId('order-ticket').getByRole('button', { name: 'Short', exact: true }).click();
+  await page.getByLabel('Leverage', { exact: true }).fill('20');
+  await page.getByRole('button', { name: 'New account' }).click();
+  await page.getByRole('dialog').getByPlaceholder('My paper account').fill('Other paper');
+  await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByTestId('order-ticket').getByRole('button', { name: 'Long', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByLabel('Leverage', { exact: true })).toHaveValue('3');
+  await page.getByLabel('Paper account').selectOption({ label: 'E2E paper' });
+  await expect(page.getByTestId('order-ticket').getByRole('button', { name: 'Short', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByLabel('Leverage', { exact: true })).toHaveValue('20');
 });

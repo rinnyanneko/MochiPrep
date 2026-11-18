@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { oneOf, useRemembered } from '@/lib/remembered';
 import type { DecisionOutcome, DecisionRecord, Fill, LedgerEvent, Position } from '@mochiprep/shared';
 import { PageTitle } from '@/components/Shell';
 import { AccountPicker, ClosedPositionsTable, DecisionDetail, DecisionList, FillsTable, LedgerTable, OUTCOME_OPTIONS, useCurrentAccount } from '@/components/trading';
@@ -9,8 +10,8 @@ import { useApp, useQuery, useSourceAccounts } from '@/store';
 function Decisions() {
   const accounts = useSourceAccounts();
   const ids = new Set(accounts.map((a) => a.id));
-  const [outcome, setOutcome] = useState<DecisionOutcome | ''>('');
-  const [selected, setSelected] = useState<string | null>(null);
+  const [outcome, setOutcome] = useRemembered<DecisionOutcome | ''>('history.outcome', '', oneOf(['', ...OUTCOME_OPTIONS.map((o) => o.value)]));
+  const [selected, setSelected] = useState(() => useApp.getState().historyDecisionId);
   const { data } = useQuery(() => api.get<DecisionRecord[]>('/decisions?limit=1000'), [], ['decisions']);
   const decisions = (data ?? []).filter((d) => ids.has(d.accountId) && (!outcome || d.outcome === outcome));
   const current = decisions.find((d) => d.id === selected) ?? decisions[0];
@@ -42,7 +43,7 @@ function Decisions() {
 function AccountRecords() {
   const account = useCurrentAccount();
   const id = account?.id;
-  const [tab, setTab] = useState('closed');
+  const [tab, setTab] = useRemembered<'closed' | 'fills' | 'ledger'>('history.tab', 'closed', oneOf(['closed', 'fills', 'ledger'] as const));
   const { data: fills } = useQuery(() => (id ? api.get<Fill[]>(`/accounts/${id}/fills?limit=500`) : Promise.resolve([])), [id], ['orders']);
   const { data: closed } = useQuery(() => (id ? api.get<Position[]>(`/accounts/${id}/closed-positions?limit=500`) : Promise.resolve([])), [id], ['positions']);
   const { data: ledger } = useQuery(() => (id ? api.get<LedgerEvent[]>(`/accounts/${id}/ledger?limit=1000`) : Promise.resolve([])), [id], ['orders', 'positions']);
