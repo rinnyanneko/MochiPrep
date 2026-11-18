@@ -282,16 +282,15 @@ async fn sends_a_well_formed_isolated_order_with_exchange_side_protection() {
     };
     assert!(hex32(&sent["clOrdId"]));
     let legs = sent["attachAlgoOrds"].as_array().unwrap();
-    assert_eq!(legs.len(), 2);
+    assert_eq!(legs.len(), 1);
     assert!(hex32(&legs[0]["attachAlgoClOrdId"]));
-    assert!(hex32(&legs[1]["attachAlgoClOrdId"]));
     assert_eq!(
         legs[0],
         json!({ "attachAlgoClOrdId": legs[0]["attachAlgoClOrdId"], "slTriggerPx": "74000", "slOrdPx": "-1" })
     );
     assert_eq!(
-        legs[1],
-        json!({ "attachAlgoClOrdId": legs[1]["attachAlgoClOrdId"], "tpTriggerPx": "77000", "tpOrdPx": "-1", "sz": "0.1" })
+        h.engine.protection_of("BTCUSDT").take_profit.as_deref(),
+        Some("77000")
     );
     // Key order on the wire, as Node builds the body.
     let keys: Vec<_> = sent.as_object().unwrap().keys().cloned().collect();

@@ -1631,7 +1631,7 @@ async fn an_attached_stop_listed_larger_than_its_fill_never_retires_the_older_st
 }
 
 #[tokio::test]
-async fn combined_entry_keeps_fixed_stop_and_target_while_trailing_response_is_lost() {
+async fn combined_entry_keeps_fixed_stop_while_a_deferred_response_is_lost() {
     let h = connect(Vec::new()).await;
     let mut request = order();
     request.take_profit = Some("78000".into());
@@ -1645,14 +1645,17 @@ async fn combined_entry_keeps_fixed_stop_and_target_while_trailing_response_is_l
             .as_array()
             .unwrap()
             .len(),
-        2
+        1
     );
-    assert_eq!(h.okx.state().placed[0]["attachAlgoOrds"][1]["sz"], "0.1");
+    assert_eq!(
+        h.okx.state().placed[0]["attachAlgoOrds"][0]["slTriggerPx"],
+        "74000"
+    );
     h.sync().await;
     let duplicate = h.engine.place_order(request).await.unwrap();
     assert!(duplicate.duplicate);
     assert_eq!(h.okx.state().placed.len(), 1);
-    assert_eq!(h.algo_placed().len(), 1);
+    assert_eq!(h.algo_placed().len(), 2);
     assert_eq!(
         h.engine.protection_of("BTCUSDT"),
         Protection {
@@ -1799,7 +1802,7 @@ async fn deferred_trailing_never_attaches_to_a_flat_or_reopened_or_ambiguous_pos
             }
         }
         h.sync().await;
-        if scenario == "flat" {
+        if matches!(scenario, "flat" | "cross") {
             assert_eq!(
                 h.order_row(&format!("{}:trail", entry.id)).status,
                 OrderStatus::Open
@@ -1813,7 +1816,7 @@ async fn deferred_trailing_never_attaches_to_a_flat_or_reopened_or_ambiguous_pos
         assert!(trail
             .reject_reason
             .unwrap()
-            .starts_with("Deferred trailing canceled:"));
+            .starts_with("Deferred protection canceled:"));
     }
 }
 
@@ -2010,7 +2013,7 @@ async fn deferred_trailing_rechecks_position_after_looking_up_the_parent() {
 }
 
 #[tokio::test]
-async fn explicit_trailing_removal_cancels_unsent_intent_but_keep_trailing_preserves_it() {
+async fn protection_edits_do_not_cancel_trailing_for_a_resting_entry() {
     let (h, entry) = deferred_limit().await;
     // A position opens outside MochiPrep while the entry is resting.
     let other = Harness::with_position().await;
@@ -2041,8 +2044,73 @@ async fn explicit_trailing_removal_cancels_unsent_intent_but_keep_trailing_prese
     })
     .await
     .unwrap();
-    assert_eq!(h.order_row(&id).status, OrderStatus::Canceled);
+    assert_eq!(h.order_row(&id).status, OrderStatus::Open);
     h.okx.state().fill_resting();
     h.sync().await;
-    assert!(h.algo_placed().is_empty());
+    assert_eq!(h.algo_placed().len(), 1);
+}
+
+#[tokio::test]
+async fn split_tp_is_not_used_and_a_canceled_partial_fill_keeps_its_stop() {
+    let h = connect(Vec::new()).await;
+    h.okx.state().rest_limit_orders = true;
+    let mut request = order();
+    request.order_type = EntryOrderType::Limit;
+    request.price = Some("74500".into());
+    request.take_profit = Some("78000".into());
+    request.trailing_stop = Some(ratio("0.01"));
+    h.engine.place_order(request).await.unwrap();
+    h.okx.state().cancel_resting_after_partial_fill("0.05");
+    h.sync().await;
+    let stops = live_stops(&h);
+    assert_eq!(stops.len(), 1);
+    assert_eq!(stops[0].0, "0.05");
+    assert_eq!(h.algo_placed().len(), 2);
+    assert!(h.algo_placed().iter().all(|algo| algo["sz"] == "0.05"));
+}
+
+#[tokio::test]
+async fn missing_protection_snapshot_does_not_hide_a_position_from_reduce_only_close() {
+    let (h, _) = deferred_limit().await;
+    h.okx.state().fill_resting();
+    h.okx.state().algo_lookup_down = true;
+    assert!(h.engine.sync().await.is_err());
+    h.disarm();
+    assert_eq!(
+        h.engine
+            .close_position(ACCOUNT, "BTCUSDT", 1.0, "close-after-protection-timeout")
+            .await
+            .unwrap()
+            .order
+            .status,
+        OrderStatus::Filled
+    );
+}
+
+#[tokio::test]
+async fn a_resting_entrys_deferred_protection_does_not_block_a_second_entry() {
+    let (h, _) = deferred_limit().await;
+    let mut second = order();
+    second.client_order_id = "another-entry".into();
+    second.order_type = EntryOrderType::Limit;
+    second.price = Some("74500".into());
+    assert_eq!(
+        h.engine.place_order(second).await.unwrap().order.status,
+        OrderStatus::Open
+    );
+    assert_eq!(h.okx.state().placed.len(), 2);
+}
+
+#[tokio::test]
+async fn deferred_trailing_uses_isolated_position_when_cross_appears_first() {
+    let (h, _) = deferred_limit().await;
+    h.okx.state().fill_resting();
+    {
+        let mut state = h.okx.state();
+        let mut cross = state.position.clone().unwrap();
+        cross.insert("mgnMode".into(), json!("cross"));
+        state.other_positions.push(cross);
+    }
+    h.sync().await;
+    assert_eq!(h.algo_placed().len(), 1);
 }

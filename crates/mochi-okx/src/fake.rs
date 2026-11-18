@@ -67,6 +67,7 @@ pub struct FakeState {
     /// Orders by clOrdId.
     pub orders: IndexMap<String, Row>,
     pub position: Option<Row>,
+    pub other_positions: Vec<Row>,
     pub simulated_headers: Vec<Option<String>>,
     /// Every signed request as `METHOD pathname`, in arrival order.
     pub calls: Vec<String>,
@@ -114,6 +115,7 @@ impl Default for FakeState {
             placed: Vec::new(),
             orders: IndexMap::new(),
             position: None,
+            other_positions: Vec::new(),
             simulated_headers: Vec::new(),
             calls: Vec::new(),
             algos: IndexMap::new(),
@@ -154,6 +156,26 @@ impl FakeState {
         };
         self.algos.insert(key, algo.clone());
         algo
+    }
+
+    /// Simulate canceling the remaining quantity after an execution, including OKX's rule
+    /// that Split TP attachments only appear after a complete fill.
+    pub fn cancel_resting_after_partial_fill(&mut self, contracts: &str) {
+        let mut entry = self.resting.remove(0);
+        entry.insert("sz".into(), json!(contracts));
+        if entry
+            .get("attachAlgoOrds")
+            .and_then(Value::as_array)
+            .is_some_and(|legs| legs.len() > 1)
+        {
+            entry.remove("attachAlgoOrds");
+        }
+        fill(self, &entry);
+        let key = text(entry.get("clOrdId")).unwrap();
+        self.orders
+            .get_mut(&key)
+            .unwrap()
+            .insert("state".into(), json!("canceled"));
     }
 
     /// Fills every resting limit order, oldest first, as the market reaching their prices would.
@@ -307,11 +329,12 @@ impl FakeOkx {
             }] }])));
         }
         if ends("/account/positions") {
-            let positions = match &state.position {
-                Some(position) => json!([position]),
-                None => json!([]),
-            };
-            return Ok(ok(positions));
+            let positions: Vec<_> = state
+                .other_positions
+                .iter()
+                .chain(state.position.iter())
+                .collect();
+            return Ok(ok(json!(positions)));
         }
         if ends("/account/set-leverage") {
             state.leverage_calls.push(parse(&body)?);

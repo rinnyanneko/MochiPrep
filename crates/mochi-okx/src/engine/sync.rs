@@ -144,13 +144,17 @@ impl OkxEngine {
             }
         }
         let client = &self.deps.client;
-        let (usdt, remote, conditional, oco, trailing) = tokio::try_join!(
-            client.get_usdt_balance(),
-            client.get_positions(),
-            client.get_pending_algos(PendingAlgoType::Conditional),
-            client.get_pending_algos(PendingAlgoType::Oco),
-            client.get_pending_algos(PendingAlgoType::MoveOrderStop),
-        )?;
+        let (usdt, remote, algos) =
+            tokio::join!(client.get_usdt_balance(), client.get_positions(), async {
+                let (conditional, oco, trailing) = tokio::try_join!(
+                    client.get_pending_algos(PendingAlgoType::Conditional),
+                    client.get_pending_algos(PendingAlgoType::Oco),
+                    client.get_pending_algos(PendingAlgoType::MoveOrderStop),
+                )?;
+                Ok::<_, EngineError>(conditional.into_iter().chain(oco).chain(trailing).collect())
+            },);
+        let usdt = usdt?;
+        let remote = remote?;
         let open: Vec<Row> = remote
             .into_iter()
             .filter(|p| js_number(p.get("pos")) != 0.0)
@@ -169,9 +173,21 @@ impl OkxEngine {
                 Held { side, contracts },
             );
         }
-        let algos = conditional.into_iter().chain(oco).chain(trailing).collect();
-        let protection = self.reconcile_protection(algos, &mut held).await?;
-        self.state().protection = protection.clone();
+        let protection = match algos {
+            Ok(algos) => self.reconcile_protection(algos, &mut held).await,
+            Err(error) => Err(error),
+        };
+        let protection = match protection {
+            Ok(protection) => {
+                self.state().protection = protection.clone();
+                protection
+            }
+            Err(error) => {
+                // The position read succeeded. Publish it so reduce-only orders can still exit.
+                order_error.get_or_insert(error);
+                self.state().protection.clone()
+            }
+        };
         let (positions, balance) = {
             let account_id = account_id.clone();
             let now = self.now();

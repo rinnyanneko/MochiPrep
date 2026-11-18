@@ -43,6 +43,27 @@ const POSITION_CLOSED: &str = "Position closed";
 // is the at-most-once boundary: a crash thereafter permits lookup only, never another send.
 const DEFERRED_TRAILING: &str = "Pending entry fill: trailing stop not yet sent";
 
+const DEFERRED_TP: &str = "Pending entry fill: take profit not yet sent";
+
+pub(super) fn is_deferred(row: &Order) -> bool {
+    matches!(
+        row.reject_reason.as_deref(),
+        Some(DEFERRED_TRAILING | DEFERRED_TP)
+    )
+}
+
+pub(super) fn defer_tp(entry: &Order) -> bool {
+    !entry.reduce_only
+        && entry
+            .attached_stop_loss
+            .as_deref()
+            .is_some_and(|p| !p.is_empty())
+        && entry
+            .attached_take_profit
+            .as_deref()
+            .is_some_and(|p| !p.is_empty())
+}
+
 pub(super) fn defer_trailing(entry: &Order) -> bool {
     !entry.reduce_only
         && entry.attached_trailing_stop.is_some()
@@ -55,11 +76,11 @@ pub(super) fn defer_trailing(entry: &Order) -> bool {
         .any(|p| !p.is_empty())
 }
 
-pub(super) fn record_deferred_trailing(
+pub(super) fn record_deferred_protection(
     rows: &dyn LiveRows,
     entry: &Order,
 ) -> Result<(), EngineError> {
-    if !defer_trailing(entry) {
+    if !defer_trailing(entry) && !defer_tp(entry) {
         return Ok(());
     }
     let source = Source {
@@ -75,19 +96,27 @@ pub(super) fn record_deferred_trailing(
         agent_id: entry.agent_id.clone(),
         decision_id: entry.decision_id.clone(),
     };
-    let mut row = protection_row(
-        format!("{}:trail", entry.id),
-        &source,
-        Leg::Trail,
-        &Protection {
-            stop_loss: None,
-            take_profit: None,
-            trailing_stop: entry.attached_trailing_stop.clone(),
-        },
-        entry.created_at,
-    );
-    row.reject_reason = Some(DEFERRED_TRAILING.into());
-    rows.insert_order(&row)?;
+    let target = Protection {
+        stop_loss: None,
+        take_profit: entry.attached_take_profit.clone(),
+        trailing_stop: entry.attached_trailing_stop.clone(),
+    };
+    for (defer, leg, marker) in [
+        (defer_tp(entry), Leg::Tp, DEFERRED_TP),
+        (defer_trailing(entry), Leg::Trail, DEFERRED_TRAILING),
+    ] {
+        if defer {
+            let mut row = protection_row(
+                format!("{}:{}", entry.id, leg.tag()),
+                &source,
+                leg,
+                &target,
+                entry.created_at,
+            );
+            row.reject_reason = Some(marker.into());
+            rows.insert_order(&row)?;
+        }
+    }
     Ok(())
 }
 
@@ -339,9 +368,8 @@ pub(crate) fn protection_row(
     }
 }
 
-/// Rows for what a filled entry attached (wholly, or partly before a cancel). Before that no rows
-/// exist, so cleanup can never touch a resting entry's protection. The ids are fixed by the
-/// entry's attachAlgoClOrdId tags. Runs inside one store turn, after the entry is saved.
+/// Track exchange-attached protection after a terminal entry with a fill. Existing
+/// deferred rows keep their submission state. Runs inside the entry's store transaction.
 pub(crate) fn record_attached(
     rows: &dyn LiveRows,
     entry: &Order,
@@ -745,17 +773,37 @@ impl OkxEngine {
             }
         }
 
-        if !keep_trailing {
-            let reason = if target.trailing_stop.is_some() {
+        // A position edit only supersedes deferred exits of settled entries. Resting
+        // entries may still fill later and must retain the exits requested with them.
+        for mut pending in context
+            .open_orders
+            .into_iter()
+            .filter(|row| row.symbol == symbol && is_deferred(row))
+        {
+            let leg = match leg_of(&pending) {
+                Some(Leg::Trail) if !keep_trailing => Leg::Trail,
+                Some(Leg::Tp) => Leg::Tp,
+                _ => continue,
+            };
+            let Some(parent_id) = pending
+                .id
+                .strip_suffix(&format!(":{}", leg.tag()))
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            let parent = self
+                .rows(move |rows| Ok(rows.get_order(&parent_id)?))
+                .await?;
+            if !parent.is_some_and(|parent| parent.status != OrderStatus::Open) {
+                continue;
+            }
+            let reason = if leg.is_set(&target) {
                 REPLACED
             } else {
                 REMOVED
             };
-            for mut pending in context.open_orders.into_iter().filter(|row| {
-                row.symbol == symbol && row.reject_reason.as_deref() == Some(DEFERRED_TRAILING)
-            }) {
-                self.close_row(&mut pending, reason).await?;
-            }
+            self.close_row(&mut pending, reason).await?;
         }
 
         let confirmed = self.sync_now().await.is_ok();
@@ -790,7 +838,7 @@ impl OkxEngine {
         let unresolved = context.open_orders.iter().any(|o| {
             &o.symbol == symbol
                 && is_leg(o)
-                && o.reject_reason.as_deref() != Some(DEFERRED_TRAILING)
+                && !is_deferred(o)
                 && o.exchange_order_id.as_deref().is_none_or(str::is_empty)
         });
         if unresolved {
@@ -916,23 +964,25 @@ impl OkxEngine {
         Ok(failure)
     }
 
-    async fn submit_deferred_trailing(
+    async fn submit_deferred_protection(
         &self,
         row: &mut Order,
         registry: &Registry,
         held: &mut HashMap<String, Held>,
     ) -> Result<(), EngineError> {
+        let leg =
+            leg_of(row).ok_or_else(|| EngineError::message("Invalid deferred protection leg"))?;
         let parent_id = row
             .id
-            .strip_suffix(":trail")
-            .ok_or_else(|| EngineError::message("Invalid deferred trailing id"))?
+            .strip_suffix(&format!(":{}", leg.tag()))
+            .ok_or_else(|| EngineError::message("Invalid deferred protection id"))?
             .to_string();
         let parent = self
             .rows(move |rows| Ok(rows.get_order(&parent_id)?))
             .await?;
         let Some(parent) = parent else {
             return self
-                .close_row(row, "Deferred trailing canceled: parent missing")
+                .close_row(row, "Deferred protection canceled: parent missing")
                 .await;
         };
         if parent.status == OrderStatus::Open {
@@ -940,7 +990,7 @@ impl OkxEngine {
         }
         if !dec(&parent.filled_quantity)?.gt(&super::zero()) {
             return self
-                .close_row(row, "Deferred trailing canceled: entry did not fill")
+                .close_row(row, "Deferred protection canceled: entry did not fill")
                 .await;
         }
         let inst_id = to_inst_id(&row.symbol);
@@ -948,9 +998,9 @@ impl OkxEngine {
         let context = self.context().await?;
         if let Some(replacement) = context.open_orders.iter().find(|other| {
             other.symbol == row.symbol
-                && other.created_at >= row.created_at
+                && other.created_at >= parent.updated_at
                 && !is_per_fill(other)
-                && leg_of(other) == Some(Leg::Trail)
+                && leg_of(other) == Some(leg)
         }) {
             if replacement
                 .exchange_order_id
@@ -969,8 +1019,8 @@ impl OkxEngine {
             .await?;
         let trade_id = remote.as_ref().and_then(last_trade_id);
         if parent.status == OrderStatus::Canceled && parent.attached_stop_loss.is_some() {
-            // OKX documents attached algos after a complete fill. On a partial cancel require
-            // evidence the attached fixed stop exists before proceeding with the trailing leg.
+            // Single attached stops also apply to a partial fill when the remainder is
+            // canceled. Confirm the fixed stop appeared before placing optional exits.
             let stop = self.lookup_algo(&format!("{}:sl", parent.id)).await?;
             if !stop
                 .as_ref()
@@ -981,14 +1031,20 @@ impl OkxEngine {
                 if confirming {
                     return Ok(());
                 }
-                return self.close_row(row, "Deferred trailing canceled: OKX did not confirm the fixed stop for the partial fill").await;
+                return self.close_row(row, "Deferred protection canceled: OKX did not confirm the fixed stop for the partial fill").await;
             }
         }
         // Read fresh after the parent/stop calls, which may have outlived the earlier snapshot.
         let positions = self.deps.client.get_positions().await?;
-        let current = positions
-            .iter()
-            .find(|p| p.get("instId").and_then(Value::as_str) == Some(inst_id.as_str()));
+        let current = positions.iter().find(|p| {
+            p.get("instId").and_then(Value::as_str) == Some(inst_id.as_str())
+                && p.get("mgnMode").and_then(Value::as_str) == Some("isolated")
+                && p.get("posSide").and_then(Value::as_str) == Some("net")
+                && p.get("pos")
+                    .and_then(Value::as_str)
+                    .and_then(|raw| dec(raw).ok())
+                    .is_some_and(|size| !size.is_zero())
+        });
         let Some(position) = current else {
             if confirming {
                 return Ok(());
@@ -996,12 +1052,10 @@ impl OkxEngine {
             return self
                 .close_row(
                     row,
-                    "Deferred trailing canceled: entry position is no longer present",
+                    "Deferred protection canceled: entry position is no longer present",
                 )
                 .await;
         };
-        let isolated_net = position.get("mgnMode").and_then(Value::as_str) == Some("isolated")
-            && position.get("posSide").and_then(Value::as_str) == Some("net");
         let signed_size = position
             .get("pos")
             .and_then(Value::as_str)
@@ -1009,7 +1063,7 @@ impl OkxEngine {
             .transpose()?;
         let Some(signed_size) = signed_size.filter(|size| !size.is_zero()) else {
             return self
-                .close_row(row, "Deferred trailing canceled: entry position is flat")
+                .close_row(row, "Deferred protection canceled: entry position is flat")
                 .await;
         };
         let short = signed_size.is_negative();
@@ -1020,45 +1074,46 @@ impl OkxEngine {
         };
         let closes = (row.side == OrderSide::Sell) != short;
         let position_trade = last_trade_id(position);
-        if !isolated_net || !closes || trade_id.is_none() || position_trade.is_none() {
-            return self.close_row(row, "Deferred trailing canceled: position changed or entry fill cannot be confirmed").await;
+        if !closes || trade_id.is_none() || position_trade.is_none() {
+            return self.close_row(row, "Deferred protection canceled: position changed or entry fill cannot be confirmed").await;
         }
         // The last exchange trade ID advances on every fill, including a same-side reopen.
         if position_trade != trade_id {
             if confirming && position_trade < trade_id {
                 return Ok(());
             }
-            return self.close_row(row, "Deferred trailing canceled: position traded after entry or entry fill cannot be confirmed").await;
+            return self.close_row(row, "Deferred protection canceled: position traded after entry or entry fill cannot be confirmed").await;
         }
-        // This pass already fetched balance/positions/algos successfully. The cached health
-        // flag may still be false on restart, so use the fresh quote directly, not last sync.
-        let Some(quote) = (self.deps.get_quote)(&row.symbol) else {
-            return Ok(());
-        };
-        if (self.now() - quote.ts) as f64 / 1000.0 > context.limits.max_quote_age_sec {
-            return Ok(());
-        }
-        let last = dec(&quote.last)?;
-        let mut spec = spec_of(row)
-            .ok_or_else(|| EngineError::message("Deferred trailing has no specification"))?;
-        if let Some(activation) = spec.activation_price.as_deref() {
-            let activation = dec(activation)?;
-            let reached = match side {
-                PositionSide::Long => !last.lt(&activation),
-                PositionSide::Short => !last.gt(&activation),
+        if let Some(mut spec) = spec_of(row) {
+            // This pass already fetched balance/positions/algos successfully. The cached health
+            // flag may still be false on restart, so use the fresh quote directly, not last sync.
+            let Some(quote) = (self.deps.get_quote)(&row.symbol) else {
+                return Ok(());
             };
-            if reached {
-                // OKX starts tracking immediately when no activation price is passed.
-                spec.activation_price = None;
+            if (self.now() - quote.ts) as f64 / 1000.0 > context.limits.max_quote_age_sec {
+                return Ok(());
             }
-        }
-        let tick = dec(&registry.get(&row.symbol)?.price_tick)?;
-        if let Some(reason) = validate_trailing(side, &last, &spec, &tick)
-            .map_err(|e| EngineError::message(e.to_string()))?
-        {
-            return self
-                .close_row(row, &format!("Deferred trailing canceled: {reason}"))
-                .await;
+            let last = dec(&quote.last)?;
+            if let Some(activation) = spec.activation_price.as_deref() {
+                let activation = dec(activation)?;
+                let reached = match side {
+                    PositionSide::Long => !last.lt(&activation),
+                    PositionSide::Short => !last.gt(&activation),
+                };
+                if reached {
+                    // OKX starts tracking immediately when no activation price is passed.
+                    spec.activation_price = None;
+                }
+            }
+            let tick = dec(&registry.get(&row.symbol)?.price_tick)?;
+            if let Some(reason) = validate_trailing(side, &last, &spec, &tick)
+                .map_err(|e| EngineError::message(e.to_string()))?
+            {
+                return self
+                    .close_row(row, &format!("Deferred protection canceled: {reason}"))
+                    .await;
+            }
+            row.trailing_activation_price = spec.activation_price;
         }
         let filled = dec(&parent.filled_quantity)?;
         let contracts = if short {
@@ -1076,10 +1131,11 @@ impl OkxEngine {
         );
         let available = contracts.mul(&dec(&registry.get(&row.symbol)?.venue_contract_value)?);
         row.quantity = filled.min(&available).to_fixed();
-        row.trailing_activation_price = spec.activation_price;
         let body = algo_body(row, registry)?;
-        row.reject_reason =
-            Some("Awaiting confirmation: deferred trailing submission started".into());
+        row.reject_reason = Some(format!(
+            "Awaiting confirmation: deferred {} submission started",
+            leg.tag()
+        ));
         row.created_at = self.now();
         row.updated_at = self.now();
         self.save(row.clone()).await?;
@@ -1239,11 +1295,10 @@ impl OkxEngine {
             if slot.status != OrderStatus::Open || alive.iter().any(|(a, _)| *a == i) {
                 continue;
             }
-            if slot.reject_reason.as_deref() == Some(DEFERRED_TRAILING) {
-                self.submit_deferred_trailing(slot, &registry, held).await?;
-                if slot.status == OrderStatus::Open
-                    && slot.reject_reason.as_deref() != Some(DEFERRED_TRAILING)
-                {
+            if is_deferred(slot) {
+                self.submit_deferred_protection(slot, &registry, held)
+                    .await?;
+                if slot.status == OrderStatus::Open && !is_deferred(slot) {
                     if let Some(remote) = self.lookup_algo(&slot.id).await? {
                         if remote
                             .get("state")

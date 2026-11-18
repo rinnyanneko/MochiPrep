@@ -82,10 +82,9 @@ impl OkxEngine {
         // The previous position's algos would otherwise count as the new one's protection, or
         // close it.
         let leftover = self.state().leftovers.contains(&to_inst_id(&order.symbol))
-            || prepared
-                .open_orders
-                .iter()
-                .any(|o| o.symbol == order.symbol && is_leg(o));
+            || prepared.open_orders.iter().any(|o| {
+                o.symbol == order.symbol && is_leg(o) && !super::protection::is_deferred(o)
+            });
         if leftover {
             return Ok(Some(
                 "PROTECTION_PENDING: protection from the previous position is still being cleaned up"

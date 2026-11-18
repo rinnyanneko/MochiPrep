@@ -623,7 +623,7 @@ impl OkxEngine {
         self.rows(move |rows| {
             rows.transaction(&mut || {
                 rows.insert_order(&row)?;
-                protection::record_deferred_trailing(rows, &row)?;
+                protection::record_deferred_protection(rows, &row)?;
                 Ok(())
             })
         })
@@ -815,9 +815,8 @@ fn trailing_fields(spec: &TrailingStopSpec, leg: &mut AttachAlgoOrd) {
     leg.active_px = spec.activation_price.clone().filter(|p| !p.is_empty());
 }
 
-/// One attachAlgoOrds element per leg, each tagged with the id of the local row that will track it
-/// once the entry fills (`<order id>:sl`, `:tp`, `:trail`). A trailing stop combined with
-/// another protection leg is submitted separately after the fill, never as a second attached SL.
+/// Attach one protective leg. In particular, a single fixed stop remains eligible
+/// for exchange placement when a partial fill is followed by cancellation.
 fn to_body(order: &Order, inst_id: &str, cl_ord_id: &str, sz: String) -> PlaceOrderBody {
     let mut algo = Vec::new();
     if !order.reduce_only {
@@ -831,17 +830,15 @@ fn to_body(order: &Order, inst_id: &str, cl_ord_id: &str, sz: String) -> PlaceOr
                 ..Default::default()
             });
         }
-        if let Some(target) = order.attached_take_profit.clone().filter(|p| !p.is_empty()) {
+        if let Some(target) = order
+            .attached_take_profit
+            .clone()
+            .filter(|p| !p.is_empty() && !protection::defer_tp(order))
+        {
             algo.push(AttachAlgoOrd {
                 attach_algo_cl_ord_id: tag("tp"),
                 tp_trigger_px: Some(target),
                 tp_ord_px: Some("-1".into()),
-                // Separate SL and TP elements use OKX's split-TP contract.
-                sz: order
-                    .attached_stop_loss
-                    .as_ref()
-                    .filter(|s| !s.is_empty())
-                    .map(|_| sz.clone()),
                 ..Default::default()
             });
         }
