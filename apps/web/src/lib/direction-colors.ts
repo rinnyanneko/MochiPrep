@@ -26,12 +26,23 @@ export function directionPalette(colors: DirectionColors, theme: 'light' | 'dark
   return { rise: palette[rise], fall: palette[fall] };
 }
 
+/** Pick the stronger WCAG contrast against the solid market color. */
+export function directionTextColor(color: string): '#000000' | '#ffffff' {
+  const [r, g, b] = [1, 3, 5].map((start) => {
+    const channel = Number.parseInt(color.slice(start, start + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) ? '#000000' : '#ffffff';
+}
+
 export function applyDirectionColors(colors: DirectionColors, theme: 'light' | 'dark') {
   const root = document.documentElement;
   delete root.dataset.colors;
   const palette = directionPalette(colors, theme);
   for (const direction of ['rise', 'fall'] as const) {
     root.style.setProperty(`--${direction}`, palette[direction]);
+    root.style.setProperty(`--${direction}-ink`, directionTextColor(palette[direction]));
     root.style.setProperty(`--${direction}-soft`, `color-mix(in srgb, ${palette[direction]} 16%, var(--surface-2))`);
   }
 }

@@ -1,3 +1,4 @@
+import { writeRemembered } from '@/lib/remembered';
 import { ArrowRight, Sparkles } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { EquityPoint, Fill, PositionView } from '@mochiprep/shared';
@@ -128,7 +129,7 @@ export function DashboardPage() {
               </div>
             </Card>
             <Card className="flex max-h-[376px] flex-col">
-              <CardHeader title="Latest AI decisions" action={<Button size="sm" variant="ghost" onClick={() => setPage('history')}>All</Button>} />
+              <CardHeader title="Latest AI decisions" action={<Button size="sm" variant="ghost" onClick={() => { writeRemembered('history.outcome', ''); setPage('history'); }}>All</Button>} />
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <DecisionList
                   decisions={decisions.filter((d) => scopeIds.has(d.accountId)).slice(0, 12)}

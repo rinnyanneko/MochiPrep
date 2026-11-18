@@ -65,12 +65,12 @@ function ResetAccount({ account }: { account: AccountView }) {
 
 function OrderTicket({ account, symbol }: { account: AccountView; symbol: SymbolId }) {
   const quote = useApp((s) => s.quotes[account.source][symbol]);
-  const [side, setSide] = useRemembered<'BUY' | 'SELL'>('ticket.side', 'BUY', oneOf(['BUY', 'SELL'] as const));
-  const [type, setType] = useRemembered<'MARKET' | 'LIMIT'>('ticket.type', 'MARKET', oneOf(['MARKET', 'LIMIT'] as const));
-  const [mode, setMode] = useRemembered<'QTY' | 'MARGIN'>('ticket.mode', 'MARGIN', oneOf(['QTY', 'MARGIN'] as const));
-  const [amount, setAmount] = useState(() => mode === 'MARGIN' ? '500' : '');
+  const [side, setSide] = useRemembered<'BUY' | 'SELL'>(`ticket.${account.id}.side`, 'BUY', oneOf(['BUY', 'SELL'] as const));
+  const [type, setType] = useRemembered<'MARKET' | 'LIMIT'>(`ticket.${account.id}.type`, 'MARKET', oneOf(['MARKET', 'LIMIT'] as const));
+  const [mode, setMode] = useRemembered<'QTY' | 'MARGIN'>(`ticket.${account.id}.mode`, 'MARGIN', oneOf(['QTY', 'MARGIN'] as const));
+  const [amount, setAmount] = useState(() => mode === 'MARGIN' && account.venue !== 'OKX_LIVE' ? '500' : '');
   const [limit, setLimit] = useState('');
-  const [leverage, setLeverage] = useRemembered('ticket.leverage', 3, (v): v is number => isInteger(v) && v >= 1 && v <= 20);
+  const [leverage, setLeverage] = useRemembered(`ticket.${account.id}.leverage`, 3, (v): v is number => isInteger(v) && v >= 1 && v <= 20);
   const [stop, setStop] = useState('');
   const [target, setTarget] = useState('');
   const [reduceOnly, setReduceOnly] = useState(false);
@@ -265,7 +265,7 @@ export function PaperPage() {
           <div className="mb-1 px-2"><ChartTradeSummary summary={overlay.summary} /></div>
           <div className="h-[470px]"><MarketChart candles={candles ?? []} symbol={symbol} timeframe={timeframe} quote={quote} showIndicators={false} priceLines={overlay.lines} markers={overlay.markers} notes={overlay.notes} /></div>
         </Card>
-        <OrderTicket account={account} symbol={symbol} />
+        <OrderTicket key={account.id} account={account} symbol={symbol} />
       </div>
       <Card className="mt-3">
         <Tabs

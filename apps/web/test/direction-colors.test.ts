@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDirectionColors, directionPalette } from '../src/lib/direction-colors';
+import { parseDirectionColors, directionPalette, directionTextColor } from '../src/lib/direction-colors';
 
 describe('direction color preferences', () => {
   it('migrates the old flip setting only when the new preference is absent', () => {
@@ -21,4 +21,10 @@ describe('direction color preferences', () => {
     expect(directionPalette({ preset: 'red-blue' }, 'light').fall).toBe('#2563eb');
     expect(directionPalette({ preset: 'blue-green' }, 'dark').fall).toBe('#6fd6ae');
   });
+});
+
+it('picks contrasting button text for a custom color in either theme', () => {
+  expect(directionTextColor('#6fd6ae')).toBe('#000000');
+  expect(directionTextColor('#f58a9e')).toBe('#000000');
+  expect(directionTextColor('#29203d')).toBe('#ffffff');
 });
