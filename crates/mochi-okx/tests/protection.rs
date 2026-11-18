@@ -15,7 +15,10 @@ use mochi_domain::{
     OrderSide, OrderStatus, OrderType, PaperAccount, PositionView, Protection, Quote, RiskSettings,
     TrailingKind, TrailingStopSpec, TrailingStopView,
 };
-use mochi_okx::engine::{EngineError, OkxEngine, OkxEngineDeps, Rows, StoreAccess, StoreWork};
+use mochi_okx::engine::{
+    CheckedProtection, EngineError, OkxEngine, OkxEngineDeps, ProtectionOrderOptions, Rows,
+    StoreAccess, StoreWork,
+};
 use mochi_okx::fake::{self, FakeOkx, Refusal};
 use mochi_okx::{
     to_algo_cl_ord_id, BoxFuture, HttpReply, HttpRequest, OkxClient, Row, Transport, Venue,
@@ -2561,6 +2564,97 @@ async fn a_partial_market_target_keeps_trailing_on_the_remaining_entry_quantity(
     assert_eq!(trail.status, OrderStatus::Open);
     assert_eq!(trail.quantity, "0.0005");
     assert_eq!(h.algo_placed()[0]["sz"], "0.05");
+}
+
+#[tokio::test]
+async fn an_agent_protection_change_refuses_a_replacement_or_resize_after_risk_check() {
+    let h = Harness::with_position().await;
+    let position = h.view().position;
+    let checked = CheckedProtection {
+        position_id: position.id,
+        quantity: position.quantity,
+        before: h.engine.protection_of("BTCUSDT"),
+    };
+    let initial = h.okx.state().position.clone().unwrap();
+    for (field, value) in [("pos", "0.4"), ("tradeId", "42")] {
+        let mut changed = initial.clone();
+        changed.insert(field.into(), json!(value));
+        h.okx.state().position = Some(changed);
+        let result = h
+            .engine
+            .set_protection_order(
+                ACCOUNT,
+                "BTCUSDT",
+                stop("73500"),
+                ProtectionOrderOptions {
+                    retain: Default::default(),
+                    agent_id: Some("agent".into()),
+                    decision_id: Some("checked".into()),
+                    checked: Some(checked.clone()),
+                },
+            )
+            .await;
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("changed after the agent's risk check"));
+    }
+    assert!(h.algo_placed().is_empty());
+}
+
+#[tokio::test]
+async fn an_agent_protection_change_checks_the_isolated_row_and_its_live_stop() {
+    let h = Harness::with_position().await;
+    {
+        let mut okx = h.okx.state();
+        let mut cross = okx.position.clone().unwrap();
+        cross.insert("mgnMode".into(), json!("cross"));
+        cross.insert("posId".into(), json!("cross-position"));
+        okx.other_positions.push(cross);
+    }
+    h.sync().await;
+    let position = h
+        .engine
+        .positions()
+        .into_iter()
+        .find(|view| view.close_supported == Some(true))
+        .unwrap()
+        .position;
+    let checked = CheckedProtection {
+        position_id: position.id,
+        quantity: position.quantity,
+        before: h.engine.protection_of("BTCUSDT"),
+    };
+    let keep_stop = || {
+        h.engine.set_protection_order(
+            ACCOUNT,
+            "BTCUSDT",
+            stop("74000"),
+            ProtectionOrderOptions {
+                retain: Default::default(),
+                agent_id: Some("agent".into()),
+                decision_id: Some("checked".into()),
+                checked: Some(checked.clone()),
+            },
+        )
+    };
+    assert_eq!(
+        keep_stop().await.unwrap().after.stop_loss.as_deref(),
+        Some("74000")
+    );
+    let id = to_algo_cl_ord_id(&h.protection_rows()[0].id);
+    h.okx
+        .state()
+        .algos
+        .get_mut(&id)
+        .unwrap()
+        .insert("slTriggerPx".into(), json!("74500"));
+    assert!(keep_stop()
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("changed after the agent's risk check"));
+    assert!(h.algo_placed().is_empty());
 }
 
 #[tokio::test]

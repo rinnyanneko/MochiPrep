@@ -7,7 +7,7 @@
 //! never hold the store and the store never waits on the network.
 
 mod protection;
-pub use protection::ProtectionRetention;
+pub use protection::{CheckedProtection, ProtectionOrderOptions, ProtectionRetention};
 mod refusal;
 mod sync;
 mod views;

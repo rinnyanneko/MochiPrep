@@ -31,6 +31,7 @@ pub struct ProtectionMeta {
     /// the same serialized step as the change, so a concurrent trailing edit is never undone.
     pub keep_trailing: bool,
     pub keep_take_profit: bool,
+    pub checked: Option<mochi_okx::engine::CheckedProtection>,
 }
 
 /// A refused protection change. `after` is Node's `ProtectionChangeError.after`: set when the
@@ -636,16 +637,19 @@ impl ExecutionEngine for OkxExecution {
         Box::pin(async move {
             let result = self
                 .engine
-                .set_protection_with(
+                .set_protection_order(
                     &account_id,
                     &symbol,
                     protection,
-                    mochi_okx::engine::ProtectionRetention {
-                        trailing_stop: meta.keep_trailing,
-                        take_profit: meta.keep_take_profit,
+                    mochi_okx::engine::ProtectionOrderOptions {
+                        retain: mochi_okx::engine::ProtectionRetention {
+                            trailing_stop: meta.keep_trailing,
+                            take_profit: meta.keep_take_profit,
+                        },
+                        agent_id: meta.agent_id,
+                        decision_id: meta.decision_id,
+                        checked: meta.checked,
                     },
-                    meta.agent_id,
-                    meta.decision_id,
                 )
                 .await;
             match result {

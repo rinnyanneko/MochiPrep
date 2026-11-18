@@ -56,6 +56,21 @@ pub struct ProtectionRetention {
     pub trailing_stop: bool,
 }
 
+/// The position and protection used in an agent's risk calculation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedProtection {
+    pub position_id: String,
+    pub quantity: String,
+    pub before: Protection,
+}
+
+pub struct ProtectionOrderOptions {
+    pub retain: ProtectionRetention,
+    pub agent_id: Option<String>,
+    pub decision_id: Option<String>,
+    pub checked: Option<CheckedProtection>,
+}
+
 const PER_ENTRY_TARGET_SUFFIX: &str = ":deferred:tp";
 
 fn deferred_parent_id(row: &Order, leg: Leg) -> Option<&str> {
@@ -831,18 +846,32 @@ impl OkxEngine {
         agent_id: Option<String>,
         decision_id: Option<String>,
     ) -> Result<ProtectionResult, EngineError> {
+        self.set_protection_order(
+            account_id,
+            symbol,
+            protection,
+            ProtectionOrderOptions {
+                retain,
+                agent_id,
+                decision_id,
+                checked: None,
+            },
+        )
+        .await
+    }
+
+    pub async fn set_protection_order(
+        self: &Arc<Self>,
+        account_id: &str,
+        symbol: &str,
+        protection: Protection,
+        options: ProtectionOrderOptions,
+    ) -> Result<ProtectionResult, EngineError> {
         let (account_id, symbol) = (account_id.to_string(), symbol.to_string());
         self.queued(move |engine| {
             Box::pin(async move {
                 engine
-                    .apply_protection(
-                        account_id,
-                        symbol,
-                        protection,
-                        retain,
-                        agent_id,
-                        decision_id,
-                    )
+                    .apply_protection(account_id, symbol, protection, options)
                     .await
             })
         })
@@ -877,18 +906,66 @@ impl OkxEngine {
         account_id: String,
         symbol: String,
         requested: Protection,
-        retain: ProtectionRetention,
-        agent_id: Option<String>,
-        decision_id: Option<String>,
+        options: ProtectionOrderOptions,
     ) -> Result<ProtectionResult, EngineError> {
-        let position = self
+        let ProtectionOrderOptions {
+            retain,
+            agent_id,
+            decision_id,
+            checked,
+        } = options;
+        let mut positions = self
             .positions()
             .into_iter()
-            .find(|p| p.position.symbol == symbol && p.close_supported == Some(true))
+            .filter(|p| p.position.symbol == symbol && p.close_supported == Some(true));
+        let position = positions
+            .next()
             .ok_or_else(|| EngineError::message(format!("No open {symbol} position")))?;
+        if positions.next().is_some() {
+            return Err(EngineError::message(format!(
+                "Several isolated {symbol} positions match"
+            )));
+        }
         let context = self.context().await?;
-        let tick = dec(&context.registry.get(&symbol)?.price_tick)?;
+        let spec = context.registry.get(&symbol)?;
+        let tick = dec(&spec.price_tick)?;
         let before = self.protection_of(&symbol);
+        let old = self
+            .state()
+            .protection
+            .get(&symbol)
+            .cloned()
+            .unwrap_or_default();
+        if let Some(checked) = checked {
+            let changed = || {
+                EngineError::message(
+                    "The OKX position or protection changed after the agent's risk check",
+                )
+            };
+            let size = dec(&checked.quantity)?;
+            if checked.position_id != position.position.id
+                || !size.eq_value(&dec(&position.position.quantity)?)
+                || checked.before != before
+            {
+                return Err(changed());
+            }
+            // An exchange-side edit can invalidate the stop used by the risk check
+            // without changing the position's identity or quantity.
+            for leg in LEGS {
+                if let Some(order) = old.leg(leg) {
+                    if !self.checked_algo_matches(leg, order).await? {
+                        return Err(changed());
+                    }
+                }
+            }
+            let remote = self.deps.client.get_positions().await?;
+            let (_, _, contracts) =
+                super::select_close(&remote, &symbol, Some(&checked.position_id))
+                    .map_err(|_| changed())?;
+            if !size.eq_value(&contracts.mul(&dec(&spec.venue_contract_value)?)) {
+                return Err(changed());
+            }
+        }
         let target = Protection {
             stop_loss: align(&requested.stop_loss, &tick)?,
             // Retained legs keep their exchange prices and sizes even if the tick changed.
@@ -916,12 +993,6 @@ impl OkxEngine {
                 changed.push(leg);
             }
         }
-        let old = self
-            .state()
-            .protection
-            .get(&symbol)
-            .cloned()
-            .unwrap_or_default();
         let source = Source {
             account_id,
             symbol: symbol.clone(),
@@ -1589,6 +1660,38 @@ impl OkxEngine {
             Ok(found) => Ok(found),
             Err(OkxError::Rejection { .. }) => Ok(None),
             Err(error) => Err(error.into()),
+        }
+    }
+
+    async fn checked_algo_matches(&self, leg: Leg, order: &Order) -> Result<bool, EngineError> {
+        let Some(algo) = self.lookup_algo(&order.id).await? else {
+            return Ok(false);
+        };
+        if !algo
+            .get("state")
+            .and_then(Value::as_str)
+            .is_some_and(|state| ALIVE_STATES.contains(&state))
+        {
+            return Ok(false);
+        }
+        let price_matches = |field, expected| {
+            let remote = truthy_text(algo.get(field)).filter(|value| value != "0");
+            same_price(expected, remote.as_deref()).map_err(decimal_error)
+        };
+        match leg {
+            Leg::Sl => price_matches("slTriggerPx", order.trigger_price.as_deref()),
+            Leg::Tp => price_matches("tpTriggerPx", order.trigger_price.as_deref()),
+            Leg::Trail => {
+                let Some(spec) = spec_of(order) else {
+                    return Ok(false);
+                };
+                let field = match spec.kind {
+                    mochi_domain::TrailingKind::Ratio => "callbackRatio",
+                    mochi_domain::TrailingKind::Spread => "callbackSpread",
+                };
+                Ok(price_matches(field, Some(&spec.callback))?
+                    && price_matches("activePx", spec.activation_price.as_deref())?)
+            }
         }
     }
 

@@ -376,10 +376,41 @@ impl Runtime {
         quote: Option<Quote>,
         protection: Option<Protection>,
         target: &ExecutionTarget,
-    ) -> Result<RiskResult, ApiError> {
+    ) -> Result<(RiskResult, Option<mochi_okx::engine::CheckedProtection>), ApiError> {
         let risk: RiskSettings =
             serde_json::from_str(a.risk.get()).map_err(|e| self.api_error(e))?;
         let daily = self.venue_daily_risk(target, &a.account_id)?;
+        let (open_positions, checked) = if d.action == AiAction::Protect
+            && matches!(target, ExecutionTarget::Okx(_))
+        {
+            let mut positions = self
+                .venue_positions(target, &a.account_id)?
+                .into_iter()
+                .map(|view| view.position)
+                .filter(|position| position.symbol == a.symbol);
+            let position = positions.next();
+            if positions.next().is_some() {
+                return Err(ApiError::bad_request(
+                    "Several isolated OKX positions match",
+                ));
+            }
+            let checked = position
+                .as_ref()
+                .map(|position| {
+                    let before = protection.clone().ok_or_else(|| {
+                        ApiError::bad_request("The OKX position changed while checking protection")
+                    })?;
+                    Ok::<_, ApiError>(mochi_okx::engine::CheckedProtection {
+                        position_id: position.id.clone(),
+                        quantity: position.quantity.clone(),
+                        before,
+                    })
+                })
+                .transpose()?;
+            (position.into_iter().collect(), checked)
+        } else {
+            (self.venue_open_positions(target, &a.account_id)?, None)
+        };
         let verdict = evaluate_risk(
             &RiskInput {
                 decision: d.clone(),
@@ -388,7 +419,7 @@ impl Runtime {
                 quote,
                 now: self.market_now(account.source),
                 balance: self.venue_balance(target, &a.account_id)?,
-                open_positions: self.venue_open_positions(target, &a.account_id)?,
+                open_positions,
                 daily_pnl: daily.daily_pnl,
                 day_start_equity: daily.day_start_equity,
                 fees: account.config.clone(),
@@ -400,7 +431,7 @@ impl Runtime {
         if let Some(c) = verdict.checks.iter().find(|c| c.id == "input" && !c.passed) {
             return Err(ApiError::bad_request(self.redact(&c.detail)));
         }
-        Ok(verdict)
+        Ok((verdict, checked))
     }
 
     // ---- acting ---------------------------------------------------------------------------
@@ -413,8 +444,9 @@ impl Runtime {
         d: &AiDecisionData,
         r: &mut Value,
         target: &ExecutionTarget,
+        checked: Option<mochi_okx::engine::CheckedProtection>,
     ) -> Result<Option<Outgoing>, ApiError> {
-        let act = self.act_for(a, d, r, target)?;
+        let act = self.act_for(a, d, r, target, checked)?;
         match target {
             ExecutionTarget::Paper => {
                 let acted = self.act_now(act);
@@ -433,6 +465,7 @@ impl Runtime {
         d: &AiDecisionData,
         r: &Value,
         target: &ExecutionTarget,
+        checked: Option<mochi_okx::engine::CheckedProtection>,
     ) -> Result<Act, ApiError> {
         let decision_id = r["id"].as_str().map(String::from);
         if d.action == AiAction::Protect {
@@ -448,6 +481,7 @@ impl Runtime {
                     decision_id,
                     keep_trailing: d.trailing_stop.is_none(),
                     keep_take_profit: false,
+                    checked,
                 },
             });
         }
@@ -610,7 +644,7 @@ impl Runtime {
             );
             return self.save_signal(r).map(SignalStep::Done);
         }
-        let risk = self.assess(
+        let (risk, checked) = self.assess(
             &a,
             &account,
             &d,
@@ -627,7 +661,7 @@ impl Runtime {
             );
             return self.save_signal(r).map(SignalStep::Done);
         }
-        match self.execute_decision(&a, &d, &mut r, &target)? {
+        match self.execute_decision(&a, &d, &mut r, &target, checked)? {
             None => self.save_signal(r).map(SignalStep::Done),
             Some(outgoing) => {
                 let token = format!("signal_{}", uuid::Uuid::new_v4());

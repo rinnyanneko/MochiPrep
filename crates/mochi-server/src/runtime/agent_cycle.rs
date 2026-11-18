@@ -485,7 +485,7 @@ impl Runtime {
         } else {
             self.market_quote(c.source, &c.agent.symbol)
         };
-        let risk = self.assess(&c.agent, &a, &d, quote, protection.clone(), &target)?;
+        let (risk, checked) = self.assess(&c.agent, &a, &d, quote, protection.clone(), &target)?;
         c.record["risk"] = json!(risk);
         if c.record["trigger"] == "ANALYZE" {
             settle(
@@ -552,7 +552,7 @@ impl Runtime {
         let mut a = latest;
         a.status = "EXECUTING".into();
         self.save_agent(&a)?;
-        self.execute_decision(&c.agent, &d, &mut c.record, &target)
+        self.execute_decision(&c.agent, &d, &mut c.record, &target, checked)
     }
     fn cycle_owned(&self, c: &Cycle) -> Result<bool, ApiError> {
         let Some(a) =

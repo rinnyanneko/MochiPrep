@@ -606,6 +606,7 @@ fn meta(id: &str) -> ProtectionMeta {
         decision_id: Some(id.into()),
         keep_trailing: false,
         keep_take_profit: false,
+        checked: None,
     }
 }
 

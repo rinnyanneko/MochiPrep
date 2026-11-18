@@ -1046,6 +1046,39 @@ async fn the_api_refuses_to_accept_while_unarmed_without_using_up_the_suggestion
 }
 
 #[tokio::test]
+async fn agent_protection_risks_use_the_isolated_position_even_when_cross_is_first() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.place(&account.id).await;
+    let agent = w.agent_on(&account.id, "AUTO").await;
+    {
+        let mut okx = w.okx.state();
+        let isolated = okx.position.as_mut().unwrap();
+        isolated.insert("pos".into(), json!("10"));
+        let mut cross = isolated.clone();
+        cross.insert("pos".into(), json!("0.01"));
+        cross.insert("mgnMode".into(), json!("cross"));
+        okx.other_positions.push(cross);
+    }
+    w.rt.sync_exchanges().await.unwrap();
+    *w.answer.lock().unwrap() = decision("PROTECT", 73_500.0, None);
+    let before = w.okx.state().algo_placed.len();
+    let result = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    assert_eq!(result["outcome"], "RISK_REJECTED", "{result}");
+    assert!(
+        result["risk"]["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| check["id"] == "protect-risk" && check["passed"] == false),
+        "{result}"
+    );
+    assert_eq!(w.okx.state().algo_placed.len(), before);
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
 async fn accepts_a_protect_while_unarmed_leaving_the_arming_rule_to_the_protection_gate() {
     let w = World::new().await;
     let account = w.connect("OKX_LIVE").await;
