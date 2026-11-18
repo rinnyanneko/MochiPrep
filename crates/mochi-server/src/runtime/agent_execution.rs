@@ -87,6 +87,10 @@ pub fn effective_risk(a: &RiskSettings, c: Option<&RiskSettings>) -> RiskSetting
 /// What an approved decision sends to its engine.
 pub(super) enum Act {
     Place(OrderRequest),
+    CloseOkx {
+        request: OrderRequest,
+        position_id: String,
+    },
     Protect {
         account_id: String,
         symbol: String,
@@ -106,6 +110,15 @@ impl Act {
     pub(super) async fn run(self, engine: Arc<dyn ExecutionEngine>) -> Acted {
         match self {
             Act::Place(request) => Acted::Placed(engine.place_order(request).await.map(Box::new)),
+            Act::CloseOkx {
+                request,
+                position_id,
+            } => Acted::Placed(
+                engine
+                    .close_agent_position(request, position_id)
+                    .await
+                    .map(Box::new),
+            ),
             Act::Protect {
                 account_id,
                 symbol,
@@ -246,7 +259,7 @@ impl Runtime {
         }
     }
 
-    /// Node's `engine.getPositions(accountId)`.
+    /// Positions the agent can manage. Account risk still sees every open position.
     pub(super) fn venue_positions(
         &self,
         target: &ExecutionTarget,
@@ -257,7 +270,11 @@ impl Runtime {
                 .engine
                 .position_views(account_id)
                 .map_err(|e| self.api_error(e)),
-            ExecutionTarget::Okx(engine) => Ok(engine.positions()),
+            ExecutionTarget::Okx(engine) => Ok(engine
+                .positions()
+                .into_iter()
+                .filter(|view| view.close_supported == Some(true))
+                .collect()),
         }
     }
 
@@ -346,7 +363,7 @@ impl Runtime {
             ExecutionTarget::Okx(engine) => Ok(engine
                 .positions()
                 .iter()
-                .any(|p| p.position.symbol == a.symbol)
+                .any(|p| p.position.symbol == a.symbol && p.close_supported == Some(true))
                 .then(|| engine.protection_of(&a.symbol))),
         }
     }
@@ -463,14 +480,25 @@ impl Runtime {
             decision_id,
         };
         if d.action == AiAction::Close {
-            let p = self
+            let mut positions = self
                 .venue_positions(target, &a.account_id)?
                 .into_iter()
                 .map(|view| view.position)
-                .find(|p| p.symbol == a.symbol)
-                .ok_or_else(|| {
-                    ApiError::bad_request("The position changed while it was being checked")
-                })?;
+                .filter(|p| p.symbol == a.symbol);
+            let p = positions.next().ok_or_else(|| {
+                ApiError::bad_request("The position changed while it was being checked")
+            })?;
+            if let ExecutionTarget::Okx(_) = target {
+                if positions.next().is_some() {
+                    return Err(ApiError::bad_request(
+                        "Several isolated OKX positions match",
+                    ));
+                }
+                return Ok(Act::CloseOkx {
+                    request,
+                    position_id: p.id,
+                });
+            }
             request.side = if p.side == PositionSide::Long {
                 OrderSide::Sell
             } else {
@@ -499,6 +527,9 @@ impl Runtime {
     /// A paper act, on the task.
     fn act_now(&mut self, act: Act) -> Acted {
         match act {
+            Act::CloseOkx { .. } => {
+                Acted::Placed(Err(ApiError::bad_request("An OKX position is required")))
+            }
             Act::Place(request) => {
                 let result = self.engine.place_order(request);
                 Acted::Placed(result.map(Box::new).map_err(|e| self.api_error(e)))

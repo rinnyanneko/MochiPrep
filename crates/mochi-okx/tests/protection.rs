@@ -2518,6 +2518,87 @@ async fn another_reached_target_keeps_its_allocation_when_the_first_is_partially
 }
 
 #[tokio::test]
+async fn a_partial_market_target_keeps_trailing_on_the_remaining_entry_quantity() {
+    let h = connect(Vec::new()).await;
+    h.okx.state().rest_limit_orders = true;
+    let mut request = order();
+    request.order_type = EntryOrderType::Limit;
+    request.price = Some("74500".into());
+    request.take_profit = Some("78000".into());
+    request.trailing_stop = Some(ratio("0.01"));
+    let entry = h.engine.place_order(request).await.unwrap().order;
+    assert_eq!(entry.status, OrderStatus::Open);
+    h.okx.state().fill_resting();
+    let mut remaining = h.okx.state().position.clone().unwrap();
+    h.advance(1);
+    *h.prices.lock().unwrap() = ("78999".into(), "79001".into(), "79000".into());
+    let post = h.okx.hold_next("POST", "/trade/order");
+    let engine = h.engine.clone();
+    let sync = tokio::spawn(async move { engine.sync().await });
+    let timeout = std::time::Duration::from_secs(2);
+    tokio::time::timeout(timeout, post.reached()).await.unwrap();
+    let lookup = h.okx.hold_next("GET", "/trade/order");
+    post.release();
+    tokio::time::timeout(timeout, lookup.reached())
+        .await
+        .unwrap();
+    {
+        let mut okx = h.okx.state();
+        let target_id = mochi_okx::to_cl_ord_id(&format!("{}:deferred:tp", entry.id));
+        let target = &mut okx.orders[&target_id];
+        target.insert("state".into(), json!("canceled"));
+        target.insert("accFillSz".into(), json!("0.05"));
+        target.insert("fillSz".into(), json!("0.05"));
+        let fill = okx.recent_fills.last_mut().unwrap();
+        fill.insert("fillSz".into(), json!("0.05"));
+        remaining.insert("pos".into(), json!("0.05"));
+        remaining.insert("tradeId".into(), fill["tradeId"].clone());
+        okx.position = Some(remaining);
+    }
+    lookup.release();
+    sync.await.unwrap().unwrap();
+    let trail = h.order_row(&format!("{}:trail", entry.id));
+    assert_eq!(trail.status, OrderStatus::Open);
+    assert_eq!(trail.quantity, "0.0005");
+    assert_eq!(h.algo_placed()[0]["sz"], "0.05");
+}
+
+#[tokio::test]
+async fn a_never_received_market_target_expires_without_resending() {
+    let (h, entry) = resting_target().await;
+    h.okx.state().fill_resting();
+    h.okx.state().drop_next_request = true;
+    h.advance(1);
+    *h.prices.lock().unwrap() = ("78999".into(), "79001".into(), "79000".into());
+    h.sync().await;
+    let id = format!("{}:deferred:tp", entry.id);
+    assert_eq!(h.order_row(&id).status, OrderStatus::Open);
+    let placed = h.count("POST /api/v5/trade/order");
+    h.advance(60_001);
+    h.sync().await;
+    assert_eq!(h.order_row(&id).status, OrderStatus::Canceled);
+    assert_eq!(h.count("POST /api/v5/trade/order"), placed);
+    assert_eq!(h.view().position.quantity, "0.001");
+
+    // A delayed terminal answer can still settle the inactive row by its client ID.
+    {
+        let mut okx = h.okx.state();
+        let key = mochi_okx::to_cl_ord_id(&id);
+        okx.orders.insert(
+            key,
+            row(json!({
+                "ordId": "late-target", "state": "filled", "accFillSz": "0.1", "avgPx": "79000",
+                "fee": "0", "pnl": "0"
+            })),
+        );
+        okx.position = None;
+    }
+    h.sync().await;
+    assert_eq!(h.order_row(&id).status, OrderStatus::Filled);
+    assert_eq!(h.count("POST /api/v5/trade/order"), placed);
+}
+
+#[tokio::test]
 async fn an_unattributed_market_exit_leaves_the_other_target_pending_until_lookup() {
     let (h, first) = resting_target().await;
     let mut request = order();

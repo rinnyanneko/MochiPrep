@@ -308,6 +308,16 @@ struct SelectedClose {
     held: Dec,
 }
 
+struct CloseIntent {
+    account_id: String,
+    symbol: String,
+    fraction: f64,
+    client_order_id: String,
+    position_id: Option<String>,
+    agent_id: Option<String>,
+    decision_id: Option<String>,
+}
+
 impl Prepared {
     fn take_duplicate(&mut self) -> Option<OrderResult> {
         let (order, fills) = self.prior.take()?;
@@ -496,19 +506,55 @@ impl OkxEngine {
         client_order_id: &str,
         position_id: Option<&str>,
     ) -> Result<OrderResult, EngineError> {
-        let position_id = position_id.map(str::to_owned);
-        let (account_id, symbol, client_order_id) = (
-            account_id.to_string(),
-            symbol.to_string(),
-            client_order_id.to_string(),
-        );
+        self.dispatch_close(CloseIntent {
+            account_id: account_id.to_owned(),
+            symbol: symbol.to_owned(),
+            fraction,
+            client_order_id: client_order_id.to_owned(),
+            position_id: position_id.map(str::to_owned),
+            agent_id: None,
+            decision_id: None,
+        })
+        .await
+    }
+
+    pub async fn close_agent_position(
+        self: &Arc<Self>,
+        request: OrderRequest,
+        position_id: String,
+    ) -> Result<OrderResult, EngineError> {
+        self.dispatch_close(CloseIntent {
+            account_id: request.account_id,
+            symbol: request.symbol,
+            fraction: 1.0,
+            client_order_id: request.client_order_id,
+            position_id: Some(position_id),
+            agent_id: request.agent_id,
+            decision_id: request.decision_id,
+        })
+        .await
+    }
+
+    async fn dispatch_close(
+        self: &Arc<Self>,
+        intent: CloseIntent,
+    ) -> Result<OrderResult, EngineError> {
         self.queued(move |engine| {
             Box::pin(async move {
+                let CloseIntent {
+                    account_id,
+                    symbol,
+                    fraction,
+                    client_order_id,
+                    position_id,
+                    agent_id,
+                    decision_id,
+                } = intent;
                 let mut prepared = engine.prepare(&account_id, &client_order_id).await?;
                 if let Some(prior) = prepared.take_duplicate() {
                     return Ok(prior);
                 }
-                let (request, position) = engine
+                let (mut request, position) = engine
                     .close_request(
                         account_id,
                         symbol,
@@ -517,6 +563,8 @@ impl OkxEngine {
                         position_id.as_deref(),
                     )
                     .await?;
+                request.agent_id = agent_id;
+                request.decision_id = decision_id;
                 engine.submit(request, Some(position), prepared).await
             })
         })
@@ -711,6 +759,9 @@ impl OkxEngine {
             }
             .await;
             if let Err(error) = checked {
+                if order.agent_id.is_some() {
+                    return self.finish_rejected(order, error.to_string()).await;
+                }
                 self.finish_rejected(order, error.to_string()).await?;
                 return Err(error);
             }

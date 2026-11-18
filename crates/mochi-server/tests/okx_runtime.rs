@@ -927,12 +927,28 @@ async fn an_unarmed_auto_agent_run_once_is_refused_by_the_engine_and_can_still_e
     w.arm(&account.id, ARM_PHRASE).await.unwrap();
     w.place(&account.id).await;
     w.rt.call(|r| r.disarm(None)).await.unwrap();
+    {
+        let mut okx = w.okx.state();
+        let position = okx.position.as_mut().unwrap();
+        position.insert("pos".into(), json!("0.4"));
+        let mut cross = position.clone();
+        cross.insert("pos".into(), json!("0.2"));
+        cross.insert("mgnMode".into(), json!("cross"));
+        okx.other_positions.push(cross);
+    }
+    w.rt.sync_exchanges().await.unwrap();
     // An exit needs no arming.
     *w.answer.lock().unwrap() = decision("CLOSE", 74_000.0, None);
     let placed = w.placed();
     let record = w.cycle(&agent, CycleTrigger::RunOnce).await;
     assert_eq!(record["outcome"], "EXECUTED", "{record}");
     assert_eq!(w.placed(), placed + 1);
+    {
+        let okx = w.okx.state();
+        assert_eq!(okx.placed.last().unwrap()["sz"], "0.4");
+        assert_eq!(okx.placed.last().unwrap()["tdMode"], "isolated");
+        assert_eq!(okx.other_positions[0]["pos"], "0.2");
+    }
     w.rt.shutdown().await;
 }
 

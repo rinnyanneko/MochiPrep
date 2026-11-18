@@ -41,6 +41,8 @@ const ALIVE_STATES: [&str; 2] = ["live", "partially_effective"];
 const REPLACED: &str = "Replaced";
 const REMOVED: &str = "Removed";
 const POSITION_CLOSED: &str = "Position closed";
+pub(super) const REACHED_EXIT_UNCONFIRMED: &str =
+    "OKX has no record of this market take profit; check its outcome in OKX";
 // Durable outbox state, only written together with a new parent. Clearing it BEFORE sending
 // is the at-most-once boundary: a crash thereafter permits lookup only, never another send.
 const DEFERRED_TRAILING: &str = "Pending entry fill: trailing stop not yet sent";
@@ -273,8 +275,13 @@ struct PositionHistory<'a> {
     reached_exits: &'a ReachedExits,
 }
 
+enum EntryInterval {
+    Different,
+    Continuous { own_reduction: Dec },
+}
+
 impl PositionHistory<'_> {
-    fn contains_entry_fill(&self, first_trade: u64, parent: &str) -> Option<bool> {
+    fn entry_interval(&self, first_trade: u64, parent: &str) -> Option<EntryInterval> {
         let trade_time = |id| {
             self.fills
                 .iter()
@@ -290,7 +297,7 @@ impl PositionHistory<'_> {
             PositionSide::Short => ("4", "6"),
         };
         let mut changes = Vec::new();
-        let mut has_sibling_exit = false;
+        let mut has_exit = false;
         for row in self.fills {
             let at = fill_time(row)?;
             let trade = last_trade_id(row);
@@ -304,34 +311,45 @@ impl PositionHistory<'_> {
                 continue;
             }
             if row.get("posSide").and_then(Value::as_str) != Some("net") {
-                return Some(false);
+                return Some(EntryInterval::Different);
             }
             let opening = row.get("subType").and_then(Value::as_str) == Some(open_type);
-            if !opening {
-                let sibling = row
+            let own_exit = if opening {
+                false
+            } else {
+                let source = row
                     .get("ordId")
                     .and_then(Value::as_str)
-                    .and_then(|id| self.reached_exits.get(id))
-                    .is_some_and(|origin| origin != parent);
-                if !sibling || row.get("subType").and_then(Value::as_str) != Some(close_type) {
-                    return Some(false);
-                }
-                has_sibling_exit = true;
-            }
-            changes.push((trade?, row, opening));
+                    .and_then(|id| self.reached_exits.get(id));
+                let Some(source) = source
+                    .filter(|_| row.get("subType").and_then(Value::as_str) == Some(close_type))
+                else {
+                    return Some(EntryInterval::Different);
+                };
+                has_exit = true;
+                source == parent
+            };
+            changes.push((trade?, row, opening, own_exit));
         }
-        if has_sibling_exit {
-            // A confirmed exit for another entry may reduce its own allocation. Walk back
-            // from the observed size to rule out a fully closed and later reopened position.
-            changes.sort_unstable_by_key(|(trade, _, _)| *trade);
+        let mut own_reduction = super::zero();
+        if has_exit {
+            // A confirmed target reduced its own entry allocation. Walk back from the
+            // observed size and reject a chain that contains a close and reopen.
+            changes.sort_unstable_by_key(|(trade, _, _, _)| *trade);
+            if changes.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+                return None;
+            }
             let mut contracts = self.contracts.clone();
-            for (_, row, opening) in changes.into_iter().rev() {
+            for (_, row, opening, own_exit) in changes.into_iter().rev() {
                 if !contracts.gt(&super::zero()) {
-                    return Some(false);
+                    return Some(EntryInterval::Different);
                 }
                 let size = dec(row.get("fillSz")?.as_str()?).ok()?;
                 if !size.gt(&super::zero()) {
                     return None;
+                }
+                if own_exit {
+                    own_reduction = own_reduction.add(&size);
                 }
                 contracts = if opening {
                     contracts.sub(&size)
@@ -339,9 +357,11 @@ impl PositionHistory<'_> {
                     contracts.add(&size)
                 };
             }
-            return Some(!contracts.is_negative());
+            if contracts.is_negative() {
+                return Some(EntryInterval::Different);
+            }
         }
-        Some(true)
+        Some(EntryInterval::Continuous { own_reduction })
     }
 }
 
@@ -359,6 +379,7 @@ fn proven_entry_contracts(
     }
     let mut total = super::zero();
     let mut remaining = super::zero();
+    let mut own_reduction = super::zero();
     let mut trades = HashSet::new();
     for fill in history.fills {
         if fill.get("ordId").and_then(Value::as_str) != Some(order_id) {
@@ -373,11 +394,18 @@ fn proven_entry_contracts(
             return None;
         }
         total = total.add(&size);
-        if history.contains_entry_fill(trade, parent_id)? {
+        if let EntryInterval::Continuous {
+            own_reduction: reduced,
+        } = history.entry_interval(trade, parent_id)?
+        {
             remaining = remaining.add(&size);
+            // The intervals overlap. The oldest proven entry interval includes all
+            // confirmed reductions for this parent since that execution.
+            own_reduction = own_reduction.max(&reduced);
         }
     }
-    (trades.contains(&entry_trade) && total.eq_value(expected)).then_some(remaining)
+    (trades.contains(&entry_trade) && total.eq_value(expected))
+        .then(|| remaining.sub(&own_reduction).max(&super::zero()))
 }
 
 pub(super) fn isolated_net_position<'a>(
@@ -1223,11 +1251,6 @@ impl OkxEngine {
         let inst_id = to_inst_id(&row.symbol);
         let confirming = self.now().saturating_sub(parent.updated_at) < POSITION_MISSING_MS;
         let context = self.context().await?;
-        let awaiting_sibling = context.open_orders.iter().any(|other| {
-            other.symbol == row.symbol
-                && is_reached_exit(other)
-                && other.exchange_order_id.as_deref().is_none_or(str::is_empty)
-        });
         if let Some(replacement) = context.open_orders.iter().find(|other| {
             other.symbol == row.symbol
                 && other.created_at >= parent.updated_at
@@ -1346,6 +1369,35 @@ impl OkxEngine {
                     .await;
             };
             let fills = self.deps.client.recent_fills(&inst_id).await?;
+            let unresolved: HashSet<_> = context
+                .open_orders
+                .iter()
+                .filter(|other| {
+                    other.symbol == row.symbol
+                        && is_reached_exit(other)
+                        && other.exchange_order_id.as_deref().is_none_or(str::is_empty)
+                })
+                .map(|other| to_cl_ord_id(&other.client_order_id))
+                .collect();
+            let first_entry_trade = fills
+                .iter()
+                .filter(|fill| fill.get("ordId").and_then(Value::as_str) == Some(order_id))
+                .filter_map(last_trade_id)
+                .min()
+                .unwrap_or(entry_trade);
+            // Only a reduction in this entry's interval can make the unanswered exit
+            // relevant. Local submission time and exchange fill time can disagree.
+            let close_subtype = if short { "6" } else { "5" };
+            let awaiting_sibling = !unresolved.is_empty()
+                && fills.iter().any(|fill| {
+                    last_trade_id(fill)
+                        .is_some_and(|id| (first_entry_trade..=position_trade).contains(&id))
+                        && fill.get("subType").and_then(Value::as_str) == Some(close_subtype)
+                        && fill
+                            .get("clOrdId")
+                            .and_then(Value::as_str)
+                            .is_none_or(|id| id.is_empty() || unresolved.contains(id))
+                });
             let observed_contracts = if short {
                 signed_size.neg()
             } else {

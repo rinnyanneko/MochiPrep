@@ -6,11 +6,13 @@ use std::collections::{HashMap, HashSet};
 use mochi_domain::{EquityPoint, Fill, Liquidity, Order, OrderStatus, PositionSide};
 use serde_json::Value;
 
-use super::protection::{is_reached_exit, last_trade_id, record_attached, Held};
+use super::protection::{
+    is_reached_exit, last_trade_id, record_attached, Held, REACHED_EXIT_UNCONFIRMED,
+};
 use super::{
     dec, is_leg, EngineError, OkxEngine, Registry, EQUITY_EVERY_MS, NEVER_ARRIVED_AFTER_MS,
 };
-use crate::client::{nullish_text, truthy_text, PendingAlgoType, Row};
+use crate::client::{nullish_text, truthy_text, PendingAlgoType, Row, RECENT_FILLS_LIMIT};
 use crate::ids::{to_cl_ord_id, to_inst_id};
 
 /// Node's `Number(value)` for an OKX field.
@@ -119,21 +121,56 @@ impl OkxEngine {
         order: &mut Order,
         registry: &Registry,
     ) -> Result<(), EngineError> {
-        let remote = self
-            .deps
-            .client
-            .get_order(
-                &to_inst_id(&order.symbol),
-                &to_cl_ord_id(&order.client_order_id),
-            )
-            .await?;
+        let inst_id = to_inst_id(&order.symbol);
+        let client_id = to_cl_ord_id(&order.client_order_id);
+        let remote = self.deps.client.get_order(&inst_id, &client_id).await?;
         let at = self.now();
         let Some(remote) = remote else {
             // Only OKX's own "order does not exist", and only once the order has had time to
             // arrive, closes it.
-            if !is_reached_exit(order) && at - order.created_at >= NEVER_ARRIVED_AFTER_MS {
+            let age = at.saturating_sub(order.created_at);
+            if age >= NEVER_ARRIVED_AFTER_MS && order.status == OrderStatus::Open {
+                if is_reached_exit(order) {
+                    // A fill can be visible before the original order lookup catches up.
+                    // Require complete recent evidence before retiring a never-seen exit.
+                    const RECENT_FILL_WINDOW: i64 = 3 * 24 * 60 * 60 * 1_000;
+                    if order
+                        .exchange_order_id
+                        .as_deref()
+                        .is_some_and(|id| !id.is_empty())
+                    {
+                        return Ok(());
+                    }
+                    if age < RECENT_FILL_WINDOW {
+                        let fills =
+                            self.deps
+                                .client
+                                .recent_fills(&inst_id)
+                                .await
+                                .map_err(|error| {
+                                    EngineError::message(format!(
+                                        "Could not verify deferred market exit: {error}"
+                                    ))
+                                })?;
+                        if fills.len() >= RECENT_FILLS_LIMIT
+                            || fills.iter().any(|row| {
+                                row.get("clOrdId").and_then(Value::as_str)
+                                    == Some(client_id.as_str())
+                            })
+                        {
+                            return Ok(());
+                        }
+                    }
+                }
                 order.status = OrderStatus::Canceled;
-                order.reject_reason = Some("OKX has no record of this order".into());
+                order.reject_reason = Some(
+                    if is_reached_exit(order) {
+                        REACHED_EXIT_UNCONFIRMED
+                    } else {
+                        "OKX has no record of this order"
+                    }
+                    .into(),
+                );
                 order.updated_at = at;
                 let row = order.clone();
                 self.rows(move |rows| Ok(rows.save_order(&row)?)).await?;
@@ -153,7 +190,7 @@ impl OkxEngine {
             Some("filled") => order.status = OrderStatus::Filled,
             Some("canceled" | "mmp_canceled") => order.status = OrderStatus::Canceled,
             // Live or partly filled: still working on OKX.
-            _ => {}
+            _ => order.status = OrderStatus::Open,
         }
         let row = order.clone();
         let attached =
@@ -199,10 +236,18 @@ impl OkxEngine {
         let (open, registry) = {
             let account_id = account_id.clone();
             self.rows(move |rows| {
-                Ok((
-                    rows.list_open_orders(&account_id)?,
-                    Registry(rows.instruments()),
-                ))
+                let mut pending = rows.list_open_orders(&account_id)?;
+                // A locally retired target remains recoverable by lookup. It is
+                // excluded from protection planning until OKX reveals its outcome.
+                pending.extend(
+                    rows.list_orders(&account_id, 500)?
+                        .into_iter()
+                        .filter(|row| {
+                            row.status == OrderStatus::Canceled
+                                && row.reject_reason.as_deref() == Some(REACHED_EXIT_UNCONFIRMED)
+                        }),
+                );
+                Ok((pending, Registry(rows.instruments())))
             })
             .await?
         };
@@ -213,9 +258,11 @@ impl OkxEngine {
         // shutdown failure stops the pass at once.
         let mut order_error: Option<EngineError> = None;
         for mut order in open.into_iter().filter(|o| !is_leg(o)) {
+            let retired = order.reject_reason.as_deref() == Some(REACHED_EXIT_UNCONFIRMED);
             match self.sync_order(&mut order, &registry).await {
                 Ok(()) => {}
-                Err(error @ (EngineError::Okx(_) | EngineError::Stopped)) => return Err(error),
+                Err(error @ EngineError::Stopped) => return Err(error),
+                Err(error @ EngineError::Okx(_)) if !retired => return Err(error),
                 Err(error) => {
                     order_error.get_or_insert(EngineError::Message(format!(
                         "Could not record OKX order {}: {error}",

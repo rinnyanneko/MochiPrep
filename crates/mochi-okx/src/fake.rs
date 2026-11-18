@@ -697,6 +697,7 @@ fn fill(state: &mut FakeState, order: &Row) {
     };
     state.recent_fills.push(object(&json!({
         "instId": order.get("instId"), "ordId": ord_id, "tradeId": trade_id,
+        "clOrdId": cl_ord_id,
         "fillSz": sz, "fillTime": "1800000000000",
         "posSide": "net", "subType": subtype,
     })));
