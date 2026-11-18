@@ -560,9 +560,12 @@ impl OkxEngine {
             .await
     }
 
-    async fn prepare(&self, request: &OrderRequest) -> Result<Prepared, EngineError> {
-        let (account_id, client_order_id) =
-            (request.account_id.clone(), request.client_order_id.clone());
+    async fn prepare(
+        &self,
+        account_id: &str,
+        client_order_id: &str,
+    ) -> Result<Prepared, EngineError> {
+        let (account_id, client_order_id) = (account_id.to_string(), client_order_id.to_string());
         let own = self.deps.account_id.clone();
         self.rows(move |rows| {
             let prior = match rows.get_order_by_client_id(&account_id, &client_order_id)? {
@@ -588,7 +591,9 @@ impl OkxEngine {
     }
 
     async fn submit(&self, request: OrderRequest) -> Result<OrderResult, EngineError> {
-        let prepared = self.prepare(&request).await?;
+        let prepared = self
+            .prepare(&request.account_id, &request.client_order_id)
+            .await?;
         if let Some((order, fills)) = prepared.prior {
             return Ok(OrderResult {
                 order,
@@ -611,7 +616,11 @@ impl OkxEngine {
             }
         }
 
-        let refusal = self.pre_trade_refusal(&order, position.as_ref(), &prepared)?;
+        let refusal = self.pre_trade_refusal(
+            &order,
+            position.as_ref().map(|p| p.position.side),
+            &prepared,
+        )?;
         let contracts = to_contracts(&order, registry)?;
         if refusal.is_some() || contracts.lte(&zero()) {
             let reason = refusal.unwrap_or_else(|| "INVALID_QUANTITY: below one lot".into());

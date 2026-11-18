@@ -154,7 +154,7 @@ async fn fills_a_market_order_with_its_attached_algos() {
         .unwrap();
     assert_eq!(
         Value::Object(order),
-        json!({ "ordId": "1", "clOrdId": to_cl_ord_id("entry"), "state": "filled", "accFillSz": "10",
+        json!({ "ordId": "1", "clOrdId": to_cl_ord_id("entry"), "state": "filled", "fillSz": "10", "accFillSz": "10",
                 "avgPx": "75000", "fee": "-0.05", "pnl": "0", "fillTime": "1800000000000", "tradeId": "1" })
     );
     let positions = client.get_positions().await.unwrap();

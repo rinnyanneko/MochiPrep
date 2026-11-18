@@ -30,6 +30,68 @@ fn dec_or_zero(value: Option<&Value>) -> Result<mochi_decimal::Dec, EngineError>
     dec(&truthy_text(value).unwrap_or_else(|| "0".into()))
 }
 
+pub(super) struct PositionSnapshot {
+    pub(super) open: Vec<Row>,
+    pub(super) held: HashMap<String, Held>,
+}
+
+impl PositionSnapshot {
+    pub(super) fn new(rows: Vec<Row>) -> Result<Self, EngineError> {
+        let mut open = Vec::new();
+        let mut held = HashMap::new();
+        for row in rows {
+            let size = dec_or_zero(row.get("pos"))?;
+            if size.is_zero() {
+                continue;
+            }
+            let (side, contracts) = if size.is_negative() {
+                (PositionSide::Short, size.neg())
+            } else {
+                (PositionSide::Long, size)
+            };
+            let inst_id = nullish_text(row.get("instId")).unwrap_or_default();
+            if isolated_net(&row) || !held.contains_key(&inst_id) {
+                held.insert(
+                    inst_id,
+                    Held {
+                        side,
+                        contracts,
+                        trade_id: last_trade_id(&row),
+                    },
+                );
+            }
+            open.push(row);
+        }
+        Ok(Self { open, held })
+    }
+
+    fn protection_keys(&self, registry: &Registry) -> HashMap<String, (u64, PositionSide)> {
+        let mut keys = HashMap::new();
+        let mut seen = HashSet::new();
+        for row in &self.open {
+            let inst_id = nullish_text(row.get("instId")).unwrap_or_default();
+            let Some(spec) = registry.symbol_of_inst_id(&inst_id) else {
+                continue;
+            };
+            if !seen.insert(&spec.symbol) {
+                keys.remove(&spec.symbol);
+            } else if isolated_net(row) {
+                if let Some(held) = self.held.get(&inst_id) {
+                    if let Some(trade_id) = held.trade_id {
+                        keys.insert(spec.symbol.clone(), (trade_id, held.side));
+                    }
+                }
+            }
+        }
+        keys
+    }
+}
+
+pub(super) fn isolated_net(row: &Row) -> bool {
+    row.get("mgnMode").and_then(Value::as_str) == Some("isolated")
+        && row.get("posSide").and_then(Value::as_str) == Some("net")
+}
+
 impl OkxEngine {
     /// Brings one local order in line with OKX. A lookup that fails is an error: the order is
     /// left as it is, never given up on.
@@ -154,49 +216,12 @@ impl OkxEngine {
                 Ok::<_, EngineError>(conditional.into_iter().chain(oco).chain(trailing).collect())
             },);
         let usdt = usdt?;
-        let remote = remote?;
-        let open: Vec<Row> = remote
-            .into_iter()
-            .filter(|p| js_number(p.get("pos")) != 0.0)
-            .collect();
-        let mut held: HashMap<String, Held> = HashMap::new();
-        let mut keys = HashMap::new();
-        let mut seen = HashSet::new();
-        for p in &open {
-            let side = if js_number(p.get("pos")) > 0.0 {
-                PositionSide::Long
-            } else {
-                PositionSide::Short
-            };
-            let size = dec_or_zero(p.get("pos"))?;
-            let contracts = if size.is_negative() { size.neg() } else { size };
-            let inst_id = nullish_text(p.get("instId")).unwrap_or_default();
-            let trade_id = last_trade_id(p);
-            if let Some(spec) = registry.symbol_of_inst_id(&inst_id) {
-                let symbol = &spec.symbol;
-                if !seen.insert(symbol) {
-                    keys.remove(symbol);
-                } else if p.get("mgnMode").and_then(Value::as_str) == Some("isolated")
-                    && p.get("posSide").and_then(Value::as_str) == Some("net")
-                {
-                    if let Some(trade_id) = trade_id {
-                        keys.insert(symbol.clone(), (trade_id, side));
-                    }
-                }
-            }
-            held.insert(
-                inst_id,
-                Held {
-                    side,
-                    contracts,
-                    trade_id,
-                },
-            );
-        }
+        let mut snapshot = PositionSnapshot::new(remote?)?;
         let protection = match algos {
-            Ok(algos) => self.reconcile_protection(algos, &mut held).await,
+            Ok(algos) => self.reconcile_protection(algos, &mut snapshot).await,
             Err(error) => Err(error),
         };
+        let keys = snapshot.protection_keys(&registry);
         let protection = match protection {
             Ok(protection) => protection,
             Err(error) => {
@@ -215,10 +240,6 @@ impl OkxEngine {
                     .collect()
             }
         };
-        keys.retain(|symbol, (trade, side)| {
-            held.get(&to_inst_id(symbol))
-                .is_some_and(|position| position.trade_id == Some(*trade) && position.side == *side)
-        });
         let saved_protection = protection.clone();
         let (positions, balance) = {
             let account_id = account_id.clone();
@@ -226,7 +247,7 @@ impl OkxEngine {
             self.rows(move |rows| {
                 let registry = Registry(rows.instruments());
                 let mut positions = Vec::new();
-                for p in &open {
+                for p in &snapshot.open {
                     positions.extend(Self::to_view(
                         p,
                         rows,

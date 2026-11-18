@@ -275,10 +275,10 @@ export function PaperPage() {
           ]}
         >
           {tab === 'positions' && <PositionsTable positions={positions ?? []} editable={!exchange} />}
-          {tab === 'orders' && <OrdersTable orders={open} cancellable emptyText="No pending orders." />}
+          {tab === 'orders' && <OrdersTable orders={open} exchange={exchange} cancellable emptyText="No pending orders." />}
           {tab === 'fills' && <FillsTable fills={fills ?? []} />}
           {tab === 'closed' && <ClosedPositionsTable positions={closed ?? []} />}
-          {tab === 'all' && <OrdersTable orders={orders ?? []} emptyText="No orders yet." />}
+          {tab === 'all' && <OrdersTable orders={orders ?? []} exchange={exchange} emptyText="No orders yet." />}
           {tab === 'ledger' && !exchange && <LedgerTable events={ledger ?? []} />}
         </Tabs>
       </Card>

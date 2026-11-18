@@ -200,7 +200,7 @@ export interface Order {
   triggerPrice: string | null;
   leverage: number;
   reduceOnly: boolean;
-  /** SL/TP orders always close whatever is left of the position when they trigger. */
+  /** Marks protection. Paper protection covers the remaining position, while OKX protection has an explicit quantity. */
   closePosition: boolean;
   status: OrderStatus;
   filledQuantity: string;

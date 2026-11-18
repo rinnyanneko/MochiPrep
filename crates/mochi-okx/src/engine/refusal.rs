@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use mochi_core::paper::validate_trailing;
 use mochi_decimal::Dec;
 use mochi_domain::jsnum::{js_number_string, js_to_fixed};
-use mochi_domain::{Order, OrderSide, OrderStatus, OrderType, PositionSide, PositionView};
+use mochi_domain::{Order, OrderSide, OrderStatus, OrderType, PositionSide};
 
 use super::{day_start_equity, dec, is_leg, side_text, EngineError, OkxEngine, Prepared};
 use crate::ids::to_inst_id;
@@ -15,15 +15,14 @@ impl OkxEngine {
     pub(super) fn pre_trade_refusal(
         &self,
         order: &Order,
-        position: Option<&PositionView>,
+        position: Option<PositionSide>,
         prepared: &Prepared,
     ) -> Result<Option<String>, EngineError> {
         // An exit only needs a position to reduce: no arming, sync, quote or limit checks, so a
         // disarmed or unhealthy account can always get out.
         if order.reduce_only {
-            let same_side = position.is_some_and(|p| {
-                (p.position.side == PositionSide::Long) == (order.side == OrderSide::Buy)
-            });
+            let same_side = position
+                .is_some_and(|side| (side == PositionSide::Long) == (order.side == OrderSide::Buy));
             if position.is_none() || same_side {
                 return Ok(Some("REDUCE_ONLY_NO_POSITION: nothing to reduce".into()));
             }
@@ -75,7 +74,7 @@ impl OkxEngine {
         if let Some(position) = position {
             return Ok(Some(format!(
                 "LIMIT_EXISTING_POSITION: already {} {}",
-                side_text(position.position.side),
+                side_text(position),
                 order.symbol
             )));
         }

@@ -144,3 +144,42 @@ test('a 1% trailing stop set in the protection dialog shows its trigger price in
   await expect(dialog).toHaveCount(0);
   await expect(trigger).toBeVisible();
 });
+
+test('separate OKX take profits show the size of each order', async ({ page }) => {
+  await page.route('**/api/accounts', async (route) => {
+    const response = await route.fetch();
+    const accounts = await response.json() as { id: string; name: string; venue: string }[];
+    await route.fulfill({
+      response,
+      json: accounts.map((account) => account.name === 'Demo terminal'
+        ? { ...account, venue: 'OKX_DEMO' }
+        : account),
+    });
+  });
+  await page.route('**/api/accounts/*/orders?**', (route) => route.fulfill({
+    json: [
+      { id: 'first-target', quantity: '0.0005', triggerPrice: '78000' },
+      { id: 'second-target', quantity: '0.001', triggerPrice: '79000' },
+    ].map((target) => ({
+      ...target,
+      symbol: 'BTCUSDT',
+      side: 'SELL',
+      type: 'TAKE_PROFIT_MARKET',
+      status: 'OPEN',
+      closePosition: true,
+      reduceOnly: true,
+      createdAt: Date.UTC(2026, 0, 1),
+    })),
+  }));
+  await page.goto('/');
+  const demo = page.getByTestId('try-demo');
+  await expect(demo.or(page.getByTestId('total-equity'))).toBeVisible();
+  if (await demo.isVisible()) await demo.click();
+  await page.getByRole('button', { name: 'Trading', exact: true }).click();
+  await page.getByLabel('Paper account').selectOption({ label: 'Demo terminal (OKX demo)' });
+  await expect(page.getByRole('heading', { name: 'OKX Trading' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Pending orders (2)' }).click();
+  const table = page.getByRole('table');
+  await expect(table.getByRole('cell', { name: '0.0005', exact: true })).toBeVisible();
+  await expect(table.getByRole('cell', { name: '0.001', exact: true })).toBeVisible();
+});

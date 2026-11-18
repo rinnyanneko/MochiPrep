@@ -636,10 +636,11 @@ fn fill(state: &mut FakeState, order: &Row) {
     state.trade_seq += 1;
     let trade_id = state.trade_seq.to_string();
     filled.insert("tradeId".into(), json!(trade_id));
-    filled.insert("ordId".into(), ord_id);
+    filled.insert("ordId".into(), ord_id.clone());
     filled.insert("clOrdId".into(), cl_ord_id.clone());
     filled.insert("state".into(), json!("filled"));
     filled.insert("fillTime".into(), json!("1800000000000"));
+    filled.insert("fillSz".into(), sz.clone());
     filled.insert("accFillSz".into(), sz.clone());
     filled.insert("avgPx".into(), json!(PRICE));
     filled.insert("fee".into(), json!("-0.05"));
@@ -669,7 +670,8 @@ fn fill(state: &mut FakeState, order: &Row) {
         (true, false) => "6",
     };
     state.recent_fills.push(object(&json!({
-        "instId": order.get("instId"), "tradeId": trade_id, "fillTime": "1800000000000",
+        "instId": order.get("instId"), "ordId": ord_id, "tradeId": trade_id,
+        "fillSz": sz, "fillTime": "1800000000000",
         "posSide": "net", "subType": subtype,
     })));
     let size = held.add(&signed);

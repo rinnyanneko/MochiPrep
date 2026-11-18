@@ -237,7 +237,8 @@ pub struct Order {
     pub trigger_price: Option<String>,
     pub leverage: u32,
     pub reduce_only: bool,
-    /// SL/TP orders always close whatever is left of the position when they trigger.
+    /// Marks a protection order. Paper protection covers the remaining position, while
+    /// OKX protection has an explicit quantity.
     pub close_position: bool,
     pub status: OrderStatus,
     pub filled_quantity: String,
