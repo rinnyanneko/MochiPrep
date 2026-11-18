@@ -49,15 +49,18 @@ describe('compareArenaRows', () => {
   });
 
   it('preserves creation order for equal returns regardless of P&L', () => {
-    const rows = [row('first', 2, '-100'), row('second', 2, '100'), row('third', 2, null)];
+    const first = row('first', 2, '-100');
+    const second = row('second', 2, '100');
+    const rows = [first, second, row('third', 2, null)];
     expect([...rows].sort(compareArenaRows)).toEqual(rows);
-    expect(compareArenaRows(rows[0], rows[1])).toBe(0);
+    expect(compareArenaRows(first, second)).toBe(0);
   });
 
   it('preserves creation order for equal decimal P&L and unavailable metrics', () => {
-    const rows = [row('first', null, '1.00'), row('second', null, '1'), row('third', null, null), row('fourth', null, null)];
+    const first = row('first', null, '1.00');
+    const second = row('second', null, '1');
+    const rows = [first, second, row('third', null, null), row('fourth', null, null)];
     expect([...rows].sort(compareArenaRows)).toEqual(rows);
-    expect(compareArenaRows(rows[0], rows[1])).toBe(0);
+    expect(compareArenaRows(first, second)).toBe(0);
   });
-
 });

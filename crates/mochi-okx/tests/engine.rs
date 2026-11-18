@@ -1178,7 +1178,10 @@ async fn malformed_position_history_is_atomic_and_can_be_retried_immediately() {
         let mut bad = closed("bad", "BTC-USDT-SWAP", 1000, 2000, "-2");
         bad.insert(field.into(), value.clone());
         h.okx.state().positions_history = vec![good.clone(), bad];
-        assert!(h.engine.sync_position_history().await.is_err(), "{field}={value}");
+        assert!(
+            h.engine.sync_position_history().await.is_err(),
+            "{field}={value}"
+        );
         assert!(recorded(&h, "BTC-USDT-SWAP").is_empty(), "{field}={value}");
 
         // A failed validation must release the running flag and leave the throttle unset.
@@ -1214,7 +1217,11 @@ async fn history_only_attributes_verified_isolated_net_directions() {
         h.engine.sync_position_history().await.unwrap();
         let records = recorded(&h, "BTC-USDT-SWAP");
         let saved = records.iter().find(|r| r.pos_id == id).unwrap();
-        assert_eq!(saved.opening_side.as_deref(), expected, "{mode}/{side}/{direction}");
+        assert_eq!(
+            saved.opening_side.as_deref(),
+            expected,
+            "{mode}/{side}/{direction}"
+        );
         assert_eq!(saved.realized_pnl, "-0.125");
     }
 }
