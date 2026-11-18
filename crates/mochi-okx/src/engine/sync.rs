@@ -1,12 +1,12 @@
 //! Bringing local rows and the cached account in line with OKX.
 
 use mochi_domain::jsnum::js_string_to_number;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use mochi_domain::{EquityPoint, Fill, Liquidity, Order, OrderStatus, PositionSide};
 use serde_json::Value;
 
-use super::protection::{record_attached, Held};
+use super::protection::{last_trade_id, record_attached, Held};
 use super::{
     dec, is_leg, EngineError, OkxEngine, Registry, EQUITY_EVERY_MS, NEVER_ARRIVED_AFTER_MS,
 };
@@ -160,6 +160,8 @@ impl OkxEngine {
             .filter(|p| js_number(p.get("pos")) != 0.0)
             .collect();
         let mut held: HashMap<String, Held> = HashMap::new();
+        let mut keys = HashMap::new();
+        let mut seen = HashSet::new();
         for p in &open {
             let side = if js_number(p.get("pos")) > 0.0 {
                 PositionSide::Long
@@ -168,9 +170,27 @@ impl OkxEngine {
             };
             let size = dec_or_zero(p.get("pos"))?;
             let contracts = if size.is_negative() { size.neg() } else { size };
+            let inst_id = nullish_text(p.get("instId")).unwrap_or_default();
+            let trade_id = last_trade_id(p);
+            if let Some(spec) = registry.symbol_of_inst_id(&inst_id) {
+                let symbol = &spec.symbol;
+                if !seen.insert(symbol) {
+                    keys.remove(symbol);
+                } else if p.get("mgnMode").and_then(Value::as_str) == Some("isolated")
+                    && p.get("posSide").and_then(Value::as_str) == Some("net")
+                {
+                    if let Some(trade_id) = trade_id {
+                        keys.insert(symbol.clone(), (trade_id, side));
+                    }
+                }
+            }
             held.insert(
-                nullish_text(p.get("instId")).unwrap_or_default(),
-                Held { side, contracts },
+                inst_id,
+                Held {
+                    side,
+                    contracts,
+                    trade_id,
+                },
             );
         }
         let protection = match algos {
@@ -178,16 +198,28 @@ impl OkxEngine {
             Err(error) => Err(error),
         };
         let protection = match protection {
-            Ok(protection) => {
-                self.state().protection = protection.clone();
-                protection
-            }
+            Ok(protection) => protection,
             Err(error) => {
-                // The position read succeeded. Publish it so reduce-only orders can still exit.
+                // A failed protection read does not invalidate the new positions. Last known
+                // protection belongs only to the exact same observed trade and position side.
                 order_error.get_or_insert(error);
-                self.state().protection.clone()
+                let state = self.state();
+                state
+                    .protection
+                    .iter()
+                    .filter(|(symbol, _)| {
+                        keys.get(*symbol)
+                            .is_some_and(|key| state.protection_keys.get(*symbol) == Some(key))
+                    })
+                    .map(|(symbol, protection)| (symbol.clone(), protection.clone()))
+                    .collect()
             }
         };
+        keys.retain(|symbol, (trade, side)| {
+            held.get(&to_inst_id(symbol))
+                .is_some_and(|position| position.trade_id == Some(*trade) && position.side == *side)
+        });
+        let saved_protection = protection.clone();
         let (positions, balance) = {
             let account_id = account_id.clone();
             let now = self.now();
@@ -213,6 +245,8 @@ impl OkxEngine {
         let point = {
             let mut state = self.state();
             state.positions = positions;
+            state.protection = saved_protection;
+            state.protection_keys = keys;
             state.balance = Some(balance.clone());
             state.last_sync_at = Some(at);
             // Set here, in the same step, so the account never reads as healthy in between.

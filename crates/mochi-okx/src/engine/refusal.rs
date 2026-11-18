@@ -140,6 +140,23 @@ impl OkxEngine {
                 )));
             }
         }
+        if let Some(target) = order
+            .attached_take_profit
+            .as_deref()
+            .filter(|p| !p.is_empty())
+        {
+            let value = dec(target)?;
+            let wrong = match order.side {
+                OrderSide::Buy => value.lte(&reference),
+                OrderSide::Sell => value.gte(&reference),
+            };
+            if !value.gt(&super::zero()) || wrong {
+                return Ok(Some(format!(
+                    "LIMIT_TARGET_INVALID: take profit {target} is on the wrong side of {}",
+                    reference.to_fixed()
+                )));
+            }
+        }
         if let Some(trailing) = &order.attached_trailing_stop {
             let side = match order.side {
                 OrderSide::Buy => PositionSide::Long,

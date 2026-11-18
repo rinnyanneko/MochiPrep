@@ -68,6 +68,7 @@ pub struct FakeState {
     pub orders: IndexMap<String, Row>,
     pub position: Option<Row>,
     pub other_positions: Vec<Row>,
+    pub recent_fills: Vec<Row>,
     pub simulated_headers: Vec<Option<String>>,
     /// Every signed request as `METHOD pathname`, in arrival order.
     pub calls: Vec<String>,
@@ -116,6 +117,7 @@ impl Default for FakeState {
             orders: IndexMap::new(),
             position: None,
             other_positions: Vec::new(),
+            recent_fills: Vec::new(),
             simulated_headers: Vec::new(),
             calls: Vec::new(),
             algos: IndexMap::new(),
@@ -327,6 +329,17 @@ impl FakeOkx {
             return Ok(ok(json!([{ "details": [{
                 "ccy": "USDT", "eq": state.equity, "availEq": state.equity, "upl": "0",
             }] }])));
+        }
+        if ends("/trade/fills") {
+            let inst_id = param("instId");
+            let rows: Vec<_> = state
+                .recent_fills
+                .iter()
+                .rev()
+                .filter(|row| text(row.get("instId")) == inst_id)
+                .take(crate::client::RECENT_FILLS_LIMIT)
+                .collect();
+            return Ok(ok(json!(rows)));
         }
         if ends("/account/positions") {
             let positions: Vec<_> = state
@@ -646,6 +659,19 @@ fn fill(state: &mut FakeState, order: &Row) {
             .as_ref()
             .and_then(|position| position.get("pos")),
     );
+    let subtype = match (
+        buy,
+        held.is_zero() || held.is_negative() == signed.is_negative(),
+    ) {
+        (true, true) => "3",
+        (false, true) => "4",
+        (false, false) => "5",
+        (true, false) => "6",
+    };
+    state.recent_fills.push(object(&json!({
+        "instId": order.get("instId"), "tradeId": trade_id, "fillTime": "1800000000000",
+        "posSide": "net", "subType": subtype,
+    })));
     let size = held.add(&signed);
     state.position = if size.is_zero() {
         None

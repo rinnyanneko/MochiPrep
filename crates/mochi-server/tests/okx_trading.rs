@@ -492,6 +492,7 @@ fn meta(id: &str) -> ProtectionMeta {
         agent_id: Some("agent_1".into()),
         decision_id: Some(id.into()),
         keep_trailing: false,
+        keep_take_profit: false,
     }
 }
 

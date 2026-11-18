@@ -7,6 +7,7 @@
 //! never hold the store and the store never waits on the network.
 
 mod protection;
+pub use protection::ProtectionRetention;
 mod refusal;
 mod sync;
 mod views;
@@ -225,6 +226,8 @@ struct State {
     sync_error: Option<String>,
     /// Our protection per symbol, as the last sync read it back from OKX.
     protection: ProtectionMap,
+    /// Exchange trade and side that the last observed protection belonged to.
+    protection_keys: HashMap<String, (u64, PositionSide)>,
     /// The last failed algo cancel, until a sync finishes with every cancel accepted.
     cancel_error: Option<String>,
     /// Per instId: consecutive syncs that found our protection but no position.

@@ -82,8 +82,10 @@ type TrailKind = TrailingStopSpec['kind'] | 'NONE';
 function ProtectionDialog({ position, onClose }: { position: PositionView; onClose(): void }) {
   const [stop, setStop] = useState(position.stopLoss ?? '');
   const [target, setTarget] = useState(position.takeProfit ?? '');
+  const [targetEdited, setTargetEdited] = useState(false);
   const current = position.trailingStop;
   const [kind, setKind] = useState<TrailKind>(current?.kind ?? 'NONE');
+  const [trailEdited, setTrailEdited] = useState(false);
   // A ratio is shown as a percent: 0.01 reads 1.
   const [callback, setCallback] = useState(current ? (current.kind === 'RATIO' ? shiftPoint(current.callback, 2) : current.callback) : '');
   const [activation, setActivation] = useState(current?.activationPrice ?? '');
@@ -98,7 +100,8 @@ function ProtectionDialog({ position, onClose }: { position: PositionView; onClo
       api.put<{ pending: boolean }>(`/positions/${position.accountId}/${position.symbol}/protection`, {
         stopLoss: stop.trim() || null,
         takeProfit: target.trim() || null,
-        trailingStop,
+        keepTakeProfit: !targetEdited,
+        ...(trailEdited ? { trailingStop } : {}),
       }),
     );
     setSaving(false);
@@ -111,7 +114,7 @@ function ProtectionDialog({ position, onClose }: { position: PositionView; onClo
     <Dialog open onOpenChange={onClose} title={`Protection for ${position.symbol}`} description={`${position.side} ${qty(position.quantity)} from ${price(position.entryPrice, position.symbol)}. Leave a field empty to remove it.`}>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Stop loss"><Input inputMode="decimal" value={stop} onChange={(e) => setStop(e.target.value)} /></Field>
-        <Field label="Take profit"><Input inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} /></Field>
+        <Field label="Take profit"><Input inputMode="decimal" value={target} onChange={(e) => { setTarget(e.target.value); setTargetEdited(true); }} /></Field>
       </div>
       <div className="mt-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
@@ -119,17 +122,17 @@ function ProtectionDialog({ position, onClose }: { position: PositionView; onClo
           <Segmented<TrailKind>
             label="Trailing stop kind"
             value={kind}
-            onChange={setKind}
+            onChange={(value) => { setKind(value); setTrailEdited(true); }}
             options={[{ value: 'NONE', label: 'None' }, { value: 'RATIO', label: 'Percent' }, { value: 'SPREAD', label: 'Price' }]}
           />
         </div>
         {kind !== 'NONE' && (
           <div className="grid grid-cols-2 gap-3">
             <Field label={kind === 'RATIO' ? 'Callback (%)' : 'Callback (USDT)'}>
-              <Input aria-label="Trailing callback" inputMode="decimal" value={callback} onChange={(e) => setCallback(e.target.value)} />
+              <Input aria-label="Trailing callback" inputMode="decimal" value={callback} onChange={(e) => { setCallback(e.target.value); setTrailEdited(true); }} />
             </Field>
             <Field label="Activation price" hint="Optional">
-              <Input aria-label="Trailing activation price" inputMode="decimal" value={activation} onChange={(e) => setActivation(e.target.value)} />
+              <Input aria-label="Trailing activation price" inputMode="decimal" value={activation} onChange={(e) => { setActivation(e.target.value); setTrailEdited(true); }} />
             </Field>
           </div>
         )}

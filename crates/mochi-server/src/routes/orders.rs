@@ -142,6 +142,7 @@ async fn protection(
         agent_id: None,
         decision_id: None,
         keep_trailing,
+        keep_take_profit: input.keep_take_profit,
     };
     // A refusal reaches the client as a 400 with its reason.
     let result = match engine

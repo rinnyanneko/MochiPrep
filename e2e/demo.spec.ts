@@ -133,4 +133,14 @@ test('a 1% trailing stop set in the protection dialog shows its trigger price in
   const triggerPrice = usdt(await trigger.textContent());
   expect(triggerPrice).toBeLessThan(mark);
   expect(triggerPrice).toBeGreaterThan(mark * 0.97);
+
+  await page.getByRole('button', { name: /^Edit stop and target for/ }).click();
+  await dialog.getByLabel('Stop loss', { exact: true }).fill((mark * 0.96).toFixed(2));
+  const saving = page.waitForRequest((req) => req.method() === 'PUT' && req.url().endsWith('/protection'));
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  const body = (await saving).postDataJSON();
+  expect(body.keepTakeProfit).toBe(true);
+  expect(body).not.toHaveProperty('trailingStop');
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeVisible();
 });

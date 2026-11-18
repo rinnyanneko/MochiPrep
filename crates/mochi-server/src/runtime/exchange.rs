@@ -212,9 +212,8 @@ impl RuntimeHandle {
             })
             .await??;
 
-        // 8-9. Trading is only possible once a full reconciliation has succeeded. The session is
-        // unarmed until it is registered, so its first sync places nothing a protection change
-        // would need arming for.
+        // 8-9. A verified position snapshot can support reduce-only exits even if protection
+        // reconciliation failed. The engine remains unhealthy until a full sync succeeds.
         let armed = Arc::new(AtomicBool::new(false));
         let link = SessionLink::new(&account.id, epoch);
         let engine = okx_engine(
@@ -226,28 +225,39 @@ impl RuntimeHandle {
             armed.clone(),
             link.clone(),
         );
-        if let Err(error) = engine.sync().await {
-            // A sync whose writes were refused because the account changed meanwhile says why.
-            let changed = account.clone();
-            let refusal = self
-                .call(move |r| r.registration_refusal(&changed, reconnect, epoch).err())
-                .await?;
-            return Err(match refusal {
-                Some(refusal) => refusal,
-                None => self.refused(error.to_string(), &secrets).await,
-            });
+        let sync = engine.sync().await.map_err(|error| error.to_string());
+        if let Err(error) = &sync {
+            if engine.last_sync().is_none() {
+                // A sync whose writes were refused because the account changed meanwhile says why.
+                let changed = account.clone();
+                let refusal = self
+                    .call(move |r| r.registration_refusal(&changed, reconnect, epoch).err())
+                    .await?;
+                return Err(match refusal {
+                    Some(refusal) => refusal,
+                    None => self.refused(error.clone(), &secrets).await,
+                });
+            }
         }
         let session = ExchangeSession {
-            engine,
+            was_healthy: true,
+            engine: engine.clone(),
             armed,
             secrets,
-            was_healthy: true,
             link,
         };
         // 10-12. Register, save or forget the key, and take the first balance.
         let remember = remember.then_some(vault);
-        self.call(move |r| r.register_session(account, session, remember, &saved, reconnect, epoch))
-            .await?
+        self.call(move |r| {
+            let account_id = account.id.clone();
+            let registered =
+                r.register_session(account, session, remember, &saved, reconnect, epoch);
+            if sync.is_err() {
+                r.after_sync(&account_id, &engine, sync);
+            }
+            registered
+        })
+        .await?
     }
 
     /// A refusal, as Node's error handler sends it: 400, the key's own values removed too.
@@ -356,7 +366,7 @@ impl Runtime {
         Ok(())
     }
 
-    /// Steps 10-12, once the first sync succeeded. A new manual session replaces the old one,
+    /// Steps 10-12, after the first position and balance snapshot. A manual session replaces the old one,
     /// which resets arming to the venue's default. A connect whose account changed while it was
     /// out (see [`Self::registration_refusal`]) registers nothing and saves nothing. `remember`
     /// is the vault generation the owner asked to save the key under.

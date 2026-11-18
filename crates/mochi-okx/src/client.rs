@@ -401,6 +401,8 @@ impl fmt::Debug for OkxClient {
     }
 }
 
+pub(crate) const RECENT_FILLS_LIMIT: usize = 100;
+
 impl OkxClient {
     pub fn new(credentials: Credentials, venue: Venue, transport: Arc<dyn Transport>) -> Self {
         OkxClient {
@@ -511,6 +513,20 @@ impl OkxClient {
                 _ => None,
             })
         }))
+    }
+
+    /// Recent executions on the instrument, including manual trades and liquidation/ADL fills.
+    pub(crate) async fn recent_fills(&self, inst_id: &str) -> Result<Vec<Row>, OkxError> {
+        rows(
+            self.request(
+                "GET",
+                &format!(
+                    "/api/v5/trade/fills?instType=SWAP&instId={inst_id}&limit={RECENT_FILLS_LIMIT}"
+                ),
+                None,
+            )
+            .await?,
+        )
     }
 
     pub async fn get_positions(&self) -> Result<Vec<Row>, OkxError> {

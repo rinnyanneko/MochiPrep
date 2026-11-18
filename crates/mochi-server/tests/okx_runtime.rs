@@ -1987,3 +1987,49 @@ async fn a_sync_of_a_replaced_session_never_writes_over_the_new_sessions_orders(
         .all(|(_, message)| !message.contains("lost sync")));
     w.rt.shutdown().await;
 }
+
+#[tokio::test]
+async fn reconnect_keeps_reduce_only_exit_available_when_okx_protection_reads_fail() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    let agent = w.agent_on(&account.id, "SIGNAL").await;
+    let id = agent.clone();
+    w.rt.call(move |r| r.start_agent(&id).unwrap())
+        .await
+        .unwrap();
+    assert!(w.agent(&agent).await.running);
+    {
+        let mut okx = w.okx.state();
+        okx.algo_lookup_down = true;
+        okx.position = Some(
+            json!({
+                "instId": "BTC-USDT-SWAP", "pos": "0.1", "avgPx": "75000", "markPx": "75000",
+                "upl": "0", "lever": "3", "liqPx": "50000", "margin": "10", "mgnMode": "isolated",
+                "posSide": "net", "tradeId": "1",
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        );
+    }
+    let again = w.connect("OKX_LIVE").await;
+    assert_eq!(again.id, account.id);
+    let statuses = w.statuses().await;
+    assert_eq!(statuses[0]["connected"], true);
+    assert_eq!(statuses[0]["healthy"], false);
+    assert_eq!(statuses[0]["armed"], false);
+    assert!(!w.agent(&agent).await.running);
+    w.rt.sync_exchanges().await.unwrap();
+    assert!(!w.agent(&agent).await.running);
+    let (status, result) = w
+        .send(
+            "POST",
+            &format!("/api/positions/{}/BTCUSDT/close", account.id),
+            Some(json!({ "fraction": 1, "clientOrderId": "degraded-close" })),
+        )
+        .await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(result["order"]["status"], "FILLED");
+    assert!(w.okx.state().position.is_none());
+    w.rt.shutdown().await;
+}

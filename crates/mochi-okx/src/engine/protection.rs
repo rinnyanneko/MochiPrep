@@ -26,6 +26,7 @@ use super::{
 };
 use crate::client::{
     nullish_text, truthy_text, AlgoOrdType, AlgoOrderBody, CancelAlgo, OkxError, Row, Side, TdMode,
+    RECENT_FILLS_LIMIT,
 };
 use crate::ids::{to_algo_cl_ord_id, to_cl_ord_id, to_inst_id};
 
@@ -44,6 +45,21 @@ const POSITION_CLOSED: &str = "Position closed";
 const DEFERRED_TRAILING: &str = "Pending entry fill: trailing stop not yet sent";
 
 const DEFERRED_TP: &str = "Pending entry fill: take profit not yet sent";
+
+/// Fields read from the current position inside the same queued step as the edit.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ProtectionRetention {
+    pub take_profit: bool,
+    pub trailing_stop: bool,
+}
+
+const PER_ENTRY_TARGET_SUFFIX: &str = ":deferred:tp";
+
+fn deferred_parent_id(row: &Order, leg: Leg) -> Option<&str> {
+    row.id
+        .strip_suffix(PER_ENTRY_TARGET_SUFFIX)
+        .or_else(|| row.id.strip_suffix(&format!(":{}", leg.tag())))
+}
 
 pub(super) fn is_deferred(row: &Order) -> bool {
     matches!(
@@ -107,7 +123,11 @@ pub(super) fn record_deferred_protection(
     ] {
         if defer {
             let mut row = protection_row(
-                format!("{}:{}", entry.id, leg.tag()),
+                if leg == Leg::Tp {
+                    format!("{}{PER_ENTRY_TARGET_SUFFIX}", entry.id)
+                } else {
+                    format!("{}:{}", entry.id, leg.tag())
+                },
                 &source,
                 leg,
                 &target,
@@ -197,6 +217,7 @@ pub(crate) type ProtectionMap = HashMap<String, SymbolProtection>;
 pub(crate) struct Held {
     pub side: PositionSide,
     pub contracts: Dec,
+    pub trade_id: Option<u64>,
 }
 
 pub(super) fn last_trade_id(row: &Row) -> Option<u64> {
@@ -205,6 +226,67 @@ pub(super) fn last_trade_id(row: &Row) -> Option<u64> {
         .parse()
         .ok()
         .filter(|id| *id > 0)
+}
+
+/// Prove that the earlier entry still belongs to the current net position. A bounded
+/// response is accepted only when it contains the entire recent history for this instrument.
+fn additive_fills(
+    rows: &[Row],
+    first_trade: u64,
+    last_trade: u64,
+    side: PositionSide,
+) -> Option<bool> {
+    if rows.len() >= RECENT_FILLS_LIMIT {
+        return None;
+    }
+    let time = |row: &Row| {
+        row.get("fillTime")
+            .and_then(Value::as_str)
+            .and_then(|time| time.parse::<i64>().ok())
+            .filter(|time| *time > 0)
+    };
+    let trade_time = |id| {
+        rows.iter()
+            .find(|row| last_trade_id(row) == Some(id))
+            .and_then(time)
+    };
+    let (first, last) = trade_time(first_trade).zip(trade_time(last_trade))?;
+    if first > last {
+        return None;
+    }
+    let open_type = match side {
+        PositionSide::Long => "3",
+        PositionSide::Short => "4",
+    };
+    for row in rows {
+        let at = time(row)?;
+        // Ordinary trade IDs order fills within one millisecond. Special IDs such as negative
+        // liquidation and ADL IDs cannot establish that a fill was outside the interval.
+        let outside = last_trade_id(row)
+            .is_some_and(|id| (at == first && id < first_trade) || (at == last && id > last_trade));
+        if at < first || at > last || outside {
+            continue;
+        }
+        if row.get("posSide").and_then(Value::as_str) != Some("net")
+            || row.get("subType").and_then(Value::as_str) != Some(open_type)
+        {
+            return Some(false);
+        }
+    }
+    Some(true)
+}
+
+fn isolated_net_position<'a>(positions: &'a [Row], inst_id: &str) -> Option<(&'a Row, Dec)> {
+    positions.iter().find_map(|position| {
+        if position.get("instId").and_then(Value::as_str) != Some(inst_id)
+            || position.get("mgnMode").and_then(Value::as_str) != Some("isolated")
+            || position.get("posSide").and_then(Value::as_str) != Some("net")
+        {
+            return None;
+        }
+        let size = dec(position.get("pos")?.as_str()?).ok()?;
+        (!size.is_zero()).then_some((position, size))
+    })
 }
 
 /// Consecutive syncs that found our protection but no position, and the first such sync.
@@ -394,6 +476,13 @@ pub(crate) fn record_attached(
         decision_id: entry.decision_id.clone(),
     };
     for leg in LEGS {
+        if leg == Leg::Tp
+            && rows
+                .get_order(&format!("{}{PER_ENTRY_TARGET_SUFFIX}", entry.id))?
+                .is_some()
+        {
+            continue;
+        }
         let id = format!("{}:{}", entry.id, leg.tag());
         if !leg.is_set(&protection) || rows.get_order(&id)?.is_some() {
             continue;
@@ -587,34 +676,45 @@ impl OkxEngine {
         agent_id: Option<String>,
         decision_id: Option<String>,
     ) -> Result<ProtectionResult, EngineError> {
-        self.set_protection_with(account_id, symbol, protection, false, agent_id, decision_id)
-            .await
+        self.set_protection_with(
+            account_id,
+            symbol,
+            protection,
+            ProtectionRetention::default(),
+            agent_id,
+            decision_id,
+        )
+        .await
     }
 
-    /// [`Self::set_protection`], except that with `keep_trailing` the trailing stop in force is
-    /// kept and `protection.trailing_stop` ignored. The trailing stop is read in the same queued
-    /// step as the change, so a trailing edit queued in between is never undone.
+    /// Preserve selected legs in the queued state, including deferred submissions.
     pub async fn set_protection_with(
         self: &Arc<Self>,
         account_id: &str,
         symbol: &str,
         mut protection: Protection,
-        keep_trailing: bool,
+        retain: ProtectionRetention,
         agent_id: Option<String>,
         decision_id: Option<String>,
     ) -> Result<ProtectionResult, EngineError> {
         let (account_id, symbol) = (account_id.to_string(), symbol.to_string());
         self.queued(move |engine| {
             Box::pin(async move {
-                if keep_trailing {
-                    protection.trailing_stop = engine.protection_of(&symbol).trailing_stop;
+                if retain.trailing_stop || retain.take_profit {
+                    let current = engine.protection_of(&symbol);
+                    if retain.trailing_stop {
+                        protection.trailing_stop = current.trailing_stop;
+                    }
+                    if retain.take_profit {
+                        protection.take_profit = current.take_profit;
+                    }
                 }
                 engine
                     .apply_protection(
                         account_id,
                         symbol,
                         protection,
-                        keep_trailing,
+                        retain,
                         agent_id,
                         decision_id,
                     )
@@ -652,7 +752,7 @@ impl OkxEngine {
         account_id: String,
         symbol: String,
         requested: Protection,
-        keep_trailing: bool,
+        retain: ProtectionRetention,
         agent_id: Option<String>,
         decision_id: Option<String>,
     ) -> Result<ProtectionResult, EngineError> {
@@ -757,6 +857,37 @@ impl OkxEngine {
             }
         }
         for leg in &changed {
+            if !leg.is_set(&target) {
+                // More than one per-entry order can share a leg. An explicit removal
+                // clears all of them, while a preserved field never reaches this branch.
+                let account = self.deps.account_id.clone();
+                let symbol = symbol.clone();
+                let leg = *leg;
+                let closing_side = if position.position.side == PositionSide::Long {
+                    OrderSide::Sell
+                } else {
+                    OrderSide::Buy
+                };
+                let active = self
+                    .rows(move |rows| {
+                        Ok(rows
+                            .list_open_orders(&account)?
+                            .into_iter()
+                            .filter(|row| {
+                                row.symbol == symbol
+                                    && row.side == closing_side
+                                    && leg_of(row) == Some(leg)
+                                    && row
+                                        .exchange_order_id
+                                        .as_deref()
+                                        .is_some_and(|id| !id.is_empty())
+                            })
+                            .collect())
+                    })
+                    .await?;
+                self.cancel_rows(active, Some(REMOVED)).await?;
+                continue;
+            }
             // A sync above may already have retired a superseded row; it is not cancelled twice.
             let Some(previous) = old.leg(*leg) else {
                 continue;
@@ -764,12 +895,7 @@ impl OkxEngine {
             let id = previous.id.clone();
             let row = self.rows(move |rows| Ok(rows.get_order(&id)?)).await?;
             if let Some(row) = row.filter(|r| r.status == OrderStatus::Open) {
-                let reason = if leg.is_set(&target) {
-                    REPLACED
-                } else {
-                    REMOVED
-                };
-                self.cancel_rows(vec![row], Some(reason)).await?;
+                self.cancel_rows(vec![row], Some(REPLACED)).await?;
             }
         }
 
@@ -781,15 +907,11 @@ impl OkxEngine {
             .filter(|row| row.symbol == symbol && is_deferred(row))
         {
             let leg = match leg_of(&pending) {
-                Some(Leg::Trail) if !keep_trailing => Leg::Trail,
-                Some(Leg::Tp) => Leg::Tp,
+                Some(Leg::Trail) if !retain.trailing_stop => Leg::Trail,
+                Some(Leg::Tp) if !retain.take_profit => Leg::Tp,
                 _ => continue,
             };
-            let Some(parent_id) = pending
-                .id
-                .strip_suffix(&format!(":{}", leg.tag()))
-                .map(str::to_string)
-            else {
+            let Some(parent_id) = deferred_parent_id(&pending, leg).map(str::to_string) else {
                 continue;
             };
             let parent = self
@@ -972,9 +1094,7 @@ impl OkxEngine {
     ) -> Result<(), EngineError> {
         let leg =
             leg_of(row).ok_or_else(|| EngineError::message("Invalid deferred protection leg"))?;
-        let parent_id = row
-            .id
-            .strip_suffix(&format!(":{}", leg.tag()))
+        let parent_id = deferred_parent_id(row, leg)
             .ok_or_else(|| EngineError::message("Invalid deferred protection id"))?
             .to_string();
         let parent = self
@@ -1036,16 +1156,7 @@ impl OkxEngine {
         }
         // Read fresh after the parent/stop calls, which may have outlived the earlier snapshot.
         let positions = self.deps.client.get_positions().await?;
-        let current = positions.iter().find(|p| {
-            p.get("instId").and_then(Value::as_str) == Some(inst_id.as_str())
-                && p.get("mgnMode").and_then(Value::as_str) == Some("isolated")
-                && p.get("posSide").and_then(Value::as_str) == Some("net")
-                && p.get("pos")
-                    .and_then(Value::as_str)
-                    .and_then(|raw| dec(raw).ok())
-                    .is_some_and(|size| !size.is_zero())
-        });
-        let Some(position) = current else {
+        let Some((position, mut signed_size)) = isolated_net_position(&positions, &inst_id) else {
             if confirming {
                 return Ok(());
             }
@@ -1056,16 +1167,6 @@ impl OkxEngine {
                 )
                 .await;
         };
-        let signed_size = position
-            .get("pos")
-            .and_then(Value::as_str)
-            .map(dec)
-            .transpose()?;
-        let Some(signed_size) = signed_size.filter(|size| !size.is_zero()) else {
-            return self
-                .close_row(row, "Deferred protection canceled: entry position is flat")
-                .await;
-        };
         let short = signed_size.is_negative();
         let side = if short {
             PositionSide::Short
@@ -1073,16 +1174,59 @@ impl OkxEngine {
             PositionSide::Long
         };
         let closes = (row.side == OrderSide::Sell) != short;
-        let position_trade = last_trade_id(position);
-        if !closes || trade_id.is_none() || position_trade.is_none() {
-            return self.close_row(row, "Deferred protection canceled: position changed or entry fill cannot be confirmed").await;
-        }
-        // The last exchange trade ID advances on every fill, including a same-side reopen.
-        if position_trade != trade_id {
-            if confirming && position_trade < trade_id {
+        let (Some(entry_trade), Some(position_trade)) = (trade_id, last_trade_id(position)) else {
+            if confirming {
                 return Ok(());
             }
-            return self.close_row(row, "Deferred protection canceled: position traded after entry or entry fill cannot be confirmed").await;
+            return self
+                .close_row(
+                    row,
+                    "Deferred protection canceled: entry fill cannot be confirmed",
+                )
+                .await;
+        };
+        if !closes {
+            return self
+                .close_row(row, "Deferred protection canceled: position changed side")
+                .await;
+        }
+        if position_trade < entry_trade {
+            if confirming {
+                return Ok(());
+            }
+            return self
+                .close_row(
+                    row,
+                    "Deferred protection canceled: latest position trade is older than the entry",
+                )
+                .await;
+        }
+        if position_trade != entry_trade {
+            // A newer trade is compatible with the same position only when OKX shows solely
+            // additive fills between the two executions. A close, reopen or incomplete history
+            // cannot be distinguished from a different position safely.
+            let fills = self.deps.client.recent_fills(&inst_id).await?;
+            match additive_fills(&fills, entry_trade, position_trade, side) {
+                Some(true) => {}
+                // The position and parent can become visible before the fills endpoint catches up.
+                None if confirming => return Ok(()),
+                _ => {
+                    return self
+                        .close_row(
+                            row,
+                            "Deferred protection canceled: entry position lifetime cannot be confirmed",
+                        )
+                        .await;
+                }
+            }
+            let refreshed = self.deps.client.get_positions().await?;
+            let same_trade = isolated_net_position(&refreshed, &inst_id).filter(|(p, size)| {
+                last_trade_id(p) == Some(position_trade) && size.is_negative() == short
+            });
+            let Some((_, size)) = same_trade else {
+                return Ok(());
+            };
+            signed_size = size;
         }
         if let Some(mut spec) = spec_of(row) {
             // This pass already fetched balance/positions/algos successfully. The cached health
@@ -1127,6 +1271,7 @@ impl OkxEngine {
             Held {
                 side,
                 contracts: contracts.clone(),
+                trade_id: Some(position_trade),
             },
         );
         let available = contracts.mul(&dec(&registry.get(&row.symbol)?.venue_contract_value)?);
@@ -1205,10 +1350,10 @@ impl OkxEngine {
     /// fill, so retiring the older one would leave the rest of the position without that leg on
     /// OKX. A newest per-fill row never retires older ones: the position list can lag behind the
     /// fills this sync confirmed and make it look as if it covers. Until then every row stays
-    /// live and, armed, one SL or TP algo is placed at the most protective level among the live
+    /// live and, armed, one SL or legacy attached TP algo is placed at the most protective level among the live
     /// rows, never a looser one, sized to the larger of the position and what the rows guard
     /// between them. The sync after OKX lists it retires the rest (placed before cancelled).
-    /// Trailing stops are never covered.
+    /// Deferred per-entry targets and trailing stops stay distinct.
     pub(super) async fn reconcile_protection(
         &self,
         algos: Vec<Row>,
@@ -1470,9 +1615,14 @@ impl OkxEngine {
             let Some(leg) = leg_of(newest) else {
                 continue;
             };
-            // Never for a trailing stop: the per-fill trails already cover the whole size, and a
-            // new one would start from the current price, behind trails that have ratcheted.
-            if leg == Leg::Trail {
+            // Deferred targets retain their entry-specific prices and sizes. Legacy attached
+            // targets still use the whole-position cover policy. Trails always keep their history.
+            if leg == Leg::Trail
+                || (leg == Leg::Tp
+                    && members
+                        .iter()
+                        .any(|&i| rows[i].id.ends_with(PER_ENTRY_TARGET_SUFFIX)))
+            {
                 continue;
             }
             let awaiting = rows.iter().take(open_count).any(|r| {
@@ -1493,6 +1643,7 @@ impl OkxEngine {
             let cover = Held {
                 side: position.side,
                 contracts: position.contracts.max(&claim),
+                trade_id: position.trade_id,
             };
             let group = members.iter().map(|i| &rows[*i]);
             let Some(level) = tightest_level(leg, position.side, group)? else {

@@ -430,6 +430,7 @@ impl Runtime {
                     agent_id: Some(a.id.clone()),
                     decision_id,
                     keep_trailing: d.trailing_stop.is_none(),
+                    keep_take_profit: false,
                 },
             });
         }

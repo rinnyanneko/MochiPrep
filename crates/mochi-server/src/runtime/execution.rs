@@ -30,6 +30,7 @@ pub struct ProtectionMeta {
     /// Keep the trailing stop in force and ignore the one in the change. The engine reads it in
     /// the same serialized step as the change, so a concurrent trailing edit is never undone.
     pub keep_trailing: bool,
+    pub keep_take_profit: bool,
 }
 
 /// A refused protection change. `after` is Node's `ProtectionChangeError.after`: set when the
@@ -462,12 +463,17 @@ impl ExecutionEngine for PaperExecution {
             let result = self
                 .runtime
                 .call(move |r| {
-                    if meta.keep_trailing {
-                        protection.trailing_stop = r
+                    if meta.keep_trailing || meta.keep_take_profit {
+                        let current = r
                             .engine()
                             .protection_of(&account_id, &symbol)
-                            .map_err(|e| r.api_error(e))?
-                            .trailing_stop;
+                            .map_err(|e| r.api_error(e))?;
+                        if meta.keep_trailing {
+                            protection.trailing_stop = current.trailing_stop;
+                        }
+                        if meta.keep_take_profit {
+                            protection.take_profit = current.take_profit;
+                        }
                     }
                     r.engine_mut()
                         .set_protection(&account_id, &symbol, &protection)
@@ -577,7 +583,10 @@ impl ExecutionEngine for OkxExecution {
                     &account_id,
                     &symbol,
                     protection,
-                    meta.keep_trailing,
+                    mochi_okx::engine::ProtectionRetention {
+                        trailing_stop: meta.keep_trailing,
+                        take_profit: meta.keep_take_profit,
+                    },
                     meta.agent_id,
                     meta.decision_id,
                 )

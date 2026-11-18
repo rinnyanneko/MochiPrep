@@ -128,6 +128,8 @@ pub struct ProtectionInput {
     /// Some(None): explicit null, which removes it.
     #[serde(default, deserialize_with = "present")]
     pub trailing_stop: Option<Option<TrailingStopSpec>>,
+    #[serde(default)]
+    pub keep_take_profit: bool,
 }
 
 /// Only called when the key is present, so a present `null` becomes `Some(None)`.
@@ -342,6 +344,7 @@ fn protection(input: Input) -> Checked {
     let mut fields = Fields::new(input)?;
     fields.nullable("stopLoss", decimal);
     fields.nullable("takeProfit", decimal);
+    fields.optional("keepTakeProfit", check_bool);
     // `.nullable().optional()` behaves as `.nullish()`.
     fields.nullish("trailingStop", trailing_stop);
     fields.strict()
