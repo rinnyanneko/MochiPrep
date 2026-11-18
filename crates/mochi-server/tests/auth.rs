@@ -87,6 +87,96 @@ async fn missing_token_is_401() {
 }
 
 #[tokio::test]
+async fn authenticated_operations_are_logged_without_request_data_and_retention_is_saved() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut state = state();
+    state.operation_logs = Some(Arc::new(
+        mochi_server::operation_log::OperationLog::open(directory.path(), -1).unwrap(),
+    ));
+    let router = auth::protect(
+        routes::router().route(
+            "/api/test/log/{id}",
+            post(|| async { StatusCode::NO_CONTENT }),
+        ),
+        state.clone(),
+    );
+    let action = |auth: bool| {
+        let mut request = Request::post("/api/test/log/private-id?token=private-query")
+            .header("host", HOST)
+            .header("content-type", "application/json");
+        if auth {
+            request = request.header("authorization", bearer(&state));
+        }
+        request
+            .body(Body::from(r#"{"key":"private-body"}"#))
+            .unwrap()
+    };
+    assert_eq!(
+        send(router.clone(), action(false)).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        send(router.clone(), action(true)).await.0,
+        StatusCode::NO_CONTENT
+    );
+    let logs = directory.path().join("logs");
+    let latest = std::fs::read_to_string(logs.join("latest.log")).unwrap();
+    assert!(latest.contains("POST /api/test/log/{id} -> 204"));
+    for secret in [
+        "private-id",
+        "private-query",
+        "private-body",
+        &state.token,
+        " -> 401",
+    ] {
+        assert!(!latest.contains(secret));
+    }
+    let retention = |count| {
+        Request::put("/api/settings/operation-logs")
+            .header("host", HOST)
+            .header("authorization", bearer(&state))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::json!({ "retention": count }).to_string(),
+            ))
+            .unwrap()
+    };
+    assert_eq!(
+        send(router.clone(), retention(-2)).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(send(router.clone(), retention(0)).await.0, StatusCode::OK);
+    assert_eq!(
+        std::fs::read_dir(&logs)
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext == "log")
+            })
+            .count(),
+        1
+    );
+    let (status, preference) = send(
+        router,
+        get("/api/settings/operation-logs")
+            .header("authorization", bearer(&state))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        preference,
+        serde_json::json!({ "retention": 0, "available": true })
+    );
+    state.runtime.shutdown().await;
+}
+
+#[tokio::test]
 async fn wrong_token_is_401() {
     let state = state();
     let wrong = format!("Bearer {}", "0".repeat(64));

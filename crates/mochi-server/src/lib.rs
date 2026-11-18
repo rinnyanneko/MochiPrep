@@ -5,6 +5,7 @@ pub mod agent_parse;
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod operation_log;
 pub mod routes;
 pub mod runtime;
 pub mod validate;
@@ -36,6 +37,7 @@ pub struct AppState {
     pub token: String,
     pub config: Arc<Config>,
     pub runtime: RuntimeHandle,
+    pub operation_logs: Option<Arc<operation_log::OperationLog>>,
     /// The open `/api/events` streams, ended together on shutdown.
     pub streams: routes::events::SseStreams,
     /// The web app's files: the embedded build, or a test's own.
@@ -48,6 +50,7 @@ impl AppState {
             token: new_token(),
             config,
             runtime,
+            operation_logs: None,
             streams: routes::events::SseStreams::default(),
             web: routes::static_files::web_dist,
         }

@@ -33,6 +33,7 @@ rust-embed = { version = "8", features = ["mime-guess"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 subtle = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
@@ -47,7 +48,6 @@ mochi-launcher-core = { path = "../mochi-launcher-core" }
 mochi-server = { path = ".", features = ["test-seams"] }
 # The in-process fake OKX for the OKX trading tests.
 mochi-okx = { path = "../mochi-okx", features = ["fake"] }
-tempfile = { workspace = true }
 # Paused time for the timing tests; socket reads and writes for the SSE shutdown test.
 tokio = { workspace = true, features = ["test-util", "io-util"] }
 tower = { workspace = true }

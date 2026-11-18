@@ -13,6 +13,8 @@ Your data is kept in these folders. The bundle identifier is `io.github.rinnyann
 
 The interface's own saved preferences (such as its theme) are kept separately. On Windows, they are in `%LOCALAPPDATA%\io.github.rinnyanneko.mochiprep\EBWebView`.
 
+Operation logs live in `logs/` beside the database. Each backend start replaces `latest.log` and creates a UTC-dated session log. Both record operation results. In **Settings → Operation logs**, choose how many dated logs to keep. The default is 10. Set 0 to keep only `latest.log`, or −1 to keep every dated log. The log records authenticated changes, agent cycle outcomes, and paper execution events. Request bodies, credentials, and provider responses stay out of the files.
+
 Changing the port starts those saved preferences fresh, because they belong to the old address.
 
 ## How it behaves

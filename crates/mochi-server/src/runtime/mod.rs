@@ -99,6 +99,7 @@ pub struct RuntimeOptions {
     pub kdf: KdfParams,
     /// How OKX private trading is reached.
     pub okx: OkxOptions,
+    pub operation_logs: Option<Arc<crate::operation_log::OperationLog>>,
 }
 
 impl RuntimeOptions {
@@ -115,6 +116,7 @@ impl RuntimeOptions {
             provider_factory: None,
             kdf: DEFAULT_KDF,
             okx: OkxOptions::default(),
+            operation_logs: None,
         }
     }
 
@@ -133,6 +135,7 @@ impl RuntimeOptions {
             provider_factory: None,
             kdf: DEFAULT_KDF,
             okx: OkxOptions::default(),
+            operation_logs: None,
         }
     }
 }
@@ -189,6 +192,7 @@ impl RuntimeHandle {
             options.kdf,
             options.okx,
         )?;
+        runtime.operation_logs = options.operation_logs;
         let events = runtime.events.sender();
         let (commands, inbox) = mpsc::channel(COMMAND_QUEUE);
         let handle = RuntimeHandle { commands, events };
@@ -291,6 +295,7 @@ fn stopped() -> ApiError {
 /// Everything the runtime task owns. Only reachable through [`RuntimeHandle::call`].
 pub struct Runtime {
     engine: Engine,
+    operation_logs: Option<Arc<crate::operation_log::OperationLog>>,
     agents: agents::Agents,
     replay_batch: Option<scheduling::ReplayBatch>,
     replay_queue: std::collections::VecDeque<scheduling::ReplayRequest>,
@@ -396,6 +401,7 @@ impl Runtime {
 
         let mut runtime = Runtime {
             engine,
+            operation_logs: None,
             agents: agents::Agents {
                 factory: provider_factory,
                 ..Default::default()
@@ -872,6 +878,20 @@ impl Runtime {
     fn handle_engine_events(&mut self) {
         let events = std::mem::take(&mut *lock(&self.engine_events));
         for event in events {
+            if let Some(log) = &self.operation_logs {
+                match &event {
+                    EngineEvent::Fill { .. } => log.record(format_args!("paper fill")),
+                    EngineEvent::Liquidation { .. } => {
+                        log.record(format_args!("paper liquidation"))
+                    }
+                    EngineEvent::Funding { .. } => {
+                        log.record(format_args!("paper funding applied"))
+                    }
+                    EngineEvent::Order { order } => {
+                        log.record(format_args!("paper order -> {:?}", order.status))
+                    }
+                }
+            }
             self.invalidate(&[
                 Topic::Accounts,
                 Topic::Orders,

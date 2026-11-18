@@ -1,5 +1,25 @@
 import { expect, test } from '@playwright/test';
 
+test('log retention survives navigating away from Settings', async ({ page, request }) => {
+  const session = await request.get('/api/session');
+  const { token } = await session.json();
+  const reset = await request.put('/api/settings/operation-logs', {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { retention: 10 },
+  });
+  expect(reset.ok()).toBe(true);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const retention = page.getByLabel('Dated logs to keep');
+  await expect(retention).toHaveValue('10');
+  await retention.fill('0');
+  await page.getByRole('button', { name: 'Save log retention' }).click();
+  await expect(page.getByText('Log retention saved')).toBeVisible();
+  await page.getByRole('button', { name: 'Dashboard', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(retention).toHaveValue('0');
+});
+
 const rootVar = (name: string) => `getComputedStyle(document.documentElement).getPropertyValue('${name}').trim()`;
 
 test('time zone and color flip apply across the UI and survive a reload', async ({ page }) => {
