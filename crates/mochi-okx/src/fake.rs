@@ -85,6 +85,8 @@ pub struct FakeState {
     pub canceled_algo_ids: Vec<String>,
     /// Applies the next algo order, then loses the response.
     pub lose_next_algo_response: bool,
+    /// Loses the next algo placement before applying it.
+    pub drop_next_algo_request: bool,
     pub reject_next_algo: Option<Refusal>,
     /// Refuses every algo placement this matches.
     pub reject_algo_if: Option<AlgoPredicate>,
@@ -134,6 +136,7 @@ impl Default for FakeState {
             algo_placed: Vec::new(),
             canceled_algo_ids: Vec::new(),
             lose_next_algo_response: false,
+            drop_next_algo_request: false,
             reject_next_algo: None,
             reject_algo_if: None,
             cancel_fails: false,
@@ -515,6 +518,9 @@ fn algo_fields(element: &Row) -> Row {
 }
 
 fn place_algo(state: &mut FakeState, body: Value) -> Result<HttpReply, String> {
+    if std::mem::take(&mut state.drop_next_algo_request) {
+        return Err("fetch failed".into());
+    }
     state.algo_placed.push(body.clone());
     let refused = state.reject_next_algo.is_some()
         || state

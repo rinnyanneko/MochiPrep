@@ -747,10 +747,9 @@ async fn an_unknown_outcome_placing_a_replacement_keeps_the_old_stop_and_is_reso
 async fn a_replacement_that_never_reached_okx_is_closed_by_sync_and_the_old_stop_stays() {
     let h = Harness::with_position().await;
     let old = h.protection_rows().remove(0);
-    h.okx.state().down = true;
+    h.okx.state().drop_next_algo_request = true;
     let result = h.set(stop("74500")).await.unwrap();
     assert!(result.pending);
-    h.okx.state().down = false;
     let lost = h
         .protection_rows()
         .into_iter()
@@ -2299,6 +2298,29 @@ async fn resting_target() -> (Harness, Order) {
 }
 
 #[tokio::test]
+async fn removing_a_deferred_target_cannot_execute_it_during_an_unknown_stop_replacement() {
+    let (h, entry) = resting_target().await;
+    h.okx.state().fill_resting();
+    *h.prices.lock().unwrap() = ("78099".into(), "78101".into(), "78100".into());
+    // Equal fill and quote timestamps leave the reached target unsent.
+    h.sync().await;
+    let id = format!("{}:deferred:tp", entry.id);
+    assert_eq!(h.order_row(&id).status, OrderStatus::Open);
+    assert!(h.algo_placed().is_empty());
+
+    h.advance(2);
+    h.okx.state().lose_next_algo_response = true;
+    let result = h.set(stop("74500")).await.unwrap();
+    assert_eq!(result.after.stop_loss.as_deref(), Some("74500"));
+    assert_eq!(h.okx.state().placed.len(), 1);
+    assert!(h.okx.state().position.is_some());
+    let target = h.order_row(&id);
+    assert_eq!(target.order_type, OrderType::TakeProfitMarket);
+    assert_eq!(target.status, OrderStatus::Canceled);
+    assert_eq!(target.reject_reason.as_deref(), Some("Removed"));
+}
+
+#[tokio::test]
 async fn a_deferred_target_only_sizes_the_parent_fills_from_the_current_position() {
     let (h, entry) = resting_target().await;
     {
@@ -2654,6 +2676,60 @@ async fn an_agent_protection_change_checks_the_isolated_row_and_its_live_stop() 
         .unwrap_err()
         .to_string()
         .contains("changed after the agent's risk check"));
+    assert!(h.algo_placed().is_empty());
+    h.sync().await;
+    assert_eq!(
+        h.engine.protection_of("BTCUSDT").stop_loss.as_deref(),
+        Some("74500")
+    );
+    let view = h
+        .engine
+        .positions()
+        .into_iter()
+        .find(|view| view.close_supported == Some(true))
+        .unwrap();
+    assert_eq!(view.stop_loss.as_deref(), Some("74500"));
+    assert_eq!(
+        h.order_row(&h.protection_rows()[0].id)
+            .trigger_price
+            .as_deref(),
+        Some("74500")
+    );
+}
+
+#[tokio::test]
+async fn a_stop_change_uses_the_liquidation_price_from_the_live_position() {
+    let h = Harness::with_position().await;
+    let position = h.view().position;
+    let checked = CheckedProtection {
+        position_id: position.id,
+        quantity: position.quantity,
+        before: h.engine.protection_of("BTCUSDT"),
+    };
+    h.okx
+        .state()
+        .position
+        .as_mut()
+        .unwrap()
+        .insert("liqPx".into(), json!("73700"));
+    for checked in [Some(checked), None] {
+        let error = h
+            .engine
+            .set_protection_order(
+                ACCOUNT,
+                "BTCUSDT",
+                stop("73500"),
+                ProtectionOrderOptions {
+                    retain: Default::default(),
+                    agent_id: None,
+                    decision_id: None,
+                    checked,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("before liquidation"));
+    }
     assert!(h.algo_placed().is_empty());
 }
 

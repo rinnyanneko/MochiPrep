@@ -494,6 +494,15 @@ fn num(value: Option<&serde_json::Value>) -> Option<String> {
     Dec::parse(&text).ok().map(|d| d.to_fixed())
 }
 
+fn live_trigger(row: &Order, algo: &Row) -> Option<String> {
+    let field = match leg_of(row)? {
+        Leg::Sl => "slTriggerPx",
+        Leg::Tp => "tpTriggerPx",
+        Leg::Trail => return None,
+    };
+    num(algo.get(field)).filter(|price| price != "0")
+}
+
 /// What an algo is, for display, built only from its numeric fields.
 pub(crate) fn external_of(algo: &Row) -> Vec<ExternalProtection> {
     if algo.get("ordType").and_then(|v| v.as_str()) == Some("move_order_stop") {
@@ -936,34 +945,29 @@ impl OkxEngine {
             .get(&symbol)
             .cloned()
             .unwrap_or_default();
-        if let Some(checked) = checked {
-            let changed = || {
-                EngineError::message(
-                    "The OKX position or protection changed after the agent's risk check",
-                )
-            };
+        let position_changed = || {
+            EngineError::message(if checked.is_some() {
+                "The OKX position or protection changed after the agent's risk check"
+            } else {
+                "The OKX position changed while checking the stop loss"
+            })
+        };
+        if let Some(checked) = &checked {
             let size = dec(&checked.quantity)?;
             if checked.position_id != position.position.id
                 || !size.eq_value(&dec(&position.position.quantity)?)
                 || checked.before != before
             {
-                return Err(changed());
+                return Err(position_changed());
             }
             // An exchange-side edit can invalidate the stop used by the risk check
             // without changing the position's identity or quantity.
             for leg in LEGS {
                 if let Some(order) = old.leg(leg) {
                     if !self.checked_algo_matches(leg, order).await? {
-                        return Err(changed());
+                        return Err(position_changed());
                     }
                 }
-            }
-            let remote = self.deps.client.get_positions().await?;
-            let (_, _, contracts) =
-                super::select_close(&remote, &symbol, Some(&checked.position_id))
-                    .map_err(|_| changed())?;
-            if !size.eq_value(&contracts.mul(&dec(&spec.venue_contract_value)?)) {
-                return Err(changed());
             }
         }
         let target = Protection {
@@ -993,6 +997,34 @@ impl OkxEngine {
                 changed.push(leg);
             }
         }
+        let new_stop = target
+            .stop_loss
+            .as_deref()
+            .filter(|_| changed.contains(&Leg::Sl));
+        if checked.is_some() || new_stop.is_some() {
+            let remote = self.deps.client.get_positions().await?;
+            let (row, side, contracts) =
+                super::select_close(&remote, &symbol, Some(&position.position.id))
+                    .map_err(|_| position_changed())?;
+            let size = dec(&position.position.quantity)?;
+            if !size.eq_value(&contracts.mul(&dec(&spec.venue_contract_value)?)) {
+                return Err(position_changed());
+            }
+            if let Some(stop) = new_stop {
+                let stop = dec(stop)?;
+                let liquidation =
+                    dec(&truthy_text(row.get("liqPx")).unwrap_or_else(|| "0".into()))?;
+                let before_liquidation = match side {
+                    PositionSide::Long => stop.gt(&liquidation),
+                    PositionSide::Short => stop.lt(&liquidation),
+                };
+                if !liquidation.is_zero() && !before_liquidation {
+                    return Err(EngineError::message(
+                        "Stop loss must trigger before liquidation",
+                    ));
+                }
+            }
+        }
         let source = Source {
             account_id,
             symbol: symbol.clone(),
@@ -1002,8 +1034,16 @@ impl OkxEngine {
             agent_id,
             decision_id,
         };
-        // Every placement first. Nothing is cancelled unless all of them were accepted, so
-        // swapping a stop for a trailing stop can never leave the position with neither.
+        // An explicitly removed, unsent target may otherwise execute during the sync
+        // that looks up an unknown placement. Its removal is independent of the
+        // stop replacement; retire the unsent exit before submitting any legs.
+        if !retain.take_profit && target.take_profit.is_none() {
+            self.retire_deferred(&source, vec![(Leg::Tp, REMOVED)], true)
+                .await?;
+        }
+
+        // Place new legs before cancelling live algos, so swapping a stop for a
+        // trailing stop can never leave the position with neither.
         for leg in changed.iter().copied().filter(|leg| leg.is_set(&target)) {
             let mut row =
                 protection_row((self.deps.new_id)("ord"), &source, leg, &target, self.now());
@@ -1104,34 +1144,21 @@ impl OkxEngine {
             }
         }
 
-        // A position edit only supersedes deferred exits of settled entries. Resting
-        // entries may still fill later and must retain the exits requested with them.
-        for mut pending in context
-            .open_orders
-            .into_iter()
-            .filter(|row| row.symbol == symbol && is_deferred(row))
-        {
-            let leg = match leg_of(&pending) {
-                Some(Leg::Trail) if !retain.trailing_stop => Leg::Trail,
-                Some(Leg::Tp) if !retain.take_profit => Leg::Tp,
-                _ => continue,
-            };
-            let Some(parent_id) = deferred_parent_id(&pending, leg).map(str::to_string) else {
-                continue;
-            };
-            let parent = self
-                .rows(move |rows| Ok(rows.get_order(&parent_id)?))
-                .await?;
-            if !parent.is_some_and(|parent| parent.status != OrderStatus::Open) {
-                continue;
-            }
-            let reason = if leg.is_set(&target) {
-                REPLACED
-            } else {
-                REMOVED
-            };
-            self.close_row(&mut pending, reason).await?;
+        let mut deferred = Vec::new();
+        if !retain.trailing_stop {
+            deferred.push((
+                Leg::Trail,
+                if target.trailing_stop.is_some() {
+                    REPLACED
+                } else {
+                    REMOVED
+                },
+            ));
         }
+        if !retain.take_profit && target.take_profit.is_some() {
+            deferred.push((Leg::Tp, REPLACED));
+        }
+        self.retire_deferred(&source, deferred, false).await?;
 
         let confirmed = self.sync_now().await.is_ok();
         // Every placement was accepted; if the view could not be refreshed, `after` may still be
@@ -1141,6 +1168,74 @@ impl OkxEngine {
             after: self.protection_of(&symbol),
             pending: !confirmed,
         })
+    }
+
+    async fn retire_deferred(
+        &self,
+        source: &Source,
+        legs: Vec<(Leg, &'static str)>,
+        check_exchange: bool,
+    ) -> Result<(), EngineError> {
+        if legs.is_empty() {
+            return Ok(());
+        }
+        let account = source.account_id.clone();
+        let symbol = source.symbol.clone();
+        let side = if source.side == PositionSide::Long {
+            OrderSide::Sell
+        } else {
+            OrderSide::Buy
+        };
+        let candidates = self
+            .rows(move |rows| {
+                let mut candidates = Vec::new();
+                for pending in rows
+                    .list_open_orders(&account)?
+                    .into_iter()
+                    .filter(|row| row.symbol == symbol && row.side == side && is_deferred(row))
+                {
+                    let Some(&(leg, reason)) =
+                        legs.iter().find(|(leg, _)| leg_of(&pending) == Some(*leg))
+                    else {
+                        continue;
+                    };
+                    let Some(parent_id) = deferred_parent_id(&pending, leg) else {
+                        continue;
+                    };
+                    if let Some(parent) = rows.get_order(parent_id)? {
+                        candidates.push((pending, parent, reason));
+                    }
+                }
+                Ok(candidates)
+            })
+            .await?;
+        for (mut pending, parent, reason) in candidates {
+            let settled = if check_exchange && parent.status == OrderStatus::Open {
+                // A fill can already be visible at OKX even though its local order
+                // is still open. Leave targets for orders that are genuinely resting.
+                let remote = self
+                    .deps
+                    .client
+                    .get_order(
+                        &to_inst_id(&parent.symbol),
+                        &to_cl_ord_id(&parent.client_order_id),
+                    )
+                    .await?;
+                matches!(
+                    remote
+                        .as_ref()
+                        .and_then(|row| row.get("state"))
+                        .and_then(Value::as_str),
+                    Some("filled" | "canceled" | "mmp_canceled")
+                )
+            } else {
+                parent.status != OrderStatus::Open
+            };
+            if settled {
+                self.close_row(&mut pending, reason).await?;
+            }
+        }
+        Ok(())
     }
 
     /// Node's `try` block for one leg: the body, the placement and the saved algoId.
@@ -1705,11 +1800,18 @@ impl OkxEngine {
         index: usize,
     ) -> Result<(), EngineError> {
         let algo_id = nullish_text(algo.get("algoId"));
+        let trigger = live_trigger(row, algo);
         if row.exchange_order_id != algo_id
             || row.reject_reason.as_deref().is_some_and(|r| !r.is_empty())
+            || trigger
+                .as_ref()
+                .is_some_and(|price| row.trigger_price.as_ref() != Some(price))
         {
             row.exchange_order_id = algo_id;
             row.reject_reason = None;
+            if trigger.is_some() {
+                row.trigger_price = trigger;
+            }
             row.updated_at = at;
             self.save(row.clone()).await?;
         }
@@ -1999,6 +2101,7 @@ impl OkxEngine {
                 let mut row = row.clone();
                 row.status = OrderStatus::Open;
                 row.reject_reason = None;
+                row.trigger_price = live_trigger(&row, &algo).or(row.trigger_price);
                 row.updated_at = at;
                 self.save(row.clone()).await?;
                 rows[i] = row;

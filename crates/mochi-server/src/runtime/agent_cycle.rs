@@ -33,6 +33,7 @@ pub(super) struct Cycle {
     generation: u64,
     reply: Option<CycleReply>,
     quote: Option<Quote>,
+    analyzed_position_id: Option<String>,
     stale: bool,
     critical_error: Option<String>,
     secrets: Vec<String>,
@@ -163,6 +164,7 @@ impl Runtime {
             timeframe,
             reply,
             quote: None,
+            analyzed_position_id: None,
             stale: false,
             critical_error: None,
             secrets: self.secrets(),
@@ -413,6 +415,7 @@ impl Runtime {
             .venue_positions(&target, &c.agent.account_id)?
             .into_iter()
             .find(|p| p.position.symbol == c.agent.symbol);
+        c.analyzed_position_id = position.as_ref().map(|p| p.position.id.clone());
         let risk: RiskSettings =
             serde_json::from_str(c.agent.risk.get()).map_err(|e| self.api_error(e))?;
         let quote = c.quote.clone().unwrap();
@@ -506,6 +509,20 @@ impl Runtime {
         if d.action == AiAction::Hold {
             settle(&mut c.record, "HOLD", None);
             return Ok(None);
+        }
+        if d.action == AiAction::Close {
+            if self
+                .close_target(&c.agent, &target, c.analyzed_position_id.as_deref())?
+                .is_none()
+            {
+                settle(
+                    &mut c.record,
+                    "ORDER_REJECTED",
+                    Some("The position changed since it was analyzed".into()),
+                );
+                return Ok(None);
+            }
+            c.record["closePositionId"] = json!(c.analyzed_position_id);
         }
         if d.action == AiAction::Protect {
             let p = protection.ok_or_else(|| {

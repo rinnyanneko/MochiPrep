@@ -436,6 +436,24 @@ impl Runtime {
 
     // ---- acting ---------------------------------------------------------------------------
 
+    pub(super) fn close_target(
+        &self,
+        a: &rows::Agent,
+        target: &ExecutionTarget,
+        position_id: Option<&str>,
+    ) -> Result<Option<Position>, ApiError> {
+        let Some(position_id) = position_id else {
+            return Ok(None);
+        };
+        let mut positions = self
+            .venue_positions(target, &a.account_id)?
+            .into_iter()
+            .map(|view| view.position)
+            .filter(|position| position.symbol == a.symbol);
+        let position = positions.next().filter(|p| p.id == position_id);
+        Ok(position.filter(|_| positions.next().is_none()))
+    }
+
     /// Node's `execute`: what an approved decision sends. A paper account's act runs here and
     /// the record is settled; an exchange's is returned for the caller to send off the task.
     pub(super) fn execute_decision(
@@ -514,20 +532,12 @@ impl Runtime {
             decision_id,
         };
         if d.action == AiAction::Close {
-            let mut positions = self
-                .venue_positions(target, &a.account_id)?
-                .into_iter()
-                .map(|view| view.position)
-                .filter(|p| p.symbol == a.symbol);
-            let p = positions.next().ok_or_else(|| {
-                ApiError::bad_request("The position changed while it was being checked")
-            })?;
+            let p = self
+                .close_target(a, target, r["closePositionId"].as_str())?
+                .ok_or_else(|| {
+                    ApiError::bad_request("The position changed since it was analyzed")
+                })?;
             if let ExecutionTarget::Okx(_) = target {
-                if positions.next().is_some() {
-                    return Err(ApiError::bad_request(
-                        "Several isolated OKX positions match",
-                    ));
-                }
                 return Ok(Act::CloseOkx {
                     request,
                     position_id: p.id,
@@ -630,6 +640,18 @@ impl Runtime {
         let target = self.execution(&account)?;
         let d: AiDecisionData =
             serde_json::from_value(r["decision"].clone()).map_err(|e| self.api_error(e))?;
+        if d.action == AiAction::Close
+            && self
+                .close_target(&a, &target, r["closePositionId"].as_str())?
+                .is_none()
+        {
+            settle(
+                &mut r,
+                "SIGNAL_EXPIRED",
+                Some("The position changed since it was analyzed".into()),
+            );
+            return self.save_signal(r).map(SignalStep::Done);
+        }
         let protection = self.current_protection(&a, &target)?;
         let before = serde_json::from_value::<Protection>(r["protectionBefore"].clone()).ok();
         // A PROTECT was judged against the stops it saw; applied over newer ones it could undo

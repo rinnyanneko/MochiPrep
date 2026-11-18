@@ -258,11 +258,11 @@ impl OkxEngine {
         // shutdown failure stops the pass at once.
         let mut order_error: Option<EngineError> = None;
         for mut order in open.into_iter().filter(|o| !is_leg(o)) {
-            let retired = order.reject_reason.as_deref() == Some(REACHED_EXIT_UNCONFIRMED);
+            let reached_exit = is_reached_exit(&order);
             match self.sync_order(&mut order, &registry).await {
                 Ok(()) => {}
                 Err(error @ EngineError::Stopped) => return Err(error),
-                Err(error @ EngineError::Okx(_)) if !retired => return Err(error),
+                Err(error @ EngineError::Okx(_)) if !reached_exit => return Err(error),
                 Err(error) => {
                     order_error.get_or_insert(EngineError::Message(format!(
                         "Could not record OKX order {}: {error}",
