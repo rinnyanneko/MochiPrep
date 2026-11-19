@@ -500,7 +500,7 @@ fn algo_fields(element: &Row) -> Row {
     let trailing = element.contains_key("callbackRatio") || element.contains_key("callbackSpread");
     let mut fields: Row = element
         .iter()
-        .filter(|(key, _)| !matches!(key.as_str(), "attachAlgoClOrdId" | "slOrdPx" | "tpOrdPx"))
+        .filter(|(key, _)| key.as_str() != "attachAlgoClOrdId")
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     fields.insert(
@@ -538,12 +538,7 @@ fn place_algo(state: &mut FakeState, body: Value) -> Result<HttpReply, String> {
     let ord_type = body.get("ordType").cloned().unwrap_or(Value::Null);
     let mut fields: Row = body
         .iter()
-        .filter(|(key, _)| {
-            !matches!(
-                key.as_str(),
-                "tdMode" | "reduceOnly" | "slOrdPx" | "tpOrdPx" | "ordType"
-            )
-        })
+        .filter(|(key, _)| !matches!(key.as_str(), "tdMode" | "reduceOnly" | "ordType"))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     let trailing = ord_type == json!("move_order_stop");

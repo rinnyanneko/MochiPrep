@@ -167,7 +167,7 @@ async fn fills_a_market_order_with_its_attached_algos() {
     assert_eq!(
         Value::Object(stops[0].clone()),
         json!({ "algoId": "A1", "algoClOrdId": to_algo_cl_ord_id("ord_1:sl"), "instId": "BTC-USDT-SWAP",
-                "state": "live", "side": "sell", "sz": "10", "slTriggerPx": "74000", "ordType": "conditional" })
+                "state": "live", "side": "sell", "sz": "10", "slTriggerPx": "74000", "slOrdPx": "-1", "ordType": "conditional" })
     );
     let trails = client
         .get_pending_algos(PendingAlgoType::MoveOrderStop)
@@ -260,7 +260,8 @@ async fn places_cancels_and_refuses_algos() {
         .unwrap();
     assert_eq!(found["algoId"], algo_id.as_str());
     assert_eq!(found["ordType"], "conditional");
-    assert!(!found.contains_key("tdMode") && !found.contains_key("slOrdPx"));
+    assert!(!found.contains_key("tdMode"));
+    assert_eq!(found["slOrdPx"], "-1");
 
     okx.state().cancel_fails = true;
     let cancel = [CancelAlgo {

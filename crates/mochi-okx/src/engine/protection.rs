@@ -1048,8 +1048,7 @@ impl OkxEngine {
             agent_id,
             decision_id,
         };
-        // A partially filled entry already belongs to this edit. Remove its unsent
-        // target before an unanswered placement can cause sync to see the final fill.
+        // A partially filled entry already belongs to an explicit removal.
         let removed_targets = if !retain.take_profit && target.take_profit.is_none() {
             self.deferred_to_retire(&source, vec![(Leg::Tp, REMOVED)], true)
                 .await?
@@ -1061,7 +1060,10 @@ impl OkxEngine {
         if let Some(fixed) = retained_stop {
             self.check_retained_stop(fixed, &position, &context.registry, &position_changed)
                 .await?;
-        } else if checked.is_some() || new_stop.is_some() || !removed_targets.is_empty() {
+        } else if checked.is_some()
+            || changed.iter().any(|leg| leg.is_set(&target))
+            || !removed_targets.is_empty()
+        {
             self.check_protection_position(&position, spec, new_stop, &position_changed)
                 .await?;
         }
@@ -1069,7 +1071,12 @@ impl OkxEngine {
 
         // Place new legs before cancelling live algos, so swapping a stop for a
         // trailing stop can never leave the position with neither.
+        let mut needs_position_check = false;
         for leg in changed.iter().copied().filter(|leg| leg.is_set(&target)) {
+            if needs_position_check {
+                self.check_follow_up_position(&position, spec, &position_changed)
+                    .await?;
+            }
             let mut row =
                 protection_row((self.deps.new_id)("ord"), &source, leg, &target, self.now());
             // Written before anything is sent, so an unanswered request can be looked up by
@@ -1085,7 +1092,7 @@ impl OkxEngine {
                 Err(EngineError::Okx(OkxError::Unknown(message))) => {
                     row.reject_reason = Some(format!("Awaiting confirmation: {message}"));
                     self.save(row.clone()).await?;
-                    let _ = self.sync_now().await;
+                    let _ = self.sync_protection_edit().await;
                     let id = row.id.clone();
                     let resolved = self.rows(move |rows| Ok(rows.get_order(&id)?)).await?;
                     let confirmed = resolved.is_some_and(|r| {
@@ -1093,6 +1100,9 @@ impl OkxEngine {
                             && r.exchange_order_id.is_some_and(|id| !id.is_empty())
                     });
                     if confirmed {
+                        self.check_follow_up_position(&position, spec, &position_changed)
+                            .await?;
+                        needs_position_check = false;
                         continue;
                     }
                     // Still unknown: the old algos stay until sync resolves it.
@@ -1111,7 +1121,7 @@ impl OkxEngine {
                     row.updated_at = self.now();
                     self.save(row).await?;
                     // Legs placed before this one stay; sync retires the algos they superseded.
-                    let confirmed = self.sync_now().await.is_ok();
+                    let confirmed = self.sync_protection_edit().await.is_ok();
                     // Without the sync, `after` is the last view, which may lack legs OKX already
                     // accepted.
                     let note = if confirmed {
@@ -1125,6 +1135,11 @@ impl OkxEngine {
                     });
                 }
             }
+            needs_position_check = true;
+        }
+        if needs_position_check && changed.contains(&Leg::Tp) && target.take_profit.is_some() {
+            self.check_follow_up_position(&position, spec, &position_changed)
+                .await?;
         }
         for leg in &changed {
             if !leg.is_set(&target) {
@@ -1163,7 +1178,7 @@ impl OkxEngine {
                         .check_retained_stop(fixed, &position, &context.registry, &position_changed)
                         .await
                     {
-                        let _ = self.sync_now().await;
+                        let _ = self.sync_protection_edit().await;
                         return Err(EngineError::ProtectionChange {
                             message: error.to_string(),
                             after: Box::new(self.protection_of(&symbol)),
@@ -1195,9 +1210,8 @@ impl OkxEngine {
                 },
             ));
         }
-        if !retain.take_profit && target.take_profit.is_some() {
-            deferred.push((Leg::Tp, REPLACED));
-        }
+        // A replacement take profit is resolved in reconciliation. The accepted
+        // size may be smaller than the position once another entry fills.
         let retired = self.deferred_to_retire(&source, deferred, false).await?;
         self.retire_deferred(retired).await?;
 
@@ -1243,6 +1257,25 @@ impl OkxEngine {
         Ok(contracts)
     }
 
+    async fn check_follow_up_position(
+        &self,
+        position: &PositionView,
+        spec: &InstrumentSpecification,
+        changed: &impl Fn() -> EngineError,
+    ) -> Result<(), EngineError> {
+        if let Err(error) = self
+            .check_protection_position(position, spec, None, changed)
+            .await
+        {
+            let _ = self.sync_protection_edit().await;
+            return Err(EngineError::ProtectionChange {
+                message: error.to_string(),
+                after: Box::new(self.protection_of(&position.position.symbol)),
+            });
+        }
+        Ok(())
+    }
+
     async fn check_retained_stop(
         &self,
         fixed: &Order,
@@ -1259,6 +1292,11 @@ impl OkxEngine {
         let algo = self.lookup_algo(&fixed.id).await?.ok_or_else(changed)?;
         if !live_algo_matches(&algo, Leg::Sl, fixed)? {
             return Err(changed());
+        }
+        if algo.get("slOrdPx").and_then(Value::as_str) != Some("-1") {
+            return Err(EngineError::message(
+                "The retained stop loss must be a market order to remove the trailing stop",
+            ));
         }
         let (listed, recorded) = sizes(fixed, &algo, registry);
         if !listed
@@ -1537,21 +1575,25 @@ impl OkxEngine {
         let inst_id = to_inst_id(&row.symbol);
         let confirming = self.now().saturating_sub(parent.updated_at) < POSITION_MISSING_MS;
         let context = self.context().await?;
-        if let Some(replacement) = context.open_orders.iter().find(|other| {
+        let replacement = context.open_orders.iter().rev().find(|other| {
             other.symbol == row.symbol
+                && other.side == row.side
                 && other.created_at >= parent.updated_at
                 && !is_per_fill(other)
                 && leg_of(other) == Some(leg)
-        }) {
+        });
+        if let Some(replacement) = replacement {
             if replacement
                 .exchange_order_id
                 .as_deref()
-                .is_some_and(|id| !id.is_empty())
+                .is_none_or(str::is_empty)
             {
+                // A manual replacement of unknown outcome must resolve before this intent sends.
+                return Ok(());
+            }
+            if leg != Leg::Tp {
                 return self.close_row(row, REPLACED).await;
             }
-            // A manual replacement of unknown outcome must resolve before this intent sends.
-            return Ok(());
         }
         let remote = self
             .deps
@@ -1623,6 +1665,28 @@ impl OkxEngine {
                     "Deferred protection canceled: latest position trade is older than the entry",
                 )
                 .await;
+        }
+        if let Some(replacement) = replacement {
+            let Some(algo) = self.lookup_algo(&replacement.id).await? else {
+                return Ok(());
+            };
+            let contracts = if short {
+                signed_size.neg()
+            } else {
+                signed_size
+            };
+            let (listed, recorded) = sizes(replacement, &algo, registry);
+            if live_algo_matches(&algo, Leg::Tp, replacement)?
+                && algo.get("tpOrdPx").and_then(Value::as_str) == Some("-1")
+                && listed
+                    .zip(recorded)
+                    .is_some_and(|(live, local)| live.min(&local).gte(&contracts))
+            {
+                return self.close_row(row, REPLACED).await;
+            }
+            // Until coverage is known, keep intent pending without sending a
+            // second target that could overlap the already accepted replacement.
+            return Ok(());
         }
         let remote = remote
             .as_ref()
@@ -1940,9 +2004,10 @@ impl OkxEngine {
         algos: Vec<Row>,
         snapshot: &mut PositionSnapshot,
         balance: &mut Option<Row>,
+        submit_deferred: bool,
     ) -> Result<ProtectionMap, EngineError> {
         match self
-            .reconcile_protection_pass(algos, snapshot, true)
+            .reconcile_protection_pass(algos, snapshot, submit_deferred)
             .await?
         {
             Some(result) => Ok(result),

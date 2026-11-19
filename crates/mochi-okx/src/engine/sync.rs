@@ -224,14 +224,27 @@ impl OkxEngine {
     /// Full reconciliation, inside the queue. On failure the error is kept and the account
     /// reads as unhealthy until a sync succeeds.
     pub(super) async fn sync_now(&self) -> Result<(), EngineError> {
-        let result = self.reconcile().await;
+        self.sync_with_deferred_protection(true).await
+    }
+
+    /// A protection edit may read back an unanswered placement before it has
+    /// finished replacing the old exits. Leave deferred placements to the next full pass.
+    pub(super) async fn sync_protection_edit(&self) -> Result<(), EngineError> {
+        self.sync_with_deferred_protection(false).await
+    }
+
+    async fn sync_with_deferred_protection(
+        &self,
+        submit_deferred: bool,
+    ) -> Result<(), EngineError> {
+        let result = self.reconcile(submit_deferred).await;
         if let Err(error) = &result {
             self.state().sync_error = Some(error.to_string());
         }
         result
     }
 
-    async fn reconcile(&self) -> Result<(), EngineError> {
+    async fn reconcile(&self, submit_deferred: bool) -> Result<(), EngineError> {
         let account_id = self.deps.account_id.clone();
         let (open, registry) = {
             let account_id = account_id.clone();
@@ -281,7 +294,7 @@ impl OkxEngine {
         let mut snapshot = PositionSnapshot::new(remote?)?;
         let protection = match algos {
             Ok(algos) => {
-                self.reconcile_protection(algos, &mut snapshot, &mut usdt)
+                self.reconcile_protection(algos, &mut snapshot, &mut usdt, submit_deferred)
                     .await
             }
             Err(error) => Err(error),
