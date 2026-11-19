@@ -54,6 +54,10 @@ fn raw_rows(store: &SqlitePaperStore, table: &str) -> Vec<Value> {
         .query_map([], |r| {
             let mut row = serde_json::Map::new();
             for (i, name) in names.iter().enumerate() {
+                // OKX lookup scheduling is outside the paper engine snapshot.
+                if table == "orders" && name == "exchange_recovery_checked_at" {
+                    continue;
+                }
                 let v = match r.get::<_, SqlValue>(i)? {
                     SqlValue::Null => Value::Null,
                     SqlValue::Integer(n) => json!(n),

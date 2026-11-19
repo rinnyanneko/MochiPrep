@@ -102,6 +102,8 @@ pub struct FakeState {
     pub cancel_fails: bool,
     /// Makes algo lookups (pending list and single lookup) fail.
     pub algo_lookup_down: bool,
+    /// Refuses algo detail lookups while the pending lists remain available.
+    pub algo_lookup_error_code: Option<String>,
     /// Limit orders rest, live and unfilled, until [`FakeState::fill_resting`]; market orders
     /// still fill at once.
     pub rest_limit_orders: bool,
@@ -153,6 +155,7 @@ impl Default for FakeState {
             reject_algo_if: None,
             cancel_fails: false,
             algo_lookup_down: false,
+            algo_lookup_error_code: None,
             rest_limit_orders: false,
             resting: Vec::new(),
             holds: Vec::new(),
@@ -455,6 +458,9 @@ impl FakeOkx {
             if state.algo_lookup_down {
                 return Ok(answer(json!([]), "50001", "Systems are busy"));
             }
+            if let Some(code) = &state.algo_lookup_error_code {
+                return Ok(answer(json!([]), code, "Algo lookup refused"));
+            }
             let algo = param("algoClOrdId").and_then(|id| state.algos.get(&id).cloned());
             return Ok(ok(match algo {
                 Some(algo) => json!([algo]),
@@ -753,7 +759,7 @@ fn fill(state: &mut FakeState, order: &Row) {
     state.recent_fills.push(object(&json!({
         "instId": order.get("instId"), "ordId": ord_id, "tradeId": trade_id,
         "clOrdId": cl_ord_id,
-        "fillSz": sz, "fillTime": "1800000000000",
+        "fillSz": sz, "fillTime": "1800000000000", "ts": "1800000000001",
         "posSide": "net", "subType": subtype,
     })));
     let size = held.add(&signed);

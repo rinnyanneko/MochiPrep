@@ -62,6 +62,14 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "010_exchange_execution_evidence.sql",
         include_str!("../migrations/010_exchange_execution_evidence.sql"),
     ),
+    (
+        "011_exchange_order_recovery.sql",
+        include_str!("../migrations/011_exchange_order_recovery.sql"),
+    ),
+    (
+        "012_okx_close_intents.sql",
+        include_str!("../migrations/012_okx_close_intents.sql"),
+    ),
 ];
 
 #[derive(Debug, thiserror::Error)]

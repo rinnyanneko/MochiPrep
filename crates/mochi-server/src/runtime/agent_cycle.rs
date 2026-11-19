@@ -7,7 +7,7 @@
 use super::{
     agent_execution::{
         position_binding_field, same_protection, settle, settle_acted, target_protection, Acted,
-        Outgoing,
+        Outgoing, RiskPosition,
     },
     agents::{CycleReply, CycleTrigger},
     execution::ExecutionTarget,
@@ -491,7 +491,17 @@ impl Runtime {
         } else {
             self.market_quote(c.source, &c.agent.symbol)
         };
-        let (risk, checked) = self.assess(&c.agent, &a, &d, quote, protection.clone(), &target)?;
+        let (risk, checked) = self.assess(
+            &c.agent,
+            &a,
+            &d,
+            quote,
+            RiskPosition {
+                bound_id: c.analyzed_position_id.as_deref(),
+                protection: protection.as_ref(),
+            },
+            &target,
+        )?;
         c.record["risk"] = json!(risk);
         if c.record["trigger"] == "ANALYZE" {
             settle(
@@ -535,7 +545,10 @@ impl Runtime {
             let p = protection.ok_or_else(|| {
                 ApiError::bad_request("The position changed while it was being checked")
             })?;
-            if same_protection(&target_protection(&d, &p), &p) {
+            // Identical active OKX protection can still hide an unsent leg to remove.
+            if matches!(target, ExecutionTarget::Paper)
+                && same_protection(&target_protection(&d, &p), &p)
+            {
                 settle(
                     &mut c.record,
                     "HOLD",

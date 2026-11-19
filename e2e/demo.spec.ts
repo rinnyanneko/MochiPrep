@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 const usdt = (text: string | null) => Number((text ?? '').replace(/[^\d.-]/g, ''));
 
-test('market data to agent decision to risk to paper order to position to PnL in the UI', async ({ page }) => {
+test('market data to agent decision to risk to paper order to position to PnL in the UI', async ({ page, request }) => {
   await page.goto('/');
 
   await expect(page.getByTestId('dyor-notice')).toContainText('DYOR');
@@ -66,9 +66,18 @@ test('market data to agent decision to risk to paper order to position to PnL in
   // Spread, slippage and the entry fee mean a fresh long is immediately below starting equity.
   await expect.poll(async () => usdt(await page.getByTestId('account-equity').textContent())).toBeLessThan(10_000);
 
+  const accountId = await page.getByLabel('Paper account').inputValue();
+  const session = await request.get('/api/session');
+  const { token } = await session.json();
+  const positions = await request.get(`/api/accounts/${encodeURIComponent(accountId)}/positions`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(positions.ok()).toBe(true);
+  const [position] = await positions.json();
+  expect(position.id).toEqual(expect.any(String));
   const closing = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/close'));
   await page.getByRole('button', { name: 'Close', exact: true }).click();
-  expect((await closing).postDataJSON().positionId).toEqual(expect.any(String));
+  expect((await closing).postDataJSON().positionId).toBe(position.id);
   await expect(page.getByTestId('position-row')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Settings' }).click();

@@ -178,6 +178,7 @@ impl ExchangeSession {
     /// session, so an engine whose session was replaced or removed is never armed; clearing the
     /// flag keeps that for anything still holding the old engine.
     pub(super) fn retire(&self) {
+        self.engine.retire();
         self.armed.store(false, Ordering::SeqCst);
     }
 }
@@ -681,6 +682,16 @@ impl ExecutionEngine for OkxExecution {
 /// no way to a session that skipped the connect checks.
 #[cfg(feature = "test-seams")]
 impl RuntimeHandle {
+    /// Keeps automatic exchange syncs from consuming the reads a test has staged.
+    #[doc(hidden)]
+    pub async fn suspend_periodic_okx_sync_for_test(&self) -> Result<(), ApiError> {
+        self.call(|r| {
+            r.last_exchange_sync_at =
+                Some(tokio::time::Instant::now() + std::time::Duration::from_secs(3600));
+        })
+        .await
+    }
+
     /// Builds an OKX session for an existing exchange account and runs its first full sync, with
     /// none of the connect checks.
     #[doc(hidden)]

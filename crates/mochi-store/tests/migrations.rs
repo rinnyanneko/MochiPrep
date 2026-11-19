@@ -298,7 +298,11 @@ fn exchange_position_history_keys_a_reused_pos_id_by_its_open_time() {
 #[test]
 fn execution_evidence_upgrade_reopens_completed_position_history_backfill() {
     let conn = open_in_memory_bare();
-    let old = &MIGRATIONS[..MIGRATIONS.len() - 1];
+    let evidence = MIGRATIONS
+        .iter()
+        .position(|(name, _)| *name == "010_exchange_execution_evidence.sql")
+        .unwrap();
+    let old = &MIGRATIONS[..evidence];
     migrate_with(&conn, old).unwrap();
     conn.execute_batch(
         "INSERT INTO accounts (id,name,source,initial_balance,wallet_balance,used_margin,

@@ -3,7 +3,7 @@
 
 use std::cell::Cell;
 
-use mochi_core::paper::{PaperStore, StoreFailure, StoreFailureKind};
+use mochi_core::paper::{CloseSelection, PaperStore, StoreFailure, StoreFailureKind};
 use mochi_domain::{
     DataSource, EquityPoint, ExchangeExecutionCursor, ExchangePositionRecord, Fill, LedgerEvent,
     Order, PaperAccount, Position, RiskSettings,
@@ -513,6 +513,30 @@ impl PaperStore for SqlitePaperStore {
         self.query_one("SELECT * FROM orders WHERE id=?", [id], to_order)
     }
 
+    fn record_close_selection(
+        &self,
+        order_id: &str,
+        selection: &CloseSelection,
+    ) -> Result<(), StoreFailure> {
+        self.run(
+            "INSERT INTO okx_close_intents (order_id, position_id, fraction) VALUES (?, ?, ?)",
+            params![order_id, selection.position_id, selection.fraction],
+        )
+    }
+
+    fn close_selection(&self, order_id: &str) -> Result<Option<CloseSelection>, StoreFailure> {
+        self.query_one(
+            "SELECT position_id, fraction FROM okx_close_intents WHERE order_id=?",
+            [order_id],
+            |row| {
+                Ok(CloseSelection {
+                    position_id: row.get("position_id")?,
+                    fraction: row.get("fraction")?,
+                })
+            },
+        )
+    }
+
     fn link_target_replacement(
         &self,
         deferred_order_id: &str,
@@ -575,6 +599,33 @@ impl PaperStore for SqlitePaperStore {
             "SELECT * FROM orders WHERE account_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
             params![account_id, limit_param(limit)],
             to_order,
+        )
+    }
+
+    fn list_canceled_orders_for_recovery(
+        &self,
+        account_id: &str,
+        reason: &str,
+        limit: usize,
+    ) -> Result<Vec<Order>, StoreFailure> {
+        self.query(
+            "SELECT * FROM orders WHERE account_id=? AND status='CANCELED' AND reject_reason=?
+             ORDER BY COALESCE(exchange_recovery_checked_at, created_at), id LIMIT ?",
+            params![account_id, reason, limit_param(limit)],
+            to_order,
+        )
+    }
+
+    fn mark_order_recovery_checked(
+        &self,
+        order_id: &str,
+        reason: &str,
+        checked_at: i64,
+    ) -> Result<(), StoreFailure> {
+        self.run(
+            "UPDATE orders SET exchange_recovery_checked_at=?
+             WHERE id=? AND status='CANCELED' AND reject_reason=?",
+            params![checked_at, order_id, reason],
         )
     }
 

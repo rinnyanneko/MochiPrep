@@ -1041,6 +1041,29 @@ async fn marks_our_stop_gone_when_okx_no_longer_has_it_pending() {
 }
 
 #[tokio::test]
+async fn a_temporary_algo_lookup_refusal_preserves_the_last_confirmed_stop() {
+    let h = Harness::with_position().await;
+    let row = h.protection_rows().remove(0);
+    {
+        let mut okx = h.okx.state();
+        okx.algos[&to_algo_cl_ord_id(&row.id)].insert("state".into(), json!("partially_effective"));
+        okx.algo_lookup_error_code = Some("50011".into());
+    }
+    assert!(h.engine.sync().await.is_err());
+    assert_eq!(h.order_row(&row.id).status, OrderStatus::Open);
+    assert_eq!(h.engine.protection_of("BTCUSDT"), stop("74000"));
+
+    // A positive not-found reply can retire a missing stop.
+    {
+        let mut okx = h.okx.state();
+        okx.algos.shift_remove(&to_algo_cl_ord_id(&row.id));
+        okx.algo_lookup_error_code = Some("51603".into());
+    }
+    h.sync().await;
+    assert_eq!(h.order_row(&row.id).status, OrderStatus::Canceled);
+}
+
+#[tokio::test]
 async fn still_lets_a_disarmed_account_close_the_position() {
     let h = Harness::with_position().await;
     h.disarm();
@@ -1338,6 +1361,24 @@ async fn two_entries_filling_into_one_position_keep_the_whole_position_stopped()
     assert_eq!(h.algo_placed().len(), 1);
     assert_eq!(h.canceled().len(), 2);
     assert!(h.view().external_protection.is_empty());
+}
+
+#[tokio::test]
+async fn unsent_optional_exits_do_not_block_fixed_stop_coverage() {
+    let h = stacked_fills([
+        Protection {
+            take_profit: Some("78000".into()),
+            ..stop("74000")
+        },
+        stop("74200"),
+    ])
+    .await;
+    // This quote crossed the target, but the fill has the same millisecond timestamp.
+    *h.prices.lock().unwrap() = ("78999".into(), "79001".into(), "79000".into());
+    h.sync().await;
+    h.sync().await;
+    assert_eq!(live_stops(&h), [("0.2".to_string(), "74200".to_string())]);
+    assert_eq!(h.okx.state().placed.len(), 2);
 }
 
 /// Disarmed, nothing is placed, and each fill keeps its own stop: the position stays covered.
@@ -2179,13 +2220,11 @@ async fn each_resting_entry_keeps_its_take_profit_when_both_fill_before_sync() {
     h.okx.state().fill_resting();
     let latest_fill = h.okx.state().recent_fills.pop().unwrap();
     h.sync().await;
-    assert_eq!(
+    assert!(
         h.algo_placed()
             .iter()
-            .filter_map(|row| row["tpTriggerPx"].as_str())
-            .collect::<Vec<_>>(),
-        ["79000"],
-        "the earlier target waits for fills to catch up"
+            .all(|row| row.get("tpTriggerPx").is_none()),
+        "both targets wait for the latest position trade to appear in fills"
     );
     h.okx.state().recent_fills.push(latest_fill);
     h.sync().await;
@@ -2406,6 +2445,30 @@ async fn an_accepted_target_that_no_longer_covers_the_position_cannot_retire_the
     assert_eq!(h.okx.state().placed.len(), 1);
     assert_eq!(h.view().position.quantity, "0.002");
 
+    // Even when readback starts with enough coverage, a fill during the
+    // algo lookup can make the accepted replacement too small.
+    h.okx
+        .state()
+        .position
+        .as_mut()
+        .unwrap()
+        .insert("pos".into(), json!("0.1"));
+    let coverage = h.okx.hold_next("GET", "/trade/order-algo");
+    let engine = h.engine.clone();
+    let sync = tokio::spawn(async move { engine.sync().await });
+    tokio::time::timeout(std::time::Duration::from_secs(2), coverage.reached())
+        .await
+        .unwrap();
+    h.okx
+        .state()
+        .position
+        .as_mut()
+        .unwrap()
+        .insert("pos".into(), json!("0.2"));
+    coverage.release();
+    sync.await.unwrap().unwrap();
+    assert_eq!(h.order_row(&deferred_id).status, OrderStatus::Open);
+
     let target = Protection {
         take_profit: Some("81000".into()),
         ..stop("74000")
@@ -2540,6 +2603,61 @@ async fn removing_a_partial_entrys_trailing_stop_persists_through_its_final_fill
         .algo_placed()
         .iter()
         .all(|order| order["ordType"] != "move_order_stop"));
+}
+
+#[tokio::test]
+async fn a_partially_filled_canceled_entry_can_use_a_replacement_fixed_stop() {
+    for (reported_size, expects_trail) in [("0.05", true), ("0.01", false)] {
+        let (h, entry) = deferred_limit().await;
+        let (h, entry, _, _) = partial_entry(h, entry).await;
+        h.engine
+            .set_protection_with(
+                ACCOUNT,
+                "BTCUSDT",
+                stop("74300"),
+                mochi_okx::engine::ProtectionRetention {
+                    trailing_stop: true,
+                    take_profit: true,
+                },
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let key = mochi_okx::to_cl_ord_id(&entry.client_order_id);
+        {
+            let mut okx = h.okx.state();
+            let order = &mut okx.orders[&key];
+            order.insert("state".into(), json!("canceled"));
+            order.insert("fillSz".into(), json!("0.05"));
+            let ord_id = order["ordId"].clone();
+            okx.recent_fills
+                .iter_mut()
+                .find(|fill| fill["ordId"] == ord_id)
+                .unwrap()
+                .insert("fillSz".into(), json!("0.05"));
+            okx.algos[&to_algo_cl_ord_id(&format!("{}:sl", entry.id))]
+                .insert("state".into(), json!("canceled"));
+            okx.algos
+                .values_mut()
+                .find(|algo| algo.get("slTriggerPx") == Some(&json!("74300")))
+                .unwrap()
+                .insert("sz".into(), json!(reported_size));
+        }
+        h.sync().await;
+        h.advance(10_001);
+        h.sync().await;
+        let trail = h.order_row(&format!("{}:trail", entry.id));
+        assert_eq!(trail.exchange_order_id.is_some(), expects_trail);
+        assert_eq!(
+            trail.status,
+            if expects_trail {
+                OrderStatus::Open
+            } else {
+                OrderStatus::Canceled
+            },
+        );
+    }
 }
 
 #[tokio::test]
@@ -2995,7 +3113,8 @@ async fn a_deferred_target_only_sizes_the_parent_fills_from_the_current_position
             okx.recent_fills.push(
                 json!({
                     "instId": "BTC-USDT-SWAP", "ordId": order_id, "tradeId": id,
-                    "fillTime": "1800000000000", "posSide": "net", "subType": kind, "fillSz": size,
+                    "fillTime": "1800000000000", "ts": "1800000000001",
+                    "posSide": "net", "subType": kind, "fillSz": size,
                 })
                 .as_object()
                 .unwrap()
@@ -3012,6 +3131,73 @@ async fn a_deferred_target_only_sizes_the_parent_fills_from_the_current_position
         h.order_row(&format!("{}:deferred:tp", entry.id)).quantity,
         "0.0005"
     );
+}
+
+#[tokio::test]
+async fn a_deferred_target_does_not_assume_matching_trade_id_proves_its_size() {
+    let (h, entry) = resting_target().await;
+    h.engine.place_order(order()).await.unwrap();
+    {
+        let mut okx = h.okx.state();
+        okx.fill_resting();
+        let position = okx.position.as_mut().unwrap();
+        // ADL can leave the last ordinary tradeId unchanged even while reducing size.
+        // The fills endpoint can lag behind the position read.
+        // The combined 0.2 contracts shrank to 0.15, which still has room
+        // for the parent's entire 0.1. Size alone cannot detect the reduction.
+        position.insert("pos".into(), json!("0.15"));
+        position.insert("uTime".into(), json!("1800000000002"));
+    }
+    h.advance(1);
+    *h.prices.lock().unwrap() = ("78999".into(), "79001".into(), "79000".into());
+    let placed = h.count("POST /api/v5/trade/order");
+    h.sync().await;
+    assert_eq!(h.count("POST /api/v5/trade/order"), placed);
+    assert_eq!(h.view().position.quantity, "0.0015");
+    assert_eq!(
+        h.order_row(&format!("{}:deferred:tp", entry.id)).status,
+        OrderStatus::Open
+    );
+}
+
+#[tokio::test]
+async fn a_deferred_target_accounts_for_adl_after_the_last_ordinary_trade() {
+    let (h, _) = resting_target().await;
+    {
+        let mut okx = h.okx.state();
+        okx.fill_resting();
+        let position = okx.position.as_mut().unwrap();
+        let later_trade = position["tradeId"]
+            .as_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap()
+            + 1;
+        position.insert("tradeId".into(), json!(later_trade.to_string()));
+        position.insert("pos".into(), json!("0.2"));
+        position.insert("uTime".into(), json!("1800000000002"));
+        // The position also held 0.1 older contracts. ADL lowers it from 0.3 to 0.2,
+        // which still reconciles arithmetically with the two recent buys.
+        okx.recent_fills.extend([
+            row(json!({
+                "instId": "BTC-USDT-SWAP", "ordId": "later-entry",
+                "tradeId": later_trade.to_string(), "fillTime": "1800000000001",
+                "ts": "1800000000002",
+                "posSide": "net", "subType": "3", "fillSz": "0.1",
+            })),
+            row(json!({
+                "instId": "BTC-USDT-SWAP", "ordId": "adl",
+                "tradeId": "-1", "fillTime": "1800000000002",
+                "posSide": "net", "subType": "125", "fillSz": "0.1",
+            })),
+        ]);
+    }
+    h.advance(1);
+    *h.prices.lock().unwrap() = ("78999".into(), "79001".into(), "79000".into());
+    let placed = h.count("POST /api/v5/trade/order");
+    h.sync().await;
+    assert_eq!(h.count("POST /api/v5/trade/order"), placed);
+    assert_eq!(h.view().position.quantity, "0.002");
 }
 
 #[tokio::test]
@@ -3083,6 +3269,58 @@ async fn a_reached_deferred_target_exits_at_most_once_even_if_the_response_is_lo
         assert_eq!(h.order_row(&id).status, OrderStatus::Filled);
         assert!(h.engine.positions().is_empty());
     }
+}
+
+#[tokio::test]
+async fn a_reached_deferred_target_revalidates_the_position_after_recording_submission() {
+    let (h, entry) = resting_target().await;
+    h.okx.state().fill_resting();
+    h.advance(1);
+    *h.prices.lock().unwrap() = ("78099".into(), "78101".into(), "78100".into());
+    let first = h.okx.hold_next("GET", "/account/positions");
+    let parent_read = h.okx.hold_next("GET", "/account/positions");
+    let attribution = h.okx.hold_next("GET", "/account/positions");
+    let before_send = h.okx.hold_next("GET", "/account/positions");
+    let engine = h.engine.clone();
+    let sync = tokio::spawn(async move { engine.sync().await });
+    let timeout = std::time::Duration::from_secs(2);
+    tokio::time::timeout(timeout, first.reached())
+        .await
+        .unwrap();
+    first.release();
+    tokio::time::timeout(timeout, parent_read.reached())
+        .await
+        .unwrap();
+    parent_read.release();
+    tokio::time::timeout(timeout, attribution.reached())
+        .await
+        .unwrap();
+    attribution.release();
+    tokio::time::timeout(timeout, before_send.reached())
+        .await
+        .unwrap();
+    let id = format!("{}:deferred:tp", entry.id);
+    assert_eq!(h.order_row(&id).order_type, OrderType::Market);
+    {
+        let mut okx = h.okx.state();
+        assert_eq!(
+            okx.placed.len(),
+            1,
+            "market order sent before final position read"
+        );
+        okx.algos.clear();
+        okx.position
+            .as_mut()
+            .unwrap()
+            .insert("tradeId".into(), json!("2"));
+    }
+    before_send.release();
+    sync.await.unwrap().unwrap();
+    assert_eq!(h.okx.state().placed.len(), 1);
+    let unsent = h.order_row(&id);
+    assert_eq!(unsent.status, OrderStatus::Open);
+    assert_ne!(unsent.order_type, OrderType::Market);
+    assert!(h.engine.protection_of("BTCUSDT").stop_loss.is_none());
 }
 
 #[tokio::test]
@@ -3397,7 +3635,32 @@ async fn a_never_received_market_target_expires_without_resending() {
     assert_eq!(h.count("POST /api/v5/trade/order"), placed);
     assert_eq!(h.view().position.quantity, "0.001");
 
-    // A delayed terminal answer can still settle the inactive row by its client ID.
+    // A delayed terminal answer can still settle the inactive row by its client ID
+    // after unrelated activity pushes it out of the recent-orders window.
+    let prior = h.order_row(&id);
+    h.store(|s| {
+        for i in 0..500 {
+            let filler = Order {
+                id: format!("filler_{i}"),
+                client_order_id: format!("filler_{i}"),
+                created_at: prior.created_at + i + 1,
+                updated_at: prior.updated_at + i + 1,
+                reject_reason: None,
+                ..prior.clone()
+            };
+            s.insert_order(&filler).unwrap();
+        }
+        for i in 0..10 {
+            let filler = Order {
+                id: format!("older_{i}:deferred:tp"),
+                client_order_id: format!("older_{i}"),
+                created_at: prior.created_at - i - 1,
+                updated_at: prior.updated_at - i - 1,
+                ..prior.clone()
+            };
+            s.insert_order(&filler).unwrap();
+        }
+    });
     {
         let mut okx = h.okx.state();
         let key = mochi_okx::to_cl_ord_id(&id);
@@ -3411,6 +3674,10 @@ async fn a_never_received_market_target_expires_without_resending() {
         okx.position = None;
     }
     h.sync().await;
+    assert_eq!(h.order_row(&id).status, OrderStatus::Canceled);
+    h.sync().await;
+    assert_eq!(h.order_row(&id).status, OrderStatus::Filled);
+    restart(&h).sync().await.unwrap();
     assert_eq!(h.order_row(&id).status, OrderStatus::Filled);
     assert_eq!(h.count("POST /api/v5/trade/order"), placed);
 }
@@ -3596,12 +3863,14 @@ async fn a_fixed_stop_edit_keeps_unsent_optional_exits_on_the_filled_entry() {
         assert_eq!(row.status, OrderStatus::Open);
         assert!(row.exchange_order_id.is_none());
     }
-    h.okx
-        .state()
-        .position
-        .as_mut()
-        .unwrap()
-        .insert("tradeId".into(), json!("2"));
+    {
+        let mut okx = h.okx.state();
+        okx.position
+            .as_mut()
+            .unwrap()
+            .insert("tradeId".into(), json!("2"));
+        okx.recent_fills[0].insert("tradeId".into(), json!("2"));
+    }
     h.sync().await;
     let protection = h.engine.protection_of("BTCUSDT");
     assert_eq!(protection.take_profit.as_deref(), Some("78000"));

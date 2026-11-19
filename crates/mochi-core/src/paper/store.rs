@@ -41,6 +41,13 @@ impl StoreFailure {
     }
 }
 
+/// The caller's selection for an OKX close, before exchange lot-size rounding.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CloseSelection {
+    pub position_id: Option<String>,
+    pub fraction: f64,
+}
+
 pub trait PaperStore {
     /// Runs `f` atomically; an `Err` rolls back everything `f` wrote. Nested calls use a
     /// savepoint, so only the inner work is undone when the inner call fails.
@@ -60,6 +67,12 @@ pub trait PaperStore {
     fn insert_order(&self, order: &Order) -> Result<(), StoreFailure>;
     fn save_order(&self, order: &Order) -> Result<(), StoreFailure>;
     fn get_order(&self, id: &str) -> Result<Option<Order>, StoreFailure>;
+    fn record_close_selection(
+        &self,
+        order_id: &str,
+        selection: &CloseSelection,
+    ) -> Result<(), StoreFailure>;
+    fn close_selection(&self, order_id: &str) -> Result<Option<CloseSelection>, StoreFailure>;
     fn link_target_replacement(
         &self,
         deferred_order_id: &str,
@@ -78,6 +91,19 @@ pub trait PaperStore {
         symbol: &str,
     ) -> Result<Vec<Order>, StoreFailure>;
     fn list_orders(&self, account_id: &str, limit: usize) -> Result<Vec<Order>, StoreFailure>;
+    /// Canceled orders still eligible for exchange lookup, least recently checked first.
+    fn list_canceled_orders_for_recovery(
+        &self,
+        account_id: &str,
+        reason: &str,
+        limit: usize,
+    ) -> Result<Vec<Order>, StoreFailure>;
+    fn mark_order_recovery_checked(
+        &self,
+        order_id: &str,
+        reason: &str,
+        checked_at: i64,
+    ) -> Result<(), StoreFailure>;
     /// The account's orders carrying any of these exchange order ids, however old.
     fn find_orders_by_exchange_ids(
         &self,

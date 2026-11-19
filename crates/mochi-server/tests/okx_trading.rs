@@ -298,8 +298,87 @@ async fn a_disarmed_okx_account_can_still_close_and_cancel_refusals_keep_node_te
 }
 
 #[tokio::test]
+async fn generic_okx_reduce_only_orders_require_the_selected_close_route() {
+    let w = world(true).await;
+    let (_, opened) = send(&w.state, "POST", "/api/orders", Some(order("entry"))).await;
+    let mut exit = order("exit");
+    exit["side"] = json!("SELL");
+    exit["reduceOnly"] = json!(true);
+    exit["stopLoss"] = Value::Null;
+    w.okx
+        .state()
+        .position
+        .as_mut()
+        .unwrap()
+        .insert("tradeId".into(), json!("11"));
+    assert_eq!(
+        send(&w.state, "POST", "/api/orders", Some(exit.clone()))
+            .await
+            .0,
+        400
+    );
+    assert_eq!(w.okx.state().placed.len(), 1);
+
+    exit["clientOrderId"] = json!("entry");
+    let (status, duplicate) = send(&w.state, "POST", "/api/orders", Some(exit)).await;
+    assert_eq!(status, 200);
+    assert_eq!(duplicate["duplicate"], true);
+    assert_eq!(duplicate["order"]["id"], opened["order"]["id"]);
+    w.state.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn disconnect_during_the_last_close_read_prevents_order_dispatch() {
+    let w = world(true).await;
+    w.state
+        .runtime
+        .suspend_periodic_okx_sync_for_test()
+        .await
+        .unwrap();
+    assert_eq!(
+        send(&w.state, "POST", "/api/orders", Some(order("entry")))
+            .await
+            .0,
+        200
+    );
+    let (_, positions) = send(
+        &w.state,
+        "GET",
+        &format!("/api/accounts/{ACCOUNT}/positions"),
+        None,
+    )
+    .await;
+    let first = w.okx.hold_next("GET", "/account/positions");
+    let final_read = w.okx.hold_next("GET", "/account/positions");
+    let close_path = format!("/api/positions/{ACCOUNT}/BTCUSDT/close");
+    let body = json!({ "fraction": 1, "clientOrderId": "disconnect-race", "positionId": positions[0]["id"] });
+    let ((status, _), ()) = tokio::join!(send(&w.state, "POST", &close_path, Some(body)), async {
+        let timeout = std::time::Duration::from_secs(2);
+        tokio::time::timeout(timeout, first.reached())
+            .await
+            .unwrap();
+        first.release();
+        tokio::time::timeout(timeout, final_read.reached())
+            .await
+            .unwrap();
+        let path = format!("/api/exchange/okx/{ACCOUNT}/disconnect");
+        assert_eq!(send(&w.state, "POST", &path, None).await.0, 200);
+        final_read.release();
+    });
+    assert_eq!(status, 400);
+    assert_eq!(w.okx.state().placed.len(), 1);
+    assert!(w.okx.state().position.is_some());
+    w.state.runtime.shutdown().await;
+}
+
+#[tokio::test]
 async fn manual_okx_close_never_substitutes_the_isolated_position_for_a_selected_cross_position() {
     let w = world(true).await;
+    w.state
+        .runtime
+        .suspend_periodic_okx_sync_for_test()
+        .await
+        .unwrap();
     send(&w.state, "POST", "/api/orders", Some(order("a"))).await;
     {
         let mut okx = w.okx.state();
@@ -385,9 +464,29 @@ async fn manual_okx_close_never_substitutes_the_isolated_position_for_a_selected
             .0,
         200
     );
-    let (status, retry) = send(&w.state, "POST", &close_path, Some(body)).await;
+    let (status, retry) = send(&w.state, "POST", &close_path, Some(body.clone())).await;
     assert_eq!(status, 200);
     assert_eq!(retry["duplicate"], true);
+    for wrong in [
+        json!({ "fraction": 1, "clientOrderId": "isolated", "positionId": cross["id"] }),
+        json!({ "fraction": 0.5, "clientOrderId": "isolated", "positionId": isolated["id"] }),
+    ] {
+        assert_eq!(
+            send(&w.state, "POST", &close_path, Some(wrong)).await.0,
+            400
+        );
+    }
+    assert_eq!(
+        send(
+            &w.state,
+            "POST",
+            &format!("/api/positions/{ACCOUNT}/ETHUSDT/close"),
+            Some(body)
+        )
+        .await
+        .0,
+        400
+    );
     {
         let okx = w.okx.state();
         assert!(okx.position.is_none());

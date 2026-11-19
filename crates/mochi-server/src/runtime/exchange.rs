@@ -500,9 +500,15 @@ impl Runtime {
         let Some(account) = account.filter(|a| a.venue != AccountVenue::Paper) else {
             return Ok(());
         };
-        if !self.exchanges.contains_key(&account.id) {
+        let Some(session) = self.exchanges.get(&account.id) else {
             return Err(ApiError::bad_request(format!(
                 "{} is not connected to OKX",
+                account.name
+            )));
+        };
+        if !session.engine.healthy() {
+            return Err(ApiError::bad_request(format!(
+                "{} must sync with OKX before its agents can start",
                 account.name
             )));
         }

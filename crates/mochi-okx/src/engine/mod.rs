@@ -15,9 +15,10 @@ mod sync;
 mod views;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use mochi_core::paper::{DailyRisk, PaperStore, StoreFailure};
+use mochi_core::paper::{CloseSelection, DailyRisk, PaperStore, StoreFailure};
 use mochi_decimal::Dec;
 use mochi_domain::{
     default_live_limits, AccountBalance, EntryOrderType, EquityPoint, ExchangeExecutionCursor,
@@ -53,6 +54,12 @@ pub trait LiveRows {
     fn insert_order(&self, order: &Order) -> Result<(), StoreFailure>;
     fn save_order(&self, order: &Order) -> Result<(), StoreFailure>;
     fn get_order(&self, id: &str) -> Result<Option<Order>, StoreFailure>;
+    fn record_close_selection(
+        &self,
+        order_id: &str,
+        selection: &CloseSelection,
+    ) -> Result<(), StoreFailure>;
+    fn close_selection(&self, order_id: &str) -> Result<Option<CloseSelection>, StoreFailure>;
     fn link_target_replacement(
         &self,
         deferred_order_id: &str,
@@ -66,6 +73,18 @@ pub trait LiveRows {
     ) -> Result<Option<Order>, StoreFailure>;
     fn list_open_orders(&self, account_id: &str) -> Result<Vec<Order>, StoreFailure>;
     fn list_orders(&self, account_id: &str, limit: usize) -> Result<Vec<Order>, StoreFailure>;
+    fn list_canceled_orders_for_recovery(
+        &self,
+        account_id: &str,
+        reason: &str,
+        limit: usize,
+    ) -> Result<Vec<Order>, StoreFailure>;
+    fn mark_order_recovery_checked(
+        &self,
+        order_id: &str,
+        reason: &str,
+        checked_at: i64,
+    ) -> Result<(), StoreFailure>;
     /// The account's orders carrying any of these exchange order ids, however old.
     fn find_orders_by_exchange_ids(
         &self,
@@ -128,6 +147,16 @@ impl<S: PaperStore> LiveRows for Rows<'_, S> {
     fn get_order(&self, id: &str) -> Result<Option<Order>, StoreFailure> {
         self.store.get_order(id)
     }
+    fn record_close_selection(
+        &self,
+        order_id: &str,
+        selection: &CloseSelection,
+    ) -> Result<(), StoreFailure> {
+        self.store.record_close_selection(order_id, selection)
+    }
+    fn close_selection(&self, order_id: &str) -> Result<Option<CloseSelection>, StoreFailure> {
+        self.store.close_selection(order_id)
+    }
     fn link_target_replacement(
         &self,
         deferred_order_id: &str,
@@ -152,6 +181,24 @@ impl<S: PaperStore> LiveRows for Rows<'_, S> {
     }
     fn list_orders(&self, account_id: &str, limit: usize) -> Result<Vec<Order>, StoreFailure> {
         self.store.list_orders(account_id, limit)
+    }
+    fn list_canceled_orders_for_recovery(
+        &self,
+        account_id: &str,
+        reason: &str,
+        limit: usize,
+    ) -> Result<Vec<Order>, StoreFailure> {
+        self.store
+            .list_canceled_orders_for_recovery(account_id, reason, limit)
+    }
+    fn mark_order_recovery_checked(
+        &self,
+        order_id: &str,
+        reason: &str,
+        checked_at: i64,
+    ) -> Result<(), StoreFailure> {
+        self.store
+            .mark_order_recovery_checked(order_id, reason, checked_at)
     }
     fn find_orders_by_exchange_ids(
         &self,
@@ -273,6 +320,8 @@ pub enum EngineError {
     /// The store's owner stopped before the work could run.
     #[error("The backend is shutting down")]
     Stopped,
+    #[error("The OKX session was replaced or disconnected before order dispatch")]
+    SessionRetired,
 }
 
 impl EngineError {
@@ -307,7 +356,7 @@ struct State {
     /// Our protection per symbol, as the last sync read it back from OKX.
     protection: ProtectionMap,
     /// Exchange trade and side that the last observed protection belonged to.
-    protection_keys: HashMap<String, (u64, PositionSide)>,
+    protection_keys: HashMap<String, String>,
     /// The last failed algo cancel, until a sync finishes with every cancel accepted.
     cancel_error: Option<String>,
     /// Per instId: consecutive syncs that found our protection but no position.
@@ -321,6 +370,7 @@ struct State {
 pub struct OkxEngine {
     deps: OkxEngineDeps,
     state: Mutex<State>,
+    retired: AtomicBool,
     /// Node's `serialized`: one operation at a time, in arrival order (tokio's mutex is fair), so
     /// two callers can never both pass the same exposure check. Sync takes the same queue.
     queue: tokio::sync::Mutex<()>,
@@ -385,6 +435,7 @@ struct SelectedClose {
     side: PositionSide,
     contracts: Dec,
     held: Dec,
+    selection: CloseSelection,
 }
 
 struct CloseIntent {
@@ -413,8 +464,14 @@ impl OkxEngine {
         Arc::new(OkxEngine {
             deps,
             state: Mutex::new(State::default()),
+            retired: AtomicBool::new(false),
             queue: tokio::sync::Mutex::new(()),
         })
+    }
+
+    /// Closes the dispatch gate for an old session without interrupting orders already handed off.
+    pub fn retire(&self) {
+        self.retired.store(true, Ordering::SeqCst);
     }
 
     pub fn account_id(&self) -> &str {
@@ -554,9 +611,17 @@ impl OkxEngine {
     ) -> Result<OrderResult, EngineError> {
         self.queued(move |engine| {
             Box::pin(async move {
-                let prepared = engine
+                let mut prepared = engine
                     .prepare(&request.account_id, &request.client_order_id)
                     .await?;
+                if let Some(prior) = prepared.take_duplicate() {
+                    return Ok(prior);
+                }
+                if request.reduce_only == Some(true) {
+                    return Err(EngineError::message(
+                        "Use the selected-position close endpoint for OKX reduce-only orders",
+                    ));
+                }
                 engine.submit(request, None, prepared).await
             })
         })
@@ -631,6 +696,24 @@ impl OkxEngine {
                 } = intent;
                 let mut prepared = engine.prepare(&account_id, &client_order_id).await?;
                 if let Some(prior) = prepared.take_duplicate() {
+                    let order_id = prior.order.id.clone();
+                    let stored = engine
+                        .rows(move |rows| Ok(rows.close_selection(&order_id)?))
+                        .await?;
+                    let selection = CloseSelection {
+                        position_id,
+                        fraction,
+                    };
+                    // Older rows lack the original position and fraction. Preserve the
+                    // returned result for same-symbol reduce-only retries of those rows.
+                    if !prior.order.reduce_only
+                        || prior.order.symbol != symbol
+                        || stored.is_some_and(|stored| stored != selection)
+                    {
+                        return Err(EngineError::message(
+                            "This client order ID was already used for a different close request",
+                        ));
+                    }
                     return Ok(prior);
                 }
                 let (mut request, position) = engine
@@ -698,6 +781,10 @@ impl OkxEngine {
                 side,
                 contracts,
                 held,
+                selection: CloseSelection {
+                    position_id: position_id.map(str::to_owned),
+                    fraction,
+                },
             },
         ))
     }
@@ -793,11 +880,11 @@ impl OkxEngine {
         &self,
         request: OrderRequest,
         fresh_position: Option<SelectedClose>,
-        mut prepared: Prepared,
+        prepared: Prepared,
     ) -> Result<OrderResult, EngineError> {
-        if let Some(prior) = prepared.take_duplicate() {
-            return Ok(prior);
-        }
+        let close_selection = fresh_position
+            .as_ref()
+            .map(|position| position.selection.clone());
         let registry = &prepared.registry;
         let mut order = self.build_order(&request);
         align_to_tick(&mut order, registry)?;
@@ -820,22 +907,15 @@ impl OkxEngine {
         let contracts = to_contracts(&order, registry)?;
         if refusal.is_some() || contracts.lte(&zero()) {
             let reason = refusal.unwrap_or_else(|| "INVALID_QUANTITY: below one lot".into());
-            return self.reject(order, reason).await;
+            return self.reject(order, reason, close_selection).await;
         }
         let spec = registry.get(&order.symbol)?;
         order.quantity = contracts.mul(&dec(&spec.venue_contract_value)?).to_fixed();
 
         // Written before anything is sent, so a crash can never leave an order we do not know
         // about.
-        let row = order.clone();
-        self.rows(move |rows| {
-            rows.transaction(&mut || {
-                rows.insert_order(&row)?;
-                protection::record_deferred_protection(rows, &row)?;
-                Ok(())
-            })
-        })
-        .await?;
+        self.insert_submission(order.clone(), close_selection)
+            .await?;
 
         let inst_id = to_inst_id(&order.symbol);
         let cl_ord_id = to_cl_ord_id(&order.client_order_id);
@@ -862,6 +942,7 @@ impl OkxEngine {
         }
         match self.send(&mut order, &inst_id, &body).await {
             Ok(()) => {}
+            Err(error @ EngineError::SessionRetired) => return Err(error),
             Err(EngineError::Okx(OkxError::Rejection { code, message })) => {
                 let reason = OkxError::Rejection { code, message }.to_string();
                 return self.finish_rejected(order, reason).await;
@@ -902,6 +983,11 @@ impl OkxEngine {
         let client = &self.deps.client;
         if !order.reduce_only {
             client.set_leverage(inst_id, order.leverage).await?;
+        }
+        // This load is the handoff: retirement before it forbids a POST, while
+        // an order handed off first must be resolved by lookup if its answer is lost.
+        if self.retired.load(Ordering::SeqCst) {
+            return Err(EngineError::SessionRetired);
         }
         order.exchange_order_id = Some(client.place_order(body).await?);
         let row = order.clone();
@@ -946,12 +1032,37 @@ impl OkxEngine {
         }
     }
 
+    async fn insert_submission(
+        &self,
+        row: Order,
+        close_selection: Option<CloseSelection>,
+    ) -> Result<(), EngineError> {
+        self.rows(move |rows| {
+            rows.transaction(&mut || {
+                rows.insert_order(&row)?;
+                if let Some(selection) = &close_selection {
+                    rows.record_close_selection(&row.id, selection)?;
+                }
+                if row.status == OrderStatus::Open {
+                    protection::record_deferred_protection(rows, &row)?;
+                }
+                Ok(())
+            })
+        })
+        .await
+    }
+
     /// A refused order is recorded, never an HTTP error.
-    async fn reject(&self, mut order: Order, reason: String) -> Result<OrderResult, EngineError> {
+    async fn reject(
+        &self,
+        mut order: Order,
+        reason: String,
+        close_selection: Option<CloseSelection>,
+    ) -> Result<OrderResult, EngineError> {
         order.status = OrderStatus::Rejected;
         order.reject_reason = Some(reason);
-        let row = order.clone();
-        self.rows(move |rows| Ok(rows.insert_order(&row)?)).await?;
+        self.insert_submission(order.clone(), close_selection)
+            .await?;
         Ok(OrderResult {
             order,
             fills: Vec::new(),

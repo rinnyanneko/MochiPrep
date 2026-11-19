@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use mochi_core::paper::CloseSelection;
 use mochi_core::paper::{
     CreateAccountArgs, EngineEvent, PaperEngineDeps, PaperExecutionEngine, PaperStore,
     StoreFailure, StoreFailureKind,
@@ -254,6 +255,17 @@ impl PaperStore for AuditedStore {
     fn get_order(&self, id: &str) -> Result<Option<Order>, StoreFailure> {
         self.inner.get_order(id)
     }
+    fn record_close_selection(
+        &self,
+        order_id: &str,
+        selection: &CloseSelection,
+    ) -> Result<(), StoreFailure> {
+        self.write("record_close_selection");
+        self.inner.record_close_selection(order_id, selection)
+    }
+    fn close_selection(&self, order_id: &str) -> Result<Option<CloseSelection>, StoreFailure> {
+        self.inner.close_selection(order_id)
+    }
     fn link_target_replacement(
         &self,
         deferred_order_id: &str,
@@ -286,6 +298,25 @@ impl PaperStore for AuditedStore {
     }
     fn list_orders(&self, account_id: &str, limit: usize) -> Result<Vec<Order>, StoreFailure> {
         self.inner.list_orders(account_id, limit)
+    }
+    fn list_canceled_orders_for_recovery(
+        &self,
+        account_id: &str,
+        reason: &str,
+        limit: usize,
+    ) -> Result<Vec<Order>, StoreFailure> {
+        self.inner
+            .list_canceled_orders_for_recovery(account_id, reason, limit)
+    }
+    fn mark_order_recovery_checked(
+        &self,
+        order_id: &str,
+        reason: &str,
+        checked_at: i64,
+    ) -> Result<(), StoreFailure> {
+        self.write("mark_order_recovery_checked");
+        self.inner
+            .mark_order_recovery_checked(order_id, reason, checked_at)
     }
     fn find_orders_by_exchange_ids(
         &self,

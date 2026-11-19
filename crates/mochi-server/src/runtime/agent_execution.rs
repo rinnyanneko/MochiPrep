@@ -34,6 +34,12 @@ pub(super) fn position_binding_field(action: AiAction) -> Option<&'static str> {
         _ => None,
     }
 }
+
+pub(super) struct RiskPosition<'a> {
+    pub bound_id: Option<&'a str>,
+    pub protection: Option<&'a Protection>,
+}
+
 fn plain(n: Option<f64>) -> Option<String> {
     n.map(|n| Dec::from_js_number(n).to_fixed())
 }
@@ -197,12 +203,12 @@ pub(super) fn settle_acted(r: &mut Value, acted: Acted) {
                     "ORDER_PLACED",
                     Some("Protection change sent to OKX, awaiting confirmation".into()),
                 );
-            } else if same_protection(&result.before, &result.after) {
+            } else if result.retired_deferred || !same_protection(&result.before, &result.after) {
+                settle(r, "EXECUTED", Some("Protection updated".into()));
+            } else {
                 // The engine aligns prices to the tick, so a target that differed only off the
                 // tick changes nothing.
                 settle(r, "HOLD", Some("Protection already as requested".into()));
-            } else {
-                settle(r, "EXECUTED", Some("Protection updated".into()));
             }
         }
     }
@@ -382,7 +388,7 @@ impl Runtime {
         account: &PaperAccount,
         d: &AiDecisionData,
         quote: Option<Quote>,
-        protection: Option<Protection>,
+        position_context: RiskPosition<'_>,
         target: &ExecutionTarget,
     ) -> Result<(RiskResult, Option<mochi_okx::engine::CheckedProtection>), ApiError> {
         let risk: RiskSettings =
@@ -405,7 +411,7 @@ impl Runtime {
             let checked = position
                 .as_ref()
                 .map(|position| {
-                    let before = protection.clone().ok_or_else(|| {
+                    let before = position_context.protection.cloned().ok_or_else(|| {
                         ApiError::bad_request("The OKX position changed while checking protection")
                     })?;
                     Ok::<_, ApiError>(mochi_okx::engine::CheckedProtection {
@@ -416,6 +422,10 @@ impl Runtime {
                 })
                 .transpose()?;
             (position.into_iter().collect(), checked)
+        } else if d.action == AiAction::Close && matches!(target, ExecutionTarget::Okx(_)) {
+            // The model and the close command both bind to the manageable isolated position.
+            let position = self.position_target(a, target, position_context.bound_id)?;
+            (position.into_iter().collect(), None)
         } else {
             (self.venue_open_positions(target, &a.account_id)?, None)
         };
@@ -432,7 +442,7 @@ impl Runtime {
                 day_start_equity: daily.day_start_equity,
                 fees: account.config.clone(),
                 allow_trailing_stop: a.allow_trailing_stop,
-                protection,
+                protection: position_context.protection.cloned(),
             },
             self.engine.instruments(),
         );
@@ -677,7 +687,10 @@ impl Runtime {
             &account,
             &d,
             self.market_quote(account.source, &a.symbol),
-            protection,
+            RiskPosition {
+                bound_id: position_id,
+                protection: protection.as_ref(),
+            },
             &target,
         )?;
         // OKX sync can publish another snapshot while risk is being evaluated.

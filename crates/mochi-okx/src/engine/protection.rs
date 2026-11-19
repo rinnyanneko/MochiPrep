@@ -27,7 +27,7 @@ use super::{
 };
 use crate::client::{
     nullish_text, truthy_text, AlgoOrdType, AlgoOrderBody, CancelAlgo, OkxError, Row, Side, TdMode,
-    RECENT_FILLS_LIMIT,
+    ORDER_NOT_FOUND, RECENT_FILLS_LIMIT,
 };
 use crate::ids::{to_algo_cl_ord_id, to_cl_ord_id, to_inst_id};
 
@@ -232,16 +232,21 @@ impl SymbolProtection {
 pub(crate) type ProtectionMap = HashMap<String, SymbolProtection>;
 
 /// A position OKX listed on this sync: its side and its size in contracts, never negative.
+#[derive(Clone)]
 pub(crate) struct Held {
     pub side: PositionSide,
     pub contracts: Dec,
     pub trade_id: Option<u64>,
+    pub position_id: String,
+    pub updated_at: Option<String>,
 }
 
 impl PartialEq for Held {
     fn eq(&self, other: &Self) -> bool {
         self.side == other.side
             && self.trade_id == other.trade_id
+            && self.position_id == other.position_id
+            && self.updated_at == other.updated_at
             && self.contracts.eq_value(&other.contracts)
     }
 }
@@ -255,11 +260,11 @@ pub(super) fn last_trade_id(row: &Row) -> Option<u64> {
 }
 
 fn fill_time(row: &Row) -> Option<i64> {
-    row.get("fillTime")?
-        .as_str()?
-        .parse()
-        .ok()
-        .filter(|at| *at > 0)
+    exchange_time(row, "fillTime")
+}
+
+fn exchange_time(row: &Row, field: &str) -> Option<i64> {
+    row.get(field)?.as_str()?.parse().ok().filter(|at| *at > 0)
 }
 
 type ReachedExits = HashMap<String, String>;
@@ -285,6 +290,7 @@ fn remember_reached_exit(exits: &mut ReachedExits, row: &Order) {
 struct PositionHistory<'a> {
     fills: &'a [Row],
     trade: u64,
+    updated_at: i64,
     side: PositionSide,
     contracts: &'a Dec,
     reached_exits: &'a ReachedExits,
@@ -297,14 +303,11 @@ enum EntryInterval {
 
 impl PositionHistory<'_> {
     fn entry_interval(&self, first_trade: u64, parent: &str) -> Option<EntryInterval> {
-        let trade_time = |id| {
-            self.fills
-                .iter()
-                .find(|row| last_trade_id(row) == Some(id))
-                .and_then(fill_time)
-        };
-        let (first, last) = trade_time(first_trade).zip(trade_time(self.trade))?;
-        if first > last {
+        let trade_row = |id| self.fills.iter().find(|row| last_trade_id(row) == Some(id));
+        let first = fill_time(trade_row(first_trade)?)?;
+        let latest = trade_row(self.trade)?;
+        let last = fill_time(latest)?;
+        if first > last || last > self.updated_at {
             return None;
         }
         let (open_type, close_type) = match self.side {
@@ -312,18 +315,21 @@ impl PositionHistory<'_> {
             PositionSide::Short => ("4", "6"),
         };
         let mut changes = Vec::new();
-        let mut has_exit = false;
         for row in self.fills {
             let at = fill_time(row)?;
             let trade = last_trade_id(row);
-            // Negative liquidation and ADL IDs cannot order fills within a millisecond.
+            // Liquidation and ADL have negative IDs and can change the position
+            // after its last ordinary trade without advancing that trade ID.
             if at < first
-                || at > last
                 || trade.is_some_and(|id| {
-                    (at == first && id < first_trade) || (at == last && id > self.trade)
+                    (at == first && id < first_trade) || at > last || id > self.trade
                 })
             {
                 continue;
+            }
+            if at > self.updated_at {
+                // A system fill is visible before the position snapshot caught up.
+                return None;
             }
             if row.get("posSide").and_then(Value::as_str) != Some("net") {
                 return Some(EntryInterval::Different);
@@ -341,40 +347,43 @@ impl PositionHistory<'_> {
                 else {
                     return Some(EntryInterval::Different);
                 };
-                has_exit = true;
                 source == parent
             };
             changes.push((trade?, row, opening, own_exit));
         }
+        // A fill's record can be generated after execution. An update newer than
+        // both timestamps is unexplained even if the known fills fit today's size.
+        let recorded_at = exchange_time(latest, "ts").unwrap_or(last);
+        if self.updated_at > recorded_at {
+            return None;
+        }
+        // Walk back from the observed size. Missing reductions can make the
+        // chain inconsistent even when the position's trade ID is unchanged.
+        changes.sort_unstable_by_key(|(trade, _, _, _)| *trade);
+        if changes.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return None;
+        }
         let mut own_reduction = super::zero();
-        if has_exit {
-            // A confirmed target reduced its own entry allocation. Walk back from the
-            // observed size and reject a chain that contains a close and reopen.
-            changes.sort_unstable_by_key(|(trade, _, _, _)| *trade);
-            if changes.windows(2).any(|pair| pair[0].0 == pair[1].0) {
-                return None;
-            }
-            let mut contracts = self.contracts.clone();
-            for (_, row, opening, own_exit) in changes.into_iter().rev() {
-                if !contracts.gt(&super::zero()) {
-                    return Some(EntryInterval::Different);
-                }
-                let size = dec(row.get("fillSz")?.as_str()?).ok()?;
-                if !size.gt(&super::zero()) {
-                    return None;
-                }
-                if own_exit {
-                    own_reduction = own_reduction.add(&size);
-                }
-                contracts = if opening {
-                    contracts.sub(&size)
-                } else {
-                    contracts.add(&size)
-                };
-            }
-            if contracts.is_negative() {
+        let mut contracts = self.contracts.clone();
+        for (_, row, opening, own_exit) in changes.into_iter().rev() {
+            if !contracts.gt(&super::zero()) {
                 return Some(EntryInterval::Different);
             }
+            let size = dec(row.get("fillSz")?.as_str()?).ok()?;
+            if !size.gt(&super::zero()) {
+                return None;
+            }
+            if own_exit {
+                own_reduction = own_reduction.add(&size);
+            }
+            contracts = if opening {
+                contracts.sub(&size)
+            } else {
+                contracts.add(&size)
+            };
+        }
+        if contracts.is_negative() {
+            return None;
         }
         Some(EntryInterval::Continuous { own_reduction })
     }
@@ -419,8 +428,9 @@ fn proven_entry_contracts(
             own_reduction = own_reduction.max(&reduced);
         }
     }
-    (trades.contains(&entry_trade) && total.eq_value(expected))
-        .then(|| remaining.sub(&own_reduction).max(&super::zero()))
+    let remaining = remaining.sub(&own_reduction).max(&super::zero());
+    (trades.contains(&entry_trade) && total.eq_value(expected) && remaining.lte(history.contracts))
+        .then_some(remaining)
 }
 
 pub(super) fn isolated_net_position<'a>(
@@ -1123,7 +1133,7 @@ impl OkxEngine {
             self.check_protection_position(&position, spec, new_stop, &position_changed)
                 .await?;
         }
-        self.retire_deferred(removed_targets).await?;
+        let mut retired_deferred = self.retire_deferred(removed_targets).await?;
 
         // Place new legs before cancelling live algos, so swapping a stop for a
         // trailing stop can never leave the position with neither.
@@ -1204,6 +1214,7 @@ impl OkxEngine {
                         before,
                         after: self.protection_of(&symbol),
                         pending: true,
+                        retired_deferred,
                     });
                 }
                 // A refusal, or Node's plain Error (a request refused before sending, an answer
@@ -1298,12 +1309,12 @@ impl OkxEngine {
         }
 
         // Keep the unsent trailing stop until any new protection has succeeded.
-        self.retire_deferred(removed_trailing).await?;
+        retired_deferred |= self.retire_deferred(removed_trailing).await?;
         if !retain.trailing_stop && target.trailing_stop.is_some() {
             let replaced = self
                 .deferred_to_retire(&source, vec![(Leg::Trail, REPLACED)], false)
                 .await?;
-            self.retire_deferred(replaced).await?;
+            retired_deferred |= self.retire_deferred(replaced).await?;
         }
         // A replacement take profit is resolved in reconciliation. The accepted
         // size may be smaller than the position once another entry fills.
@@ -1313,7 +1324,8 @@ impl OkxEngine {
         Ok(ProtectionResult {
             before,
             after: self.protection_of(&symbol),
-            pending: !confirmed,
+            pending: !confirmed && !changed.is_empty(),
+            retired_deferred,
         })
     }
 
@@ -1391,6 +1403,45 @@ impl OkxEngine {
                 && algo.get("tpOrdPx").and_then(Value::as_str) == Some("-1")
                 && listed.min(&recorded).gte(contracts),
         ))
+    }
+
+    async fn live_fixed_stop_covers(
+        &self,
+        fixed: &Order,
+        contracts: &Dec,
+        registry: &Registry,
+    ) -> Result<bool, EngineError> {
+        let Some(algo) = self.lookup_algo(&fixed.id).await? else {
+            return Ok(false);
+        };
+        Ok(live_algo_matches(&algo, Leg::Sl, fixed)?
+            && algo.get("slOrdPx").and_then(Value::as_str) == Some("-1")
+            && covers_with_reported_size(fixed, &algo, contracts, registry))
+    }
+
+    async fn refresh_matching_position(
+        &self,
+        snapshot: &mut PositionSnapshot,
+        inst_id: &str,
+    ) -> Result<bool, EngineError> {
+        let fresh = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
+        let before = isolated_net_position(&snapshot.open, inst_id);
+        let after = isolated_net_position(&fresh.open, inst_id);
+        let same = before
+            .zip(after)
+            .is_some_and(|((before, size), (after, fresh_size))| {
+                let side = if size.is_negative() {
+                    PositionSide::Short
+                } else {
+                    PositionSide::Long
+                };
+                size.eq_value(&fresh_size)
+                && super::views::position_id(before, side) == super::views::position_id(after, side)
+                // Some system reductions do not change tradeId.
+                && before.get("uTime") == after.get("uTime")
+            });
+        *snapshot = fresh;
+        Ok(same)
     }
 
     async fn check_fixed_stop_coverage(
@@ -1504,11 +1555,12 @@ impl OkxEngine {
     async fn retire_deferred(
         &self,
         retired: Vec<(Order, &'static str)>,
-    ) -> Result<(), EngineError> {
+    ) -> Result<bool, EngineError> {
+        let changed = !retired.is_empty();
         for (mut pending, reason) in retired {
             self.close_row(&mut pending, reason).await?;
         }
-        Ok(())
+        Ok(changed)
     }
 
     /// Node's `try` block for one leg: the body, the placement and the saved algoId.
@@ -1837,26 +1889,22 @@ impl OkxEngine {
             .client
             .get_order(&inst_id, &to_cl_ord_id(&parent.client_order_id))
             .await?;
-        if parent.status == OrderStatus::Canceled && parent.attached_stop_loss.is_some() {
-            // Single attached stops also apply to a partial fill when the remainder is
-            // canceled. Confirm the fixed stop appeared before placing optional exits.
-            let stop = self.lookup_algo(&format!("{}:sl", parent.id)).await?;
-            if !stop
-                .as_ref()
-                .and_then(|algo| algo.get("state"))
-                .and_then(Value::as_str)
-                .is_some_and(|state| ALIVE_STATES.contains(&state))
-            {
-                if confirming {
-                    return Ok(());
-                }
-                return self.close_row(row, "Deferred protection canceled: OKX did not confirm the fixed stop for the partial fill").await;
-            }
-        }
+        let needs_replacement_stop =
+            if parent.status == OrderStatus::Canceled && parent.attached_stop_loss.is_some() {
+                // Single attached stops also apply to a partial fill when the remainder is
+                // canceled. Confirm the fixed stop appeared before placing optional exits.
+                let stop = self.lookup_algo(&format!("{}:sl", parent.id)).await?;
+                !stop
+                    .as_ref()
+                    .and_then(|algo| algo.get("state"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|state| ALIVE_STATES.contains(&state))
+            } else {
+                false
+            };
         // Read fresh after the parent/stop calls, which may have outlived the earlier snapshot.
         *snapshot = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
-        let Some((position, mut signed_size)) = isolated_net_position(&snapshot.open, &inst_id)
-        else {
+        let Some((position, signed_size)) = isolated_net_position(&snapshot.open, &inst_id) else {
             if confirming {
                 return Ok(());
             }
@@ -1875,8 +1923,11 @@ impl OkxEngine {
         };
         let closes = (row.side == OrderSide::Sell) != short;
         let order_trade = remote.as_ref().and_then(last_trade_id);
-        let (Some(entry_trade), Some(position_trade)) = (order_trade, last_trade_id(position))
-        else {
+        let (Some(entry_trade), Some(position_trade), Some(position_updated_at)) = (
+            order_trade,
+            last_trade_id(position),
+            exchange_time(position, "uTime"),
+        ) else {
             if confirming {
                 return Ok(());
             }
@@ -1903,6 +1954,47 @@ impl OkxEngine {
                 )
                 .await;
         }
+        if needs_replacement_stop {
+            // An SL-only edit may have superseded the attached stop while leaving
+            // the entry's deferred exits in place.
+            let replacement_stop = context.open_orders.iter().rev().find(|other| {
+                other.symbol == row.symbol
+                    && other.side == row.side
+                    && !is_per_fill(other)
+                    && leg_of(other) == Some(Leg::Sl)
+                    && other
+                        .exchange_order_id
+                        .as_deref()
+                        .is_some_and(|id| !id.is_empty())
+            });
+            let mut confirmed = false;
+            if let Some((fixed, stop)) = replacement_stop
+                .and_then(|fixed| fixed.trigger_price.as_deref().map(|stop| (fixed, stop)))
+            {
+                let contracts = if short {
+                    signed_size.neg()
+                } else {
+                    signed_size.clone()
+                };
+                if self
+                    .live_fixed_stop_covers(fixed, &contracts, registry)
+                    .await?
+                {
+                    if !self.refresh_matching_position(snapshot, &inst_id).await? {
+                        return Ok(());
+                    }
+                    let (position, _) = isolated_net_position(&snapshot.open, &inst_id)
+                        .expect("the fresh position matched");
+                    confirmed = stop_precedes_liquidation(stop, position, side)?;
+                }
+            }
+            if !confirmed {
+                if confirming {
+                    return Ok(());
+                }
+                return self.close_row(row, "Deferred protection canceled: OKX did not confirm the fixed stop for the partial fill").await;
+            }
+        }
         if let Some(replacement) = replacement {
             let contracts = if short {
                 signed_size.neg()
@@ -1913,6 +2005,7 @@ impl OkxEngine {
                 .live_target_coverage(replacement, &contracts, registry)
                 .await?
                 == Some(true)
+                && self.refresh_matching_position(snapshot, &inst_id).await?
             {
                 return self.close_row(row, REPLACED).await;
             }
@@ -1938,18 +2031,7 @@ impl OkxEngine {
         let expected = dec(&parent.filled_quantity)?;
         let contract_value = dec(&registry.get(&row.symbol)?.venue_contract_value)?;
         let expected = expected.div(&contract_value).map_err(decimal_error)?;
-        let last_size = remote
-            .get("fillSz")
-            .and_then(Value::as_str)
-            .and_then(|size| dec(size).ok());
-        let filled = if position_trade == entry_trade
-            && last_size
-                .as_ref()
-                .is_some_and(|size| size.eq_value(&expected))
-        {
-            // The whole parent filled in this one trade, which is still the position's latest.
-            expected
-        } else {
+        let filled = {
             let Some(order_id) = remote
                 .get("ordId")
                 .and_then(Value::as_str)
@@ -2000,6 +2082,7 @@ impl OkxEngine {
             let history = PositionHistory {
                 fills: &fills,
                 trade: position_trade,
+                updated_at: position_updated_at,
                 side,
                 contracts: &observed_contracts,
                 reached_exits,
@@ -2026,22 +2109,12 @@ impl OkxEngine {
                         .await;
                 }
             };
-            *snapshot = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
-            let same_trade = isolated_net_position(&snapshot.open, &inst_id).filter(|(p, size)| {
-                last_trade_id(p) == Some(position_trade) && size.eq_value(&signed_size)
-            });
-            let Some((_, size)) = same_trade else {
+            if !self.refresh_matching_position(snapshot, &inst_id).await? {
                 return Ok(());
-            };
-            signed_size = size;
+            }
             filled
         };
-        let contracts = if short {
-            signed_size.neg()
-        } else {
-            signed_size
-        };
-        row.quantity = filled.min(&contracts).mul(&contract_value).to_fixed();
+        row.quantity = filled.mul(&contract_value).to_fixed();
         let Some(quote) = (self.deps.get_quote)(&row.symbol) else {
             return Ok(());
         };
@@ -2142,6 +2215,7 @@ impl OkxEngine {
                 .await;
         }
         let contract_value = dec(&registry.get(&row.symbol)?.venue_contract_value)?;
+        let unsent = row.clone();
         row.quantity = contracts.mul(&contract_value).to_fixed();
         row.order_type = OrderType::Market;
         row.close_position = false;
@@ -2152,6 +2226,14 @@ impl OkxEngine {
         self.save(row.clone()).await?;
         let client_id = to_cl_ord_id(&row.client_order_id);
         let body = to_body(row, inst_id, &client_id, contracts.to_fixed());
+        let current = self.refresh_matching_position(snapshot, inst_id).await;
+        if !matches!(current, Ok(true)) {
+            // We have not attempted a POST. A later pass can attribute the
+            // entry again. A crash before this save leaves lookup-only state.
+            *row = unsent;
+            self.save(row.clone()).await?;
+            return current.map(|_| ());
+        }
         match self.send(row, inst_id, &body).await {
             Err(error @ EngineError::Okx(OkxError::Rejection { .. })) => {
                 row.status = OrderStatus::Rejected;
@@ -2175,13 +2257,11 @@ impl OkxEngine {
         Ok(())
     }
 
-    /// Called only for a row absent from the pending lists, so a refused lookup is read as "not
-    /// live": the pending list is the evidence, and the lookup can only show the algo is still
-    /// alive. Any other failure aborts the sync.
+    /// A temporary refusal cannot establish whether the algo is still live.
     async fn lookup_algo(&self, id: &str) -> Result<Option<Row>, EngineError> {
         match self.deps.client.get_algo(&to_algo_cl_ord_id(id)).await {
             Ok(found) => Ok(found),
-            Err(OkxError::Rejection { .. }) => Ok(None),
+            Err(OkxError::Rejection { code, .. }) if code == ORDER_NOT_FOUND => Ok(None),
             Err(error) => Err(error.into()),
         }
     }
@@ -2256,8 +2336,7 @@ impl OkxEngine {
         {
             Some(result) => Ok(result),
             None => {
-                // A market exit can retire algos or outlive a closed position. The original
-                // protection snapshot cannot be associated with the newer positions.
+                // An exit or a position change can invalidate the earlier algo list.
                 let refreshed = self.pending_protection().await;
                 let post_exit = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
                 let position_changed = snapshot.held != post_exit.held;
@@ -2371,7 +2450,8 @@ impl OkxEngine {
 
         // The pending lists have already confirmed any matching submitted algo. An unsent
         // deferred row has no exchange order to reconcile until its one permitted placement.
-        let mut market_exit = false;
+        let initial_held = snapshot.held.clone();
+        let mut refresh_readback = false;
         for (i, slot) in rows.iter_mut().enumerate().take(open_count) {
             if slot.status != OrderStatus::Open || alive.iter().any(|(a, _)| *a == i) {
                 continue;
@@ -2382,8 +2462,9 @@ impl OkxEngine {
                 }
                 self.submit_deferred_protection(slot, &registry, snapshot, &reached_exits)
                     .await?;
-                market_exit |=
-                    slot.order_type == OrderType::Market && slot.status != OrderStatus::Rejected;
+                refresh_readback |= snapshot.held != initial_held
+                    || (slot.order_type == OrderType::Market
+                        && slot.status != OrderStatus::Rejected);
                 remember_reached_exit(&mut reached_exits, slot);
                 if is_leg(slot) && slot.status == OrderStatus::Open && !is_deferred(slot) {
                     if let Some(remote) = self.lookup_algo(&slot.id).await? {
@@ -2425,7 +2506,7 @@ impl OkxEngine {
                     .await?;
             }
         }
-        if market_exit {
+        if refresh_readback {
             return Ok(None);
         }
 
@@ -2581,6 +2662,7 @@ impl OkxEngine {
             let awaiting = rows.iter().take(open_count).any(|r| {
                 r.status == OrderStatus::Open
                     && r.symbol == newest.symbol
+                    && !is_deferred(r)
                     && r.exchange_order_id.as_deref().is_none_or(str::is_empty)
             });
             if awaiting {
@@ -2594,9 +2676,8 @@ impl OkxEngine {
                 continue;
             };
             let cover = Held {
-                side: position.side,
                 contracts: position.contracts.max(&claim),
-                trade_id: position.trade_id,
+                ..position.clone()
             };
             let group = members.iter().map(|i| &rows[*i]);
             let Some(level) = tightest_level(leg, position.side, group)? else {

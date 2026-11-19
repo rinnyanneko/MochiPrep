@@ -65,6 +65,8 @@ impl PositionSnapshot {
                         side,
                         contracts,
                         trade_id: last_trade_id(&row),
+                        position_id: super::views::position_id(&row, side),
+                        updated_at: nullish_text(row.get("uTime")),
                     },
                 );
             }
@@ -73,7 +75,7 @@ impl PositionSnapshot {
         Ok(Self { open, held })
     }
 
-    fn protection_keys(&self, registry: &Registry) -> HashMap<String, (u64, PositionSide)> {
+    fn protection_keys(&self, registry: &Registry) -> HashMap<String, String> {
         let mut keys = HashMap::new();
         let mut seen = HashSet::new();
         for row in &self.open {
@@ -88,8 +90,8 @@ impl PositionSnapshot {
                 keys.remove(&spec.symbol);
             } else {
                 if let Some(held) = self.held.get(&inst_id) {
-                    if let Some(trade_id) = held.trade_id {
-                        keys.insert(spec.symbol.clone(), (trade_id, held.side));
+                    if held.trade_id.is_some() {
+                        keys.insert(spec.symbol.clone(), held.position_id.clone());
                     }
                 }
             }
@@ -260,14 +262,12 @@ impl OkxEngine {
                 let mut pending = rows.list_open_orders(&account_id)?;
                 // A locally retired target remains recoverable by lookup. It is
                 // excluded from protection planning until OKX reveals its outcome.
-                pending.extend(
-                    rows.list_orders(&account_id, 500)?
-                        .into_iter()
-                        .filter(|row| {
-                            row.status == OrderStatus::Canceled
-                                && row.reject_reason.as_deref() == Some(REACHED_EXIT_UNCONFIRMED)
-                        }),
-                );
+                const RECOVERY_BATCH: usize = 10;
+                pending.extend(rows.list_canceled_orders_for_recovery(
+                    &account_id,
+                    REACHED_EXIT_UNCONFIRMED,
+                    RECOVERY_BATCH,
+                )?);
                 Ok((pending, Registry(rows.instruments())))
             })
             .await?
@@ -280,6 +280,8 @@ impl OkxEngine {
         let mut order_error: Option<EngineError> = None;
         for mut order in open.into_iter().filter(|o| !is_leg(o)) {
             let reached_exit = is_reached_exit(&order);
+            let recovering = order.status == OrderStatus::Canceled
+                && order.reject_reason.as_deref() == Some(REACHED_EXIT_UNCONFIRMED);
             match self.sync_order(&mut order, &registry).await {
                 Ok(()) => {}
                 Err(error @ EngineError::Stopped) => return Err(error),
@@ -290,6 +292,19 @@ impl OkxEngine {
                         order.id
                     )));
                 }
+            }
+            if recovering {
+                // Move even an unanswered lookup behind orders that have not had a turn.
+                // Keep this checkpoint across restarts without changing the order's status.
+                let checked_at = self.now();
+                self.rows(move |rows| {
+                    Ok(rows.mark_order_recovery_checked(
+                        &order.id,
+                        REACHED_EXIT_UNCONFIRMED,
+                        checked_at,
+                    )?)
+                })
+                .await?;
             }
         }
         let client = &self.deps.client;

@@ -1178,6 +1178,96 @@ async fn agent_protection_risks_use_the_isolated_position_even_when_cross_is_fir
 }
 
 #[tokio::test]
+async fn agent_close_risk_records_the_isolated_position_even_when_cross_is_first() {
+    let w = World::new().await;
+    let account = w.connect("OKX_DEMO").await;
+    w.place(&account.id).await;
+    {
+        let mut okx = w.okx.state();
+        let mut cross = okx.position.as_ref().unwrap().clone();
+        cross.insert("pos".into(), json!("0.01"));
+        cross.insert("mgnMode".into(), json!("cross"));
+        okx.other_positions.push(cross);
+    }
+    w.rt.sync_exchanges().await.unwrap();
+    let agent = w.agent_on(&account.id, "AUTO").await;
+    *w.answer.lock().unwrap() = decision("CLOSE", 74_000.0, None);
+
+    let result = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    assert_eq!(result["outcome"], "EXECUTED", "{result}");
+    assert!(w.okx.state().position.is_none());
+    let close_check = result["risk"]["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["id"] == "has-position")
+        .unwrap();
+    assert_eq!(close_check["detail"], "LONG 0.001");
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn agent_protect_can_remove_an_unsent_take_profit_with_an_unchanged_stop() {
+    let w = World::new().await;
+    let account = w.connect("OKX_DEMO").await;
+    w.okx.state().rest_limit_orders = true;
+    let request = serde_json::from_value(json!({
+        "accountId": account.id, "clientOrderId": "agent-remove-unsent-target",
+        "symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "quantity": "0.001",
+        "price": "74500", "leverage": 3, "stopLoss": "74000", "takeProfit": "78000",
+    }))
+    .unwrap();
+    let engine = w.rt.execution(&account.id).await.unwrap();
+    let entry = engine.place_order(request).await.unwrap().order;
+    {
+        let mut okx = w.okx.state();
+        okx.fill_resting();
+        // The entry lookup can report a fill ahead of the position's trade watermark.
+        okx.orders
+            .get_mut(&mochi_okx::to_cl_ord_id(&entry.client_order_id))
+            .unwrap()
+            .insert("tradeId".into(), json!("2"));
+    }
+    w.rt.sync_exchanges().await.unwrap();
+    let target_id = format!("{}:deferred:tp", entry.id);
+    let target_before = target_id.clone();
+    let target =
+        w.rt.call(move |r| {
+            r.engine()
+                .store()
+                .get_order(&target_before)
+                .unwrap()
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(target.status, mochi_domain::OrderStatus::Open);
+    assert!(target.exchange_order_id.is_none());
+    let agent = w.agent_on(&account.id, "AUTO").await;
+    *w.answer.lock().unwrap() = decision("PROTECT", 74_000.0, None);
+
+    let result = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    let target =
+        w.rt.call(move |r| r.engine().store().get_order(&target_id).unwrap().unwrap())
+            .await
+            .unwrap();
+    assert_eq!(
+        target.status,
+        mochi_domain::OrderStatus::Canceled,
+        "{result}"
+    );
+    assert_eq!(target.reject_reason.as_deref(), Some("Removed"));
+    assert_eq!(result["outcome"], "EXECUTED", "{result}");
+    assert_eq!(result["protectionBefore"]["stopLoss"], "74000");
+    assert_eq!(result["protectionBefore"], result["protectionAfter"]);
+    assert_eq!(
+        w.cycle(&agent, CycleTrigger::RunOnce).await["outcome"],
+        "HOLD"
+    );
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
 async fn accepts_a_protect_while_unarmed_leaving_the_arming_rule_to_the_protection_gate() {
     let w = World::new().await;
     let account = w.connect("OKX_LIVE").await;
@@ -2177,6 +2267,13 @@ async fn reconnect_keeps_reduce_only_exit_available_when_okx_protection_reads_fa
     assert_eq!(statuses[0]["healthy"], false);
     assert_eq!(statuses[0]["armed"], false);
     assert!(!w.agent(&agent).await.running);
+    for action in ["start", "resume"] {
+        let (status, result) = w
+            .send("POST", &format!("/api/agents/{agent}/{action}"), None)
+            .await;
+        assert_eq!(status, 400, "{result}");
+        assert!(!w.agent(&agent).await.running);
+    }
     w.rt.sync_exchanges().await.unwrap();
     assert!(!w.agent(&agent).await.running);
     let (_, positions) = w
@@ -2202,6 +2299,13 @@ async fn reconnect_keeps_reduce_only_exit_available_when_okx_protection_reads_fa
     assert_eq!(result["order"]["reduceOnly"], true);
     assert_eq!(w.placed(), placed + 1);
     assert!(w.okx.state().position.is_none());
+    w.okx.state().algo_lookup_down = false;
+    w.rt.sync_exchanges().await.unwrap();
+    let (status, result) = w
+        .send("POST", &format!("/api/agents/{agent}/resume"), None)
+        .await;
+    assert_eq!(status, 200, "{result}");
+    assert!(w.agent(&agent).await.running);
     w.rt.shutdown().await;
 }
 

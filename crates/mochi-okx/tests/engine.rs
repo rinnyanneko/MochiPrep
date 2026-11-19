@@ -467,11 +467,11 @@ async fn a_resting_entry_on_another_pair_never_blocks_a_reduce_only_exit() {
     assert_eq!(eth.order.status, OrderStatus::Open);
     // Now over the ceiling: a BTC position and a resting ETH entry against a limit of 1.
     set_max_open_positions(&h, 1.0);
-    let mut exit = order();
-    exit.side = OrderSide::Sell;
-    exit.reduce_only = Some(true);
-    exit.stop_loss = None;
-    let exit = h.engine.place_order(exit).await.unwrap();
+    let exit = h
+        .engine
+        .close_position(ACCOUNT, "BTCUSDT", 1.0, "exit")
+        .await
+        .unwrap();
     assert_eq!(exit.order.status, OrderStatus::Filled, "{}", reason(&exit));
     assert!(h.okx.state().position.is_none());
 }
@@ -495,17 +495,17 @@ async fn refuses_an_order_larger_than_available_margin() {
 }
 
 #[tokio::test]
-async fn refuses_a_reduce_only_order_on_the_same_side_as_the_position() {
+async fn refuses_an_unbound_reduce_only_order() {
     let h = connect_default().await;
     h.arm();
     h.engine.place_order(order()).await.unwrap();
     let mut request = order();
     request.reduce_only = Some(true);
     request.stop_loss = None;
-    let result = h.engine.place_order(request).await.unwrap();
+    let result = h.engine.place_order(request).await.unwrap_err();
     assert_eq!(
-        reason(&result),
-        "REDUCE_ONLY_NO_POSITION: nothing to reduce"
+        result.to_string(),
+        "Use the selected-position close endpoint for OKX reduce-only orders"
     );
     assert_eq!(h.placed().len(), 1);
 }
@@ -531,7 +531,7 @@ async fn stops_new_positions_once_the_daily_loss_limit_is_reached() {
 }
 
 #[tokio::test]
-async fn still_lets_a_disarmed_account_exit_clipped_to_the_position_size() {
+async fn still_lets_a_disarmed_account_fully_close_a_position() {
     let h = connect_default().await;
     h.arm();
     h.engine.place_order(order()).await.unwrap();
@@ -541,12 +541,11 @@ async fn still_lets_a_disarmed_account_exit_clipped_to_the_position_size() {
     eth.stop_loss = Some("1".into());
     let blocked = h.engine.place_order(eth).await.unwrap();
     assert!(reason(&blocked).starts_with("NOT_ARMED"));
-    let mut exit = order();
-    exit.side = OrderSide::Sell;
-    exit.quantity = "5".into();
-    exit.reduce_only = Some(true);
-    exit.stop_loss = None;
-    let exit = h.engine.place_order(exit).await.unwrap();
+    let exit = h
+        .engine
+        .close_position(ACCOUNT, "BTCUSDT", 1.0, "exit")
+        .await
+        .unwrap();
     assert_eq!(exit.order.status, OrderStatus::Filled);
     assert_eq!(exit.order.quantity, "0.001");
     assert_eq!(h.placed()[1]["sz"], "0.1");
