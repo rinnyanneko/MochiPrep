@@ -1143,14 +1143,21 @@ impl OkxEngine {
             let inserted = row.clone();
             // Recovery must know which deferred exits this placement affects
             // even when its answer is lost before the edit can finish.
-            let replaces = match leg {
-                Leg::Tp => replaced_targets.as_slice(),
-                Leg::Sl if fixed_is_only_placement => removed_trailing.as_slice(),
-                Leg::Sl | Leg::Trail => &[],
-            }
-            .iter()
-            .map(|(deferred, _)| deferred.id.clone())
-            .collect::<Vec<_>>();
+            let completes_trailing_removal = match leg {
+                Leg::Sl => fixed_is_only_placement,
+                Leg::Tp => placed_fixed.is_some(),
+                Leg::Trail => false,
+            };
+            let replaces = replaced_targets
+                .iter()
+                .filter(|_| leg == Leg::Tp)
+                .chain(
+                    removed_trailing
+                        .iter()
+                        .filter(|_| completes_trailing_removal),
+                )
+                .map(|(deferred, _)| deferred.id.clone())
+                .collect::<Vec<_>>();
             self.rows(move |rows| {
                 rows.transaction(&mut || {
                     rows.insert_order(&inserted)?;
@@ -1658,21 +1665,62 @@ impl OkxEngine {
         registry: &Registry,
         snapshot: &mut PositionSnapshot,
     ) -> Result<bool, EngineError> {
-        let Some(fixed) = linked_replacements.iter().rev().find(|fixed| {
-            fixed.status == OrderStatus::Open
-                && leg_of(fixed) == Some(Leg::Sl)
-                && fixed.symbol == row.symbol
-                && fixed.side == row.side
+        let Some(completion) = linked_replacements.iter().rev().find(|order| {
+            order.status == OrderStatus::Open
+                && order.symbol == row.symbol
+                && order.side == row.side
         }) else {
             return Ok(false);
         };
-        if fixed.exchange_order_id.as_deref().is_none_or(str::is_empty) {
+        if completion
+            .exchange_order_id
+            .as_deref()
+            .is_none_or(str::is_empty)
+        {
             return Ok(true);
         }
-        let Some(algo) = self.lookup_algo(&fixed.id).await? else {
+        let Some(confirmed) = self.lookup_algo(&completion.id).await? else {
             return Ok(true);
         };
-        if !live_algo_matches(&algo, Leg::Sl, fixed)?
+        let (fixed, algo) = match leg_of(completion) {
+            Some(Leg::Sl) => (completion.clone(), confirmed),
+            Some(Leg::Tp) => {
+                if !live_algo_matches(&confirmed, Leg::Tp, completion)? {
+                    return Ok(false);
+                }
+                // The take profit is linked only after the earlier fixed stop
+                // was accepted. Recheck the fixed stop still in force before removing protection.
+                let account = row.account_id.clone();
+                let symbol = row.symbol.clone();
+                let side = row.side;
+                let fixed = self
+                    .rows(move |rows| {
+                        Ok(rows
+                            .list_open_orders(&account)?
+                            .into_iter()
+                            .rev()
+                            .find(|order| {
+                                order.symbol == symbol
+                                    && order.side == side
+                                    && leg_of(order) == Some(Leg::Sl)
+                                    && order
+                                        .exchange_order_id
+                                        .as_deref()
+                                        .is_some_and(|id| !id.is_empty())
+                            }))
+                    })
+                    .await?;
+                let Some(fixed) = fixed else {
+                    return Ok(false);
+                };
+                let Some(algo) = self.lookup_algo(&fixed.id).await? else {
+                    return Ok(true);
+                };
+                (fixed, algo)
+            }
+            _ => return Ok(false),
+        };
+        if !live_algo_matches(&algo, Leg::Sl, &fixed)?
             || algo.get("slOrdPx").and_then(Value::as_str) != Some("-1")
         {
             return Ok(false);
@@ -1694,7 +1742,7 @@ impl OkxEngine {
         let Some(stop) = fixed.trigger_price.as_deref() else {
             return Ok(false);
         };
-        if !covers_with_reported_size(fixed, &algo, &contracts, registry)
+        if !covers_with_reported_size(&fixed, &algo, &contracts, registry)
             || !stop_precedes_liquidation(stop, position, side)?
         {
             return Ok(false);
