@@ -74,6 +74,11 @@ impl OkxEngine {
             // Live or partly filled: still working on OKX.
             _ => {}
         }
+        let execution = if filled.gt(&super::zero()) && order.agent_id.is_some() {
+            super::history::execution_of(&remote)
+        } else {
+            None
+        };
         let row = order.clone();
         let attached =
             row.status != OrderStatus::Open && filled.gt(&super::zero()) && !row.reduce_only;
@@ -88,6 +93,9 @@ impl OkxEngine {
         self.rows(move |rows| {
             rows.transaction(&mut || {
                 rows.save_order(&row)?;
+                if let Some((trade_id, at)) = &execution {
+                    rows.record_exchange_execution(&row.id, trade_id, *at)?;
+                }
                 if attached {
                     record_attached(rows, &row, &filled, at)?;
                 }
@@ -169,6 +177,10 @@ impl OkxEngine {
                 Held { side, contracts },
             );
         }
+        let mut open_results = Vec::new();
+        for p in &open {
+            open_results.extend(super::history::open_result_of(p, &registry)?);
+        }
         let algos = conditional.into_iter().chain(oco).chain(trailing).collect();
         let protection = self.reconcile_protection(algos, &held).await?;
         self.state().protection = protection.clone();
@@ -197,6 +209,7 @@ impl OkxEngine {
         let point = {
             let mut state = self.state();
             state.positions = positions;
+            state.open_results = open_results;
             state.balance = Some(balance.clone());
             state.last_sync_at = Some(at);
             // Set here, in the same step, so the account never reads as healthy in between.

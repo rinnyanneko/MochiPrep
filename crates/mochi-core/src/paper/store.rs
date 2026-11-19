@@ -3,7 +3,10 @@
 //! wraps even its single-row writes in one, so a store can rely on every write being in a
 //! transaction. The methods mirror `packages/core/src/paper/store.ts` one for one.
 
-use mochi_domain::{DataSource, EquityPoint, Fill, LedgerEvent, Order, PaperAccount, Position};
+use mochi_domain::{
+    DataSource, EquityPoint, ExchangeExecutionCursor, ExchangePositionRecord, Fill, LedgerEvent,
+    Order, PaperAccount, Position,
+};
 
 /// A storage error. The engine's reaction is the same whatever the cause (roll back and report),
 /// but its owner may retry when another connection held the database, so that kind is kept.
@@ -112,4 +115,35 @@ pub trait PaperStore {
     /// The latest `limit` points, oldest first.
     fn list_equity(&self, account_id: &str, limit: usize)
         -> Result<Vec<EquityPoint>, StoreFailure>;
+
+    /// Inserts the record, or replaces the one with its account, posId and open time.
+    fn execution_cursor(&self, account_id: &str) -> Result<ExchangeExecutionCursor, StoreFailure>;
+    fn save_execution_cursor(
+        &self,
+        account_id: &str,
+        cursor: &ExchangeExecutionCursor,
+    ) -> Result<(), StoreFailure>;
+    fn record_exchange_execution(
+        &self,
+        order_id: &str,
+        trade_id: &str,
+        executed_at: i64,
+    ) -> Result<(), StoreFailure>;
+    fn upsert_position_record(&self, record: &ExchangePositionRecord) -> Result<(), StoreFailure>;
+    /// Every record on `inst_id` opened at or after `since`, oldest first.
+    fn list_position_records(
+        &self,
+        account_id: &str,
+        inst_id: &str,
+        since: i64,
+    ) -> Result<Vec<ExchangePositionRecord>, StoreFailure>;
+    /// The newest close time recorded for the account.
+    fn latest_position_record_at(&self, account_id: &str) -> Result<Option<i64>, StoreFailure>;
+    /// The uTime older history is still to be read before, `None` when nothing is left.
+    fn position_history_backfill(&self, account_id: &str) -> Result<Option<i64>, StoreFailure>;
+    fn set_position_history_backfill(
+        &self,
+        account_id: &str,
+        before: Option<i64>,
+    ) -> Result<(), StoreFailure>;
 }

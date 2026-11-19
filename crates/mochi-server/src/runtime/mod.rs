@@ -679,6 +679,16 @@ impl Runtime {
         })
     }
 
+    /// What each open OKX position has made, as of the last sync, or `None` while the account has
+    /// no session.
+    pub fn exchange_open_results(
+        &self,
+        account_id: &str,
+    ) -> Option<Vec<mochi_okx::engine::OpenPositionResult>> {
+        self.exchange_session(account_id)
+            .map(|session| session.engine.open_results())
+    }
+
     /// `{ ...account, balance }`, in Node's key order.
     pub fn account_view(&self, id: &str) -> Result<serde_json::Value, ApiError> {
         let account = self.require_account(id)?;

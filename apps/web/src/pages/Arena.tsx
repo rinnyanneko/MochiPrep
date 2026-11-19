@@ -5,6 +5,7 @@ import { EquityChart } from '@/components/charts';
 import { PageTitle } from '@/components/Shell';
 import { VenueBadge } from '@/components/trading';
 import { Badge, Card, CardHeader, Segmented, Table } from '@/components/ui';
+import { compareArenaRows } from '@/lib/arena';
 import { money, pct, pnlClass, signedMoney } from '@/lib/format';
 import { oneOf, useRemembered } from '@/lib/remembered';
 import { cn } from '@/lib/utils';
@@ -19,14 +20,17 @@ export function ArenaPage() {
   const [source, setSource] = useRemembered<DataSource>('arena.source', globalSource, oneOf(['REPLAY', 'LIVE'] as const));
   const rows = arena.filter((r) => r.source === source);
 
-  /** Color follows creation order, so sorting by return never repaints an agent. */
-  const colors = useMemo(() => new Map(rows.map((r, i) => [r.agentId, SERIES[i]])), [rows.map((r) => r.agentId).join()]);
-  const ranked = [...rows].sort((a, b) => b.returnPct - a.returnPct);
+  // Exchange accounts send no curve: their equity jumps with every deposit or transfer.
+  const charted = rows.filter((r) => r.attribution === 'ACCOUNT');
+  /** Color follows creation order among charted agents, so sorting never repaints one. */
+  const colors = useMemo(() => new Map(charted.map((r, i) => [r.agentId, SERIES[i]])), [charted.map((r) => r.agentId).join()]);
+  const ranked = [...rows].sort(compareArenaRows);
   const series = useMemo(
-    () => rows.slice(0, CHARTED).map((r) => ({ id: r.agentId, name: r.agentName, color: colors.get(r.agentId)!, points: r.curve })),
+    () => charted.slice(0, CHARTED).map((r) => ({ id: r.agentId, name: r.agentName, color: colors.get(r.agentId)!, points: r.curve })),
     [arena, source],
   );
-  const capitals = new Set(rows.map((r) => Number(r.initialBalance)));
+  const capitals = new Set(charted.map((r) => Number(r.initialBalance)));
+  const onExchange = rows.some((r) => r.attribution !== 'ACCOUNT');
 
   return (
     <>
@@ -50,6 +54,8 @@ export function ArenaPage() {
             : 'Live OKX prices. Accounts marked OKX demo or Real money trade on the exchange; the rest are simulated. Agents started at different times are not directly comparable.'}{' '}
           Short-term returns do not predict future performance.
           {capitals.size > 1 && ' Starting capital differs between these agents, so compare returns, not USDT.'}
+          {onExchange &&
+            " For OKX agents, P&L reflects the whole net position on their pair, including any manual trades that change it. Deposits and transfers do not count toward P&L. Agents sharing that pair and account have no separate P&L."}
         </span>
       </div>
       {rows.length === 0 ? (
@@ -57,12 +63,19 @@ export function ArenaPage() {
       ) : (
         <div className="space-y-3">
           <Card>
-            <CardHeader title="Equity curves" description={rows.length > CHARTED ? `First ${CHARTED} of ${rows.length} agents. USDT.` : 'USDT, sampled on the backend.'} />
-            <div className="h-80 pb-3"><EquityChart series={series} /></div>
+            <CardHeader
+              title="Equity curves"
+              description={charted.length > CHARTED ? `First ${CHARTED} of ${charted.length} paper agents. USDT.` : 'Paper accounts, USDT, sampled on the backend.'}
+            />
+            {charted.length === 0 ? (
+              <p className="px-6 pb-6 text-[13px] text-ink-3">OKX accounts are not charted: their equity moves with deposits and transfers.</p>
+            ) : (
+              <div className="h-80 pb-3"><EquityChart series={series} /></div>
+            )}
           </Card>
           <Card>
-            <CardHeader title="Leaderboard" description="Sorted by return." />
-            <Table head={['#', 'Agent', 'Provider / Model', 'Equity', 'Return', 'Realized', 'Max DD', 'Win rate', 'Trades', 'AI cost']}>
+            <CardHeader title="Leaderboard" description={onExchange ? 'Sorted by return, then OKX agents by P&L.' : 'Sorted by return.'} />
+            <Table head={['#', 'Agent', 'Provider / Model', 'Equity', 'Return', 'P&L', 'Realized', 'Max DD', 'Win rate', 'Trades', 'AI cost']}>
               {ranked.map((r: ArenaRow, i) => (
                 <tr key={r.agentId} data-testid="arena-row">
                   <td className="num text-ink-3">{i + 1}</td>
@@ -72,13 +85,22 @@ export function ArenaPage() {
                       {r.agentName}
                       {r.isMock && <Badge tone="info">Mock</Badge>}
                       {r.venue !== 'PAPER' && <VenueBadge venue={r.venue} />}
+                      {r.attribution === 'SHARED' && (
+                        <span title={`Another agent on this account also trades ${r.symbol}, so its P&L cannot be split.`}>
+                          <Badge tone="warn">Shared pair</Badge>
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td className="text-ink-2">{r.providerName}<span className="block text-xs text-ink-3">{r.model}</span></td>
-                  <td className="num">{money(r.equity)}</td>
+                  <td className="num">
+                    {money(r.equity)}
+                    {r.attribution !== 'ACCOUNT' && <span className="block text-xs text-ink-3">whole account</span>}
+                  </td>
                   <td className={cn('num font-semibold', pnlClass(r.returnPct))}>{pct(r.returnPct)}</td>
+                  <td className={cn('num font-semibold', pnlClass(r.pnl))}>{signedMoney(r.pnl)}</td>
                   <td className={cn('num', pnlClass(r.realizedPnl))}>{signedMoney(r.realizedPnl)}</td>
-                  <td className="num">{r.maxDrawdownPct.toFixed(2)}%</td>
+                  <td className="num">{r.maxDrawdownPct === null ? '–' : `${r.maxDrawdownPct.toFixed(2)}%`}</td>
                   <td className="num">{r.winRatePct === null ? '–' : `${r.winRatePct.toFixed(0)}%`}</td>
                   <td className="num">{r.tradeCount}</td>
                   <td className="num">{r.isMock ? 'Free' : r.estimatedAiCost === null ? 'Unknown' : `$${Number(r.estimatedAiCost).toFixed(4)}`}</td>

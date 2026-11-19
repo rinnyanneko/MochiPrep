@@ -929,3 +929,354 @@ async fn re_reads_live_limits_from_the_account_row_on_every_call() {
     let result = h.engine.place_order(order()).await.unwrap();
     assert_eq!(reason(&result), "LIMIT_LEVERAGE: 3x exceeds 2x");
 }
+
+// ---- closed-position history -------------------------------------------------------------------
+
+fn closed(
+    pos_id: &str,
+    inst_id: &str,
+    c_time: i64,
+    u_time: i64,
+    realized: &str,
+) -> serde_json::Map<String, Value> {
+    json!({
+        "posId": pos_id, "instId": inst_id, "cTime": c_time.to_string(),
+        "uTime": u_time.to_string(), "realizedPnl": realized, "type": "2",
+    })
+    .as_object()
+    .unwrap()
+    .clone()
+}
+
+fn recorded(h: &Harness, inst_id: &str) -> Vec<mochi_domain::ExchangePositionRecord> {
+    let inner = h.store.inner.lock().unwrap();
+    inner.0.list_position_records(ACCOUNT, inst_id, 0).unwrap()
+}
+
+/// A sync, then the history pass the sync loop would start after it.
+async fn sync_with_history(h: &Harness) {
+    h.engine.sync().await.unwrap();
+    h.engine.sync_position_history().await.unwrap_or(());
+}
+
+fn history_calls(h: &Harness) -> usize {
+    h.okx
+        .state()
+        .calls
+        .iter()
+        .filter(|c| c.ends_with("/account/positions-history"))
+        .count()
+}
+
+#[tokio::test]
+async fn records_closed_positions_page_by_page_once_a_minute() {
+    let h = connect_default().await;
+    let before = history_calls(&h);
+    {
+        let mut okx = h.okx.state();
+        // 205 BTC closes, three pages, and one on a pair the registry does not know.
+        for i in 0..205 {
+            okx.positions_history.push(closed(
+                &format!("p{i}"),
+                "BTC-USDT-SWAP",
+                1000 + i,
+                2000 + i,
+                "1.5",
+            ));
+        }
+        okx.positions_history
+            .push(closed("x", "DOGE-USDT-SWAP", 1000, 9000, "9"));
+    }
+    sync_with_history(&h).await;
+    assert_eq!(history_calls(&h), before + 3);
+    assert_eq!(recorded(&h, "DOGE-USDT-SWAP").len(), 1);
+    // Within the minute: not read again.
+    sync_with_history(&h).await;
+    assert_eq!(history_calls(&h), before + 3);
+    let btc = recorded(&h, "BTC-USDT-SWAP");
+    assert_eq!(btc.len(), 205);
+    assert_eq!(btc[0].opened_at, 1000);
+    assert_eq!(btc[0].closed_at, 2000);
+    assert_eq!(btc[0].realized_pnl, "1.5");
+    assert_eq!(btc[0].close_type, "2");
+
+    // Next minute: one newer close, and a later update to an old one. Only the first page is read,
+    // since it already reaches what is recorded.
+    {
+        let mut okx = h.okx.state();
+        okx.positions_history
+            .push(closed("new", "ETH-USDT-SWAP", 5000, 10_000, "-2"));
+        okx.positions_history[0] = closed("p0", "BTC-USDT-SWAP", 1000, 10_001, "3");
+    }
+    h.clock.fetch_add(60_000, Ordering::SeqCst);
+    sync_with_history(&h).await;
+    assert_eq!(history_calls(&h), before + 4);
+    assert_eq!(recorded(&h, "ETH-USDT-SWAP")[0].realized_pnl, "-2");
+    let btc = recorded(&h, "BTC-USDT-SWAP");
+    assert_eq!(btc.len(), 205);
+    assert_eq!(btc[0].realized_pnl, "3");
+}
+
+#[tokio::test]
+async fn a_history_failure_leaves_the_sync_healthy_and_is_retried() {
+    let h = connect_default().await;
+    {
+        let mut okx = h.okx.state();
+        okx.history_down = true;
+        okx.positions_history
+            .push(closed("p", "BTC-USDT-SWAP", 1000, 2000, "1"));
+    }
+    h.clock.fetch_add(60_000, Ordering::SeqCst);
+    sync_with_history(&h).await;
+    assert!(recorded(&h, "BTC-USDT-SWAP").is_empty());
+
+    // Not throttled: the failed read did not count.
+    h.okx.state().history_down = false;
+    sync_with_history(&h).await;
+    assert_eq!(recorded(&h, "BTC-USDT-SWAP").len(), 1);
+}
+
+fn add_btc_closes(h: &Harness, count: i64) {
+    let mut okx = h.okx.state();
+    for i in 0..count {
+        okx.positions_history.push(closed(
+            &format!("p{i}"),
+            "BTC-USDT-SWAP",
+            1000 + i,
+            2000 + i,
+            "1",
+        ));
+    }
+}
+
+#[tokio::test]
+async fn a_long_history_is_read_over_several_passes_without_a_gap() {
+    let h = connect_default().await;
+    add_btc_closes(&h, 1105);
+    h.clock.fetch_add(60_000, Ordering::SeqCst);
+    sync_with_history(&h).await;
+    // The page budget: ten pages, each rereading the millisecond the last one ended on.
+    assert_eq!(recorded(&h, "BTC-USDT-SWAP").len(), 991);
+
+    // Next pass: one page meets the records, then the rest is read as backfill.
+    let before = history_calls(&h);
+    h.clock.fetch_add(60_000, Ordering::SeqCst);
+    sync_with_history(&h).await;
+    assert_eq!(recorded(&h, "BTC-USDT-SWAP").len(), 1105);
+    assert_eq!(history_calls(&h), before + 3);
+
+    // Nothing left: one page a minute from now on.
+    h.clock.fetch_add(60_000, Ordering::SeqCst);
+    sync_with_history(&h).await;
+    assert_eq!(history_calls(&h), before + 4);
+}
+
+#[tokio::test]
+async fn a_pass_that_fails_part_way_writes_nothing_and_the_next_reads_it_all() {
+    let h = connect_default().await;
+    add_btc_closes(&h, 205);
+    h.okx.state().history_answers_left = Some(1);
+    h.clock.fetch_add(60_000, Ordering::SeqCst);
+    sync_with_history(&h).await;
+    assert!(recorded(&h, "BTC-USDT-SWAP").is_empty());
+
+    h.okx.state().history_answers_left = None;
+    sync_with_history(&h).await;
+    assert_eq!(recorded(&h, "BTC-USDT-SWAP").len(), 205);
+}
+
+#[tokio::test]
+async fn an_exit_is_not_held_up_by_a_history_read() {
+    let h = connect_default().await;
+    h.arm();
+    h.engine.place_order(order()).await.unwrap();
+    let hold = h.okx.hold_next("GET", "/account/positions-history");
+    h.clock.fetch_add(60_000, Ordering::SeqCst);
+    let engine = h.engine.clone();
+    let sync = tokio::spawn(async move { engine.sync_position_history().await });
+    hold.reached().await;
+
+    let closed = h
+        .engine
+        .close_position(ACCOUNT, "BTCUSDT", 1.0, "close-while-reading")
+        .await
+        .unwrap();
+    assert_eq!(closed.order.status, OrderStatus::Filled);
+    hold.release();
+    sync.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn open_results_carry_what_okx_reports_for_the_open_position() {
+    let h = connect_default().await;
+    h.okx.state().position = Some(
+        json!({
+            "instId": "BTC-USDT-SWAP", "pos": "1", "avgPx": "75000", "markPx": "75000", "upl": "4.2",
+            "realizedPnl": "-0.3", "posId": "77", "cTime": "1700000000000", "lever": "3",
+            "liqPx": "50000", "margin": "10", "mgnMode": "isolated",
+        })
+        .as_object()
+        .unwrap()
+        .clone(),
+    );
+    sync_with_history(&h).await;
+    let open = h.engine.open_results();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].symbol, "BTCUSDT");
+    assert_eq!(open[0].pos_id, "77");
+    assert_eq!(open[0].opened_at, Some(1_700_000_000_000));
+    assert_eq!(open[0].realized_pnl.as_deref(), Some("-0.3"));
+    assert_eq!(open[0].unrealized_pnl.as_deref(), Some("4.2"));
+}
+
+#[tokio::test]
+async fn malformed_arena_pnl_does_not_hide_open_positions_or_other_results() {
+    let h = connect_default().await;
+    let btc = json!({
+        "instId": "BTC-USDT-SWAP", "pos": "1", "avgPx": "75000", "markPx": "75000",
+        "upl": "4.2", "realizedPnl": "invalid", "posId": "77",
+        "cTime": "1700000000000", "uTime": "1700000000010",
+        "lever": "3", "mgnMode": "isolated", "posSide": "net",
+    })
+    .as_object()
+    .unwrap()
+    .clone();
+    let mut eth = btc.clone();
+    eth.insert("instId".into(), json!("ETH-USDT-SWAP"));
+    eth.insert("posId".into(), json!("78"));
+    eth.insert("realizedPnl".into(), json!("0.5"));
+    {
+        let mut okx = h.okx.state();
+        okx.position = Some(btc);
+        okx.other_positions.push(eth);
+    }
+    h.engine.sync().await.unwrap();
+    let positions = h.engine.positions();
+    assert_eq!(positions.len(), 2);
+    assert!(positions.iter().any(|p| p.position.symbol == "BTCUSDT"));
+    let results = h.engine.open_results();
+    let btc = results.iter().find(|p| p.symbol == "BTCUSDT").unwrap();
+    assert_eq!(btc.pos_id, "77");
+    assert_eq!(btc.realized_pnl, None);
+    let eth = results.iter().find(|p| p.symbol == "ETHUSDT").unwrap();
+    assert_eq!(eth.realized_pnl.as_deref(), Some("0.5"));
+    assert!(h.engine.healthy());
+
+    for (upl, expected) in [("invalid", None), ("6", Some("6"))] {
+        {
+            let mut state = h.okx.state();
+            let btc = state.position.as_mut().unwrap();
+            btc.insert("pos".into(), json!("2"));
+            btc.insert("upl".into(), json!(upl));
+            btc.insert("realizedPnl".into(), json!("0.75"));
+        }
+        h.engine.sync().await.unwrap();
+        let current = h.engine.positions();
+        let btc = current
+            .iter()
+            .find(|p| p.position.symbol == "BTCUSDT")
+            .unwrap();
+        assert_eq!(btc.position.quantity, "0.02");
+        let results = h.engine.open_results();
+        let btc = results.iter().find(|p| p.symbol == "BTCUSDT").unwrap();
+        assert_eq!(btc.realized_pnl.as_deref(), Some("0.75"));
+        assert_eq!(btc.unrealized_pnl.as_deref(), expected);
+    }
+}
+
+#[tokio::test]
+async fn pages_of_pairs_outside_the_registry_still_move_the_read_on() {
+    let h = connect_default().await;
+    {
+        let mut okx = h.okx.state();
+        // An older BTC close behind more unknown-pair closes than one pass reads.
+        okx.positions_history
+            .push(closed("btc", "BTC-USDT-SWAP", 10, 20, "2"));
+        for i in 0..1100 {
+            okx.positions_history.push(closed(
+                &format!("d{i}"),
+                "DOGE-USDT-SWAP",
+                1000 + i,
+                2000 + i,
+                "1",
+            ));
+        }
+    }
+    for _ in 0..2 {
+        h.clock.fetch_add(60_000, Ordering::SeqCst);
+        sync_with_history(&h).await;
+    }
+    assert_eq!(recorded(&h, "BTC-USDT-SWAP").len(), 1);
+}
+
+#[tokio::test]
+async fn a_sync_leaves_the_history_to_its_own_pass() {
+    let h = connect_default().await;
+    let before = history_calls(&h);
+    h.clock.fetch_add(60_000, Ordering::SeqCst);
+    h.engine.sync().await.unwrap();
+    assert_eq!(history_calls(&h), before);
+}
+
+#[tokio::test]
+async fn malformed_position_history_is_atomic_and_can_be_retried_immediately() {
+    for (field, value) in [
+        ("posId", json!("")),
+        ("instId", json!("")),
+        ("cTime", json!("0")),
+        ("cTime", json!("1.5")),
+        ("uTime", Value::Null),
+        ("realizedPnl", json!("invalid")),
+    ] {
+        let h = connect_default().await;
+        let good = closed("good", "BTC-USDT-SWAP", 1000, 3000, "1.25");
+        let mut bad = closed("bad", "BTC-USDT-SWAP", 1000, 2000, "-2");
+        bad.insert(field.into(), value.clone());
+        h.okx.state().positions_history = vec![good.clone(), bad];
+        assert!(
+            h.engine.sync_position_history().await.is_err(),
+            "{field}={value}"
+        );
+        assert!(recorded(&h, "BTC-USDT-SWAP").is_empty(), "{field}={value}");
+
+        // A failed validation must release the running flag and leave the throttle unset.
+        h.okx.state().positions_history = vec![good];
+        h.engine.sync_position_history().await.unwrap();
+        let records = recorded(&h, "BTC-USDT-SWAP");
+        assert_eq!(records.len(), 1, "{field}={value}");
+        assert_eq!(records[0].pos_id, "good");
+        assert_eq!(records[0].realized_pnl, "1.25");
+    }
+}
+
+#[tokio::test]
+async fn history_only_attributes_verified_isolated_net_directions() {
+    let h = connect_default().await;
+    for (index, (mode, side, direction, expected)) in [
+        ("isolated", "net", "long", Some("BUY")),
+        ("isolated", "net", "short", Some("SELL")),
+        ("cross", "net", "long", None),
+        ("isolated", "long", "long", None),
+        ("isolated", "net", "unknown", None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = format!("direction_{index}");
+        let mut record = closed(&id, "BTC-USDT-SWAP", 1000, 2000, "-0.125");
+        record.insert("mgnMode".into(), json!(mode));
+        record.insert("posSide".into(), json!(side));
+        record.insert("direction".into(), json!(direction));
+        h.okx.state().positions_history = vec![record];
+        h.clock.fetch_add(60_000, Ordering::SeqCst);
+        h.engine.sync_position_history().await.unwrap();
+        let records = recorded(&h, "BTC-USDT-SWAP");
+        let saved = records.iter().find(|r| r.pos_id == id).unwrap();
+        assert_eq!(
+            saved.opening_side.as_deref(),
+            expected,
+            "{mode}/{side}/{direction}"
+        );
+        assert_eq!(saved.realized_pnl, "-0.125");
+    }
+}

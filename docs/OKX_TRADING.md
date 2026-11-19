@@ -64,6 +64,22 @@ Live trailing stops and protection changes have not been verified on OKX Demo Tr
 9. **Extra full-position stop.** It is not confirmed whether OKX accepts one more stop sized to the whole position beside the per-entry stops. If it refuses, the per-entry stops stay in force.
 10. **Oversized stop at trigger.** It is not confirmed whether OKX trims or rejects a triggered reduce-only stop that is larger than the remaining position. If it rejects, part of the position may stay open after its stop triggers.
 
+## Agent results in the Trading Arena
+
+An exchange account's balance moves with deposits and transfers, so the arena shows no return for an OKX agent. It shows the agent's own P&L in USDT instead:
+
+- Closed positions come from OKX's position history (`account/positions-history`), read once a minute and kept in MochiPrep, because OKX keeps only three months. Each counts OKX's `realizedPnl`, which includes fees and funding. Stops, take profits and closes made in the OKX app count too. A long history is read over several minutes.
+- The open position on the agent's pair adds what OKX has realized on it so far (fees, funding, partial closes) and its unrealized P&L.
+- A confirmed opening-side execution from one of the agent's orders must fall inside an isolated net position's exchange timestamps. An order that is only partially filled still provides execution evidence. MochiPrep uses OKX's execution time even if reconciliation happened later. Ambiguous overlapping lifetimes cannot establish ownership. MochiPrep records recent executions immediately and backfills OKX's three-month transaction history in bounded pages. Executions that OKX can no longer supply stay outside the reported total. The result covers the whole net position, including manual activity that changes it.
+- Agents configured for the same account and pair do not get separate P&L. Confirmed participation by another agent also marks the P&L as shared after that agent is moved or deleted.
+
+Not yet confirmed against OKX:
+
+1. **Partial closes.** It is not confirmed whether a partly closed position's history record carries the total realized so far or only the latest part. MochiPrep keeps one record per position (its posId and open time) and takes the newest, which would undercount if OKX reports each part separately.
+2. **Paging.** MochiPrep assumes `after` returns records last updated before the given time. The first read stops after 1,000 records.
+3. **Open time.** MochiPrep reads a position's open time from `cTime`, and assumes a position that went flat and reopened gets a new `cTime`. An open position without one is left out.
+4. **Realized P&L on an open position.** MochiPrep assumes the open position's `realizedPnl` already includes any partial close, and then skips that position's history record so it is not counted twice.
+
 ## Trading pairs
 
 Pairs you add in **Settings** trade on OKX like the built-in ones. Orders are sent in contracts, and contract sizes vary widely: a BTC contract is 0.01 BTC, and a PEPE contract is 10,000,000 PEPE. One contract can be larger than a small order, and each pair has its own minimum size.
