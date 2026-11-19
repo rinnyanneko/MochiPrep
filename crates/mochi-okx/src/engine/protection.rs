@@ -1075,12 +1075,6 @@ impl OkxEngine {
             .as_deref()
             .filter(|_| changed.contains(&Leg::Sl));
         let removing_trailing = changed.contains(&Leg::Trail) && target.trailing_stop.is_none();
-        let retained_stop = if removing_trailing && target.stop_loss.is_some() && new_stop.is_none()
-        {
-            Some(old.leg(Leg::Sl).ok_or_else(position_changed)?)
-        } else {
-            None
-        };
         let source = Source {
             account_id,
             symbol: symbol.clone(),
@@ -1108,6 +1102,13 @@ impl OkxEngine {
                 .await?
         } else {
             Vec::new()
+        };
+        let removes_trailing = removing_trailing || !removed_trailing.is_empty();
+        let retained_stop = if removes_trailing && target.stop_loss.is_some() && new_stop.is_none()
+        {
+            Some(old.leg(Leg::Sl).ok_or_else(position_changed)?)
+        } else {
+            None
         };
         // Read the position after the entry lookups, before persisting changes or
         // submitting an algo based on the previously selected position.
@@ -1145,7 +1146,7 @@ impl OkxEngine {
             // even when its answer is lost before the edit can finish.
             let completes_trailing_removal = match leg {
                 Leg::Sl => fixed_is_only_placement,
-                Leg::Tp => placed_fixed.is_some(),
+                Leg::Tp => placed_fixed.is_some() || retained_stop.is_some(),
                 Leg::Trail => false,
             };
             let replaces = replaced_targets
@@ -1224,7 +1225,9 @@ impl OkxEngine {
         }
         if let Some(fixed) = placed_fixed
             .as_ref()
-            .filter(|_| removing_trailing || !removed_trailing.is_empty())
+            .filter(|_| removes_trailing)
+            .or(retained_stop
+                .filter(|_| changed.contains(&Leg::Tp) && target.take_profit.is_some()))
         {
             if let Err(error) = self
                 .check_fixed_stop_coverage(fixed, &position, &context.registry, &position_changed)
@@ -1679,17 +1682,17 @@ impl OkxEngine {
         {
             return Ok(true);
         }
-        let Some(confirmed) = self.lookup_algo(&completion.id).await? else {
-            return Ok(true);
-        };
-        let (fixed, algo) = match leg_of(completion) {
-            Some(Leg::Sl) => (completion.clone(), confirmed),
+        let fixed = match leg_of(completion) {
+            Some(Leg::Sl) => completion.clone(),
             Some(Leg::Tp) => {
+                let Some(confirmed) = self.lookup_algo(&completion.id).await? else {
+                    return Ok(true);
+                };
                 if !live_algo_matches(&confirmed, Leg::Tp, completion)? {
                     return Ok(false);
                 }
-                // The take profit is linked only after the earlier fixed stop
-                // was accepted. Recheck the fixed stop still in force before removing protection.
+                // The edit already confirmed a new or retained fixed stop.
+                // Recheck its current coverage before retiring the trail.
                 let account = row.account_id.clone();
                 let symbol = row.symbol.clone();
                 let side = row.side;
@@ -1713,12 +1716,25 @@ impl OkxEngine {
                 let Some(fixed) = fixed else {
                     return Ok(false);
                 };
-                let Some(algo) = self.lookup_algo(&fixed.id).await? else {
-                    return Ok(true);
-                };
-                (fixed, algo)
+                fixed
             }
             _ => return Ok(false),
+        };
+        let inst = to_inst_id(&row.symbol);
+        let side = match fixed.side {
+            OrderSide::Buy => PositionSide::Short,
+            OrderSide::Sell => PositionSide::Long,
+        };
+        *snapshot = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
+        let Some((position, original_size)) = isolated_net_position(&snapshot.open, &inst) else {
+            return Ok(false);
+        };
+        if (side == PositionSide::Short) != original_size.is_negative() {
+            return Ok(false);
+        }
+        let original_id = super::views::position_id(position, side);
+        let Some(algo) = self.lookup_algo(&fixed.id).await? else {
+            return Ok(true);
         };
         if !live_algo_matches(&algo, Leg::Sl, &fixed)?
             || algo.get("slOrdPx").and_then(Value::as_str) != Some("-1")
@@ -1726,18 +1742,18 @@ impl OkxEngine {
             return Ok(false);
         }
         *snapshot = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
-        let inst = to_inst_id(&row.symbol);
         let Some((position, signed_size)) = isolated_net_position(&snapshot.open, &inst) else {
             return Ok(false);
         };
-        let short = signed_size.is_negative();
-        if (fixed.side == OrderSide::Buy) != short {
-            return Ok(false);
+        if !original_size.eq_value(&signed_size)
+            || super::views::position_id(position, side) != original_id
+        {
+            return Ok(true);
         }
-        let (side, contracts) = if short {
-            (PositionSide::Short, signed_size.neg())
+        let contracts = if side == PositionSide::Short {
+            signed_size.neg()
         } else {
-            (PositionSide::Long, signed_size)
+            signed_size
         };
         let Some(stop) = fixed.trigger_price.as_deref() else {
             return Ok(false);

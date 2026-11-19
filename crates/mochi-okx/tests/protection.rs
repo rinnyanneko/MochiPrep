@@ -2667,6 +2667,84 @@ async fn a_combined_edit_remembers_trailing_removal_when_its_last_answer_is_lost
     assert_eq!(h.algo_placed().len(), 2, "must not send the trailing stop");
 }
 
+async fn pending_take_profit_with_retained_fixed_stop() -> (Harness, Order, Protection) {
+    let (h, entry) = filled_entry_with_deferred_trailing_stop().await;
+    assert_eq!(h.engine.protection_of("BTCUSDT"), stop("74000"));
+    let request = Protection {
+        take_profit: Some("78000".into()),
+        ..stop("74000")
+    };
+    let target = h.okx.hold_next("POST", "/trade/order-algo");
+    let engine = h.engine.clone();
+    let submitted = request.clone();
+    let edit = tokio::spawn(async move {
+        engine
+            .set_protection(ACCOUNT, "BTCUSDT", submitted, None, None)
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), target.reached())
+        .await
+        .unwrap();
+    {
+        let mut okx = h.okx.state();
+        okx.lose_next_algo_response = true;
+        okx.algo_lookup_down = true;
+    }
+    target.release();
+    assert!(edit.await.unwrap().unwrap().pending);
+    assert_eq!(h.algo_placed().len(), 1);
+
+    h.okx.state().algo_lookup_down = false;
+    h.advance(2);
+    (h, entry, request)
+}
+
+#[tokio::test]
+async fn a_pending_take_profit_remembers_trailing_removal_with_a_retained_fixed_stop() {
+    let (h, entry, request) = pending_take_profit_with_retained_fixed_stop().await;
+    let restarted = restart(&h);
+    restarted.sync().await.unwrap();
+    assert_eq!(restarted.protection_of("BTCUSDT"), request);
+    let deferred = h.order_row(&format!("{}:trail", entry.id));
+    assert_eq!(deferred.status, OrderStatus::Canceled);
+    assert_eq!(deferred.reject_reason.as_deref(), Some("Removed"));
+    assert_eq!(h.algo_placed().len(), 1, "must not send the trailing stop");
+}
+
+#[tokio::test]
+async fn pending_take_profit_recovery_keeps_the_trail_if_the_retained_stop_shrinks() {
+    let (h, entry, _) = pending_take_profit_with_retained_fixed_stop().await;
+    let restarted = restart(&h);
+    let initial = h.okx.hold_next("GET", "/account/positions");
+    let recheck = h.okx.hold_next("GET", "/account/positions");
+    let engine = restarted.clone();
+    let sync = tokio::spawn(async move { engine.sync().await });
+    let timeout = std::time::Duration::from_secs(2);
+    tokio::time::timeout(timeout, initial.reached())
+        .await
+        .unwrap();
+    initial.release();
+    tokio::time::timeout(timeout, recheck.reached())
+        .await
+        .unwrap();
+    h.okx
+        .state()
+        .algos
+        .values_mut()
+        .find(|algo| algo.get("slTriggerPx") == Some(&json!("74000")))
+        .unwrap()
+        .insert("sz".into(), json!("0.05"));
+    recheck.release();
+    sync.await.unwrap().unwrap();
+    let deferred = h.order_row(&format!("{}:trail", entry.id));
+    assert_eq!(deferred.status, OrderStatus::Open);
+    assert!(restarted.protection_of("BTCUSDT").trailing_stop.is_some());
+    assert_eq!(
+        h.algo_placed().last().unwrap()["ordType"],
+        "move_order_stop"
+    );
+}
+
 #[tokio::test]
 async fn raising_a_partially_filled_entry_target_survives_completion_of_its_parent() {
     let (h, entry, filled_order, full_position) = partial_target().await;
