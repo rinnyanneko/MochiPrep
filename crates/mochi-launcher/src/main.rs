@@ -35,7 +35,9 @@ fn main() {
             import_window::run_import,
             import_window::skip_import,
             panel::panel_state,
-            panel::panel_action
+            panel::panel_action,
+            windows::interface_status,
+            windows::interface_quit
         ])
         .setup(|app| app::setup(app.handle()))
         .build(tauri::generate_context!())

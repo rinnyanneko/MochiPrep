@@ -2,8 +2,11 @@
 //! interface may navigate.
 
 use mochi_launcher_core::settings::{save_settings, terms_accepted, TERMS_VERSION};
+use tauri::ipc::CapabilityBuilder;
 use tauri::webview::NewWindowResponse;
-use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
@@ -123,7 +126,22 @@ pub fn open_interface(app: &AppHandle) {
 }
 
 fn build_interface(app: &AppHandle, port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    let url = Url::parse(&format!("http://127.0.0.1:{port}/"))?;
+    let origin = format!("http://127.0.0.1:{port}");
+    let url = Url::parse(&origin)?;
+    let state = app.state::<AppState>();
+    let mut ports = lock(&state.interface_ports);
+    if !ports.contains(&port) {
+        app.add_capability(
+            CapabilityBuilder::new(format!("interface-{port}"))
+                .local(false)
+                .remote(origin)
+                .webview(INTERFACE)
+                .permission("allow-interface-status")
+                .permission("allow-interface-quit"),
+        )?;
+        ports.insert(port);
+    }
+    drop(ports);
     let on_navigation = app.clone();
     let on_new_window = app.clone();
     WebviewWindowBuilder::new(app, INTERFACE, WebviewUrl::External(url))
@@ -148,6 +166,49 @@ fn build_interface(app: &AppHandle, port: u16) -> Result<(), Box<dyn std::error:
             NewWindowResponse::Deny
         })
         .build()?;
+    Ok(())
+}
+
+async fn check_interface(window: &WebviewWindow, app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let port = state
+        .backend
+        .lock()
+        .await
+        .as_mut()
+        .and_then(|backend| backend.is_alive().then(|| backend.port()));
+    if window.label() == INTERFACE
+        && port
+            .zip(window.url().ok())
+            .is_some_and(|(port, url)| allowed_navigation(&url, port) == Navigation::Allow)
+    {
+        Ok(())
+    } else {
+        Err("The MochiPrep interface is no longer connected to the launcher".into())
+    }
+}
+
+#[tauri::command]
+pub async fn interface_status(
+    window: WebviewWindow,
+    app: AppHandle,
+) -> Result<Option<String>, String> {
+    check_interface(&window, &app).await?;
+    let state = app.state::<AppState>();
+    if !lock(&state.settings).check_updates {
+        return Ok(None);
+    }
+    let version = lock(&state.update)
+        .as_ref()
+        .map(|update| update.offer.version.clone());
+    Ok(version)
+}
+
+#[tauri::command]
+pub async fn interface_quit(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
+    check_interface(&window, &app).await?;
+    // The existing Quit flow checks active agents and armed accounts before stopping.
+    app::quit(&app).await;
     Ok(())
 }
 

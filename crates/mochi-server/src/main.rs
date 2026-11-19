@@ -121,6 +121,7 @@ async fn run() -> ExitCode {
     let mut state = AppState::new(config.clone(), runtime.clone());
     state.operation_logs = operation_logs.clone();
     let streams = state.streams.clone();
+    let shutdown = state.shutdown.clone();
     println!("{READY_PREFIX}{port} (data: {})", config.data_dir.display());
     let _ = std::io::stdout().flush();
     // stderr, so it shows wherever errors are captured; stdout stays the launcher's ready line.
@@ -139,7 +140,10 @@ async fn run() -> ExitCode {
     let (signalled, on_signal) = oneshot::channel::<()>();
     let server = axum::serve(listener, app(state))
         .with_graceful_shutdown(async move {
-            shutdown_signal(stdin_closed).await;
+            tokio::select! {
+                () = shutdown_signal(stdin_closed) => {}
+                () = shutdown.notified() => {}
+            }
             // Open event streams never finish on their own, and graceful shutdown waits for
             // every response to finish.
             streams.close_all();

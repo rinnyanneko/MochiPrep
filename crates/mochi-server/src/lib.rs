@@ -38,6 +38,8 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub runtime: RuntimeHandle,
     pub operation_logs: Option<Arc<operation_log::OperationLog>>,
+    /// An authenticated browser request can trigger the same shutdown as a process signal.
+    pub shutdown: Arc<tokio::sync::Notify>,
     /// The open `/api/events` streams, ended together on shutdown.
     pub streams: routes::events::SseStreams,
     /// The web app's files: the embedded build, or a test's own.
@@ -51,6 +53,7 @@ impl AppState {
             config,
             runtime,
             operation_logs: None,
+            shutdown: Arc::new(tokio::sync::Notify::new()),
             streams: routes::events::SseStreams::default(),
             web: routes::static_files::web_dist,
         }

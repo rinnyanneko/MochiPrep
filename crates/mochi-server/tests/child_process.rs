@@ -170,6 +170,43 @@ fn exits_cleanly_when_stdin_closes_in_parent_mode() {
 }
 
 #[test]
+fn browser_shutdown_exits_and_finishes_the_operation_log() {
+    let data = tempfile::tempdir().unwrap();
+    let port = free_port();
+    let mut child = spawn(port, data.path(), true);
+    let (line, _stdout) = first_line(child.stdout.take().unwrap());
+    assert!(line.starts_with(READY_PREFIX), "{line}");
+    let request = |method: &str, path: &str, headers: &str| {
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(stream, "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n{headers}\r\n").unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    };
+    let session = request("GET", "/api/session", "");
+    assert!(session.starts_with("HTTP/1.1 200"), "{session}");
+    let body: serde_json::Value =
+        serde_json::from_str(session.split_once("\r\n\r\n").unwrap().1).unwrap();
+    let token = body["token"].as_str().unwrap();
+    let headers = format!("Authorization: Bearer {token}\r\nContent-Length: 0\r\n");
+    let result = request("POST", "/api/shutdown", &headers);
+    assert!(result.starts_with("HTTP/1.1 202"), "{result}");
+    let status = wait_for_exit(&mut child, Duration::from_secs(10));
+    if status.is_none() {
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+    assert!(status
+        .expect("browser shutdown exits with stdin still open")
+        .success());
+    let log = std::fs::read_to_string(data.path().join("logs/latest.log")).unwrap();
+    assert!(log.contains("backend started") && log.contains("backend stopped"));
+}
+
+#[test]
 fn ignores_stdin_without_parent_mode() {
     let data = tempfile::tempdir().unwrap();
     let port = free_port();

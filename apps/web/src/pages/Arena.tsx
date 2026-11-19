@@ -1,11 +1,12 @@
 import { Info } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { ArenaRow, DataSource } from '@mochiprep/shared';
 import { EquityChart } from '@/components/charts';
 import { PageTitle } from '@/components/Shell';
 import { VenueBadge } from '@/components/trading';
 import { Badge, Card, CardHeader, Segmented, Table } from '@/components/ui';
 import { money, pct, pnlClass, signedMoney } from '@/lib/format';
+import { oneOf, useRemembered } from '@/lib/remembered';
 import { cn } from '@/lib/utils';
 import { useApp } from '@/store';
 
@@ -15,7 +16,7 @@ const CHARTED = SERIES.length;
 export function ArenaPage() {
   const arena = useApp((s) => s.arena);
   const globalSource = useApp((s) => s.source);
-  const [source, setSource] = useState<DataSource>(globalSource);
+  const [source, setSource] = useRemembered<DataSource>('arena.source', globalSource, oneOf(['REPLAY', 'LIVE'] as const));
   const rows = arena.filter((r) => r.source === source);
 
   /** Color follows creation order, so sorting by return never repaints an agent. */

@@ -1,6 +1,7 @@
 //! The launcher's state and the flows that change it: start, stop, restart, quit, disarm, and
 //! the poll that keeps the tray honest about a backend that died on its own.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -33,6 +34,8 @@ pub struct AppState {
     pub backend: tokio::sync::Mutex<Option<Backend>>,
     pub state: Mutex<BackendState>,
     pub snapshot: Mutex<SnapshotSlot>,
+    /// Backend ports already registered for the interface capability in this launcher.
+    pub interface_ports: Mutex<HashSet<u16>>,
     /// Set only by the Quit flows; any other exit request (the last window closing) is refused,
     /// because the launcher lives in the tray.
     pub quitting: AtomicBool,
@@ -77,6 +80,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         backend: tokio::sync::Mutex::new(None),
         state: Mutex::new(BackendState::Stopped),
         snapshot: Mutex::new(SnapshotSlot::default()),
+        interface_ports: Mutex::new(HashSet::new()),
         quitting: AtomicBool::new(false),
         stopping: AtomicBool::new(false),
         importing: AtomicBool::new(false),
@@ -432,14 +436,19 @@ async fn refresh_snapshot(app: &AppHandle) {
         let Some(child) = backend.as_mut() else {
             return;
         };
-        if !child.is_alive() {
+        if let Some(status) = child.exit_status() {
             // No automatic restart: a backend that keeps dying would loop, and the owner
             // should see that it stopped, and why (the backend redacts its own logs).
             let tail = child.stderr_tail();
             *backend = None;
             // Published while the lock is held, as start and stop do: a start waiting for the
             // lock then sets its own state after this one, never before it.
-            set_state(app, BackendState::Error(died_message(&tail)));
+            let next = if status.success() {
+                BackendState::Stopped
+            } else {
+                BackendState::Error(died_message(&tail))
+            };
+            set_state(app, next);
             return;
         }
         child.port()
