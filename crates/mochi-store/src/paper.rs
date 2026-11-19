@@ -529,7 +529,8 @@ impl PaperStore for SqlitePaperStore {
         self.query(
             "SELECT orders.* FROM deferred_target_replacements AS links
              JOIN orders ON orders.id=links.replacement_order_id
-             WHERE links.deferred_order_id=?",
+             WHERE links.deferred_order_id=?
+             ORDER BY orders.created_at, orders.rowid",
             [deferred_order_id],
             to_order,
         )

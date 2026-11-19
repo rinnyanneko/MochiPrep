@@ -734,6 +734,31 @@ fn sizes(row: &Order, algo: &Row, registry: &Registry) -> (Option<Dec>, Option<D
     (listed, to_contracts(row, registry).ok())
 }
 
+fn covers_with_reported_size(
+    order: &Order,
+    algo: &Row,
+    contracts: &Dec,
+    registry: &Registry,
+) -> bool {
+    let (live, recorded) = sizes(order, algo, registry);
+    live.zip(recorded)
+        .is_some_and(|(live, recorded)| live.min(&recorded).gte(contracts))
+}
+
+fn stop_precedes_liquidation(
+    stop: &str,
+    position: &Row,
+    side: PositionSide,
+) -> Result<bool, EngineError> {
+    let stop = dec(stop)?;
+    let liquidation = dec(&truthy_text(position.get("liqPx")).unwrap_or_else(|| "0".into()))?;
+    Ok(liquidation.is_zero()
+        || match side {
+            PositionSide::Long => stop.gt(&liquidation),
+            PositionSide::Short => stop.lt(&liquidation),
+        })
+}
+
 /// Whether `row`, whose algo OKX listed as `algo`, covers a position of `contracts`. It takes the
 /// smaller of OKX's `sz` and the row's own size: older stops are retired on this, so a size OKX
 /// reports above what was filled or sent is never trusted.
@@ -1078,7 +1103,7 @@ impl OkxEngine {
             .await?
             .into_iter()
             .partition(|(row, _)| leg_of(row) == Some(Leg::Tp));
-        let mut replaced_targets = if changed.contains(&Leg::Tp) && target.take_profit.is_some() {
+        let replaced_targets = if changed.contains(&Leg::Tp) && target.take_profit.is_some() {
             self.deferred_to_retire(&source, vec![(Leg::Tp, REPLACED)], true)
                 .await?
         } else {
@@ -1101,6 +1126,9 @@ impl OkxEngine {
 
         // Place new legs before cancelling live algos, so swapping a stop for a
         // trailing stop can never leave the position with neither.
+        let fixed_is_only_placement = changed
+            .iter()
+            .all(|leg| *leg == Leg::Sl || !leg.is_set(&target));
         let mut needs_position_check = false;
         let mut placed_fixed = None;
         for leg in changed.iter().copied().filter(|leg| leg.is_set(&target)) {
@@ -1113,16 +1141,21 @@ impl OkxEngine {
             // Written before anything is sent, so an unanswered request can be looked up by
             // algoClOrdId.
             let inserted = row.clone();
-            let replaces = if leg == Leg::Tp {
-                std::mem::take(&mut replaced_targets)
-            } else {
-                Vec::new()
-            };
+            // Recovery must know which deferred exits this placement affects
+            // even when its answer is lost before the edit can finish.
+            let replaces = match leg {
+                Leg::Tp => replaced_targets.as_slice(),
+                Leg::Sl if fixed_is_only_placement => removed_trailing.as_slice(),
+                Leg::Sl | Leg::Trail => &[],
+            }
+            .iter()
+            .map(|(deferred, _)| deferred.id.clone())
+            .collect::<Vec<_>>();
             self.rows(move |rows| {
                 rows.transaction(&mut || {
                     rows.insert_order(&inserted)?;
-                    for (deferred, _) in &replaces {
-                        rows.link_target_replacement(&deferred.id, &inserted.id)?;
+                    for deferred in &replaces {
+                        rows.link_target_replacement(deferred, &inserted.id)?;
                     }
                     Ok(())
                 })
@@ -1182,7 +1215,10 @@ impl OkxEngine {
             self.check_follow_up_position(&position, spec, &position_changed)
                 .await?;
         }
-        if let Some(fixed) = placed_fixed.as_ref().filter(|_| removing_trailing) {
+        if let Some(fixed) = placed_fixed
+            .as_ref()
+            .filter(|_| removing_trailing || !removed_trailing.is_empty())
+        {
             if let Err(error) = self
                 .check_fixed_stop_coverage(fixed, &position, &context.registry, &position_changed)
                 .await
@@ -1288,13 +1324,7 @@ impl OkxEngine {
             return Err(changed());
         }
         if let Some(stop) = stop {
-            let stop = dec(stop)?;
-            let liquidation = dec(&truthy_text(row.get("liqPx")).unwrap_or_else(|| "0".into()))?;
-            let before_liquidation = match side {
-                PositionSide::Long => stop.gt(&liquidation),
-                PositionSide::Short => stop.lt(&liquidation),
-            };
-            if !liquidation.is_zero() && !before_liquidation {
+            if !stop_precedes_liquidation(stop, row, side)? {
                 return Err(EngineError::message(
                     "Stop loss must trigger before liquidation",
                 ));
@@ -1375,11 +1405,7 @@ impl OkxEngine {
                 "The fixed stop loss must be a market order to remove the trailing stop",
             ));
         }
-        let (listed, recorded) = sizes(fixed, &algo, registry);
-        if !listed
-            .zip(recorded)
-            .is_some_and(|(live, local)| live.min(&local).gte(&contracts))
-        {
+        if !covers_with_reported_size(fixed, &algo, &contracts, registry) {
             return Err(EngineError::message(
                 "The fixed stop loss does not cover the entire OKX position",
             ));
@@ -1623,6 +1649,60 @@ impl OkxEngine {
         Ok(failure)
     }
 
+    /// True when the linked stop has resolved the removal or still needs confirmation.
+    /// A known loss of coverage leaves the original trailing intent eligible to send.
+    async fn resolve_deferred_trailing_removal(
+        &self,
+        row: &mut Order,
+        linked_replacements: &[Order],
+        registry: &Registry,
+        snapshot: &mut PositionSnapshot,
+    ) -> Result<bool, EngineError> {
+        let Some(fixed) = linked_replacements.iter().rev().find(|fixed| {
+            fixed.status == OrderStatus::Open
+                && leg_of(fixed) == Some(Leg::Sl)
+                && fixed.symbol == row.symbol
+                && fixed.side == row.side
+        }) else {
+            return Ok(false);
+        };
+        if fixed.exchange_order_id.as_deref().is_none_or(str::is_empty) {
+            return Ok(true);
+        }
+        let Some(algo) = self.lookup_algo(&fixed.id).await? else {
+            return Ok(true);
+        };
+        if !live_algo_matches(&algo, Leg::Sl, fixed)?
+            || algo.get("slOrdPx").and_then(Value::as_str) != Some("-1")
+        {
+            return Ok(false);
+        }
+        *snapshot = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
+        let inst = to_inst_id(&row.symbol);
+        let Some((position, signed_size)) = isolated_net_position(&snapshot.open, &inst) else {
+            return Ok(false);
+        };
+        let short = signed_size.is_negative();
+        if (fixed.side == OrderSide::Buy) != short {
+            return Ok(false);
+        }
+        let (side, contracts) = if short {
+            (PositionSide::Short, signed_size.neg())
+        } else {
+            (PositionSide::Long, signed_size)
+        };
+        let Some(stop) = fixed.trigger_price.as_deref() else {
+            return Ok(false);
+        };
+        if !covers_with_reported_size(fixed, &algo, &contracts, registry)
+            || !stop_precedes_liquidation(stop, position, side)?
+        {
+            return Ok(false);
+        }
+        self.close_row(row, REMOVED).await?;
+        Ok(true)
+    }
+
     async fn submit_deferred_protection(
         &self,
         row: &mut Order,
@@ -1643,6 +1723,17 @@ impl OkxEngine {
                 .close_row(row, "Deferred protection canceled: parent missing")
                 .await;
         };
+        let id = row.id.clone();
+        let linked_replacements = self
+            .rows(move |rows| Ok(rows.target_replacements(&id)?))
+            .await?;
+        if leg == Leg::Trail
+            && self
+                .resolve_deferred_trailing_removal(row, &linked_replacements, registry, snapshot)
+                .await?
+        {
+            return Ok(());
+        }
         if parent.status == OrderStatus::Open {
             return Ok(());
         }
@@ -1654,13 +1745,6 @@ impl OkxEngine {
         let inst_id = to_inst_id(&row.symbol);
         let confirming = self.now().saturating_sub(parent.updated_at) < POSITION_MISSING_MS;
         let context = self.context().await?;
-        let linked_replacements = if leg == Leg::Tp {
-            let id = row.id.clone();
-            self.rows(move |rows| Ok(rows.target_replacements(&id)?))
-                .await?
-        } else {
-            Vec::new()
-        };
         let replacement = context.open_orders.iter().rev().find(|other| {
             other.symbol == row.symbol
                 && other.side == row.side
@@ -1772,12 +1856,14 @@ impl OkxEngine {
             // second target that could overlap the already accepted replacement.
             return Ok(());
         }
-        if linked_replacements.iter().any(|replacement| {
-            replacement
-                .exchange_order_id
-                .as_deref()
-                .is_some_and(|id| !id.is_empty())
-        }) {
+        if leg == Leg::Tp
+            && linked_replacements.iter().any(|replacement| {
+                replacement
+                    .exchange_order_id
+                    .as_deref()
+                    .is_some_and(|id| !id.is_empty())
+            })
+        {
             // Acceptance of the replacement superseded this price. A later fill
             // or cancellation of the replacement cannot authorize the old target.
             return Ok(());

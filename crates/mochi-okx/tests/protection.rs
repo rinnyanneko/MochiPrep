@@ -2543,6 +2543,90 @@ async fn removing_a_partial_entrys_trailing_stop_persists_through_its_final_fill
 }
 
 #[tokio::test]
+async fn a_pending_fixed_stop_change_remembers_to_remove_the_deferred_trailing_stop() {
+    let (h, entry) = deferred_trailing_with_unconfirmed_fixed_stop().await;
+    let id = format!("{}:trail", entry.id);
+    let restarted = restart(&h);
+    restarted.sync().await.unwrap();
+    assert_eq!(restarted.protection_of("BTCUSDT"), stop("74500"));
+    assert_eq!(h.order_row(&id).status, OrderStatus::Canceled);
+    assert_eq!(h.order_row(&id).reject_reason.as_deref(), Some("Removed"));
+    assert_eq!(h.algo_placed().len(), 1);
+}
+
+#[tokio::test]
+async fn an_unconfirmed_fixed_stop_that_turns_out_undersized_keeps_the_deferred_trailing_stop() {
+    let (h, entry) = deferred_trailing_with_unconfirmed_fixed_stop().await;
+    h.okx
+        .state()
+        .algos
+        .values_mut()
+        .find(|algo| algo.get("slTriggerPx") == Some(&json!("74500")))
+        .unwrap()
+        .insert("sz".into(), json!("0.05"));
+    let restarted = restart(&h);
+    restarted.sync().await.unwrap();
+    assert_eq!(
+        h.order_row(&format!("{}:trail", entry.id)).status,
+        OrderStatus::Open
+    );
+    assert!(restarted.protection_of("BTCUSDT").trailing_stop.is_some());
+    assert_eq!(
+        h.algo_placed().last().unwrap()["ordType"],
+        "move_order_stop"
+    );
+}
+
+async fn filled_entry_with_deferred_trailing_stop() -> (Harness, Order) {
+    let (h, entry) = deferred_limit().await;
+    h.okx.state().fill_resting();
+    h.quote_time.store(START - 120_000, Ordering::SeqCst);
+    h.sync().await;
+    let id = format!("{}:trail", entry.id);
+    assert_eq!(h.order_row(&id).status, OrderStatus::Open);
+    assert!(h.algo_placed().is_empty());
+    h.quote_time.store(0, Ordering::SeqCst);
+    (h, entry)
+}
+
+async fn deferred_trailing_with_unconfirmed_fixed_stop() -> (Harness, Order) {
+    let (h, entry) = filled_entry_with_deferred_trailing_stop().await;
+    let id = format!("{}:trail", entry.id);
+    {
+        let mut okx = h.okx.state();
+        okx.lose_next_algo_response = true;
+        okx.algo_lookup_down = true;
+    }
+    let result = h.set(stop("74500")).await.unwrap();
+    assert!(result.pending);
+    assert_eq!(h.order_row(&id).status, OrderStatus::Open);
+    assert_eq!(h.algo_placed().len(), 1);
+
+    h.okx.state().algo_lookup_down = false;
+    h.advance(2);
+    (h, entry)
+}
+
+#[tokio::test]
+async fn a_refused_take_profit_preserves_the_deferred_trailing_stop_in_a_combined_edit() {
+    let (h, entry) = filled_entry_with_deferred_trailing_stop().await;
+    h.okx.state().reject_algo_if = Some(Box::new(|body| body.get("tpTriggerPx").is_some()));
+    let request = Protection {
+        take_profit: Some("78000".into()),
+        ..stop("74500")
+    };
+    assert!(h.set(request).await.is_err());
+    h.advance(2);
+    let restarted = restart(&h);
+    restarted.sync().await.unwrap();
+    assert_eq!(
+        h.order_row(&format!("{}:trail", entry.id)).status,
+        OrderStatus::Open
+    );
+    assert!(restarted.protection_of("BTCUSDT").trailing_stop.is_some());
+}
+
+#[tokio::test]
 async fn raising_a_partially_filled_entry_target_survives_completion_of_its_parent() {
     let (h, entry, filled_order, full_position) = partial_target().await;
     h.advance(2);
