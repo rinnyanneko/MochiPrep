@@ -7,7 +7,7 @@
 
 use mochi_domain::jsnum::js_number_raw;
 use rusqlite::types::Type;
-use rusqlite::{Connection, OptionalExtension, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 
 pub use crate::ai::*;
@@ -234,6 +234,52 @@ pub fn decision_stats(conn: &Connection, agent_id: &str) -> Result<DecisionStats
         count,
         estimated_cost: cost,
     })
+}
+
+pub struct AgentExecution {
+    pub agent_id: String,
+    pub at: i64,
+    pub side: String,
+    pub reduce_only: bool,
+}
+
+/// Keep deleted or moved agents' executions in the result. The immutable order owns the evidence,
+/// independent of any current agent configuration or local aggregate fill.
+pub fn agent_executions(
+    conn: &Connection,
+    account_id: &str,
+    symbol: &str,
+) -> Result<Vec<AgentExecution>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT orders.agent_id, fills.executed_at, orders.side, orders.reduce_only
+         FROM exchange_order_executions AS fills JOIN orders ON orders.id = fills.order_id
+         WHERE orders.account_id=? AND orders.symbol=? AND orders.agent_id IS NOT NULL
+         ORDER BY fills.executed_at",
+    )?;
+    let rows = stmt.query_map(params![account_id, symbol], |row| {
+        Ok(AgentExecution {
+            agent_id: row.get(0)?,
+            at: row.get(1)?,
+            side: row.get(2)?,
+            reduce_only: row.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// How many fills the agent's own orders in the account had.
+pub fn count_agent_fills(
+    conn: &Connection,
+    account_id: &str,
+    agent_id: &str,
+) -> Result<usize, StoreError> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM fills JOIN orders ON orders.id = fills.order_id
+         WHERE fills.account_id=? AND orders.agent_id=?",
+        params![account_id, agent_id],
+        |row| row.get(0),
+    )?;
+    Ok(usize::try_from(count).unwrap_or(0))
 }
 
 /// Stored costs use Node's `Number(text)` rules, including JS whitespace and radix prefixes.

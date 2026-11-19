@@ -186,6 +186,17 @@ fn request(state: &AppState, normaliser: &Normaliser, step: &Value) -> Request<B
     builder.body(Body::from(body)).unwrap()
 }
 
+/// The response without the keys Rust added after the switch-over, which the recorded Node
+/// session cannot hold: the arena's `attribution` and `pnl`, so OKX rows can leave deposits out.
+/// Every other byte must still match.
+fn without_post_node_fields(path: &str, text: String) -> String {
+    if path != "/api/arena" {
+        return text;
+    }
+    let added = regex::Regex::new(r#""attribution":"[A-Z]+","pnl":(?:null|"[^"]*"),"#).unwrap();
+    added.replace_all(&text, "").into_owned()
+}
+
 #[tokio::test]
 async fn the_recorded_node_session_replays_byte_for_byte() {
     let fixture = fixture();
@@ -202,6 +213,7 @@ async fn the_recorded_node_session_replays_byte_for_byte() {
         let status = response.status().as_u16();
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
         let text = normaliser.normalise(std::str::from_utf8(&bytes).unwrap());
+        let text = without_post_node_fields(step["path"].as_str().unwrap(), text);
         assert_eq!(
             (status, text.as_str()),
             (

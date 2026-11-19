@@ -2812,6 +2812,9 @@ async fn protection_and_the_published_position_use_the_same_snapshot_after_a_fli
     assert_eq!(view.position.side, mochi_domain::PositionSide::Long);
     assert_eq!(view.stop_loss.as_deref(), Some("74000"));
     assert_eq!(view.take_profit.as_deref(), Some("78000"));
+    let results = h.engine.open_results();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].opening_side.as_deref(), Some("BUY"));
 }
 
 #[tokio::test]

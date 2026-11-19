@@ -607,6 +607,10 @@ impl Runtime {
                 )?;
             }
             rows::insert_decision(self.connection(), &c.record).map_err(|e| self.api_error(e))?;
+            if let Some(log) = &self.operation_logs {
+                let outcome = c.record["outcome"].as_str().unwrap_or("UNKNOWN");
+                log.record(format_args!("agent cycle -> {outcome}"));
+            }
             // A cycle can finish after a lifecycle action. Keep its decision in History,
             // but leave the newer schedule and failure state alone.
             if self

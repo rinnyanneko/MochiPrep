@@ -9,8 +9,9 @@ import { VaultCard } from '@/components/VaultCard';
 import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Select, Textarea } from '@/components/ui';
 import { api } from '@/lib/api';
 import { formatDateTime, listTimeZones, resolveTimeZone } from '@/lib/display';
+import { COLOR_PRESETS, directionPalette, type ColorPreset } from '@/lib/direction-colors';
 import { pct } from '@/lib/format';
-import { attempt, useApp } from '@/store';
+import { attempt, useApp, useQuery } from '@/store';
 
 const KINDS: { value: Exclude<ProviderKind, 'MOCK'>; label: string; baseUrl: string; model: string }[] = [
   { value: 'OPENAI_COMPATIBLE', label: 'OpenAI-compatible (custom URL)', baseUrl: 'http://localhost:11434/v1', model: '' },
@@ -148,9 +149,11 @@ function ProviderRow({ provider, onEdit }: { provider: ProviderView; onEdit(): v
 
 function DisplayCard() {
   const timeZone = useApp((s) => s.timeZone);
-  const flipColors = useApp((s) => s.flipColors);
+  const colors = useApp((s) => s.directionColors);
+  const theme = useApp((s) => s.theme);
+  const palette = directionPalette(colors, theme);
   const setTimeZone = useApp((s) => s.setTimeZone);
-  const setFlipColors = useApp((s) => s.setFlipColors);
+  const setColors = useApp((s) => s.setDirectionColors);
   const zones = useMemo(() => listTimeZones().filter((zone) => zone !== 'UTC'), []);
   const now = Date.now();
 
@@ -169,16 +172,66 @@ function DisplayCard() {
         </Field>
         <div>
           <span className="mb-1 block text-xs font-semibold text-ink-2">Up and down colors</span>
-          <label className="flex h-9 items-center gap-2 text-[13px]">
-            <input type="checkbox" className="accent-[var(--accent)]" checked={flipColors} onChange={(e) => setFlipColors(e.target.checked)} data-testid="flip-colors" />{' '}
-            Red for up, green for down
-          </label>
+          <Select aria-label="Up and down color preset" value={colors.preset} onChange={(e) => {
+            if (e.target.value === 'custom') setColors({ preset: 'custom', ...palette });
+            else setColors({ preset: e.target.value as ColorPreset });
+          }}>
+            {COLOR_PRESETS.map((preset) => <option key={preset} value={preset}>{preset.split('-').map((name) => name[0]!.toUpperCase() + name.slice(1)).join(' / ')}</option>)}
+            <option value="custom">Custom</option>
+          </Select>
+          <div className="mt-2 flex gap-4">
+            {(['rise', 'fall'] as const).map((direction) => <label key={direction} className="flex items-center gap-2 text-xs text-ink-2">
+              {direction === 'rise' ? 'Up / Long' : 'Down / Short'}
+              <input type="color" aria-label={direction === 'rise' ? 'Up color' : 'Down color'} value={palette[direction]}
+                onChange={(e) => {
+                  const current = useApp.getState();
+                  setColors({ preset: 'custom', ...directionPalette(current.directionColors, current.theme), [direction]: e.target.value });
+                }}
+                className="h-8 w-10 cursor-pointer rounded border border-line bg-surface-2" />
+            </label>)}
+          </div>
           <span className="mt-1 block text-[11px] text-ink-3">
             Applies to prices, PnL, long and short, and charts:{' '}
             <span className="num font-semibold text-rise">{pct(1.25)}</span> <span className="num font-semibold text-fall">{pct(-1.25)}</span>. Warnings and errors stay red.
           </span>
         </div>
       </div>
+    </Card>
+  );
+}
+
+type LogPreference = { retention: number; available: boolean };
+
+function OperationLogsCard() {
+  const { data, error, reload } = useQuery(() => api.get<LogPreference>('/settings/operation-logs'), []);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const text = draft ?? String(data?.retention ?? '');
+  const retention = Number(text);
+  const valid = text.trim() !== '' && Number.isInteger(retention) && retention >= -1 && retention <= 2_147_483_647;
+  const save = async () => {
+    setSaving(true);
+    const saved = await attempt(() => api.put<LogPreference>('/settings/operation-logs', { retention }));
+    setSaving(false);
+    if (saved) {
+      setDraft(String(saved.retention));
+      reload();
+      useApp.getState().toast('info', 'Log retention saved');
+    }
+  };
+  return (
+    <Card>
+      <CardHeader title="Operation logs" description="The backend writes operation results to the logs folder in its data directory." />
+      {error && <p className="px-5 pb-4 text-sm text-down">{error}</p>}
+      {data && !data.available && <p className="px-5 pb-4 text-sm text-down">Operation logs are unavailable.</p>}
+      {data?.available && (
+        <div className="flex flex-wrap items-end gap-3 px-5 pb-4">
+          <Field label="Dated logs to keep" hint="0 keeps only latest.log. −1 keeps every dated log.">
+            <Input type="number" min={-1} step={1} value={text} disabled={saving} onChange={(event) => setDraft(event.target.value)} />
+          </Field>
+          <Button disabled={saving || !valid} onClick={save}>Save log retention</Button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -217,6 +270,8 @@ export function SettingsPage() {
         </Card>
 
         <DisplayCard />
+
+        <OperationLogsCard />
 
         <VaultCard />
 

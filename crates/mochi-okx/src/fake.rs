@@ -73,8 +73,16 @@ pub struct FakeState {
     /// Orders by clOrdId.
     pub orders: IndexMap<String, Row>,
     pub position: Option<Row>,
+    /// Additional rows returned alongside the position managed by mock order fills.
     pub other_positions: Vec<Row>,
     pub recent_fills: Vec<Row>,
+    /// `account/positions-history` rows, in any order; served newest `uTime` first.
+    pub positions_history: Vec<Row>,
+    pub execution_history: Vec<Row>,
+    /// Makes `account/positions-history` fail.
+    pub history_down: bool,
+    /// Answers this many more `account/positions-history` requests, then fails them.
+    pub history_answers_left: Option<usize>,
     pub simulated_headers: Vec<Option<String>>,
     /// Every signed request as `METHOD pathname`, in arrival order.
     pub calls: Vec<String>,
@@ -130,6 +138,10 @@ impl Default for FakeState {
             position: None,
             other_positions: Vec::new(),
             recent_fills: Vec::new(),
+            positions_history: Vec::new(),
+            execution_history: Vec::new(),
+            history_down: false,
+            history_answers_left: None,
             simulated_headers: Vec::new(),
             calls: Vec::new(),
             algos: IndexMap::new(),
@@ -352,6 +364,48 @@ impl FakeOkx {
                 .filter(|row| text(row.get("instId")) == inst_id)
                 .take(crate::client::RECENT_FILLS_LIMIT)
                 .collect();
+            return Ok(ok(json!(rows)));
+        }
+        if ends("/trade/fills-history") {
+            let bill = |row: &Row| text(row.get("billId")).and_then(|id| id.parse::<u64>().ok());
+            let after = param("after").and_then(|id| id.parse::<u64>().ok());
+            let limit = param("limit")
+                .and_then(|limit| limit.parse::<usize>().ok())
+                .unwrap_or(100);
+            let mut rows: Vec<_> = state
+                .execution_history
+                .iter()
+                .filter(|row| after.is_none_or(|after| bill(row).is_some_and(|id| id < after)))
+                .collect();
+            rows.sort_by_key(|row| std::cmp::Reverse(bill(row)));
+            rows.truncate(limit);
+            return Ok(ok(json!(rows)));
+        }
+        if ends("/account/positions-history") {
+            let exhausted = match &mut state.history_answers_left {
+                Some(0) => true,
+                Some(left) => {
+                    *left -= 1;
+                    false
+                }
+                None => false,
+            };
+            if state.history_down || exhausted {
+                return Ok(answer(json!([]), "50001", "Systems are busy"));
+            }
+            let u_time = |row: &Row| number(row.get("uTime"));
+            let after = param("after").and_then(|after| Dec::parse(&after).ok());
+            let limit = param("limit")
+                .and_then(|limit| limit.parse::<usize>().ok())
+                .unwrap_or(100);
+            let mut rows: Vec<Row> = state
+                .positions_history
+                .iter()
+                .filter(|row| after.as_ref().is_none_or(|after| u_time(row).lt(after)))
+                .cloned()
+                .collect();
+            rows.sort_by(|a, b| u_time(b).cmp_value(&u_time(a)));
+            rows.truncate(limit);
             return Ok(ok(json!(rows)));
         }
         if ends("/account/positions") {

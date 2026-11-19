@@ -14,8 +14,8 @@ use mochi_core::paper::{
 };
 use mochi_domain::registry::Instruments;
 use mochi_domain::{
-    DataSource, EquityPoint, Fill, LedgerEvent, Order, OrderRequest, OrderStatus, PaperAccount,
-    Position, Protection, Quote,
+    DataSource, EquityPoint, ExchangeExecutionCursor, Fill, LedgerEvent, Order, OrderRequest,
+    OrderStatus, PaperAccount, Position, Protection, Quote,
 };
 use mochi_store::{open_database, open_in_memory, SqlitePaperStore};
 use serde_json::json;
@@ -358,6 +358,55 @@ impl PaperStore for AuditedStore {
         limit: usize,
     ) -> Result<Vec<EquityPoint>, StoreFailure> {
         self.inner.list_equity(account_id, limit)
+    }
+    fn execution_cursor(&self, account_id: &str) -> Result<ExchangeExecutionCursor, StoreFailure> {
+        self.inner.execution_cursor(account_id)
+    }
+    fn save_execution_cursor(
+        &self,
+        account_id: &str,
+        cursor: &ExchangeExecutionCursor,
+    ) -> Result<(), StoreFailure> {
+        self.inner.save_execution_cursor(account_id, cursor)
+    }
+    fn record_exchange_execution(
+        &self,
+        order_id: &str,
+        trade_id: &str,
+        executed_at: i64,
+    ) -> Result<(), StoreFailure> {
+        self.inner
+            .record_exchange_execution(order_id, trade_id, executed_at)
+    }
+
+    fn upsert_position_record(
+        &self,
+        r: &mochi_domain::ExchangePositionRecord,
+    ) -> Result<(), StoreFailure> {
+        self.write("upsert_position_record");
+        self.inner.upsert_position_record(r)
+    }
+    fn list_position_records(
+        &self,
+        account_id: &str,
+        inst_id: &str,
+        since: i64,
+    ) -> Result<Vec<mochi_domain::ExchangePositionRecord>, StoreFailure> {
+        self.inner.list_position_records(account_id, inst_id, since)
+    }
+    fn latest_position_record_at(&self, account_id: &str) -> Result<Option<i64>, StoreFailure> {
+        self.inner.latest_position_record_at(account_id)
+    }
+    fn position_history_backfill(&self, account_id: &str) -> Result<Option<i64>, StoreFailure> {
+        self.inner.position_history_backfill(account_id)
+    }
+    fn set_position_history_backfill(
+        &self,
+        account_id: &str,
+        before: Option<i64>,
+    ) -> Result<(), StoreFailure> {
+        self.write("set_position_history_backfill");
+        self.inner.set_position_history_backfill(account_id, before)
     }
 }
 

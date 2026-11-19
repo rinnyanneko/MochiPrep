@@ -185,7 +185,11 @@ impl Backend {
     /// Only a confirmed exit counts as dead: a status that cannot be read leaves a process
     /// that may still hold armed accounts.
     pub fn is_alive(&mut self) -> bool {
-        !matches!(self.child.try_wait(), Ok(Some(_)))
+        self.exit_status().is_none()
+    }
+
+    pub fn exit_status(&mut self) -> Option<std::process::ExitStatus> {
+        self.child.try_wait().ok().flatten()
     }
 
     /// The last of the child's stderr, trimmed; empty if it wrote none.

@@ -192,6 +192,11 @@ impl OkxEngine {
             // Live or partly filled: still working on OKX.
             _ => order.status = OrderStatus::Open,
         }
+        let execution = if filled.gt(&super::zero()) && order.agent_id.is_some() {
+            super::history::execution_of(&remote)
+        } else {
+            None
+        };
         let row = order.clone();
         let attached =
             row.status != OrderStatus::Open && filled.gt(&super::zero()) && !row.reduce_only;
@@ -206,6 +211,9 @@ impl OkxEngine {
         self.rows(move |rows| {
             rows.transaction(&mut || {
                 rows.save_order(&row)?;
+                if let Some((trade_id, at)) = &execution {
+                    rows.record_exchange_execution(&row.id, trade_id, *at)?;
+                }
                 if attached {
                     record_attached(rows, &row, &filled, at)?;
                 }
@@ -319,13 +327,15 @@ impl OkxEngine {
             }
         };
         let saved_protection = protection.clone();
-        let (positions, balance) = {
+        let (positions, open_results, balance) = {
             let account_id = account_id.clone();
             let now = self.now();
             self.rows(move |rows| {
                 let registry = Registry(rows.instruments());
                 let mut positions = Vec::new();
+                let mut open_results = Vec::new();
                 for p in &snapshot.open {
+                    open_results.extend(super::history::open_result_of(p, &registry)?);
                     positions.extend(Self::to_view(
                         p,
                         rows,
@@ -336,7 +346,7 @@ impl OkxEngine {
                     )?);
                 }
                 let balance = Self::to_balance(usdt.as_ref(), rows, &account_id)?;
-                Ok((positions, balance))
+                Ok((positions, open_results, balance))
             })
             .await?
         };
@@ -346,6 +356,7 @@ impl OkxEngine {
             state.positions = positions;
             state.protection = saved_protection;
             state.protection_keys = keys;
+            state.open_results = open_results;
             state.balance = Some(balance.clone());
             state.last_sync_at = Some(at);
             // Set here, in the same step, so the account never reads as healthy in between.
