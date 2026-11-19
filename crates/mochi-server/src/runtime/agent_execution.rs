@@ -26,6 +26,14 @@ pub(super) fn settle(r: &mut Value, outcome: &str, detail: Option<String>) {
     r["outcome"] = json!(outcome);
     r["outcomeDetail"] = json!(detail);
 }
+
+pub(super) fn position_binding_field(action: AiAction) -> Option<&'static str> {
+    match action {
+        AiAction::Close => Some("closePositionId"),
+        AiAction::Protect => Some("protectPositionId"),
+        _ => None,
+    }
+}
 fn plain(n: Option<f64>) -> Option<String> {
     n.map(|n| Dec::from_js_number(n).to_fixed())
 }
@@ -436,7 +444,7 @@ impl Runtime {
 
     // ---- acting ---------------------------------------------------------------------------
 
-    pub(super) fn close_target(
+    pub(super) fn position_target(
         &self,
         a: &rows::Agent,
         target: &ExecutionTarget,
@@ -533,7 +541,7 @@ impl Runtime {
         };
         if d.action == AiAction::Close {
             let p = self
-                .close_target(a, target, r["closePositionId"].as_str())?
+                .position_target(a, target, r["closePositionId"].as_str())?
                 .ok_or_else(|| {
                     ApiError::bad_request("The position changed since it was analyzed")
                 })?;
@@ -640,11 +648,9 @@ impl Runtime {
         let target = self.execution(&account)?;
         let d: AiDecisionData =
             serde_json::from_value(r["decision"].clone()).map_err(|e| self.api_error(e))?;
-        if d.action == AiAction::Close
-            && self
-                .close_target(&a, &target, r["closePositionId"].as_str())?
-                .is_none()
-        {
+        let binding = position_binding_field(d.action);
+        let position_id = binding.and_then(|field| r[field].as_str());
+        if binding.is_some() && self.position_target(&a, &target, position_id)?.is_none() {
             settle(
                 &mut r,
                 "SIGNAL_EXPIRED",
@@ -674,6 +680,18 @@ impl Runtime {
             protection,
             &target,
         )?;
+        // OKX sync can publish another snapshot while risk is being evaluated.
+        if checked
+            .as_ref()
+            .is_some_and(|checked| Some(checked.position_id.as_str()) != position_id)
+        {
+            settle(
+                &mut r,
+                "SIGNAL_EXPIRED",
+                Some("The position changed since it was analyzed".into()),
+            );
+            return self.save_signal(r).map(SignalStep::Done);
+        }
         r["risk"] = json!(risk);
         if !risk.approved {
             settle(

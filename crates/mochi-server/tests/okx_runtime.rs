@@ -1031,6 +1031,41 @@ async fn an_old_close_suggestion_expires_after_the_position_flips() {
 }
 
 #[tokio::test]
+async fn a_protect_suggestion_expires_for_a_replacement_with_the_same_stop() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.place(&account.id).await;
+    *w.answer.lock().unwrap() = decision("PROTECT", 74_500.0, None);
+    let agent = w.agent_on(&account.id, "SIGNAL").await;
+    let suggestion = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    assert_eq!(suggestion["outcome"], "SIGNAL", "{suggestion}");
+    assert_eq!(suggestion["protectionBefore"]["stopLoss"], "74000");
+
+    w.okx
+        .state()
+        .position
+        .as_mut()
+        .unwrap()
+        .insert("tradeId".into(), json!("10"));
+    w.rt.sync_exchanges().await.unwrap();
+    let engine = w.rt.execution(&account.id).await.unwrap();
+    let protection = engine
+        .protection_of(account.id.clone(), "BTCUSDT".into())
+        .await
+        .unwrap();
+    assert_eq!(protection.stop_loss.as_deref(), Some("74000"));
+    let placed = w.okx.state().algo_placed.len();
+    let done =
+        w.rt.execute_signal(suggestion["id"].as_str().unwrap())
+            .await
+            .unwrap();
+    assert_eq!(done["outcome"], "SIGNAL_EXPIRED", "{done}");
+    assert_eq!(w.okx.state().algo_placed.len(), placed);
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_close_suggestion_cannot_close_a_remote_replacement_hidden_by_the_cache() {
     let w = World::new().await;
     let account = w.connect("OKX_LIVE").await;

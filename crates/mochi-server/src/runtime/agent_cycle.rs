@@ -5,7 +5,10 @@
 //! the start of `analyzeAndAct`). On an exchange, cancelling stale entries and the final order
 //! or protection change go out off the actor and come back as completions.
 use super::{
-    agent_execution::{same_protection, settle, settle_acted, target_protection, Acted, Outgoing},
+    agent_execution::{
+        position_binding_field, same_protection, settle, settle_acted, target_protection, Acted,
+        Outgoing,
+    },
     agents::{CycleReply, CycleTrigger},
     execution::ExecutionTarget,
     Runtime,
@@ -510,10 +513,14 @@ impl Runtime {
             settle(&mut c.record, "HOLD", None);
             return Ok(None);
         }
-        if d.action == AiAction::Close {
-            if self
-                .close_target(&c.agent, &target, c.analyzed_position_id.as_deref())?
-                .is_none()
+        if let Some(field) = position_binding_field(d.action) {
+            let position_id = c.analyzed_position_id.as_deref();
+            if checked
+                .as_ref()
+                .is_some_and(|checked| Some(checked.position_id.as_str()) != position_id)
+                || self
+                    .position_target(&c.agent, &target, position_id)?
+                    .is_none()
             {
                 settle(
                     &mut c.record,
@@ -522,7 +529,7 @@ impl Runtime {
                 );
                 return Ok(None);
             }
-            c.record["closePositionId"] = json!(c.analyzed_position_id);
+            c.record[field] = json!(position_id);
         }
         if d.action == AiAction::Protect {
             let p = protection.ok_or_else(|| {

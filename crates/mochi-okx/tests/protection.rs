@@ -2490,6 +2490,10 @@ async fn the_next_protection_leg_is_not_sent_if_readback_observes_a_replacement_
 
 async fn partial_target() -> (Harness, Order, Row, Row) {
     let (h, entry) = resting_target().await;
+    partial_entry(h, entry).await
+}
+
+async fn partial_entry(h: Harness, entry: Order) -> (Harness, Order, Row, Row) {
     let (filled_order, full_position) = {
         let mut okx = h.okx.state();
         okx.fill_resting();
@@ -2509,6 +2513,33 @@ async fn partial_target() -> (Harness, Order, Row, Row) {
     assert_eq!(h.order_row(&entry.id).status, OrderStatus::Open);
     assert_eq!(h.view().position.quantity, "0.0005");
     (h, entry, filled_order, full_position)
+}
+
+#[tokio::test]
+async fn removing_a_partial_entrys_trailing_stop_persists_through_its_final_fill() {
+    let (h, entry) = deferred_limit().await;
+    let (h, entry, filled_order, full_position) = partial_entry(h, entry).await;
+    let id = format!("{}:trail", entry.id);
+    assert_eq!(h.order_row(&id).status, OrderStatus::Open);
+    h.set(stop("74000")).await.unwrap();
+    h.advance(2);
+    {
+        let mut okx = h.okx.state();
+        okx.orders.insert(
+            mochi_okx::to_cl_ord_id(&entry.client_order_id),
+            filled_order,
+        );
+        okx.position = Some(full_position);
+    }
+    let restarted = restart(&h);
+    restarted.sync().await.unwrap();
+    assert_eq!(h.order_row(&entry.id).status, OrderStatus::Filled);
+    assert_eq!(h.order_row(&id).status, OrderStatus::Canceled);
+    assert_eq!(h.order_row(&id).reject_reason.as_deref(), Some("Removed"));
+    assert!(h
+        .algo_placed()
+        .iter()
+        .all(|order| order["ordType"] != "move_order_stop"));
 }
 
 #[tokio::test]

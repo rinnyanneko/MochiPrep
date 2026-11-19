@@ -1066,12 +1066,18 @@ impl OkxEngine {
             decision_id,
         };
         // A partially filled entry already belongs to an explicit removal.
-        let removed_targets = if !retain.take_profit && target.take_profit.is_none() {
-            self.deferred_to_retire(&source, vec![(Leg::Tp, REMOVED)], true)
-                .await?
-        } else {
-            Vec::new()
-        };
+        let mut removals = Vec::new();
+        if !retain.take_profit && target.take_profit.is_none() {
+            removals.push((Leg::Tp, REMOVED));
+        }
+        if !retain.trailing_stop && target.trailing_stop.is_none() {
+            removals.push((Leg::Trail, REMOVED));
+        }
+        let (removed_targets, removed_trailing): (Vec<_>, Vec<_>) = self
+            .deferred_to_retire(&source, removals, true)
+            .await?
+            .into_iter()
+            .partition(|(row, _)| leg_of(row) == Some(Leg::Tp));
         let mut replaced_targets = if changed.contains(&Leg::Tp) && target.take_profit.is_some() {
             self.deferred_to_retire(&source, vec![(Leg::Tp, REPLACED)], true)
                 .await?
@@ -1086,6 +1092,7 @@ impl OkxEngine {
         } else if checked.is_some()
             || changed.iter().any(|leg| leg.is_set(&target))
             || !removed_targets.is_empty()
+            || !removed_trailing.is_empty()
         {
             self.check_protection_position(&position, spec, new_stop, &position_changed)
                 .await?;
@@ -1244,22 +1251,16 @@ impl OkxEngine {
             }
         }
 
-        let mut deferred = Vec::new();
-        if !retain.trailing_stop {
-            deferred.push((
-                Leg::Trail,
-                if target.trailing_stop.is_some() {
-                    REPLACED
-                } else {
-                    REMOVED
-                },
-            ));
+        // Keep the unsent trailing stop until any new protection has succeeded.
+        self.retire_deferred(removed_trailing).await?;
+        if !retain.trailing_stop && target.trailing_stop.is_some() {
+            let replaced = self
+                .deferred_to_retire(&source, vec![(Leg::Trail, REPLACED)], false)
+                .await?;
+            self.retire_deferred(replaced).await?;
         }
         // A replacement take profit is resolved in reconciliation. The accepted
         // size may be smaller than the position once another entry fills.
-        let retired = self.deferred_to_retire(&source, deferred, false).await?;
-        self.retire_deferred(retired).await?;
-
         let confirmed = self.sync_now().await.is_ok();
         // Every placement was accepted; if the view could not be refreshed, `after` may still be
         // the old protection, which must not read as "nothing changed".
