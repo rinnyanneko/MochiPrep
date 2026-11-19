@@ -768,7 +768,7 @@ fn fill(state: &mut FakeState, order: &Row) {
     } else {
         Some(object(&json!({
             "instId": order.get("instId"), "pos": size.to_fixed(), "avgPx": PRICE, "markPx": PRICE,
-            "upl": "0", "lever": "3", "liqPx": "50000", "margin": "10", "mgnMode": "isolated", "posSide": "net", "tradeId": trade_id, "uTime": "1800000000001", "cTime": "1800000000000",
+            "upl": "0", "lever": "3", "liqPx": "50000", "margin": "10", "mgnMode": "isolated", "posSide": "net", "tradeId": trade_id, "uTime": "1800000000000", "cTime": "1800000000000",
         })))
     };
     // Attached algos go live on the fill. They are left alone when the position closes, so the

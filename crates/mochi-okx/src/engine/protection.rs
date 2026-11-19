@@ -43,11 +43,13 @@ const REMOVED: &str = "Removed";
 const POSITION_CLOSED: &str = "Position closed";
 pub(super) const REACHED_EXIT_UNCONFIRMED: &str =
     "OKX has no record of this market take profit; check its outcome in OKX";
-// Durable outbox state, only written together with a new parent. Clearing it BEFORE sending
-// is the at-most-once boundary: a crash thereafter permits lookup only, never another send.
+// These durable markers identify an unsent intent. Clearing them before sending permits
+// only lookup after a crash, never another send.
 const DEFERRED_TRAILING: &str = "Pending entry fill: trailing stop not yet sent";
 
 const DEFERRED_TP: &str = "Pending entry fill: take profit not yet sent";
+const DEFERRED_POSITION_ADJUSTED: &str =
+    "Pending protection: awaiting position adjustment evidence";
 
 /// Fields read from the current position inside the same queued step as the edit.
 #[derive(Clone, Copy, Debug, Default)]
@@ -82,7 +84,7 @@ fn deferred_parent_id(row: &Order, leg: Leg) -> Option<&str> {
 pub(super) fn is_deferred(row: &Order) -> bool {
     matches!(
         row.reject_reason.as_deref(),
-        Some(DEFERRED_TRAILING | DEFERRED_TP)
+        Some(DEFERRED_TRAILING | DEFERRED_TP | DEFERRED_POSITION_ADJUSTED)
     )
 }
 
@@ -243,10 +245,15 @@ pub(crate) struct Held {
 
 impl PartialEq for Held {
     fn eq(&self, other: &Self) -> bool {
+        self.same_position_size(other) && self.updated_at == other.updated_at
+    }
+}
+
+impl Held {
+    fn same_position_size(&self, other: &Self) -> bool {
         self.side == other.side
             && self.trade_id == other.trade_id
             && self.position_id == other.position_id
-            && self.updated_at == other.updated_at
             && self.contracts.eq_value(&other.contracts)
     }
 }
@@ -302,11 +309,19 @@ enum EntryInterval {
 }
 
 impl PositionHistory<'_> {
+    fn trade_row(&self, id: u64) -> Option<&Row> {
+        self.fills.iter().find(|row| last_trade_id(row) == Some(id))
+    }
+
+    fn last_trade_accounts_for_update(&self) -> bool {
+        // Fill records can be generated after later position changes. Only the
+        // execution time can account for the update directly.
+        self.trade_row(self.trade).and_then(fill_time) == Some(self.updated_at)
+    }
+
     fn entry_interval(&self, first_trade: u64, parent: &str) -> Option<EntryInterval> {
-        let trade_row = |id| self.fills.iter().find(|row| last_trade_id(row) == Some(id));
-        let first = fill_time(trade_row(first_trade)?)?;
-        let latest = trade_row(self.trade)?;
-        let last = fill_time(latest)?;
+        let first = fill_time(self.trade_row(first_trade)?)?;
+        let last = fill_time(self.trade_row(self.trade)?)?;
         if first > last || last > self.updated_at {
             return None;
         }
@@ -350,12 +365,6 @@ impl PositionHistory<'_> {
                 source == parent
             };
             changes.push((trade?, row, opening, own_exit));
-        }
-        // A fill's record can be generated after execution. An update newer than
-        // both timestamps is unexplained even if the known fills fit today's size.
-        let recorded_at = exchange_time(latest, "ts").unwrap_or(last);
-        if self.updated_at > recorded_at {
-            return None;
         }
         // Walk back from the observed size. Missing reductions can make the
         // chain inconsistent even when the position's trade ID is unchanged.
@@ -1185,6 +1194,7 @@ impl OkxEngine {
                         placed_fixed = Some(row);
                     }
                 }
+                Err(error @ EngineError::SessionRetired) => return Err(error),
                 // Unknown outcome: never placed again. A sync looks it up by algoClOrdId; if OKX
                 // shows it live, the placement is known to have succeeded and the change carries
                 // on.
@@ -1566,6 +1576,7 @@ impl OkxEngine {
     /// Node's `try` block for one leg: the body, the placement and the saved algoId.
     async fn place(&self, row: &mut Order, registry: &Registry) -> Result<(), EngineError> {
         let body = algo_body(row, registry)?;
+        self.check_dispatch()?;
         row.exchange_order_id = Some(self.deps.client.place_algo(&body).await?);
         row.updated_at = self.now();
         self.save(row.clone()).await
@@ -1677,7 +1688,17 @@ impl OkxEngine {
             })
             .collect();
         let mut failure = None;
+        let mut dispatched = HashSet::new();
+        let mut retirement = None;
         for batch in sent.chunks(10) {
+            if let Err(error) = self.check_dispatch() {
+                if dispatched.is_empty() {
+                    return Err(error);
+                }
+                retirement = Some(error);
+                break;
+            }
+            dispatched.extend(batch.iter().map(|item| item.algo_id.as_str()));
             if let Err(error) = self.deps.client.cancel_algos(batch).await {
                 failure = Some(format!("Could not cancel an OKX algo order: {error}"));
             }
@@ -1685,6 +1706,14 @@ impl OkxEngine {
         let now = self.now();
         let rows: Vec<Order> = rows
             .into_iter()
+            // A later batch can still be live when a previously sent batch is reconciled.
+            .filter(|row| {
+                retirement.is_none()
+                    || row
+                        .exchange_order_id
+                        .as_deref()
+                        .is_some_and(|id| dispatched.contains(id))
+            })
             .map(|mut row| {
                 if row.status == OrderStatus::Open {
                     row.status = OrderStatus::Canceled;
@@ -1707,6 +1736,9 @@ impl OkxEngine {
         // unhealthy: the algo is only an extra reduce-only order, and sync keeps retrying.
         if let Some(failure) = &failure {
             self.state().cancel_error = Some(failure.clone());
+        }
+        if let Some(error) = retirement {
+            return Err(error);
         }
         Ok(failure)
     }
@@ -1954,6 +1986,17 @@ impl OkxEngine {
                 )
                 .await;
         }
+        let observed = Held {
+            side,
+            contracts: if short {
+                signed_size.neg()
+            } else {
+                signed_size.clone()
+            },
+            trade_id: Some(position_trade),
+            position_id: super::views::position_id(position, side),
+            updated_at: nullish_text(position.get("uTime")),
+        };
         if needs_replacement_stop {
             // An SL-only edit may have superseded the attached stop while leaving
             // the entry's deferred exits in place.
@@ -2074,17 +2117,12 @@ impl OkxEngine {
                             .and_then(Value::as_str)
                             .is_none_or(|id| id.is_empty() || unresolved.contains(id))
                 });
-            let observed_contracts = if short {
-                signed_size.neg()
-            } else {
-                signed_size.clone()
-            };
             let history = PositionHistory {
                 fills: &fills,
                 trade: position_trade,
                 updated_at: position_updated_at,
                 side,
-                contracts: &observed_contracts,
+                contracts: &observed.contracts,
                 reached_exits,
             };
             let filled = match proven_entry_contracts(
@@ -2099,7 +2137,11 @@ impl OkxEngine {
                 // Let lookup identify it before rejecting another entry's intent.
                 _ if awaiting_sibling => return Ok(()),
                 // The position and parent can become visible before the fills endpoint catches up.
-                None if confirming => return Ok(()),
+                None if confirming
+                    || row.reject_reason.as_deref() == Some(DEFERRED_POSITION_ADJUSTED) =>
+                {
+                    return Ok(());
+                }
                 _ => {
                     return self
                         .close_row(
@@ -2109,8 +2151,38 @@ impl OkxEngine {
                         .await;
                 }
             };
+            let explained_by_trade = history.last_trade_accounts_for_update();
+            let known_size = !explained_by_trade
+                && self
+                    .state()
+                    .confirmed_entry_positions
+                    .get(&inst_id)
+                    .is_some_and(|confirmed| {
+                        confirmed.same_position_size(&observed)
+                            && confirmed
+                                .updated_at
+                                .as_deref()
+                                .and_then(|at| at.parse::<i64>().ok())
+                                .is_some_and(|at| at < position_updated_at)
+                    });
+            // Liquidation and ADL can leave tradeId unchanged and only reduce size.
+            // The same previously confirmed size rules out a later system reduction.
+            // A first observation after an adjustment cannot establish that by itself.
+            if !explained_by_trade && !known_size {
+                if row.reject_reason.as_deref() != Some(DEFERRED_POSITION_ADJUSTED) {
+                    row.reject_reason = Some(DEFERRED_POSITION_ADJUSTED.into());
+                    row.updated_at = self.now();
+                    self.save(row.clone()).await?;
+                }
+                return Ok(());
+            }
             if !self.refresh_matching_position(snapshot, &inst_id).await? {
                 return Ok(());
+            }
+            if explained_by_trade {
+                self.state()
+                    .confirmed_entry_positions
+                    .insert(inst_id.clone(), observed);
             }
             filled
         };
@@ -2170,6 +2242,7 @@ impl OkxEngine {
         row.created_at = self.now();
         row.updated_at = self.now();
         self.save(row.clone()).await?;
+        self.check_dispatch()?;
         match self.deps.client.place_algo(&body).await {
             Ok(id) => {
                 row.exchange_order_id = Some(id);
@@ -2235,6 +2308,7 @@ impl OkxEngine {
             return current.map(|_| ());
         }
         match self.send(row, inst_id, &body).await {
+            Err(error @ EngineError::SessionRetired) => return Err(error),
             Err(error @ EngineError::Okx(OkxError::Rejection { .. })) => {
                 row.status = OrderStatus::Rejected;
                 row.reject_reason = Some(error.to_string());

@@ -45,7 +45,16 @@ impl StoreFailure {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CloseSelection {
     pub position_id: Option<String>,
-    pub fraction: f64,
+    pub amount: CloseAmount,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum CloseAmount {
+    Fraction(f64),
+    Quantity {
+        quantity: String,
+        limit_price: Option<String>,
+    },
 }
 
 pub trait PaperStore {

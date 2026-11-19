@@ -17,12 +17,12 @@ use axum::http::HeaderMap;
 use axum::routing::{delete, post, put};
 use axum::{Json, Router};
 use mochi_core::paper::PaperStore;
-use mochi_domain::{OrderRequest, Topic};
+use mochi_domain::Topic;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
 use crate::runtime::ProtectionMeta;
-use crate::validate::{self, ClosePositionInput, ProtectionInput, Schema};
+use crate::validate::{self, ClosePositionInput, PlaceOrderInput, ProtectionInput, Schema};
 use crate::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -42,8 +42,8 @@ async fn place(
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
     let body = validate::read_body(&headers, &body)?;
-    let input: OrderRequest = validate::parse_input(Schema::PlaceOrder, body.as_ref())?;
-    let (account_id, symbol) = (input.account_id.clone(), input.symbol.clone());
+    let input: PlaceOrderInput = validate::parse_input(Schema::PlaceOrder, body.as_ref())?;
+    let (account_id, symbol) = (input.order.account_id.clone(), input.order.symbol.clone());
     let target = state
         .runtime
         .call(move |runtime| {
@@ -52,7 +52,11 @@ async fn place(
             runtime.execution(&account)
         })
         .await??;
-    let result = state.runtime.engine_for(target).place_order(input).await?;
+    let engine = state.runtime.engine_for(target);
+    let result = match input.position_id {
+        Some(position_id) => engine.reduce_position(input.order, position_id).await?,
+        None => engine.place_order(input.order).await?,
+    };
     state.runtime.invalidate(TRADED).await?;
     Ok(Json(to_json(result)?))
 }

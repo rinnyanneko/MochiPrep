@@ -3,7 +3,7 @@
 
 use std::cell::Cell;
 
-use mochi_core::paper::{CloseSelection, PaperStore, StoreFailure, StoreFailureKind};
+use mochi_core::paper::{CloseAmount, CloseSelection, PaperStore, StoreFailure, StoreFailureKind};
 use mochi_domain::{
     DataSource, EquityPoint, ExchangeExecutionCursor, ExchangePositionRecord, Fill, LedgerEvent,
     Order, PaperAccount, Position, RiskSettings,
@@ -518,20 +518,34 @@ impl PaperStore for SqlitePaperStore {
         order_id: &str,
         selection: &CloseSelection,
     ) -> Result<(), StoreFailure> {
+        let (fraction, quantity, price) = match &selection.amount {
+            CloseAmount::Fraction(fraction) => (Some(*fraction), None, None),
+            CloseAmount::Quantity {
+                quantity,
+                limit_price,
+            } => (None, Some(quantity), limit_price.as_ref()),
+        };
         self.run(
-            "INSERT INTO okx_close_intents (order_id, position_id, fraction) VALUES (?, ?, ?)",
-            params![order_id, selection.position_id, selection.fraction],
+            "INSERT INTO okx_close_selections (order_id, position_id, fraction, quantity, limit_price)
+             VALUES (?, ?, ?, ?, ?)",
+            params![order_id, selection.position_id, fraction, quantity, price],
         )
     }
 
     fn close_selection(&self, order_id: &str) -> Result<Option<CloseSelection>, StoreFailure> {
         self.query_one(
-            "SELECT position_id, fraction FROM okx_close_intents WHERE order_id=?",
+            "SELECT position_id, fraction, quantity, limit_price FROM okx_close_selections WHERE order_id=?",
             [order_id],
             |row| {
                 Ok(CloseSelection {
                     position_id: row.get("position_id")?,
-                    fraction: row.get("fraction")?,
+                    amount: match row.get::<_, Option<f64>>("fraction")? {
+                        Some(fraction) => CloseAmount::Fraction(fraction),
+                        None => CloseAmount::Quantity {
+                            quantity: row.get("quantity")?,
+                            limit_price: row.get("limit_price")?,
+                        },
+                    },
                 })
             },
         )

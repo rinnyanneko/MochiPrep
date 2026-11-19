@@ -102,7 +102,15 @@ pub enum Schema {
 }
 
 // ---- typed results ---------------------------------------------------------------------------
-// What a route gets after validation. `PlaceOrder` parses into `mochi_domain::OrderRequest`.
+// What a route gets after validation.
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaceOrderInput {
+    #[serde(flatten)]
+    pub order: mochi_domain::OrderRequest,
+    pub position_id: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -334,6 +342,7 @@ fn place_order(input: Input) -> Checked {
         check_number(v, &NumberRule::int(1.0, 100.0))
     });
     fields.optional("reduceOnly", check_bool);
+    fields.optional("positionId", |v| check_string(v, &CLIENT_ORDER_ID));
     fields.nullish("stopLoss", decimal);
     fields.nullish("takeProfit", decimal);
     fields.nullish("trailingStop", trailing_stop);

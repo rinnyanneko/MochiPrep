@@ -505,7 +505,7 @@ async fn refuses_an_unbound_reduce_only_order() {
     let result = h.engine.place_order(request).await.unwrap_err();
     assert_eq!(
         result.to_string(),
-        "Use the selected-position close endpoint for OKX reduce-only orders"
+        "Select an OKX position for this reduce-only order"
     );
     assert_eq!(h.placed().len(), 1);
 }

@@ -1796,6 +1796,58 @@ async fn deferred_limit() -> (Harness, Order) {
 }
 
 #[tokio::test]
+async fn deferred_trailing_keeps_waiting_when_its_first_position_update_is_unexplained() {
+    let (h, entry) = deferred_limit().await;
+    {
+        let mut okx = h.okx.state();
+        okx.fill_resting();
+        let position = okx.position.as_mut().unwrap();
+        position.insert("margin".into(), json!("15"));
+        position.insert("uTime".into(), json!((START + 2).to_string()));
+    }
+    h.sync().await;
+    h.advance(60_001);
+    restart(&h).sync().await.unwrap();
+
+    assert!(h.algo_placed().is_empty());
+    let trail = h.order_row(&format!("{}:trail", entry.id));
+    assert_eq!(trail.status, OrderStatus::Open);
+    assert!(trail.reject_reason.unwrap().contains("position adjustment"));
+}
+
+#[tokio::test]
+async fn deferred_trailing_can_use_the_same_proven_position_after_a_margin_adjustment() {
+    let (h, entry) = deferred_limit().await;
+    h.engine.place_order(order()).await.unwrap();
+    h.okx.state().fill_resting();
+    h.quote_time.store(START - 120_000, Ordering::SeqCst);
+    h.sync().await;
+    assert!(h.algo_placed().is_empty());
+
+    {
+        let mut okx = h.okx.state();
+        let position = okx.position.as_mut().unwrap();
+        position.insert("margin".into(), json!("15"));
+        position.insert("uTime".into(), json!((START + 10_001).to_string()));
+    }
+    h.advance(10_001);
+    h.quote_time.store(0, Ordering::SeqCst);
+    h.sync().await;
+
+    let trailing: Vec<_> = h
+        .algo_placed()
+        .into_iter()
+        .filter(|algo| algo["ordType"] == "move_order_stop")
+        .collect();
+    assert_eq!(trailing.len(), 1);
+    assert_eq!(trailing[0]["sz"], "0.1");
+    assert!(h
+        .order_row(&format!("{}:trail", entry.id))
+        .exchange_order_id
+        .is_some());
+}
+
+#[tokio::test]
 async fn deferred_trailing_is_canceled_when_parent_never_fills() {
     let (h, entry) = deferred_limit().await;
     let key = mochi_okx::to_cl_ord_id(&entry.client_order_id);
@@ -2300,10 +2352,9 @@ async fn deferred_protection_does_not_cross_a_close_and_reopen_proven_by_fills()
     h.okx.state().fill_resting();
     {
         let mut okx = h.okx.state();
-        okx.position
-            .as_mut()
-            .unwrap()
-            .insert("tradeId".into(), json!("3"));
+        let position = okx.position.as_mut().unwrap();
+        position.insert("tradeId".into(), json!("3"));
+        position.insert("uTime".into(), json!("1800000000001"));
         for (id, subtype) in [("2", "5"), ("3", "3")] {
             okx.recent_fills.push(
                 json!({
@@ -3134,7 +3185,7 @@ async fn a_deferred_target_only_sizes_the_parent_fills_from_the_current_position
 }
 
 #[tokio::test]
-async fn a_deferred_target_does_not_assume_matching_trade_id_proves_its_size() {
+async fn a_deferred_target_does_not_use_fill_record_time_to_rule_out_late_adl() {
     let (h, entry) = resting_target().await;
     h.engine.place_order(order()).await.unwrap();
     {
@@ -3147,6 +3198,12 @@ async fn a_deferred_target_does_not_assume_matching_trade_id_proves_its_size() {
         // for the parent's entire 0.1. Size alone cannot detect the reduction.
         position.insert("pos".into(), json!("0.15"));
         position.insert("uTime".into(), json!("1800000000002"));
+        // The most recent ordinary trade executed before ADL. Its record was
+        // generated later, which says nothing about the position's adjustment.
+        okx.recent_fills
+            .last_mut()
+            .unwrap()
+            .insert("ts".into(), json!("1800000000003"));
     }
     h.advance(1);
     *h.prices.lock().unwrap() = ("78999".into(), "79001".into(), "79000".into());
@@ -3198,6 +3255,41 @@ async fn a_deferred_target_accounts_for_adl_after_the_last_ordinary_trade() {
     h.sync().await;
     assert_eq!(h.count("POST /api/v5/trade/order"), placed);
     assert_eq!(h.view().position.quantity, "0.002");
+}
+
+#[tokio::test]
+async fn a_deferred_target_waits_for_late_adl_after_a_previously_proven_snapshot() {
+    let (h, entry) = resting_target().await;
+    h.engine.place_order(order()).await.unwrap();
+    h.okx.state().fill_resting();
+    h.quote_time.store(START - 120_000, Ordering::SeqCst);
+    h.sync().await;
+
+    let at = (START + 10_001).to_string();
+    {
+        let mut okx = h.okx.state();
+        let position = okx.position.as_mut().unwrap();
+        // The position keeps the same ordinary trade ID and could still hold
+        // the parent's 0.1. It no longer matches the previously proven 0.2.
+        position.insert("pos".into(), json!("0.15"));
+        position.insert("uTime".into(), json!(at));
+    }
+    h.advance(10_001);
+    h.quote_time.store(0, Ordering::SeqCst);
+    *h.prices.lock().unwrap() = ("78999".into(), "79001".into(), "79000".into());
+    let placed = h.count("POST /api/v5/trade/order");
+    h.sync().await;
+    assert_eq!(h.count("POST /api/v5/trade/order"), placed);
+    let id = format!("{}:deferred:tp", entry.id);
+    assert_eq!(h.order_row(&id).status, OrderStatus::Open);
+
+    h.okx.state().recent_fills.push(row(json!({
+        "instId": "BTC-USDT-SWAP", "ordId": "adl", "tradeId": "-1",
+        "fillTime": at, "posSide": "net", "subType": "125", "fillSz": "0.05",
+    })));
+    h.sync().await;
+    assert_eq!(h.count("POST /api/v5/trade/order"), placed);
+    assert_eq!(h.order_row(&id).status, OrderStatus::Canceled);
 }
 
 #[tokio::test]

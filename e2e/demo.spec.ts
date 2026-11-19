@@ -196,3 +196,61 @@ test('separate OKX take profits show the size of each order', async ({ page }) =
   await expect(table.getByRole('cell', { name: '0.001', exact: true })).toBeVisible();
   await expect(table.getByRole('cell', { name: '0.0000003', exact: true })).toBeVisible();
 });
+
+test('OKX market and limit reductions send the selected isolated position', async ({ page }) => {
+  await page.route('**/api/accounts', async (route) => {
+    const response = await route.fetch();
+    const accounts = await response.json() as { id: string; name: string; venue: string }[];
+    await route.fulfill({
+      response,
+      json: accounts.map((account) => account.name === 'Demo terminal'
+        ? { ...account, venue: 'OKX_DEMO' }
+        : account),
+    });
+  });
+  const positionId = 'okx:BTC-USDT-SWAP:isolated:LONG:test:1';
+  await page.route('**/api/accounts/*/positions', (route) => {
+    const path = new URL(route.request().url()).pathname.split('/');
+    const accountId = path.at(-2);
+    const position = {
+      accountId, symbol: 'BTCUSDT', side: 'LONG', quantity: '0.001',
+      entryPrice: '75000', markPrice: '75500', liquidationPrice: '52000',
+      margin: '25', leverage: 3, unrealizedPnl: '0.5', openedAt: Date.UTC(2026, 0, 1),
+      externalProtection: [],
+    };
+    return route.fulfill({ json: [
+      { ...position, id: 'cross-position', marginMode: 'cross', closeSupported: false },
+      { ...position, id: positionId, marginMode: 'isolated', closeSupported: true },
+    ] });
+  });
+  await page.route('**/api/orders', (route) => route.fulfill({ json: { order: { status: 'OPEN' } } }));
+  await page.goto('/');
+  const demo = page.getByTestId('try-demo');
+  await expect(demo.or(page.getByTestId('total-equity'))).toBeVisible();
+  if (await demo.isVisible()) await demo.click();
+  await page.getByRole('button', { name: 'Trading', exact: true }).click();
+  await page.getByLabel('Paper account').selectOption({ label: 'Demo terminal (OKX demo)' });
+  await expect(page.getByTestId('position-row')).toHaveCount(2);
+  await page.getByRole('checkbox', { name: 'Reduce only' }).check();
+  const selected = page.getByLabel('Position to reduce');
+  await expect(selected).toHaveValue(positionId);
+  await expect(selected.locator('option[value="cross-position"]')).toHaveCount(0);
+
+  const size = page.getByLabel('Order size');
+  await size.fill('0.002');
+  const review = page.getByRole('button', { name: 'Review reduction' });
+  await expect(review).toBeDisabled();
+  await size.fill('0.0004');
+  for (const [type, limit] of [['Market', null], ['Limit', '76000']] as const) {
+    await page.getByRole('button', { name: type, exact: true }).click();
+    if (limit) await page.getByRole('textbox', { name: 'Limit price' }).fill(limit);
+    await review.click();
+    const request = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/api/orders'));
+    await page.getByRole('button', { name: 'Place order', exact: true }).click();
+    expect((await request).postDataJSON()).toMatchObject({
+      symbol: 'BTCUSDT', positionId, side: 'SELL', type: type.toUpperCase(),
+      quantity: '0.0004', price: limit, reduceOnly: true,
+    });
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  }
+});

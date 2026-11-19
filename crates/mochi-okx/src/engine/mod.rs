@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use mochi_core::paper::{CloseSelection, DailyRisk, PaperStore, StoreFailure};
+use mochi_core::paper::{CloseAmount, CloseSelection, DailyRisk, PaperStore, StoreFailure};
 use mochi_decimal::Dec;
 use mochi_domain::{
     default_live_limits, AccountBalance, EntryOrderType, EquityPoint, ExchangeExecutionCursor,
@@ -27,7 +27,7 @@ use mochi_domain::{
     RiskSettings, TrailingKind, TrailingStopSpec,
 };
 
-use protection::{Miss, ProtectionMap};
+use protection::{Held, Miss, ProtectionMap};
 use tokio::sync::oneshot;
 
 use crate::client::{
@@ -357,6 +357,8 @@ struct State {
     protection: ProtectionMap,
     /// Exchange trade and side that the last observed protection belonged to.
     protection_keys: HashMap<String, String>,
+    /// Per instrument, the last position whose size was reconciled with its entry fills.
+    confirmed_entry_positions: HashMap<String, Held>,
     /// The last failed algo cancel, until a sync finishes with every cancel accepted.
     cancel_error: Option<String>,
     /// Per instId: consecutive syncs that found our protection but no position.
@@ -472,6 +474,15 @@ impl OkxEngine {
     /// Closes the dispatch gate for an old session without interrupting orders already handed off.
     pub fn retire(&self) {
         self.retired.store(true, Ordering::SeqCst);
+    }
+
+    pub(super) fn check_dispatch(&self) -> Result<(), EngineError> {
+        // Retirement before this handoff forbids a mutation. After handoff,
+        // a request with an unknown outcome must be resolved by lookup.
+        if self.retired.load(Ordering::SeqCst) {
+            return Err(EngineError::SessionRetired);
+        }
+        Ok(())
     }
 
     pub fn account_id(&self) -> &str {
@@ -615,14 +626,85 @@ impl OkxEngine {
                     .prepare(&request.account_id, &request.client_order_id)
                     .await?;
                 if let Some(prior) = prepared.take_duplicate() {
+                    if request.reduce_only == Some(true) {
+                        let order_id = prior.order.id.clone();
+                        let stored = engine
+                            .rows(move |rows| Ok(rows.close_selection(&order_id)?))
+                            .await?;
+                        if stored.is_some_and(|stored| {
+                            matches!(stored.amount, CloseAmount::Quantity { .. })
+                        }) {
+                            return Err(close_changed());
+                        }
+                    }
                     return Ok(prior);
                 }
                 if request.reduce_only == Some(true) {
                     return Err(EngineError::message(
-                        "Use the selected-position close endpoint for OKX reduce-only orders",
+                        "Select an OKX position for this reduce-only order",
                     ));
                 }
                 engine.submit(request, None, prepared).await
+            })
+        })
+        .await
+    }
+
+    pub async fn reduce_position(
+        self: &Arc<Self>,
+        request: OrderRequest,
+        position_id: String,
+    ) -> Result<OrderResult, EngineError> {
+        self.queued(move |engine| {
+            Box::pin(async move {
+                let mut request = request;
+                if request.reduce_only != Some(true)
+                    || request.stop_loss.is_some()
+                    || request.take_profit.is_some()
+                    || request.trailing_stop.is_some()
+                {
+                    return Err(EngineError::message(
+                        "A selected position requires a reduce-only order without attached protection",
+                    ));
+                }
+                let limit_price = if request.order_type == EntryOrderType::Limit {
+                    let price = request.price.as_deref().ok_or_else(|| {
+                        EngineError::message("A reduce-only limit order requires a price")
+                    })?;
+                    let value = dec(price)?;
+                    if !value.gt(&zero()) {
+                        return Err(EngineError::message("Limit price must be positive"));
+                    }
+                    Some(value.to_fixed())
+                } else {
+                    None
+                };
+                request.price = limit_price.clone();
+                let quantity = dec(&request.quantity)?;
+                let selection = CloseSelection {
+                    position_id: Some(position_id),
+                    amount: CloseAmount::Quantity {
+                        quantity: quantity.to_fixed(),
+                        limit_price,
+                    },
+                };
+                let mut prepared = engine.prepare(&request.account_id, &request.client_order_id).await?;
+                if let Some(prior) = prepared.take_duplicate() {
+                    if prior.order.side != request.side {
+                        return Err(close_retry_changed());
+                    }
+                    return engine.check_close_retry(prior, &request.symbol, &selection).await;
+                }
+                let (position, leverage) = engine
+                    .read_selected_close(&request.symbol, selection, &prepared.registry)
+                    .await?;
+                if !quantity.gt(&zero()) || quantity.gt(&position.held) {
+                    return Err(EngineError::message(
+                        "Reduction quantity must be positive and cannot exceed the selected position",
+                    ));
+                }
+                request.leverage = leverage;
+                engine.submit(request, Some(position), prepared).await
             })
         })
         .await
@@ -696,25 +778,11 @@ impl OkxEngine {
                 } = intent;
                 let mut prepared = engine.prepare(&account_id, &client_order_id).await?;
                 if let Some(prior) = prepared.take_duplicate() {
-                    let order_id = prior.order.id.clone();
-                    let stored = engine
-                        .rows(move |rows| Ok(rows.close_selection(&order_id)?))
-                        .await?;
                     let selection = CloseSelection {
                         position_id,
-                        fraction,
+                        amount: CloseAmount::Fraction(fraction),
                     };
-                    // Older rows lack the original position and fraction. Preserve the
-                    // returned result for same-symbol reduce-only retries of those rows.
-                    if !prior.order.reduce_only
-                        || prior.order.symbol != symbol
-                        || stored.is_some_and(|stored| stored != selection)
-                    {
-                        return Err(EngineError::message(
-                            "This client order ID was already used for a different close request",
-                        ));
-                    }
-                    return Ok(prior);
+                    return engine.check_close_retry(prior, &symbol, &selection).await;
                 }
                 let (mut request, position) = engine
                     .close_request(
@@ -733,6 +801,51 @@ impl OkxEngine {
         .await
     }
 
+    async fn check_close_retry(
+        &self,
+        prior: OrderResult,
+        symbol: &str,
+        selection: &CloseSelection,
+    ) -> Result<OrderResult, EngineError> {
+        let order_id = prior.order.id.clone();
+        let stored = self
+            .rows(move |rows| Ok(rows.close_selection(&order_id)?))
+            .await?;
+        // Preserve same-symbol fraction retries from before their inputs were stored.
+        let matches = stored.as_ref().map_or_else(
+            || matches!(selection.amount, CloseAmount::Fraction(_)),
+            |stored| stored == selection,
+        );
+        if !prior.order.reduce_only || prior.order.symbol != symbol || !matches {
+            return Err(close_retry_changed());
+        }
+        Ok(prior)
+    }
+
+    async fn read_selected_close(
+        &self,
+        symbol: &str,
+        selection: CloseSelection,
+        registry: &Registry,
+    ) -> Result<(SelectedClose, u32), EngineError> {
+        let spec = registry.get(symbol)?;
+        // The cached size can predate a fill or an unanswered reduce-only order.
+        let positions = self.deps.client.get_positions().await?;
+        let (position, side, contracts) =
+            select_close(&positions, symbol, selection.position_id.as_deref())?;
+        let held = contracts.mul(&dec(&spec.venue_contract_value)?);
+        Ok((
+            SelectedClose {
+                id: views::position_id(position, side),
+                side,
+                contracts,
+                held,
+                selection,
+            },
+            views::leverage_of(position),
+        ))
+    }
+
     async fn close_request(
         &self,
         account_id: String,
@@ -743,15 +856,20 @@ impl OkxEngine {
     ) -> Result<(OrderRequest, SelectedClose), EngineError> {
         let registry = self.registry().await?;
         let spec = registry.get(&symbol)?;
-        // The cached size can predate a fill or an unanswered reduce-only order.
-        let positions = self.deps.client.get_positions().await?;
-        let (position, side, contracts) = select_close(&positions, &symbol, position_id)?;
-        let held = contracts.mul(&dec(&spec.venue_contract_value)?);
+        let selection = CloseSelection {
+            position_id: position_id.map(str::to_owned),
+            amount: CloseAmount::Fraction(fraction),
+        };
+        let (position, leverage) = self
+            .read_selected_close(&symbol, selection, &registry)
+            .await?;
         let quantity = if fraction >= 1.0 {
-            held.clone()
+            position.held.clone()
         } else {
             let step = dec(&spec.quantity_step)?;
-            held.mul(&Dec::from_js_number(fraction))
+            position
+                .held
+                .mul(&Dec::from_js_number(fraction))
                 .floor_to_step(&step)
                 .map_err(|_| EngineError::message("Invalid quantity step"))?
         };
@@ -759,14 +877,14 @@ impl OkxEngine {
             account_id,
             client_order_id,
             symbol,
-            side: match side {
+            side: match position.side {
                 PositionSide::Long => OrderSide::Sell,
                 PositionSide::Short => OrderSide::Buy,
             },
             order_type: EntryOrderType::Market,
             quantity: quantity.to_fixed(),
             price: None,
-            leverage: views::leverage_of(position),
+            leverage,
             reduce_only: Some(true),
             stop_loss: None,
             take_profit: None,
@@ -774,19 +892,7 @@ impl OkxEngine {
             agent_id: None,
             decision_id: None,
         };
-        Ok((
-            request,
-            SelectedClose {
-                id: views::position_id(position, side),
-                side,
-                contracts,
-                held,
-                selection: CloseSelection {
-                    position_id: position_id.map(str::to_owned),
-                    fraction,
-                },
-            },
-        ))
+        Ok((request, position))
     }
 
     pub async fn cancel_order(self: &Arc<Self>, order_id: &str) -> Result<(), EngineError> {
@@ -811,6 +917,7 @@ impl OkxEngine {
                         "Change protection on OKX through the protection settings",
                     ));
                 }
+                engine.check_dispatch()?;
                 engine
                     .deps
                     .client
@@ -982,13 +1089,10 @@ impl OkxEngine {
     ) -> Result<(), EngineError> {
         let client = &self.deps.client;
         if !order.reduce_only {
+            self.check_dispatch()?;
             client.set_leverage(inst_id, order.leverage).await?;
         }
-        // This load is the handoff: retirement before it forbids a POST, while
-        // an order handed off first must be resolved by lookup if its answer is lost.
-        if self.retired.load(Ordering::SeqCst) {
-            return Err(EngineError::SessionRetired);
-        }
+        self.check_dispatch()?;
         order.exchange_order_id = Some(client.place_order(body).await?);
         let row = order.clone();
         self.rows(move |rows| Ok(rows.save_order(&row)?)).await
@@ -1090,6 +1194,10 @@ impl OkxEngine {
 
 fn close_changed() -> EngineError {
     EngineError::message("The selected OKX position has changed. Refresh and try again.")
+}
+
+fn close_retry_changed() -> EngineError {
+    EngineError::message("This client order ID was already used for a different close request")
 }
 
 fn select_close<'a>(

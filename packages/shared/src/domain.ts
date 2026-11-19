@@ -179,6 +179,8 @@ export interface OrderRequest {
   price?: string | null;
   leverage: number;
   reduceOnly?: boolean;
+  /** Required for a new OKX reduce-only order. Identifies the selected isolated position. */
+  positionId?: string;
   stopLoss?: string | null;
   takeProfit?: string | null;
   trailingStop?: TrailingStopSpec | null;

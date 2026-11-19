@@ -1,6 +1,6 @@
 import { Plus, RotateCcw, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
-import { INSTRUMENTS, TIMEFRAMES, type Fill, type LedgerEvent, type Order, type Position, type PositionView, type SymbolId, type Timeframe } from '@mochiprep/shared';
+import { INSTRUMENTS, TIMEFRAMES, type Fill, type LedgerEvent, type Order, type OrderRequest, type Position, type PositionView, type SymbolId, type Timeframe } from '@mochiprep/shared';
 import { ChartTradeSummary, MarketChart } from '@/components/charts';
 import { useTradeOverlay } from '@/components/useTradeOverlay';
 import { PageTitle } from '@/components/Shell';
@@ -63,7 +63,7 @@ function ResetAccount({ account }: { account: AccountView }) {
   );
 }
 
-function OrderTicket({ account, symbol }: { account: AccountView; symbol: SymbolId }) {
+function OrderTicket({ account, symbol, positions }: { account: AccountView; symbol: SymbolId; positions: PositionView[] }) {
   const quote = useApp((s) => s.quotes[account.source][symbol]);
   const [side, setSide] = useRemembered<'BUY' | 'SELL'>(`ticket.${account.id}.side`, 'BUY', oneOf(['BUY', 'SELL'] as const));
   const [type, setType] = useRemembered<'MARKET' | 'LIMIT'>(`ticket.${account.id}.type`, 'MARKET', oneOf(['MARKET', 'LIMIT'] as const));
@@ -74,38 +74,58 @@ function OrderTicket({ account, symbol }: { account: AccountView; symbol: Symbol
   const [stop, setStop] = useState('');
   const [target, setTarget] = useState('');
   const [reduceOnly, setReduceOnly] = useState(false);
-  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [positionId, setPositionId] = useState('');
+  const [reduceQuantity, setReduceQuantity] = useState('');
+  const [confirmation, setConfirmation] = useState<{ clientOrderId: string; positionId?: string } | null>(null);
 
+  const exchange = account.venue !== 'PAPER';
+  const boundReduction = exchange && reduceOnly;
+  const reducible = positions.filter((position) => position.accountId === account.id && position.symbol === symbol && position.closeSupported === true);
+  const selected = reducible.find((position) => position.id === positionId);
+  const orderSide = boundReduction && selected ? (selected.side === 'LONG' ? 'SELL' : 'BUY') : side;
+  const changeReduceOnly = (enabled: boolean) => {
+    setReduceOnly(enabled);
+    if (enabled && exchange) setPositionId(reducible.length === 1 ? reducible[0]!.id : '');
+  };
   const instrument = INSTRUMENTS[symbol]!;
-  const reference = type === 'LIMIT' ? Number(limit) : Number(side === 'BUY' ? quote?.ask : quote?.bid);
+  const reference = type === 'LIMIT' ? Number(limit) : Number(orderSide === 'BUY' ? quote?.ask : quote?.bid);
   const step = Number(instrument.quantityStep);
   const rawQty = mode === 'QTY' ? Number(amount) : (Number(amount) * leverage) / (reference || Infinity);
-  const quantity = Number((Math.floor(rawQty / step + 1e-9) * step).toFixed(8));
+  const quantity = boundReduction ? Number(reduceQuantity) : Number((Math.floor(rawQty / step + 1e-9) * step).toFixed(8));
   const notional = quantity * reference;
   const margin = notional / leverage;
   const feeRate = Number(type === 'LIMIT' ? account.config.makerFeeRate : account.config.takerFeeRate);
   const fee = notional * feeRate;
   const mmr = Number(instrument.maintenanceMarginRate);
   const liq = side === 'BUY' ? reference * (1 - 1 / leverage + mmr) : reference * (1 + 1 / leverage - mmr);
-  const valid = quantity >= Number(instrument.minQuantity) && reference > 0;
+  const valid = Number.isFinite(quantity) && quantity >= Number(instrument.minQuantity)
+    && (boundReduction
+      ? !!selected && quantity <= Number(selected.quantity)
+        && /^\d*\.?\d+$/.test(reduceQuantity.trim()) && (type === 'MARKET' || reference > 0)
+      : reference > 0 && !!quote);
+  const displayedQuantity = boundReduction ? reduceQuantity.trim() : qty(quantity);
+  const canConfirm = valid && confirmation !== null
+    && (!boundReduction || confirmation.positionId === selected?.id);
 
   const submit = async () => {
+    if (!confirmation || !canConfirm) return;
     const result = await attempt(() =>
       api.post<{ order: Order }>('/orders', {
         accountId: account.id,
-        clientOrderId: confirmId!,
+        clientOrderId: confirmation.clientOrderId,
+        ...(confirmation.positionId ? { positionId: confirmation.positionId } : {}),
         symbol,
-        side,
+        side: orderSide,
         type,
-        quantity: String(quantity),
+        quantity: boundReduction ? reduceQuantity.trim() : String(quantity),
         price: type === 'LIMIT' ? limit : null,
         leverage,
         reduceOnly,
         stopLoss: !reduceOnly && stop.trim() ? stop.trim() : null,
         takeProfit: !reduceOnly && target.trim() ? target.trim() : null,
-      }),
+      } satisfies OrderRequest),
     );
-    setConfirmId(null);
+    setConfirmation(null);
     if (result) {
       const { order } = result;
       const toast = useApp.getState().toast;
@@ -117,23 +137,33 @@ function OrderTicket({ account, symbol }: { account: AccountView; symbol: Symbol
 
   return (
     <Card className="space-y-3 p-4" data-testid="order-ticket">
-      <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface-2 p-1">
+      {!boundReduction && <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface-2 p-1">
         <Button size="sm" variant={side === 'BUY' ? 'long' : 'ghost'} aria-pressed={side === 'BUY'} onClick={() => setSide('BUY')}>Long</Button>
         <Button size="sm" variant={side === 'SELL' ? 'short' : 'ghost'} aria-pressed={side === 'SELL'} onClick={() => setSide('SELL')}>Short</Button>
-      </div>
+      </div>}
       <div className="flex items-center justify-between gap-2">
         <Segmented label="Order type" value={type} onChange={setType} options={[{ value: 'MARKET', label: 'Market' }, { value: 'LIMIT', label: 'Limit' }]} />
-        <Segmented label="Size unit" value={mode} onChange={setMode} options={[{ value: 'MARGIN', label: 'Margin' }, { value: 'QTY', label: 'Quantity' }]} />
+        {!boundReduction && <Segmented label="Size unit" value={mode} onChange={setMode} options={[{ value: 'MARGIN', label: 'Margin' }, { value: 'QTY', label: 'Quantity' }]} />}
       </div>
       {type === 'LIMIT' && (
-        <Field label="Limit price"><Input inputMode="decimal" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder={quote?.last} /></Field>
+        <Field label="Limit price"><Input inputMode="decimal" aria-label="Limit price" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder={quote?.last} /></Field>
       )}
-      <Field label={mode === 'MARGIN' ? 'Margin (USDT)' : `Quantity (${instrument.baseCurrency})`}>
-        <Input inputMode="decimal" aria-label="Order size" value={amount} onChange={(e) => setAmount(e.target.value)} />
+      {boundReduction && (
+        <Field label="Position to reduce">
+          <Select aria-label="Position to reduce" value={selected ? positionId : ''} onChange={(e) => setPositionId(e.target.value)}>
+            <option value="">{reducible.length ? 'Select a position' : 'No isolated position for this symbol'}</option>
+            {reducible.map((position) => (
+              <option key={position.id} value={position.id}>{position.side} · {position.quantity} {instrument.baseCurrency} · Isolated</option>
+            ))}
+          </Select>
+        </Field>
+      )}
+      <Field label={!boundReduction && mode === 'MARGIN' ? 'Margin (USDT)' : `Quantity (${instrument.baseCurrency})`}>
+        <Input inputMode="decimal" aria-label="Order size" value={boundReduction ? reduceQuantity : amount} onChange={(e) => (boundReduction ? setReduceQuantity : setAmount)(e.target.value)} />
       </Field>
-      <Field label={`Leverage: ${leverage}x`}>
+      {!boundReduction && <Field label={`Leverage: ${leverage}x`}>
         <input aria-label="Leverage" type="range" min={1} max={20} value={leverage} onChange={(e) => setLeverage(Number(e.target.value))} className="w-full accent-[var(--accent)]" />
-      </Field>
+      </Field>}
       {!reduceOnly && (
         <div className="grid grid-cols-2 gap-2">
           <Field label="Stop loss"><Input inputMode="decimal" value={stop} onChange={(e) => setStop(e.target.value)} placeholder="Optional" /></Field>
@@ -141,20 +171,20 @@ function OrderTicket({ account, symbol }: { account: AccountView; symbol: Symbol
         </div>
       )}
       <label className="flex items-center gap-2 text-xs text-ink-2">
-        <input type="checkbox" checked={reduceOnly} onChange={(e) => setReduceOnly(e.target.checked)} className="accent-[var(--accent)]" /> Reduce only
+        <input type="checkbox" checked={reduceOnly} onChange={(e) => changeReduceOnly(e.target.checked)} className="accent-[var(--accent)]" /> Reduce only
       </label>
       <div className="space-y-0.5 rounded-xl bg-surface-2 p-2.5 text-xs">
-        <div className="flex justify-between"><span className="text-ink-3">Quantity</span><span className="num">{valid ? `${qty(quantity)} ${instrument.baseCurrency}` : '–'}</span></div>
+        <div className="flex justify-between"><span className="text-ink-3">Quantity</span><span className="num">{valid ? `${displayedQuantity} ${instrument.baseCurrency}` : '–'}</span></div>
         <div className="flex justify-between"><span className="text-ink-3">Notional</span><span className="num">{valid ? money(notional) : '–'}</span></div>
         <div className="flex justify-between"><span className="text-ink-3">Available</span><span className="num">{money(account.balance.availableBalance)}</span></div>
       </div>
-      <Button className="w-full" size="lg" variant={side === 'BUY' ? 'long' : 'short'} disabled={!valid || !quote} onClick={() => setConfirmId(`ui:${crypto.randomUUID()}`)}>
-        Review {side === 'BUY' ? 'long' : 'short'}
+      <Button className="w-full" size="lg" variant={orderSide === 'BUY' ? 'long' : 'short'} disabled={!valid} onClick={() => setConfirmation({ clientOrderId: `ui:${crypto.randomUUID()}`, positionId: boundReduction ? selected?.id : undefined })}>
+        {boundReduction ? 'Review reduction' : `Review ${side === 'BUY' ? 'long' : 'short'}`}
       </Button>
       <Dialog
-        open={confirmId !== null}
-        onOpenChange={(open) => !open && setConfirmId(null)}
-        title={`Confirm ${side === 'BUY' ? 'long' : 'short'} ${symbol}`}
+        open={confirmation !== null}
+        onOpenChange={(open) => !open && setConfirmation(null)}
+        title={`Confirm ${boundReduction ? 'reduction' : side === 'BUY' ? 'long' : 'short'} ${symbol}`}
         description={account.venue === 'PAPER' ? 'Simulated order. Estimates only: the engine fills against the live quote, with spread and slippage.' : 'Sent to OKX. Estimates only: the exchange decides the fill.'}
       >
         {account.venue === 'OKX_LIVE' && (
@@ -165,20 +195,21 @@ function OrderTicket({ account, symbol }: { account: AccountView; symbol: Symbol
         <dl className="num space-y-1 text-[13px]">
           {[
             ['Type', `${type}${reduceOnly ? ' · reduce only' : ''}`],
-            ['Quantity', `${qty(quantity)} ${instrument.baseCurrency}`],
+            ['Quantity', `${displayedQuantity} ${instrument.baseCurrency}`],
+            ...(boundReduction && selected ? [['Position', `${selected.side} · Isolated`]] : []),
             ['Reference price', price(reference, symbol)],
             ['Notional', `${money(notional)} USDT`],
             ['Margin', reduceOnly ? '–' : `${money(margin)} USDT at ${leverage}x`],
             ['Estimated fee', `${money(fee, 4)} USDT`],
             ['Estimated liquidation', reduceOnly ? '–' : price(liq, symbol)],
-            ['Stop / Target', `${stop || '–'} / ${target || '–'}`],
+            ['Stop / Target', reduceOnly ? '–' : `${stop || '–'} / ${target || '–'}`],
           ].map(([k, v]) => (
             <div key={k} className="flex justify-between gap-4"><dt className="text-ink-3">{k}</dt><dd>{v}</dd></div>
           ))}
         </dl>
         <div className="mt-4 flex justify-end gap-2">
-          <Button onClick={() => setConfirmId(null)}>Cancel</Button>
-          <Button variant={side === 'BUY' ? 'long' : 'short'} onClick={submit}>{account.venue === 'OKX_LIVE' ? 'Place real order' : 'Place order'}</Button>
+          <Button onClick={() => setConfirmation(null)}>Cancel</Button>
+          <Button variant={orderSide === 'BUY' ? 'long' : 'short'} disabled={!canConfirm} onClick={submit}>{account.venue === 'OKX_LIVE' ? 'Place real order' : 'Place order'}</Button>
         </div>
       </Dialog>
     </Card>
@@ -265,7 +296,7 @@ export function PaperPage() {
           <div className="mb-1 px-2"><ChartTradeSummary summary={overlay.summary} /></div>
           <div className="h-[470px]"><MarketChart candles={candles ?? []} symbol={symbol} timeframe={timeframe} quote={quote} showIndicators={false} priceLines={overlay.lines} markers={overlay.markers} notes={overlay.notes} /></div>
         </Card>
-        <OrderTicket key={account.id} account={account} symbol={symbol} />
+        <OrderTicket key={account.id} account={account} symbol={symbol} positions={positions ?? []} />
       </div>
       <Card className="mt-3">
         <Tabs

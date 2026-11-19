@@ -328,6 +328,75 @@ async fn generic_okx_reduce_only_orders_require_the_selected_close_route() {
 }
 
 #[tokio::test]
+async fn selected_okx_market_and_limit_orders_can_reduce_an_exact_quantity() {
+    let w = world_with_position().await;
+    w.state
+        .runtime
+        .set_armed_for_test(ACCOUNT, false)
+        .await
+        .unwrap();
+    let (_, positions) = send(
+        &w.state,
+        "GET",
+        &format!("/api/accounts/{ACCOUNT}/positions"),
+        None,
+    )
+    .await;
+    let mut request = order("reduce-limit");
+    request["side"] = json!("SELL");
+    request["reduceOnly"] = json!(true);
+    request["stopLoss"] = Value::Null;
+    request["type"] = json!("LIMIT");
+    request["price"] = json!("76000");
+    request["quantity"] = json!("0.0004");
+    request["positionId"] = positions[0]["id"].clone();
+    w.okx.state().rest_limit_orders = true;
+    let mut oversized = request.clone();
+    oversized["quantity"] = json!("0.002");
+    assert_eq!(
+        send(&w.state, "POST", "/api/orders", Some(oversized))
+            .await
+            .0,
+        400
+    );
+    assert_eq!(w.okx.state().placed.len(), 1);
+    let (status, result) = send(&w.state, "POST", "/api/orders", Some(request.clone())).await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(result["order"]["status"], "OPEN");
+    assert_eq!(result["order"]["quantity"], "0.0004");
+    assert_eq!(w.okx.state().placed.last().unwrap()["px"], "76000");
+
+    let mut mismatch = request.clone();
+    mismatch["quantity"] = json!("0.0003");
+    assert_eq!(
+        send(&w.state, "POST", "/api/orders", Some(mismatch))
+            .await
+            .0,
+        400
+    );
+    let (status, retry) = send(&w.state, "POST", "/api/orders", Some(request.clone())).await;
+    assert_eq!(status, 200);
+    assert_eq!(retry["duplicate"], true);
+
+    request["clientOrderId"] = json!("reduce-market");
+    request["type"] = json!("MARKET");
+    request["price"] = Value::Null;
+    let (status, result) = send(&w.state, "POST", "/api/orders", Some(request.clone())).await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(result["order"]["status"], "FILLED");
+    assert_eq!(result["order"]["quantity"], "0.0004");
+    assert_eq!(w.okx.state().placed.last().unwrap()["reduceOnly"], true);
+
+    request["clientOrderId"] = json!("stale-selection");
+    assert_eq!(
+        send(&w.state, "POST", "/api/orders", Some(request)).await.0,
+        400
+    );
+    assert_eq!(w.okx.state().placed.len(), 3);
+    w.state.runtime.shutdown().await;
+}
+
+#[tokio::test]
 async fn disconnect_during_the_last_close_read_prevents_order_dispatch() {
     let w = world(true).await;
     w.state
@@ -817,6 +886,50 @@ async fn an_sl_only_edit_overlapping_a_trailing_edit_keeps_the_new_trailing_stop
     assert_eq!(status, 200);
     assert_eq!(edited["after"]["stopLoss"], "74500");
     assert_eq!(edited["after"]["trailingStop"]["callback"], "0.01");
+    w.state.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn disconnect_during_the_final_stop_check_keeps_the_live_trailing_stop() {
+    let w = world_with_position().await;
+    w.state
+        .runtime
+        .suspend_periodic_okx_sync_for_test()
+        .await
+        .unwrap();
+    let path = format!("/api/positions/{ACCOUNT}/BTCUSDT/protection");
+    let trail = json!({
+        "stopLoss": "74000", "takeProfit": null,
+        "trailingStop": {"kind": "RATIO", "callback": "0.01", "activationPrice": null},
+    });
+    assert_eq!(send(&w.state, "PUT", &path, Some(trail)).await.0, 200);
+    let preflight = w.okx.hold_next("GET", "/trade/order-algo");
+    let after_placement = w.okx.hold_next("GET", "/trade/order-algo");
+    let before_cancel = w.okx.hold_next("GET", "/trade/order-algo");
+    let edit = json!({ "stopLoss": "74000", "takeProfit": "78000", "trailingStop": null });
+    let ((status, _), ()) = tokio::join!(send(&w.state, "PUT", &path, Some(edit)), async {
+        let timeout = std::time::Duration::from_secs(2);
+        for check in [preflight, after_placement] {
+            tokio::time::timeout(timeout, check.reached())
+                .await
+                .unwrap();
+            check.release();
+        }
+        tokio::time::timeout(timeout, before_cancel.reached())
+            .await
+            .unwrap();
+        let disconnect = format!("/api/exchange/okx/{ACCOUNT}/disconnect");
+        assert_eq!(send(&w.state, "POST", &disconnect, None).await.0, 200);
+        before_cancel.release();
+    });
+    assert_eq!(status, 400);
+    assert!(w.okx.state().canceled_algo_ids.is_empty());
+    assert!(w
+        .okx
+        .state()
+        .algos
+        .values()
+        .any(|algo| algo["ordType"] == "move_order_stop" && algo["state"] == "live"));
     w.state.runtime.shutdown().await;
 }
 

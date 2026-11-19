@@ -144,6 +144,42 @@ fn older_schema_gets_only_the_new_migration() {
     assert_eq!(rows, 1);
 }
 
+#[test]
+fn close_quantity_upgrade_preserves_fraction_selections() {
+    let conn = open_in_memory_bare();
+    let quantity_migration = MIGRATIONS
+        .iter()
+        .position(|(name, _)| *name == "013_okx_close_quantities.sql")
+        .unwrap();
+    migrate_with(&conn, &MIGRATIONS[..quantity_migration]).unwrap();
+    conn.execute_batch(
+        "INSERT INTO accounts (id,name,source,initial_balance,wallet_balance,used_margin,
+           realized_pnl,fees_paid,funding_paid,config,created_at)
+         VALUES ('a','A','LIVE','0','0','0','0','0','0','{}',1);
+         INSERT INTO orders (id,account_id,client_order_id,symbol,side,type,quantity,leverage,
+            reduce_only,close_position,status,filled_quantity,reserved_margin,created_at,updated_at)
+         VALUES ('o','a','key','BTCUSDT','SELL','MARKET','0.001',1,1,0,'FILLED','0.001','0',1,1);
+         INSERT INTO okx_close_intents (order_id, position_id, fraction)
+         VALUES ('o', 'isolated-long', 0.5);",
+    )
+    .unwrap();
+    migrate_with(&conn, MIGRATIONS).unwrap();
+    let saved = conn
+        .query_row(
+            "SELECT position_id, fraction, quantity FROM okx_close_selections WHERE order_id='o'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, f64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(saved, ("isolated-long".to_owned(), 0.5, None));
+}
+
 /// A connection with no migrations run, unlike `open_in_memory`.
 fn open_in_memory_bare() -> Connection {
     Connection::open_in_memory().unwrap()

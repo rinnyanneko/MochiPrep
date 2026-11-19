@@ -70,6 +70,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "012_okx_close_intents.sql",
         include_str!("../migrations/012_okx_close_intents.sql"),
     ),
+    (
+        "013_okx_close_quantities.sql",
+        include_str!("../migrations/013_okx_close_quantities.sql"),
+    ),
 ];
 
 #[derive(Debug, thiserror::Error)]

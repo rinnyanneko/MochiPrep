@@ -52,6 +52,13 @@ impl ProtectionFailure {
 /// refusal is a 400 with its reason, secrets removed.
 pub trait ExecutionEngine: Send + Sync {
     fn place_order(&self, request: OrderRequest) -> BoxFuture<'_, Result<OrderResult, ApiError>>;
+    fn reduce_position(
+        &self,
+        _request: OrderRequest,
+        _position_id: String,
+    ) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
+        Box::pin(async { Err(ApiError::bad_request("An OKX position is required")) })
+    }
     fn close_agent_position(
         &self,
         _request: OrderRequest,
@@ -567,6 +574,17 @@ impl OkxExecution {
 impl ExecutionEngine for OkxExecution {
     fn place_order(&self, request: OrderRequest) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
         Box::pin(async move { self.answer(self.engine.place_order(request).await).await })
+    }
+
+    fn reduce_position(
+        &self,
+        request: OrderRequest,
+        position_id: String,
+    ) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
+        Box::pin(async move {
+            self.answer(self.engine.reduce_position(request, position_id).await)
+                .await
+        })
     }
 
     fn close_agent_position(
