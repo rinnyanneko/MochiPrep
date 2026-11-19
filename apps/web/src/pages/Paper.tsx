@@ -63,6 +63,17 @@ function ResetAccount({ account }: { account: AccountView }) {
   );
 }
 
+function matchesQuantityStep(quantity: string, step: string): boolean {
+  const decimal = /^\d*\.?\d+$/;
+  if (!decimal.test(quantity) || !decimal.test(step)) return false;
+  const [whole = '', fraction = ''] = quantity.split('.');
+  const [stepWhole = '', stepFraction = ''] = step.split('.');
+  const precision = Math.max(fraction.length, stepFraction.length);
+  const units = BigInt(whole + fraction.padEnd(precision, '0'));
+  const increment = BigInt(stepWhole + stepFraction.padEnd(precision, '0'));
+  return increment > 0n && units % increment === 0n;
+}
+
 function OrderTicket({ account, symbol, positions }: { account: AccountView; symbol: SymbolId; positions: PositionView[] }) {
   const quote = useApp((s) => s.quotes[account.source][symbol]);
   const [side, setSide] = useRemembered<'BUY' | 'SELL'>(`ticket.${account.id}.side`, 'BUY', oneOf(['BUY', 'SELL'] as const));
@@ -98,12 +109,14 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
   const fee = notional * feeRate;
   const mmr = Number(instrument.maintenanceMarginRate);
   const liq = side === 'BUY' ? reference * (1 - 1 / leverage + mmr) : reference * (1 + 1 / leverage - mmr);
+  const reductionSize = reduceQuantity.trim();
+  const validStep = !boundReduction || matchesQuantityStep(reductionSize, instrument.quantityStep);
   const valid = Number.isFinite(quantity) && quantity >= Number(instrument.minQuantity)
     && (boundReduction
       ? !!selected && quantity <= Number(selected.quantity)
-        && /^\d*\.?\d+$/.test(reduceQuantity.trim()) && (type === 'MARKET' || reference > 0)
+        && validStep && (type === 'MARKET' || reference > 0)
       : reference > 0 && !!quote);
-  const displayedQuantity = boundReduction ? reduceQuantity.trim() : qty(quantity);
+  const displayedQuantity = boundReduction ? reductionSize : qty(quantity);
   const canConfirm = valid && confirmation !== null
     && (!boundReduction || confirmation.positionId === selected?.id);
 
@@ -117,7 +130,7 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
         symbol,
         side: orderSide,
         type,
-        quantity: boundReduction ? reduceQuantity.trim() : String(quantity),
+        quantity: boundReduction ? reductionSize : String(quantity),
         price: type === 'LIMIT' ? limit : null,
         leverage,
         reduceOnly,
@@ -161,6 +174,9 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
       <Field label={!boundReduction && mode === 'MARGIN' ? 'Margin (USDT)' : `Quantity (${instrument.baseCurrency})`}>
         <Input inputMode="decimal" aria-label="Order size" value={boundReduction ? reduceQuantity : amount} onChange={(e) => (boundReduction ? setReduceQuantity : setAmount)(e.target.value)} />
       </Field>
+      {boundReduction && reductionSize && !validStep && (
+        <p className="text-xs text-warn">Enter a multiple of {instrument.quantityStep} {instrument.baseCurrency}.</p>
+      )}
       {!boundReduction && <Field label={`Leverage: ${leverage}x`}>
         <input aria-label="Leverage" type="range" min={1} max={20} value={leverage} onChange={(e) => setLeverage(Number(e.target.value))} className="w-full accent-[var(--accent)]" />
       </Field>}

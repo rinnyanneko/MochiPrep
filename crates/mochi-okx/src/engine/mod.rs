@@ -322,6 +322,8 @@ pub enum EngineError {
     Stopped,
     #[error("The OKX session was replaced or disconnected before order dispatch")]
     SessionRetired,
+    #[error("NOT_ARMED: real-money orders are switched off for this account")]
+    OpeningDisarmed,
 }
 
 impl EngineError {
@@ -1012,12 +1014,23 @@ impl OkxEngine {
 
         let refusal = self.pre_trade_refusal(&order, position.map(|(side, _)| side), &prepared)?;
         let contracts = to_contracts(&order, registry)?;
+        let spec = registry.get(&order.symbol)?;
+        let executable_quantity = contracts.mul(&dec(&spec.venue_contract_value)?);
+        if close_selection
+            .as_ref()
+            .is_some_and(|selection| matches!(selection.amount, CloseAmount::Quantity { .. }))
+            && !executable_quantity.eq_value(&dec(&order.quantity)?)
+        {
+            return Err(EngineError::message(format!(
+                "Reduction quantity must be a multiple of {}",
+                spec.quantity_step
+            )));
+        }
         if refusal.is_some() || contracts.lte(&zero()) {
             let reason = refusal.unwrap_or_else(|| "INVALID_QUANTITY: below one lot".into());
             return self.reject(order, reason, close_selection).await;
         }
-        let spec = registry.get(&order.symbol)?;
-        order.quantity = contracts.mul(&dec(&spec.venue_contract_value)?).to_fixed();
+        order.quantity = executable_quantity.to_fixed();
 
         // Written before anything is sent, so a crash can never leave an order we do not know
         // about.
@@ -1050,6 +1063,9 @@ impl OkxEngine {
         match self.send(&mut order, &inst_id, &body).await {
             Ok(()) => {}
             Err(error @ EngineError::SessionRetired) => return Err(error),
+            Err(error @ EngineError::OpeningDisarmed) => {
+                return self.finish_rejected(order, error.to_string()).await;
+            }
             Err(EngineError::Okx(OkxError::Rejection { code, message })) => {
                 let reason = OkxError::Rejection { code, message }.to_string();
                 return self.finish_rejected(order, reason).await;
@@ -1090,9 +1106,16 @@ impl OkxEngine {
         let client = &self.deps.client;
         if !order.reduce_only {
             self.check_dispatch()?;
+            if !(self.deps.is_armed)() {
+                return Err(EngineError::OpeningDisarmed);
+            }
             client.set_leverage(inst_id, order.leverage).await?;
         }
         self.check_dispatch()?;
+        // Stop All can disarm this account while the leverage request is in flight.
+        if !order.reduce_only && !(self.deps.is_armed)() {
+            return Err(EngineError::OpeningDisarmed);
+        }
         order.exchange_order_id = Some(client.place_order(body).await?);
         let row = order.clone();
         self.rows(move |rows| Ok(rows.save_order(&row)?)).await

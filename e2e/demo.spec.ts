@@ -240,6 +240,8 @@ test('OKX market and limit reductions send the selected isolated position', asyn
   await size.fill('0.002');
   const review = page.getByRole('button', { name: 'Review reduction' });
   await expect(review).toBeDisabled();
+  await size.fill('0.00019');
+  await expect(review).toBeDisabled();
   await size.fill('0.0004');
   for (const [type, limit] of [['Market', null], ['Limit', '76000']] as const) {
     await page.getByRole('button', { name: type, exact: true }).click();

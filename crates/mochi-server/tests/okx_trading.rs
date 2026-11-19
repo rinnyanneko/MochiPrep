@@ -328,6 +328,37 @@ async fn generic_okx_reduce_only_orders_require_the_selected_close_route() {
 }
 
 #[tokio::test]
+async fn stop_all_prevents_opening_while_leverage_is_in_flight() {
+    let w = world(true).await;
+    w.state
+        .runtime
+        .suspend_periodic_okx_sync_for_test()
+        .await
+        .unwrap();
+    let leverage = w.okx.hold_next("POST", "/account/set-leverage");
+    let order = order("stop-all-race");
+    let ((status, result), ()) =
+        tokio::join!(send(&w.state, "POST", "/api/orders", Some(order)), async {
+            tokio::time::timeout(std::time::Duration::from_secs(2), leverage.reached())
+                .await
+                .unwrap();
+            assert_eq!(
+                send(&w.state, "POST", "/api/agents/stop-all", None).await.0,
+                200
+            );
+            leverage.release();
+        });
+    assert_eq!(status, 200);
+    assert_eq!(result["order"]["status"], "REJECTED");
+    assert!(result["order"]["rejectReason"]
+        .as_str()
+        .unwrap()
+        .starts_with("NOT_ARMED"));
+    assert!(w.okx.state().placed.is_empty());
+    w.state.runtime.shutdown().await;
+}
+
+#[tokio::test]
 async fn selected_okx_market_and_limit_orders_can_reduce_an_exact_quantity() {
     let w = world_with_position().await;
     w.state
@@ -355,6 +386,15 @@ async fn selected_okx_market_and_limit_orders_can_reduce_an_exact_quantity() {
     oversized["quantity"] = json!("0.002");
     assert_eq!(
         send(&w.state, "POST", "/api/orders", Some(oversized))
+            .await
+            .0,
+        400
+    );
+    assert_eq!(w.okx.state().placed.len(), 1);
+    let mut off_step = request.clone();
+    off_step["quantity"] = json!("0.00019");
+    assert_eq!(
+        send(&w.state, "POST", "/api/orders", Some(off_step))
             .await
             .0,
         400

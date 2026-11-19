@@ -30,9 +30,7 @@ impl OkxEngine {
         }
         let limits = &prepared.limits;
         if !(self.deps.is_armed)() {
-            return Ok(Some(
-                "NOT_ARMED: real-money orders are switched off for this account".into(),
-            ));
+            return Ok(Some(EngineError::OpeningDisarmed.to_string()));
         }
         let (healthy, balance, sync_error, held_symbols) = {
             let healthy = self.healthy();
