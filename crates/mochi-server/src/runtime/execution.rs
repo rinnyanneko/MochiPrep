@@ -656,7 +656,7 @@ impl ExecutionEngine for OkxExecution {
                 Ok(result) => Ok(result),
                 Err(error) => {
                     let after = match &error {
-                        EngineError::ProtectionChange { after, .. } => Some((**after).clone()),
+                        EngineError::ProtectionChange { after, .. } => after.as_deref().cloned(),
                         _ => None,
                     };
                     Err(ProtectionFailure {

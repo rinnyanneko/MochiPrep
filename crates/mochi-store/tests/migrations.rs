@@ -1,4 +1,4 @@
-use mochi_store::{migrate_with, open_database, open_in_memory, scrub, StoreError, MIGRATIONS};
+use mochi_store::{migrate_with, open_database, scrub, StoreError, MIGRATIONS};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -27,7 +27,9 @@ fn migration_names(conn: &Connection) -> Vec<String> {
 
 #[test]
 fn fresh_schema_matches_node() {
-    let conn = open_in_memory().unwrap();
+    let conn = open_in_memory_bare();
+    // The frozen Node schema ends at the trailing-stop migration.
+    migrate_with(&conn, &MIGRATIONS[..8]).unwrap();
     let mut stmt = conn
         .prepare(
             "SELECT type, name, tbl_name, sql FROM sqlite_master \
@@ -67,7 +69,7 @@ fn migration_list_matches_directory() {
 }
 
 #[test]
-fn opens_node_database_without_reapplying() {
+fn upgrades_node_database_without_reapplying_its_migrations() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("node.sqlite");
     std::fs::copy(golden_path("node-created.sqlite"), &path).unwrap();
@@ -77,8 +79,12 @@ fn opens_node_database_without_reapplying() {
         applied_at(&raw)
     };
     let conn = open_database(&path).unwrap();
-    assert_eq!(applied_at(&conn).len(), 8);
-    assert_eq!(applied_at(&conn), applied_before);
+    let applied = applied_at(&conn);
+    let (original, added) = applied.split_at(applied_before.len());
+    assert_eq!(original, applied_before);
+    assert_eq!(added.len(), 1);
+    assert_eq!(added[0].0, "009_deferred_target_replacements.sql");
+    assert!(table_exists(&conn, "deferred_target_replacements"));
     let name: String = conn
         .query_row(
             "SELECT name FROM accounts WHERE id = 'acct_golden'",
@@ -87,6 +93,8 @@ fn opens_node_database_without_reapplying() {
         )
         .unwrap();
     assert_eq!(name, "Golden");
+    drop(conn);
+    assert_eq!(applied_at(&open_database(&path).unwrap()), applied);
 }
 
 fn applied_at(conn: &Connection) -> Vec<(String, i64)> {
@@ -98,7 +106,7 @@ fn applied_at(conn: &Connection) -> Vec<(String, i64)> {
 }
 
 #[test]
-fn older_schema_gets_only_the_new_migration() {
+fn older_schema_gets_only_the_new_migrations() {
     let conn = open_in_memory_bare();
     migrate_with(&conn, &MIGRATIONS[..7]).unwrap();
     conn.execute_batch(
@@ -112,7 +120,13 @@ fn older_schema_gets_only_the_new_migration() {
     migrate_with(&conn, MIGRATIONS).unwrap();
     let after = migration_names(&conn);
     let added: Vec<&String> = after.iter().filter(|n| !before.contains(n)).collect();
-    assert_eq!(added, vec!["008_trailing_stop.sql"]);
+    assert_eq!(
+        added,
+        vec![
+            "008_trailing_stop.sql",
+            "009_deferred_target_replacements.sql"
+        ]
+    );
     let rows: i64 = conn
         .query_row("SELECT COUNT(*) FROM providers", [], |r| r.get(0))
         .unwrap();

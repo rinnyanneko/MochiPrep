@@ -254,6 +254,18 @@ impl PaperStore for AuditedStore {
     fn get_order(&self, id: &str) -> Result<Option<Order>, StoreFailure> {
         self.inner.get_order(id)
     }
+    fn link_target_replacement(
+        &self,
+        deferred_order_id: &str,
+        replacement_order_id: &str,
+    ) -> Result<(), StoreFailure> {
+        self.write("link_target_replacement");
+        self.inner
+            .link_target_replacement(deferred_order_id, replacement_order_id)
+    }
+    fn target_replacements(&self, deferred_order_id: &str) -> Result<Vec<Order>, StoreFailure> {
+        self.inner.target_replacements(deferred_order_id)
+    }
     fn get_order_by_client_id(
         &self,
         account_id: &str,

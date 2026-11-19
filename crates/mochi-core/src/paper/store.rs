@@ -57,6 +57,12 @@ pub trait PaperStore {
     fn insert_order(&self, order: &Order) -> Result<(), StoreFailure>;
     fn save_order(&self, order: &Order) -> Result<(), StoreFailure>;
     fn get_order(&self, id: &str) -> Result<Option<Order>, StoreFailure>;
+    fn link_target_replacement(
+        &self,
+        deferred_order_id: &str,
+        replacement_order_id: &str,
+    ) -> Result<(), StoreFailure>;
+    fn target_replacements(&self, deferred_order_id: &str) -> Result<Vec<Order>, StoreFailure>;
     fn get_order_by_client_id(
         &self,
         account_id: &str,

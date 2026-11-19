@@ -1024,16 +1024,33 @@ impl OkxEngine {
         for leg in LEGS {
             if !same_leg(leg, &before, &target)? {
                 changed.push(leg);
+            } else if let Some(tp) = old
+                .leg(leg)
+                .filter(|_| leg == Leg::Tp && !retain.take_profit)
+            {
+                let contracts = self
+                    .check_protection_position(&position, spec, None, &position_changed)
+                    .await?;
+                let covered = self
+                    .live_target_coverage(tp, &contracts, &context.registry)
+                    .await?
+                    .ok_or_else(|| {
+                        EngineError::message("Could not verify the live take profit size")
+                    })?;
+                if covered {
+                    self.check_protection_position(&position, spec, None, &position_changed)
+                        .await?;
+                } else {
+                    changed.push(leg);
+                }
             }
         }
         let new_stop = target
             .stop_loss
             .as_deref()
             .filter(|_| changed.contains(&Leg::Sl));
-        let retained_stop = if changed.contains(&Leg::Trail)
-            && target.trailing_stop.is_none()
-            && target.stop_loss.is_some()
-            && new_stop.is_none()
+        let removing_trailing = changed.contains(&Leg::Trail) && target.trailing_stop.is_none();
+        let retained_stop = if removing_trailing && target.stop_loss.is_some() && new_stop.is_none()
         {
             Some(old.leg(Leg::Sl).ok_or_else(position_changed)?)
         } else {
@@ -1055,10 +1072,16 @@ impl OkxEngine {
         } else {
             Vec::new()
         };
+        let mut replaced_targets = if changed.contains(&Leg::Tp) && target.take_profit.is_some() {
+            self.deferred_to_retire(&source, vec![(Leg::Tp, REPLACED)], true)
+                .await?
+        } else {
+            Vec::new()
+        };
         // Read the position after the entry lookups, before persisting changes or
         // submitting an algo based on the previously selected position.
         if let Some(fixed) = retained_stop {
-            self.check_retained_stop(fixed, &position, &context.registry, &position_changed)
+            self.check_fixed_stop_coverage(fixed, &position, &context.registry, &position_changed)
                 .await?;
         } else if checked.is_some()
             || changed.iter().any(|leg| leg.is_set(&target))
@@ -1072,6 +1095,7 @@ impl OkxEngine {
         // Place new legs before cancelling live algos, so swapping a stop for a
         // trailing stop can never leave the position with neither.
         let mut needs_position_check = false;
+        let mut placed_fixed = None;
         for leg in changed.iter().copied().filter(|leg| leg.is_set(&target)) {
             if needs_position_check {
                 self.check_follow_up_position(&position, spec, &position_changed)
@@ -1082,10 +1106,27 @@ impl OkxEngine {
             // Written before anything is sent, so an unanswered request can be looked up by
             // algoClOrdId.
             let inserted = row.clone();
-            self.rows(move |rows| Ok(rows.insert_order(&inserted)?))
-                .await?;
+            let replaces = if leg == Leg::Tp {
+                std::mem::take(&mut replaced_targets)
+            } else {
+                Vec::new()
+            };
+            self.rows(move |rows| {
+                rows.transaction(&mut || {
+                    rows.insert_order(&inserted)?;
+                    for (deferred, _) in &replaces {
+                        rows.link_target_replacement(&deferred.id, &inserted.id)?;
+                    }
+                    Ok(())
+                })
+            })
+            .await?;
             match self.place(&mut row, &context.registry).await {
-                Ok(()) => {}
+                Ok(()) => {
+                    if leg == Leg::Sl {
+                        placed_fixed = Some(row);
+                    }
+                }
                 // Unknown outcome: never placed again. A sync looks it up by algoClOrdId; if OKX
                 // shows it live, the placement is known to have succeeded and the change carries
                 // on.
@@ -1095,13 +1136,18 @@ impl OkxEngine {
                     let _ = self.sync_protection_edit().await;
                     let id = row.id.clone();
                     let resolved = self.rows(move |rows| Ok(rows.get_order(&id)?)).await?;
-                    let confirmed = resolved.is_some_and(|r| {
+                    let confirmed = resolved.filter(|r| {
                         r.status == OrderStatus::Open
-                            && r.exchange_order_id.is_some_and(|id| !id.is_empty())
+                            && r.exchange_order_id
+                                .as_deref()
+                                .is_some_and(|id| !id.is_empty())
                     });
-                    if confirmed {
+                    if let Some(confirmed) = confirmed {
                         self.check_follow_up_position(&position, spec, &position_changed)
                             .await?;
+                        if leg == Leg::Sl {
+                            placed_fixed = Some(confirmed);
+                        }
                         needs_position_check = false;
                         continue;
                     }
@@ -1120,19 +1166,7 @@ impl OkxEngine {
                     row.reject_reason = Some(message.clone());
                     row.updated_at = self.now();
                     self.save(row).await?;
-                    // Legs placed before this one stay; sync retires the algos they superseded.
-                    let confirmed = self.sync_protection_edit().await.is_ok();
-                    // Without the sync, `after` is the last view, which may lack legs OKX already
-                    // accepted.
-                    let note = if confirmed {
-                        ""
-                    } else {
-                        "; current protection not yet confirmed from OKX"
-                    };
-                    return Err(EngineError::ProtectionChange {
-                        message: format!("{message}{note}"),
-                        after: Box::new(self.protection_of(&symbol)),
-                    });
+                    return Err(self.protection_edit_error(&symbol, error).await);
                 }
             }
             needs_position_check = true;
@@ -1140,6 +1174,14 @@ impl OkxEngine {
         if needs_position_check && changed.contains(&Leg::Tp) && target.take_profit.is_some() {
             self.check_follow_up_position(&position, spec, &position_changed)
                 .await?;
+        }
+        if let Some(fixed) = placed_fixed.as_ref().filter(|_| removing_trailing) {
+            if let Err(error) = self
+                .check_fixed_stop_coverage(fixed, &position, &context.registry, &position_changed)
+                .await
+            {
+                return Err(self.protection_edit_error(&symbol, error).await);
+            }
         }
         for leg in &changed {
             if !leg.is_set(&target) {
@@ -1170,19 +1212,22 @@ impl OkxEngine {
                             .collect())
                     })
                     .await?;
-                if let Some(fixed) = retained_stop
+                if let Some(fixed) = placed_fixed
+                    .as_ref()
+                    .or(retained_stop)
                     .filter(|_| leg == Leg::Trail && !active.is_empty() && changed.len() > 1)
                 {
                     // Other edits may have made exchange calls since preflight.
                     if let Err(error) = self
-                        .check_retained_stop(fixed, &position, &context.registry, &position_changed)
+                        .check_fixed_stop_coverage(
+                            fixed,
+                            &position,
+                            &context.registry,
+                            &position_changed,
+                        )
                         .await
                     {
-                        let _ = self.sync_protection_edit().await;
-                        return Err(EngineError::ProtectionChange {
-                            message: error.to_string(),
-                            after: Box::new(self.protection_of(&symbol)),
-                        });
+                        return Err(self.protection_edit_error(&symbol, error).await);
                     }
                 }
                 self.cancel_rows(active, Some(REMOVED)).await?;
@@ -1267,16 +1312,47 @@ impl OkxEngine {
             .check_protection_position(position, spec, None, changed)
             .await
         {
-            let _ = self.sync_protection_edit().await;
-            return Err(EngineError::ProtectionChange {
-                message: error.to_string(),
-                after: Box::new(self.protection_of(&position.position.symbol)),
-            });
+            return Err(self
+                .protection_edit_error(&position.position.symbol, error)
+                .await);
         }
         Ok(())
     }
 
-    async fn check_retained_stop(
+    async fn protection_edit_error(&self, symbol: &str, error: EngineError) -> EngineError {
+        let confirmed = self.sync_protection_edit().await.is_ok();
+        let note = if confirmed {
+            ""
+        } else {
+            "; current protection not yet confirmed from OKX"
+        };
+        EngineError::ProtectionChange {
+            message: format!("{error}{note}"),
+            after: confirmed.then(|| Box::new(self.protection_of(symbol))),
+        }
+    }
+
+    async fn live_target_coverage(
+        &self,
+        target: &Order,
+        contracts: &Dec,
+        registry: &Registry,
+    ) -> Result<Option<bool>, EngineError> {
+        // An uncertain lookup must not be treated as proof that a live target is too small.
+        let Some(algo) = self.lookup_algo(&target.id).await? else {
+            return Ok(None);
+        };
+        let (Some(listed), Some(recorded)) = sizes(target, &algo, registry) else {
+            return Ok(None);
+        };
+        Ok(Some(
+            live_algo_matches(&algo, Leg::Tp, target)?
+                && algo.get("tpOrdPx").and_then(Value::as_str) == Some("-1")
+                && listed.min(&recorded).gte(contracts),
+        ))
+    }
+
+    async fn check_fixed_stop_coverage(
         &self,
         fixed: &Order,
         position: &PositionView,
@@ -1295,7 +1371,7 @@ impl OkxEngine {
         }
         if algo.get("slOrdPx").and_then(Value::as_str) != Some("-1") {
             return Err(EngineError::message(
-                "The retained stop loss must be a market order to remove the trailing stop",
+                "The fixed stop loss must be a market order to remove the trailing stop",
             ));
         }
         let (listed, recorded) = sizes(fixed, &algo, registry);
@@ -1304,9 +1380,11 @@ impl OkxEngine {
             .is_some_and(|(live, local)| live.min(&local).gte(&contracts))
         {
             return Err(EngineError::message(
-                "The retained stop loss does not cover the entire OKX position",
+                "The fixed stop loss does not cover the entire OKX position",
             ));
         }
+        self.check_protection_position(position, spec, fixed.trigger_price.as_deref(), changed)
+            .await?;
         Ok(())
     }
 
@@ -1575,12 +1653,22 @@ impl OkxEngine {
         let inst_id = to_inst_id(&row.symbol);
         let confirming = self.now().saturating_sub(parent.updated_at) < POSITION_MISSING_MS;
         let context = self.context().await?;
+        let linked_replacements = if leg == Leg::Tp {
+            let id = row.id.clone();
+            self.rows(move |rows| Ok(rows.target_replacements(&id)?))
+                .await?
+        } else {
+            Vec::new()
+        };
         let replacement = context.open_orders.iter().rev().find(|other| {
             other.symbol == row.symbol
                 && other.side == row.side
-                && other.created_at >= parent.updated_at
                 && !is_per_fill(other)
                 && leg_of(other) == Some(leg)
+                // Keep the timestamp fallback for orders written before replacement
+                // links existed. A later partial fill changes the parent's timestamp.
+                && (other.created_at >= parent.updated_at
+                    || linked_replacements.iter().any(|linked| linked.id == other.id))
         });
         if let Some(replacement) = replacement {
             if replacement
@@ -1667,25 +1755,30 @@ impl OkxEngine {
                 .await;
         }
         if let Some(replacement) = replacement {
-            let Some(algo) = self.lookup_algo(&replacement.id).await? else {
-                return Ok(());
-            };
             let contracts = if short {
                 signed_size.neg()
             } else {
                 signed_size
             };
-            let (listed, recorded) = sizes(replacement, &algo, registry);
-            if live_algo_matches(&algo, Leg::Tp, replacement)?
-                && algo.get("tpOrdPx").and_then(Value::as_str) == Some("-1")
-                && listed
-                    .zip(recorded)
-                    .is_some_and(|(live, local)| live.min(&local).gte(&contracts))
+            if self
+                .live_target_coverage(replacement, &contracts, registry)
+                .await?
+                == Some(true)
             {
                 return self.close_row(row, REPLACED).await;
             }
             // Until coverage is known, keep intent pending without sending a
             // second target that could overlap the already accepted replacement.
+            return Ok(());
+        }
+        if linked_replacements.iter().any(|replacement| {
+            replacement
+                .exchange_order_id
+                .as_deref()
+                .is_some_and(|id| !id.is_empty())
+        }) {
+            // Acceptance of the replacement superseded this price. A later fill
+            // or cancellation of the replacement cannot authorize the old target.
             return Ok(());
         }
         let remote = remote
@@ -2169,6 +2262,12 @@ impl OkxEngine {
                     .as_deref()
                     .is_some_and(|id| !id.is_empty())
             {
+                if let Some(id) = remote
+                    .as_ref()
+                    .and_then(|algo| truthy_text(algo.get("algoId")))
+                {
+                    row.exchange_order_id = Some(id);
+                }
                 self.close_row(row, "Gone from OKX").await?;
             } else if at - row.created_at >= NEVER_ARRIVED_AFTER_MS {
                 self.close_row(row, "OKX has no record of this algo")

@@ -50,6 +50,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "008_trailing_stop.sql",
         include_str!("../migrations/008_trailing_stop.sql"),
     ),
+    (
+        "009_deferred_target_replacements.sql",
+        include_str!("../migrations/009_deferred_target_replacements.sql"),
+    ),
 ];
 
 #[derive(Debug, thiserror::Error)]

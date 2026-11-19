@@ -496,6 +496,28 @@ impl PaperStore for SqlitePaperStore {
         self.query_one("SELECT * FROM orders WHERE id=?", [id], to_order)
     }
 
+    fn link_target_replacement(
+        &self,
+        deferred_order_id: &str,
+        replacement_order_id: &str,
+    ) -> Result<(), StoreFailure> {
+        self.run(
+            "INSERT INTO deferred_target_replacements (deferred_order_id, replacement_order_id)
+             VALUES (?, ?)",
+            params![deferred_order_id, replacement_order_id],
+        )
+    }
+
+    fn target_replacements(&self, deferred_order_id: &str) -> Result<Vec<Order>, StoreFailure> {
+        self.query(
+            "SELECT orders.* FROM deferred_target_replacements AS links
+             JOIN orders ON orders.id=links.replacement_order_id
+             WHERE links.deferred_order_id=?",
+            [deferred_order_id],
+            to_order,
+        )
+    }
+
     fn get_order_by_client_id(
         &self,
         account_id: &str,

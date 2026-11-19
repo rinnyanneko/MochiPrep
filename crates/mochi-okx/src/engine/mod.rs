@@ -51,6 +51,12 @@ pub trait LiveRows {
     fn insert_order(&self, order: &Order) -> Result<(), StoreFailure>;
     fn save_order(&self, order: &Order) -> Result<(), StoreFailure>;
     fn get_order(&self, id: &str) -> Result<Option<Order>, StoreFailure>;
+    fn link_target_replacement(
+        &self,
+        deferred_order_id: &str,
+        replacement_order_id: &str,
+    ) -> Result<(), StoreFailure>;
+    fn target_replacements(&self, deferred_order_id: &str) -> Result<Vec<Order>, StoreFailure>;
     fn get_order_by_client_id(
         &self,
         account_id: &str,
@@ -99,6 +105,17 @@ impl<S: PaperStore> LiveRows for Rows<'_, S> {
     }
     fn get_order(&self, id: &str) -> Result<Option<Order>, StoreFailure> {
         self.store.get_order(id)
+    }
+    fn link_target_replacement(
+        &self,
+        deferred_order_id: &str,
+        replacement_order_id: &str,
+    ) -> Result<(), StoreFailure> {
+        self.store
+            .link_target_replacement(deferred_order_id, replacement_order_id)
+    }
+    fn target_replacements(&self, deferred_order_id: &str) -> Result<Vec<Order>, StoreFailure> {
+        self.store.target_replacements(deferred_order_id)
     }
     fn get_order_by_client_id(
         &self,
@@ -185,12 +202,12 @@ pub enum EngineError {
     /// Node's plain `Error`s, such as `Unknown order <id>`.
     #[error("{0}")]
     Message(String),
-    /// Node's `ProtectionChangeError`: a protection change refused part-way. `after` is what is
-    /// in force, including legs already placed.
+    /// Node's `ProtectionChangeError`: a protection change refused part-way. `after` is set
+    /// only when the protection in force was confirmed after the refusal.
     #[error("{message}")]
     ProtectionChange {
         message: String,
-        after: Box<Protection>,
+        after: Option<Box<Protection>>,
     },
     #[error(transparent)]
     Okx(#[from] OkxError),
