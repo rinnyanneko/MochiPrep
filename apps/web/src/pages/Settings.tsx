@@ -11,7 +11,7 @@ import { api } from '@/lib/api';
 import { formatDateTime, listTimeZones, resolveTimeZone } from '@/lib/display';
 import { COLOR_PRESETS, directionPalette, type ColorPreset } from '@/lib/direction-colors';
 import { pct } from '@/lib/format';
-import { attempt, useApp } from '@/store';
+import { attempt, useApp, useQuery } from '@/store';
 
 const KINDS: { value: Exclude<ProviderKind, 'MOCK'>; label: string; baseUrl: string; model: string }[] = [
   { value: 'OPENAI_COMPATIBLE', label: 'OpenAI-compatible (custom URL)', baseUrl: 'http://localhost:11434/v1', model: '' },
@@ -200,6 +200,42 @@ function DisplayCard() {
   );
 }
 
+type LogPreference = { retention: number; available: boolean };
+
+function OperationLogsCard() {
+  const { data, error, reload } = useQuery(() => api.get<LogPreference>('/settings/operation-logs'), []);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const text = draft ?? String(data?.retention ?? '');
+  const retention = Number(text);
+  const valid = text.trim() !== '' && Number.isInteger(retention) && retention >= -1 && retention <= 2_147_483_647;
+  const save = async () => {
+    setSaving(true);
+    const saved = await attempt(() => api.put<LogPreference>('/settings/operation-logs', { retention }));
+    setSaving(false);
+    if (saved) {
+      setDraft(String(saved.retention));
+      reload();
+      useApp.getState().toast('info', 'Log retention saved');
+    }
+  };
+  return (
+    <Card>
+      <CardHeader title="Operation logs" description="The backend writes operation results to the logs folder in its data directory." />
+      {error && <p className="px-5 pb-4 text-sm text-down">{error}</p>}
+      {data && !data.available && <p className="px-5 pb-4 text-sm text-down">Operation logs are unavailable.</p>}
+      {data?.available && (
+        <div className="flex flex-wrap items-end gap-3 px-5 pb-4">
+          <Field label="Dated logs to keep" hint="0 keeps only latest.log. −1 keeps every dated log.">
+            <Input type="number" min={-1} step={1} value={text} disabled={saving} onChange={(event) => setDraft(event.target.value)} />
+          </Field>
+          <Button disabled={saving || !valid} onClick={save}>Save log retention</Button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function SettingsPage() {
   const providers = useApp((s) => s.providers);
   const demoActive = useApp((s) => s.demoActive);
@@ -234,6 +270,8 @@ export function SettingsPage() {
         </Card>
 
         <DisplayCard />
+
+        <OperationLogsCard />
 
         <VaultCard />
 

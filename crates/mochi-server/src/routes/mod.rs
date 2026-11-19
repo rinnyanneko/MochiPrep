@@ -8,6 +8,7 @@ pub mod instruments;
 pub mod later;
 pub mod market;
 pub mod news;
+mod operation_logs;
 pub mod orders;
 pub mod providers;
 pub mod replay;
@@ -34,6 +35,7 @@ pub fn router() -> Router<AppState> {
         .merge(state::router())
         .merge(market::router())
         .merge(news::router())
+        .merge(operation_logs::router())
         .merge(instruments::router())
         .merge(accounts::router())
         .merge(orders::router())

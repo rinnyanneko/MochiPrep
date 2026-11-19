@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::{Request, State};
+use axum::extract::{MatchedPath, Request, State};
 use axum::http::header::{AUTHORIZATION, CONTENT_LENGTH, HOST, ORIGIN};
 use axum::http::{HeaderMap, Method};
 use axum::middleware::{self, Next};
@@ -33,6 +33,7 @@ struct Guard {
     token: String,
     allowed_origins: Vec<String>,
     allowed_hosts: HashSet<String>,
+    operation_logs: Option<Arc<crate::operation_log::OperationLog>>,
 }
 
 /// Wraps `router` in the guard and the body limit, and answers unmatched paths with JSON.
@@ -46,6 +47,7 @@ pub fn protect(router: Router<AppState>, state: AppState) -> Router {
             .iter()
             .filter_map(|origin| url_host(origin))
             .collect(),
+        operation_logs: state.operation_logs.clone(),
     });
     router
         // A path no route claims may be a file of the web build; any other is a 404. Fastify's
@@ -67,12 +69,29 @@ async fn guard_request(State(guard): State<Arc<Guard>>, request: Request, next: 
     if let Err(error) = guard.check(&request) {
         return error.into_response();
     }
+    let operation = guard.operation_logs.as_ref().and_then(|log| {
+        let path = request.extensions().get::<MatchedPath>()?;
+        (path.as_str().starts_with("/api/")
+            && matches!(
+                *request.method(),
+                Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+            ))
+        .then(|| (log, request.method().clone(), path.clone()))
+    });
     // Only now read the body, as Fastify parses it after `onRequest`: a refused request never
     // gets to upload anything.
-    match limit_body(request).await {
+    let response = match limit_body(request).await {
         Ok(request) => next.run(request).await,
         Err(error) => error.into_response(),
+    };
+    if let Some((log, method, path)) = operation {
+        log.record(format_args!(
+            "{method} {} -> {}",
+            path.as_str(),
+            response.status().as_u16()
+        ));
     }
+    response
 }
 
 impl Guard {

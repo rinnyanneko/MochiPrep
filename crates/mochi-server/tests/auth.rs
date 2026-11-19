@@ -87,6 +87,176 @@ async fn missing_token_is_401() {
 }
 
 #[tokio::test]
+async fn authenticated_operations_are_logged_without_request_data_and_retention_is_saved() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut state = state();
+    state.operation_logs = Some(Arc::new(
+        mochi_server::operation_log::OperationLog::open(directory.path(), -1).unwrap(),
+    ));
+    let router = auth::protect(
+        routes::router().route(
+            "/api/test/log/{id}",
+            post(|| async { StatusCode::NO_CONTENT }),
+        ),
+        state.clone(),
+    );
+    let action = |auth: bool| {
+        let mut request = Request::post("/api/test/log/private-id?token=private-query")
+            .header("host", HOST)
+            .header("content-type", "application/json");
+        if auth {
+            request = request.header("authorization", bearer(&state));
+        }
+        request
+            .body(Body::from(r#"{"key":"private-body"}"#))
+            .unwrap()
+    };
+    assert_eq!(
+        send(router.clone(), action(false)).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let log = state.operation_logs.as_ref().unwrap();
+    let resume = log.pause_writer_for_test().await;
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        send(router.clone(), action(true)),
+    )
+    .await;
+    drop(resume);
+    assert_eq!(response.unwrap().0, StatusCode::NO_CONTENT);
+    log.flush().await;
+    let logs = directory.path().join("logs");
+    let latest = std::fs::read_to_string(logs.join("latest.log")).unwrap();
+    assert!(latest.contains("POST /api/test/log/{id} -> 204"));
+    for secret in [
+        "private-id",
+        "private-query",
+        "private-body",
+        &state.token,
+        " -> 401",
+    ] {
+        assert!(!latest.contains(secret));
+    }
+    let retention = |count| {
+        Request::put("/api/settings/operation-logs")
+            .header("host", HOST)
+            .header("authorization", bearer(&state))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::json!({ "retention": count }).to_string(),
+            ))
+            .unwrap()
+    };
+    assert_eq!(
+        send(router.clone(), retention(-2)).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(send(router.clone(), retention(-1)).await.0, StatusCode::OK);
+    let archive = std::fs::read_dir(&logs)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("session-")
+        })
+        .unwrap();
+    state
+        .runtime
+        .call(|r| {
+            r.connection().execute_batch(
+                "CREATE TRIGGER refuse_retention BEFORE INSERT ON settings
+         WHEN NEW.key='operationLogRetention'
+         BEGIN SELECT RAISE(ABORT, 'test write failure'); END;",
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!send(router.clone(), retention(0)).await.0.is_success());
+    assert!(archive.exists());
+    assert_eq!(
+        state
+            .runtime
+            .call(|r| mochi_server::operation_log::retention(r.connection()))
+            .await
+            .unwrap()
+            .unwrap(),
+        -1
+    );
+    state
+        .runtime
+        .call(|r| {
+            r.connection()
+                .execute_batch("DROP TRIGGER refuse_retention")
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let resume = log.pause_writer_for_test().await;
+    let update = tokio::spawn(send(router.clone(), retention(0)));
+    let timeout = std::time::Duration::from_secs(2);
+    tokio::time::timeout(timeout, async {
+        loop {
+            let count = state
+                .runtime
+                .call(|r| mochi_server::operation_log::retention(r.connection()))
+                .await
+                .unwrap()
+                .unwrap();
+            if count == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        archive.exists(),
+        "the worker is still paused after the DB commit"
+    );
+    update.abort();
+    drop(resume);
+    tokio::time::timeout(timeout, async {
+        while archive.exists() {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        std::fs::read_dir(&logs)
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext == "log")
+            })
+            .count(),
+        1
+    );
+    let (status, preference) = send(
+        router,
+        get("/api/settings/operation-logs")
+            .header("authorization", bearer(&state))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        preference,
+        serde_json::json!({ "retention": 0, "available": true })
+    );
+    state.runtime.shutdown().await;
+}
+
+#[tokio::test]
 async fn wrong_token_is_401() {
     let state = state();
     let wrong = format!("Bearer {}", "0".repeat(64));

@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use mochi_market::okx_public::{OkxPublicFeed, REST_BASE, WS_URL};
 use mochi_server::{
-    app, load_config, AppState, RuntimeHandle, RuntimeOptions, EXIT_PORT_IN_USE, READY_PREFIX,
+    app, load_config, operation_log, AppState, RuntimeHandle, RuntimeOptions, EXIT_PORT_IN_USE,
+    READY_PREFIX,
 };
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -14,6 +15,7 @@ use tokio::time::sleep;
 
 /// How long open requests get to finish after a shutdown signal.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+const LOG_SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
 
 /// Tokio worker threads. The work is I/O-bound, the ledger and SQLite run in one runtime task, and
 /// the vault KDF uses the separate blocking pool, so two workers are enough; each extra worker
@@ -50,23 +52,6 @@ async fn run() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // Public market data only: the feed never holds or sends a credential.
-    let options = if config.offline {
-        RuntimeOptions::new(db)
-    } else {
-        RuntimeOptions::with_live_feed(db, OkxPublicFeed::new(REST_BASE, WS_URL))
-    };
-    let runtime = match RuntimeHandle::start(options) {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            eprintln!("Cannot start: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let state = AppState::new(config.clone(), runtime.clone());
-    let streams = state.streams.clone();
-    let shutdown = state.shutdown.clone();
-
     // Loopback unless the owner set MOCHIPREP_HOST. Anything else exposes the API beyond this
     // machine, where the token and the Host/Origin allowlist are all that stand between it and
     // trading keys.
@@ -89,6 +74,54 @@ async fn run() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let retention = match operation_log::retention(&db) {
+        Ok(retention) => retention,
+        Err(_) => {
+            eprintln!("Cannot read log retention; keeping existing archives");
+            -1
+        }
+    };
+    let log_directory = match operation_log::LogDirectory::acquire(&config.data_dir) {
+        Ok(directory) => Some(directory),
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+            eprintln!("Another backend is using this data directory");
+            return ExitCode::FAILURE;
+        }
+        Err(error) => {
+            eprintln!("Cannot open operation logs: {error}");
+            None
+        }
+    };
+    // Public market data only: the feed never holds or sends a credential.
+    let options = if config.offline {
+        RuntimeOptions::new(db)
+    } else {
+        RuntimeOptions::with_live_feed(db, OkxPublicFeed::new(REST_BASE, WS_URL))
+    };
+    let mut operation_logs = None;
+    let runtime = match RuntimeHandle::start_with_operation_log(options, || {
+        operation_logs = log_directory.and_then(|directory| match directory.open(retention) {
+            Ok(log) => Some(Arc::new(log)),
+            Err(error) => {
+                eprintln!("Cannot open operation logs: {error}");
+                None
+            }
+        });
+        operation_logs.clone()
+    }) {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("Cannot start: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Some(log) = &operation_logs {
+        log.backend_started(retention);
+    }
+    let mut state = AppState::new(config.clone(), runtime.clone());
+    state.operation_logs = operation_logs.clone();
+    let streams = state.streams.clone();
+    let shutdown = state.shutdown.clone();
     println!("{READY_PREFIX}{port} (data: {})", config.data_dir.display());
     let _ = std::io::stdout().flush();
     // stderr, so it shows wherever errors are captured; stdout stays the launcher's ready line.
@@ -136,6 +169,15 @@ async fn run() -> ExitCode {
     };
     // Pauses the replay and closes the database, as Node's shutdown does.
     runtime.shutdown().await;
+    if let Some(log) = operation_logs {
+        log.record(format_args!("backend stopped"));
+        if tokio::time::timeout(LOG_SHUTDOWN_GRACE, log.shutdown())
+            .await
+            .is_err()
+        {
+            eprintln!("Operation log did not finish before shutdown");
+        }
+    }
     if let Err(error) = served {
         eprintln!("Server error: {error}");
         return ExitCode::FAILURE;
