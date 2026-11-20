@@ -236,7 +236,9 @@ test('OKX market and limit reductions send the selected isolated position', asyn
   });
   let unconfirmedOrder = false;
   let orderReadback: Record<string, unknown> | undefined;
+  let submittedOrders = 0;
   await context.route('**/api/orders', (route) => {
+    submittedOrders += 1;
     if (unconfirmedOrder) {
       unconfirmedOrder = false;
       const order = route.request().postDataJSON();
@@ -266,6 +268,27 @@ test('OKX market and limit reductions send the selected isolated position', asyn
   await size.fill('0.00019');
   await expect(review).toBeDisabled();
   await size.fill('0.0004');
+
+  // Simulate both browser stores refusing the reduction reference.
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith('mochiprep.pending-reduction.')) {
+        throw new DOMException('Storage is full', 'QuotaExceededError');
+      }
+      original.call(this, key, value);
+    };
+    window.addEventListener('restore-test-storage', () => {
+      Storage.prototype.setItem = original;
+    }, { once: true });
+  });
+  await review.click();
+  await page.getByRole('button', { name: 'Place order', exact: true }).click();
+  await expect(page.getByText('Browser storage is required to confirm this reduction.')).toBeVisible();
+  expect(submittedOrders).toBe(0);
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('restore-test-storage')));
+
   let marketClientOrderId: string | undefined;
   for (const [type, limit] of [['Market', null], ['Limit', '76000.1']] as const) {
     await page.getByRole('button', { name: type, exact: true }).click();

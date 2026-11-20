@@ -155,9 +155,10 @@ function persistPendingReduction(key: string, pending: PendingReduction, clear =
         storage.removeItem(key);
       }
     } catch {
-      // Fall back to this tab's storage or keep the request in memory.
+      // The other store may still be available.
     }
   }
+  return persisted;
 }
 
 function reductionSummary(request: Readonly<OrderRequest>): [string, string][] {
@@ -315,9 +316,12 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
       lookupId = readPendingReductions(pendingKey, account.id)
         .find((item) => item.request.clientOrderId === request.clientOrderId)?.lookupId;
     }
-    setSubmitting(true);
     // Persist before sending so a reload while in flight can use the same idempotency key.
-    if (selectedReduction) persistPendingReduction(pendingKey, { request, lookupId });
+    if (selectedReduction && !lookupId && !persistPendingReduction(pendingKey, { request })) {
+      useApp.getState().toast('error', 'Browser storage is required to confirm this reduction.');
+      return;
+    }
+    setSubmitting(true);
     const result = await attempt(async () => {
       const order = lookupId
         ? await api.get<Order>(`/orders/${encodeURIComponent(lookupId)}`)
