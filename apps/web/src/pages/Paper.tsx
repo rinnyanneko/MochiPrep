@@ -1,6 +1,6 @@
 import { Plus, RotateCcw, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
-import { INSTRUMENTS, TIMEFRAMES, type Fill, type LedgerEvent, type Order, type OrderRequest, type Position, type PositionView, type SymbolId, type Timeframe } from '@mochiprep/shared';
+import { INSTRUMENTS, TIMEFRAMES, type Fill, type LedgerEvent, type Order, type OrderRequest, type OrderResult, type Position, type PositionView, type SymbolId, type Timeframe } from '@mochiprep/shared';
 import { ChartTradeSummary, MarketChart } from '@/components/charts';
 import { useTradeOverlay } from '@/components/useTradeOverlay';
 import { PageTitle } from '@/components/Shell';
@@ -78,6 +78,51 @@ function matchesStep(value: string, step: string): boolean {
   return increment > 0n && units % increment === 0n;
 }
 
+type OrderConfirmation = {
+  request: Readonly<OrderRequest>;
+  retry: boolean;
+  summary?: [string, string][];
+};
+
+function readPendingReduction(key: string, accountId: string): Readonly<OrderRequest> | null {
+  try {
+    const request = JSON.parse(sessionStorage.getItem(key) ?? 'null') as OrderRequest | null;
+    if (request?.accountId === accountId && request.reduceOnly === true
+      && typeof request.clientOrderId === 'string' && request.clientOrderId.startsWith('ui:')
+      && typeof request.positionId === 'string' && typeof request.symbol === 'string'
+      && (request.side === 'BUY' || request.side === 'SELL') && typeof request.quantity === 'string'
+      && isInteger(request.leverage) && request.stopLoss === null && request.takeProfit === null
+      && ((request.type === 'MARKET' && request.price === null)
+        || (request.type === 'LIMIT' && typeof request.price === 'string'))) return request;
+  } catch {
+    // The ticket still holds the request when browser storage is unavailable.
+  }
+  return null;
+}
+
+function persistPendingReduction(key: string, request: Readonly<OrderRequest>, clear = false) {
+  try {
+    if (!clear) sessionStorage.setItem(key, JSON.stringify(request));
+    // A request from an unmounted ticket may finish after a newer attempt was saved.
+    else if (readPendingReduction(key, request.accountId)?.clientOrderId === request.clientOrderId) {
+      sessionStorage.removeItem(key);
+    }
+  } catch {
+    // The ticket can still retain the request for a retry before navigation.
+  }
+}
+
+function reductionSummary(request: Readonly<OrderRequest>): [string, string][] {
+  const currency = INSTRUMENTS[request.symbol]?.baseCurrency;
+  const summary: [string, string][] = [
+    ['Type', `${request.type} · reduce only`],
+    ['Quantity', currency ? `${request.quantity} ${currency}` : request.quantity],
+    ['Position', `${request.side === 'SELL' ? 'LONG' : 'SHORT'} · Isolated`],
+  ];
+  if (request.price != null) summary.push(['Limit price', request.price]);
+  return summary;
+}
+
 function OrderTicket({ account, symbol, positions }: { account: AccountView; symbol: SymbolId; positions: PositionView[] }) {
   const quote = useApp((s) => s.quotes[account.source][symbol]);
   const [side, setSide] = useRemembered<'BUY' | 'SELL'>(`ticket.${account.id}.side`, 'BUY', oneOf(['BUY', 'SELL'] as const));
@@ -91,9 +136,15 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
   const [reduceOnly, setReduceOnly] = useState(false);
   const [positionId, setPositionId] = useState('');
   const [reduceQuantity, setReduceQuantity] = useState('');
-  const [confirmation, setConfirmation] = useState<{ clientOrderId: string; positionId?: string } | null>(null);
-
   const exchange = account.venue !== 'PAPER';
+  const pendingKey = `mochiprep.pending-reduction.${account.id}`;
+  const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(() => {
+    const request = exchange ? readPendingReduction(pendingKey, account.id) : null;
+    return request ? { request, retry: true } : null;
+  });
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
   const boundReduction = exchange && reduceOnly;
   const reductionLimit = boundReduction && type === 'LIMIT';
   const reducible = positions.filter((position) => position.accountId === account.id && position.symbol === symbol && position.closeSupported === true);
@@ -124,28 +175,81 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
         && validStep && (type === 'MARKET' || (Number.isFinite(reference) && reference > 0 && !invalidLimitTick))
       : reference > 0 && !!quote);
   const displayedQuantity = boundReduction ? reductionSize : qty(quantity);
-  const canConfirm = valid && confirmation !== null
-    && (!boundReduction || confirmation.positionId === selected?.id);
+  const canConfirm = confirmation !== null && !submitting && (confirmation.retry || (
+    valid && confirmation.request.symbol === symbol && (!boundReduction || confirmation.request.positionId === selected?.id)
+  ));
+
+  const review = () => {
+    if (!confirmation?.retry) {
+      setConfirmation({
+        request: {
+          accountId: account.id,
+          clientOrderId: `ui:${crypto.randomUUID()}`,
+          ...(boundReduction && selected ? { positionId: selected.id } : {}),
+          symbol,
+          side: orderSide,
+          type,
+          quantity: boundReduction ? reductionSize : String(quantity),
+          price: type === 'LIMIT' ? limitPrice : null,
+          leverage,
+          reduceOnly,
+          stopLoss: !reduceOnly && stop.trim() ? stop.trim() : null,
+          takeProfit: !reduceOnly && target.trim() ? target.trim() : null,
+        },
+        retry: false,
+        summary: [
+          ['Type', `${type}${reduceOnly ? ' · reduce only' : ''}`],
+          ['Quantity', `${displayedQuantity} ${instrument.baseCurrency}`],
+          ...(boundReduction && selected ? [['Position', `${selected.side} · Isolated`] as [string, string]] : []),
+          [reductionLimit ? 'Limit price' : 'Reference price', reductionLimit ? limitPrice : price(reference, symbol)],
+          ['Notional', `${money(notional)} USDT`],
+          ['Margin', reduceOnly ? '–' : `${money(margin)} USDT at ${leverage}x`],
+          ['Estimated fee', `${money(fee, 4)} USDT`],
+          ['Estimated liquidation', reduceOnly ? '–' : price(liq, symbol)],
+          ['Stop / Target', reduceOnly ? '–' : `${stop || '–'} / ${target || '–'}`],
+        ],
+      });
+    }
+    setDialogOpen(true);
+  };
+
+  const closeDialog = () => {
+    if (submitting) return;
+    setDialogOpen(false);
+    if (!confirmation?.retry) setConfirmation(null);
+  };
+
+  const discardRetry = () => {
+    if (!confirmation?.retry || submitting) return;
+    persistPendingReduction(pendingKey, confirmation.request, true);
+    setConfirmation(null);
+    setDialogOpen(false);
+  };
 
   const submit = async () => {
     if (!confirmation || !canConfirm) return;
-    const result = await attempt(() =>
-      api.post<{ order: Order }>('/orders', {
-        accountId: account.id,
-        clientOrderId: confirmation.clientOrderId,
-        ...(confirmation.positionId ? { positionId: confirmation.positionId } : {}),
-        symbol,
-        side: orderSide,
-        type,
-        quantity: boundReduction ? reductionSize : String(quantity),
-        price: type === 'LIMIT' ? limitPrice : null,
-        leverage,
-        reduceOnly,
-        stopLoss: !reduceOnly && stop.trim() ? stop.trim() : null,
-        takeProfit: !reduceOnly && target.trim() ? target.trim() : null,
-      } satisfies OrderRequest),
-    );
+    const { request } = confirmation;
+    const selectedReduction = request.positionId !== undefined;
+    setSubmitting(true);
+    // Persist before sending so a reload while in flight can use the same idempotency key.
+    if (selectedReduction) persistPendingReduction(pendingKey, request);
+    const result = await attempt(async () => {
+      const response = await api.post<OrderResult>('/orders', request);
+      if (!response?.order?.status || (selectedReduction && response.order.clientOrderId !== request.clientOrderId)) {
+        throw new Error('The order response was incomplete.');
+      }
+      return response;
+    });
+    setSubmitting(false);
+    // The HTTP route can report an error after dispatch. A matching order result, including a
+    // rejection, settles this request. Until then the same key lets the engine look it up.
+    if (selectedReduction && !result) {
+      setConfirmation({ request, retry: true });
+      return;
+    }
+    if (selectedReduction) persistPendingReduction(pendingKey, request, true);
     setConfirmation(null);
+    setDialogOpen(false);
     if (result) {
       const { order } = result;
       const toast = useApp.getState().toast;
@@ -204,13 +308,13 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
         <div className="flex justify-between"><span className="text-ink-3">Notional</span><span className="num">{valid ? money(notional) : '–'}</span></div>
         <div className="flex justify-between"><span className="text-ink-3">Available</span><span className="num">{money(account.balance.availableBalance)}</span></div>
       </div>
-      <Button className="w-full" size="lg" variant={orderSide === 'BUY' ? 'long' : 'short'} disabled={!valid} onClick={() => setConfirmation({ clientOrderId: `ui:${crypto.randomUUID()}`, positionId: boundReduction ? selected?.id : undefined })}>
-        {boundReduction ? 'Review reduction' : `Review ${side === 'BUY' ? 'long' : 'short'}`}
+      <Button className="w-full" size="lg" variant={(confirmation?.request.side ?? orderSide) === 'BUY' ? 'long' : 'short'} disabled={!confirmation?.retry && !valid} onClick={review}>
+        {confirmation?.retry ? 'Review pending reduction' : boundReduction ? 'Review reduction' : `Review ${side === 'BUY' ? 'long' : 'short'}`}
       </Button>
       <Dialog
-        open={confirmation !== null}
-        onOpenChange={(open) => !open && setConfirmation(null)}
-        title={`Confirm ${boundReduction ? 'reduction' : side === 'BUY' ? 'long' : 'short'} ${symbol}`}
+        open={dialogOpen}
+        onOpenChange={(open) => !open && closeDialog()}
+        title={`${confirmation?.retry ? 'Pending' : 'Confirm'} ${confirmation?.request.positionId ? 'reduction' : confirmation?.request.side === 'BUY' ? 'long' : 'short'} ${confirmation?.request.symbol ?? symbol}`}
         description={account.venue === 'PAPER' ? 'Simulated order. Estimates only: the engine fills against the live quote, with spread and slippage.' : 'Sent to OKX. Estimates only: the exchange decides the fill.'}
       >
         {account.venue === 'OKX_LIVE' && (
@@ -218,24 +322,21 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
             This is a real order with real money. It cannot be undone.
           </p>
         )}
+        {confirmation?.retry && (
+          <p role="status" className="mb-3 text-sm text-warn">The order outcome is unclear. Retry with the same order ID, or check Order history before discarding the retry.</p>
+        )}
         <dl className="num space-y-1 text-[13px]">
-          {[
-            ['Type', `${type}${reduceOnly ? ' · reduce only' : ''}`],
-            ['Quantity', `${displayedQuantity} ${instrument.baseCurrency}`],
-            ...(boundReduction && selected ? [['Position', `${selected.side} · Isolated`]] : []),
-            [reductionLimit ? 'Limit price' : 'Reference price', reductionLimit ? limitPrice : price(reference, symbol)],
-            ['Notional', `${money(notional)} USDT`],
-            ['Margin', reduceOnly ? '–' : `${money(margin)} USDT at ${leverage}x`],
-            ['Estimated fee', `${money(fee, 4)} USDT`],
-            ['Estimated liquidation', reduceOnly ? '–' : price(liq, symbol)],
-            ['Stop / Target', reduceOnly ? '–' : `${stop || '–'} / ${target || '–'}`],
-          ].map(([k, v]) => (
+          {confirmation && (confirmation.summary ?? reductionSummary(confirmation.request)).map(([k, v]) => (
             <div key={k} className="flex justify-between gap-4"><dt className="text-ink-3">{k}</dt><dd>{v}</dd></div>
           ))}
         </dl>
         <div className="mt-4 flex justify-end gap-2">
-          <Button onClick={() => setConfirmation(null)}>Cancel</Button>
-          <Button variant={orderSide === 'BUY' ? 'long' : 'short'} disabled={!canConfirm} onClick={submit}>{account.venue === 'OKX_LIVE' ? 'Place real order' : 'Place order'}</Button>
+          {confirmation?.retry
+            ? <Button disabled={submitting} onClick={discardRetry}>Discard retry</Button>
+            : <Button disabled={submitting} onClick={closeDialog}>Cancel</Button>}
+          <Button variant={confirmation?.request.side === 'BUY' ? 'long' : 'short'} disabled={!canConfirm} onClick={submit}>
+            {submitting ? 'Submitting…' : confirmation?.retry ? 'Retry reduction' : account.venue === 'OKX_LIVE' ? 'Place real order' : 'Place order'}
+          </Button>
         </div>
       </Dialog>
     </Card>

@@ -237,9 +237,9 @@ impl OkxEngine {
         self.sync_with_deferred_protection(true).await
     }
 
-    /// A protection edit may read back an unanswered placement before it has
-    /// finished replacing the old exits. Leave deferred placements to the next full pass.
-    pub(super) async fn sync_protection_edit(&self) -> Result<(), EngineError> {
+    /// Read back an unanswered placement during an edit, or take a connection's
+    /// first snapshot, without dispatching deferred exits.
+    pub(super) async fn sync_without_deferred_orders(&self) -> Result<(), EngineError> {
         self.sync_with_deferred_protection(false).await
     }
 
@@ -260,8 +260,8 @@ impl OkxEngine {
             let account_id = account_id.clone();
             self.rows(move |rows| {
                 let mut pending = rows.list_open_orders(&account_id)?;
-                // A locally retired target remains recoverable by lookup. It is
-                // excluded from protection planning until OKX reveals its outcome.
+                // A locally retired target stays lookup-only. Protection can
+                // wait on matching fill evidence while lookup catches up.
                 const RECOVERY_BATCH: usize = 10;
                 pending.extend(rows.list_canceled_orders_for_recovery(
                     &account_id,

@@ -10,8 +10,8 @@ use std::sync::Arc;
 use futures_util::future::BoxFuture;
 use mochi_core::paper::{DailyRisk, PaperStore, ProtectionResult, StoreFailure};
 use mochi_domain::{
-    AccountBalance, AccountVenue, Order, OrderRequest, OrderResult, OrderStatus, PaperAccount,
-    PositionView, Protection,
+    AccountBalance, AccountVenue, Order, OrderRequest, OrderResult, PaperAccount, PositionView,
+    Protection,
 };
 use mochi_okx::engine::{EngineError, OkxEngine, OkxEngineDeps, Rows, StoreAccess, StoreWork};
 use mochi_okx::{Clock, Credentials, NetTransport, OkxClient, Transport, Venue};
@@ -185,19 +185,17 @@ impl ExchangeSession {
     pub(super) fn retire(self, store: &impl PaperStore, now: i64) -> Result<(), StoreFailure> {
         let unsent = self.engine.retire();
         self.armed.store(false, Ordering::SeqCst);
-        let Some(id) = unsent else {
+        let Some(unsent) = unsent else {
             return Ok(());
         };
         store.transaction(|| {
-            if let Some(mut order) = store.get_order(&id)?.filter(|order| {
-                order.account_id == self.link.account_id
-                    && order.status == OrderStatus::Open
-                    && order.exchange_order_id.as_deref().is_none_or(str::is_empty)
-            }) {
-                order.status = OrderStatus::Rejected;
-                order.reject_reason = Some(EngineError::SessionRetired.to_string());
-                order.updated_at = now;
-                store.save_order(&order)?;
+            if let Some(mut order) = store
+                .get_order(unsent.id())?
+                .filter(|order| order.account_id == self.link.account_id)
+            {
+                if unsent.finalize(&mut order, now) {
+                    store.save_order(&order)?;
+                }
             }
             Ok(())
         })
@@ -759,7 +757,7 @@ impl RuntimeHandle {
             flag.clone(),
             link.clone(),
         );
-        if let Err(error) = engine.sync().await {
+        if let Err(error) = engine.sync_before_registration().await {
             let text = error.to_string();
             return Err(self.call(move |r| r.api_error(text)).await?);
         }

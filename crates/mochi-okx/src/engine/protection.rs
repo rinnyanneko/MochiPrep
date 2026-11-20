@@ -41,6 +41,7 @@ const ALIVE_STATES: [&str; 2] = ["live", "partially_effective"];
 const REPLACED: &str = "Replaced";
 const REMOVED: &str = "Removed";
 const POSITION_CLOSED: &str = "Position closed";
+pub(super) const ALGO_NOT_ARRIVED: &str = "OKX has no record of this algo";
 pub(super) const REACHED_EXIT_UNCONFIRMED: &str =
     "OKX has no record of this market take profit; check its outcome in OKX";
 // These durable markers identify an unsent intent. Clearing them before sending permits
@@ -274,7 +275,11 @@ fn exchange_time(row: &Row, field: &str) -> Option<i64> {
     row.get(field)?.as_str()?.parse().ok().filter(|at| *at > 0)
 }
 
-type ReachedExits = HashMap<String, String>;
+#[derive(Default)]
+struct ReachedExits {
+    by_order_id: HashMap<String, String>,
+    retired_by_client_id: HashMap<String, String>,
+}
 
 pub(super) fn is_reached_exit(row: &Order) -> bool {
     row.order_type == OrderType::Market
@@ -283,14 +288,22 @@ pub(super) fn is_reached_exit(row: &Order) -> bool {
         && deferred_parent_id(row, Leg::Tp).is_some()
 }
 
-fn remember_reached_exit(exits: &mut ReachedExits, row: &Order) {
-    if !is_reached_exit(row) || row.status == OrderStatus::Rejected {
-        return;
-    }
-    if let Some((parent, exchange_id)) = deferred_parent_id(row, Leg::Tp)
-        .zip(row.exchange_order_id.as_ref().filter(|id| !id.is_empty()))
-    {
-        exits.insert(exchange_id.clone(), parent.to_owned());
+impl ReachedExits {
+    fn remember(&mut self, row: &Order) {
+        if !is_reached_exit(row) || row.status == OrderStatus::Rejected {
+            return;
+        }
+        if let Some((parent, exchange_id)) = deferred_parent_id(row, Leg::Tp)
+            .zip(row.exchange_order_id.as_ref().filter(|id| !id.is_empty()))
+        {
+            self.by_order_id
+                .insert(exchange_id.clone(), parent.to_owned());
+        } else if row.status == OrderStatus::Canceled
+            && row.reject_reason.as_deref() == Some(REACHED_EXIT_UNCONFIRMED)
+        {
+            self.retired_by_client_id
+                .insert(to_cl_ord_id(&row.client_order_id), row.symbol.clone());
+        }
     }
 }
 
@@ -356,7 +369,7 @@ impl PositionHistory<'_> {
                 let source = row
                     .get("ordId")
                     .and_then(Value::as_str)
-                    .and_then(|id| self.reached_exits.get(id));
+                    .and_then(|id| self.reached_exits.by_order_id.get(id));
                 let Some(source) = source
                     .filter(|_| row.get("subType").and_then(Value::as_str) == Some(close_type))
                 else {
@@ -1201,7 +1214,7 @@ impl OkxEngine {
                 Err(EngineError::Okx(OkxError::Unknown(message))) => {
                     row.reject_reason = Some(format!("Awaiting confirmation: {message}"));
                     self.save(row.clone()).await?;
-                    let _ = self.sync_protection_edit().await;
+                    let _ = self.sync_without_deferred_orders().await;
                     let id = row.id.clone();
                     let resolved = self.rows(move |rows| Ok(rows.get_order(&id)?)).await?;
                     let confirmed = resolved.filter(|r| {
@@ -1383,7 +1396,7 @@ impl OkxEngine {
     }
 
     async fn protection_edit_error(&self, symbol: &str, error: EngineError) -> EngineError {
-        let confirmed = self.sync_protection_edit().await.is_ok();
+        let confirmed = self.sync_without_deferred_orders().await.is_ok();
         let note = if confirmed {
             ""
         } else {
@@ -1856,21 +1869,32 @@ impl OkxEngine {
         row: &mut Order,
         registry: &Registry,
         snapshot: &mut PositionSnapshot,
-        reached_exits: &ReachedExits,
+        reached_exits: &mut ReachedExits,
     ) -> Result<(), EngineError> {
         let leg =
             leg_of(row).ok_or_else(|| EngineError::message("Invalid deferred protection leg"))?;
         let parent_id = deferred_parent_id(row, leg)
             .ok_or_else(|| EngineError::message("Invalid deferred protection id"))?
             .to_string();
-        let parent = self
-            .rows(move |rows| Ok(rows.get_order(&parent_id)?))
+        let (parent, entry_target) = self
+            .rows(move |rows| {
+                // Newer orders may have pushed this entry's target out of the recent list.
+                let target = if leg == Leg::Trail {
+                    rows.get_order(&format!("{parent_id}{PER_ENTRY_TARGET_SUFFIX}"))?
+                } else {
+                    None
+                };
+                Ok((rows.get_order(&parent_id)?, target))
+            })
             .await?;
         let Some(parent) = parent else {
             return self
                 .close_row(row, "Deferred protection canceled: parent missing")
                 .await;
         };
+        if let Some(target) = entry_target {
+            reached_exits.remember(&target);
+        }
         let id = row.id.clone();
         let linked_replacements = self
             .rows(move |rows| Ok(rows.target_replacements(&id)?))
@@ -2107,16 +2131,20 @@ impl OkxEngine {
             // Only a reduction in this entry's interval can make the unanswered exit
             // relevant. Local submission time and exchange fill time can disagree.
             let close_subtype = if short { "6" } else { "5" };
-            let awaiting_sibling = !unresolved.is_empty()
-                && fills.iter().any(|fill| {
-                    last_trade_id(fill)
-                        .is_some_and(|id| (first_entry_trade..=position_trade).contains(&id))
-                        && fill.get("subType").and_then(Value::as_str) == Some(close_subtype)
-                        && fill
-                            .get("clOrdId")
-                            .and_then(Value::as_str)
-                            .is_none_or(|id| id.is_empty() || unresolved.contains(id))
-                });
+            let awaiting_sibling = fills.iter().any(|fill| {
+                last_trade_id(fill)
+                    .is_some_and(|id| (first_entry_trade..=position_trade).contains(&id))
+                    && fill.get("subType").and_then(Value::as_str) == Some(close_subtype)
+                    && match fill.get("clOrdId").and_then(Value::as_str) {
+                        Some(id) if !id.is_empty() => {
+                            unresolved.contains(id)
+                                || reached_exits.retired_by_client_id.get(id) == Some(&row.symbol)
+                        }
+                        // Only an active unresolved target can justify waiting on an
+                        // anonymous reduction. Retired ones require a matching ID.
+                        _ => !unresolved.is_empty(),
+                    }
+            });
             let history = PositionHistory {
                 fills: &fills,
                 trade: position_trade,
@@ -2186,6 +2214,7 @@ impl OkxEngine {
             }
             filled
         };
+        let unsent = row.clone();
         row.quantity = filled.mul(&contract_value).to_fixed();
         let Some(quote) = (self.deps.get_quote)(&row.symbol) else {
             return Ok(());
@@ -2208,7 +2237,7 @@ impl OkxEngine {
                     return Ok(());
                 }
                 return self
-                    .submit_reached_target(row, &inst_id, registry, side, snapshot)
+                    .submit_reached_target(row, unsent, &inst_id, registry, side, snapshot)
                     .await;
             }
         }
@@ -2241,8 +2270,15 @@ impl OkxEngine {
         ));
         row.created_at = self.now();
         row.updated_at = self.now();
+        let _staged = self.stage_order(super::UnsentOrder::Deferred(Box::new(unsent.clone())))?;
         self.save(row.clone()).await?;
-        self.check_dispatch()?;
+        if !self
+            .recheck_deferred_dispatch(row, unsent, snapshot, &inst_id)
+            .await?
+        {
+            return Ok(());
+        }
+        self.handoff_order(row)?;
         match self.deps.client.place_algo(&body).await {
             Ok(id) => {
                 row.exchange_order_id = Some(id);
@@ -2272,6 +2308,7 @@ impl OkxEngine {
     async fn submit_reached_target(
         &self,
         row: &mut Order,
+        unsent: Order,
         inst_id: &str,
         registry: &Registry,
         side: PositionSide,
@@ -2288,7 +2325,6 @@ impl OkxEngine {
                 .await;
         }
         let contract_value = dec(&registry.get(&row.symbol)?.venue_contract_value)?;
-        let unsent = row.clone();
         row.quantity = contracts.mul(&contract_value).to_fixed();
         row.order_type = OrderType::Market;
         row.close_position = false;
@@ -2296,16 +2332,15 @@ impl OkxEngine {
             Some("Awaiting confirmation: reached take profit submission started".into());
         row.created_at = self.now();
         row.updated_at = self.now();
+        let _staged = self.stage_order(super::UnsentOrder::Deferred(Box::new(unsent.clone())))?;
         self.save(row.clone()).await?;
         let client_id = to_cl_ord_id(&row.client_order_id);
         let body = to_body(row, inst_id, &client_id, contracts.to_fixed());
-        let current = self.refresh_matching_position(snapshot, inst_id).await;
-        if !matches!(current, Ok(true)) {
-            // We have not attempted a POST. A later pass can attribute the
-            // entry again. A crash before this save leaves lookup-only state.
-            *row = unsent;
-            self.save(row.clone()).await?;
-            return current.map(|_| ());
+        if !self
+            .recheck_deferred_dispatch(row, unsent, snapshot, inst_id)
+            .await?
+        {
+            return Ok(());
         }
         match self.send(row, inst_id, &body).await {
             Err(error @ EngineError::SessionRetired) => return Err(error),
@@ -2329,6 +2364,23 @@ impl OkxEngine {
         self.sync_order(row, registry).await?;
         *snapshot = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
         Ok(())
+    }
+
+    async fn recheck_deferred_dispatch(
+        &self,
+        row: &mut Order,
+        unsent: Order,
+        snapshot: &mut PositionSnapshot,
+        inst_id: &str,
+    ) -> Result<bool, EngineError> {
+        let current = self.refresh_matching_position(snapshot, inst_id).await;
+        if !matches!(current, Ok(true)) {
+            // The POST has not started. Restore the intent for fresh attribution.
+            // A crash before this write leaves the marker eligible only for lookup.
+            *row = unsent;
+            self.save(row.clone()).await?;
+        }
+        current
     }
 
     /// A temporary refusal cannot establish whether the algo is still live.
@@ -2459,9 +2511,9 @@ impl OkxEngine {
         let mut rows: Vec<Order> = open.into_iter().filter(is_leg).collect();
         let open_count = rows.len();
         let open_ids: HashSet<String> = rows.iter().map(|r| r.id.clone()).collect();
-        let mut reached_exits = ReachedExits::new();
+        let mut reached_exits = ReachedExits::default();
         for row in &recent {
-            remember_reached_exit(&mut reached_exits, row);
+            reached_exits.remember(row);
         }
         rows.extend(
             recent
@@ -2534,12 +2586,12 @@ impl OkxEngine {
                 if !submit_deferred {
                     continue;
                 }
-                self.submit_deferred_protection(slot, &registry, snapshot, &reached_exits)
+                self.submit_deferred_protection(slot, &registry, snapshot, &mut reached_exits)
                     .await?;
                 refresh_readback |= snapshot.held != initial_held
                     || (slot.order_type == OrderType::Market
                         && slot.status != OrderStatus::Rejected);
-                remember_reached_exit(&mut reached_exits, slot);
+                reached_exits.remember(slot);
                 if is_leg(slot) && slot.status == OrderStatus::Open && !is_deferred(slot) {
                     if let Some(remote) = self.lookup_algo(&slot.id).await? {
                         if remote
@@ -2576,8 +2628,7 @@ impl OkxEngine {
                 }
                 self.close_row(row, "Gone from OKX").await?;
             } else if at - row.created_at >= NEVER_ARRIVED_AFTER_MS {
-                self.close_row(row, "OKX has no record of this algo")
-                    .await?;
+                self.close_row(row, ALGO_NOT_ARRIVED).await?;
             }
         }
         if refresh_readback {

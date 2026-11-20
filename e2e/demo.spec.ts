@@ -233,7 +233,15 @@ test('OKX market and limit reductions send the selected isolated position', asyn
       { ...position, id: positionId, marginMode: 'isolated', closeSupported: true },
     ] });
   });
-  await page.route('**/api/orders', (route) => route.fulfill({ json: { order: { status: 'OPEN' } } }));
+  let loseOrderResponse = false;
+  await page.route('**/api/orders', (route) => {
+    if (loseOrderResponse) {
+      loseOrderResponse = false;
+      return route.abort('connectionreset');
+    }
+    const order = route.request().postDataJSON();
+    return route.fulfill({ json: { order: { ...order, status: 'OPEN' }, fills: [], duplicate: false } });
+  });
   await page.goto('/');
   const demo = page.getByTestId('try-demo');
   await expect(demo.or(page.getByTestId('total-equity'))).toBeVisible();
@@ -253,6 +261,7 @@ test('OKX market and limit reductions send the selected isolated position', asyn
   await size.fill('0.00019');
   await expect(review).toBeDisabled();
   await size.fill('0.0004');
+  let marketClientOrderId: string | undefined;
   for (const [type, limit] of [['Market', null], ['Limit', '76000.1']] as const) {
     await page.getByRole('button', { name: type, exact: true }).click();
     if (limit) {
@@ -263,13 +272,34 @@ test('OKX market and limit reductions send the selected isolated position', asyn
       await price.fill(limit);
     }
     await review.click();
-    if (limit) await expect(page.getByRole('dialog').getByText(limit, { exact: true })).toBeVisible();
+    if (limit) {
+      await expect(page.getByRole('dialog').getByText(limit, { exact: true })).toBeVisible();
+      loseOrderResponse = true;
+    }
     const request = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/api/orders'));
     await page.getByRole('button', { name: 'Place order', exact: true }).click();
-    expect((await request).postDataJSON()).toMatchObject({
+    const body = (await request).postDataJSON();
+    expect(body).toMatchObject({
       symbol: 'BTCUSDT', positionId, side: 'SELL', type: type.toUpperCase(),
       quantity: '0.0004', price: limit, reduceOnly: true,
+      clientOrderId: expect.stringMatching(/^ui:/),
     });
+    if (limit) {
+      expect(body.clientOrderId).not.toBe(marketClientOrderId);
+      const dialog = page.getByRole('dialog');
+      await expect(dialog.getByRole('button', { name: 'Retry reduction' })).toBeEnabled();
+      await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+      await page.reload();
+      await page.getByLabel('Paper account').selectOption({ label: 'Demo terminal (OKX demo)' });
+      await page.getByRole('button', { name: 'Review pending reduction' }).click();
+      await expect(dialog.getByText(limit, { exact: true })).toBeVisible();
+      const retry = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/api/orders'));
+      await dialog.getByRole('button', { name: 'Retry reduction' }).click();
+      expect((await retry).postDataJSON()).toEqual(body);
+    } else {
+      marketClientOrderId = body.clientOrderId;
+    }
     await expect(page.getByRole('dialog')).toHaveCount(0);
   }
+  await expect(page.getByRole('button', { name: 'Review pending reduction' })).toHaveCount(0);
 });

@@ -2177,6 +2177,122 @@ async fn a_connect_out_on_okx_across_a_vault_reset_and_new_password_saves_no_key
     w.rt.shutdown().await;
 }
 
+#[tokio::test]
+async fn manual_reconnect_restores_a_deferred_exit_that_had_not_reached_dispatch() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.rt.suspend_periodic_okx_sync_for_test().await.unwrap();
+    w.okx.state().rest_limit_orders = true;
+    let (status, entry) = w
+        .send(
+            "POST",
+            "/api/orders",
+            Some(json!({
+                "accountId": account.id, "clientOrderId": "reconnect-staged-exit",
+                "symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "price": "74500",
+                "quantity": "0.001", "leverage": 3, "stopLoss": "74000", "takeProfit": "78000",
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "{entry}");
+    let id = format!("{}:deferred:tp", entry["order"]["id"].as_str().unwrap());
+    w.okx.state().fill_resting();
+    let early_reads: Vec<_> = (0..3)
+        .map(|_| w.okx.hold_next("GET", "/account/positions"))
+        .collect();
+    let before_dispatch = w.okx.hold_next("GET", "/account/positions");
+    let (old_sync, ()) = tokio::join!(w.rt.sync_exchanges(), async {
+        let timeout = Duration::from_secs(2);
+        for hold in early_reads {
+            tokio::time::timeout(timeout, hold.reached()).await.unwrap();
+            hold.release();
+        }
+        tokio::time::timeout(timeout, before_dispatch.reached())
+            .await
+            .unwrap();
+        let staged_id = id.clone();
+        let reason =
+            w.rt.call(move |r| {
+                r.engine()
+                    .store()
+                    .get_order(&staged_id)
+                    .unwrap()
+                    .unwrap()
+                    .reject_reason
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(reason.contains("submission started"));
+        assert_eq!(w.connect("OKX_LIVE").await.id, account.id);
+        assert!(w.okx.state().algo_placed.is_empty());
+        w.rt.sync_exchanges().await.unwrap();
+        assert_eq!(w.okx.state().algo_placed.len(), 1);
+        // The old read now sees a mismatch and attempts to restore its former intent.
+        w.okx
+            .state()
+            .position
+            .as_mut()
+            .unwrap()
+            .insert("tradeId".into(), json!("2"));
+        before_dispatch.release();
+    });
+    old_sync.unwrap();
+    assert_eq!(w.okx.state().algo_placed.len(), 1);
+    let confirmed =
+        w.rt.call(move |r| {
+            r.engine()
+                .store()
+                .get_order(&id)
+                .unwrap()
+                .unwrap()
+                .exchange_order_id
+        })
+        .await
+        .unwrap();
+    assert!(confirmed.is_some());
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn manual_reconnect_waits_until_registration_to_send_deferred_protection() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.rt.suspend_periodic_okx_sync_for_test().await.unwrap();
+    w.okx.state().rest_limit_orders = true;
+    let (status, result) = w
+        .send(
+            "POST",
+            "/api/orders",
+            Some(json!({
+                "accountId": account.id, "clientOrderId": "reconnect-deferred",
+                "symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "price": "74500",
+                "quantity": "0.001", "leverage": 3, "stopLoss": "74000", "takeProfit": "78000",
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(result["order"]["status"], "OPEN");
+    w.okx.state().fill_resting();
+    let old_history = w.okx.hold_next("GET", "/trade/fills");
+    let (old_sync, ()) = tokio::join!(w.rt.sync_exchanges(), async {
+        tokio::time::timeout(Duration::from_secs(2), old_history.reached())
+            .await
+            .unwrap();
+        let reconnected = w.connect("OKX_LIVE").await;
+        assert_eq!(reconnected.id, account.id);
+        assert!(w.okx.state().algo_placed.is_empty());
+        old_history.release();
+    });
+    old_sync.unwrap();
+    assert!(w.okx.state().algo_placed.is_empty());
+    w.rt.sync_exchanges().await.unwrap();
+    assert_eq!(w.okx.state().algo_placed.len(), 1);
+    w.rt.shutdown().await;
+}
+
 /// A sync still out on OKX when the owner connects the account anew must not write what it read
 /// over the new session's rows: here its late answer says the entry is still resting, after the
 /// new session has recorded it filled.

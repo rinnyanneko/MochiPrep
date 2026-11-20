@@ -384,7 +384,55 @@ pub struct OkxEngine {
 #[derive(Default)]
 struct DispatchState {
     retired: bool,
-    unsent_order: Option<String>,
+    unsent_order: Option<UnsentOrder>,
+}
+
+/// Durable state to finalize once a session loses dispatch ownership.
+pub enum UnsentOrder {
+    Submission(String),
+    Deferred(Box<Order>),
+}
+
+impl UnsentOrder {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Submission(id) => id,
+            Self::Deferred(order) => &order.id,
+        }
+    }
+
+    pub fn finalize(self, order: &mut Order, now: i64) -> bool {
+        if order
+            .exchange_order_id
+            .as_deref()
+            .is_some_and(|id| !id.is_empty())
+        {
+            return false;
+        }
+        match self {
+            Self::Submission(_) if order.status == OrderStatus::Open => {
+                order.status = OrderStatus::Rejected;
+                order.reject_reason = Some(EngineError::SessionRetired.to_string());
+                order.updated_at = now;
+            }
+            Self::Deferred(original)
+                if order.status == OrderStatus::Open
+                    || (order.status == OrderStatus::Canceled
+                        && matches!(
+                            order.reject_reason.as_deref(),
+                            Some(
+                                protection::REACHED_EXIT_UNCONFIRMED | protection::ALGO_NOT_ARRIVED
+                            )
+                        )) =>
+            {
+                // A connection's readback may already have expired an old marker.
+                // Neither this marker nor its expiry attests to any exchange dispatch.
+                *order = *original;
+            }
+            _ => return false,
+        }
+        true
+    }
 }
 
 impl DispatchState {
@@ -500,8 +548,8 @@ impl OkxEngine {
         })
     }
 
-    /// Stops new dispatches and returns the ordinary order, if any, that never reached handoff.
-    pub fn retire(&self) -> Option<String> {
+    /// Stops new dispatches and returns the order, if any, that never reached handoff.
+    pub fn retire(&self) -> Option<UnsentOrder> {
         let mut dispatch = self.dispatch();
         dispatch.retired = true;
         dispatch.unsent_order.take()
@@ -517,12 +565,12 @@ impl OkxEngine {
         self.dispatch.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn stage_order(&self, order_id: &str) -> Result<StagedOrder<'_>, EngineError> {
+    fn stage_order(&self, order: UnsentOrder) -> Result<StagedOrder<'_>, EngineError> {
         let mut dispatch = self.dispatch();
         dispatch.check()?;
-        // The account's queue allows at most one ordinary submission at a time.
+        // The account's queue allows at most one submission at a time.
         debug_assert!(dispatch.unsent_order.is_none());
-        dispatch.unsent_order = Some(order_id.to_owned());
+        dispatch.unsent_order = Some(order);
         Ok(StagedOrder(&self.dispatch))
     }
 
@@ -532,7 +580,11 @@ impl OkxEngine {
         if !order.reduce_only && !(self.deps.is_armed)() {
             return Err(EngineError::OpeningDisarmed);
         }
-        if dispatch.unsent_order.as_deref() == Some(order.id.as_str()) {
+        if dispatch
+            .unsent_order
+            .as_ref()
+            .is_some_and(|pending| pending.id() == order.id)
+        {
             dispatch.unsent_order = None;
         }
         Ok(())
@@ -1000,6 +1052,13 @@ impl OkxEngine {
             .await
     }
 
+    /// A connection candidate can read back orders while the current session still
+    /// owns dispatch. Deferred orders become eligible after registration.
+    pub async fn sync_before_registration(self: &Arc<Self>) -> Result<(), EngineError> {
+        self.queued(|engine| Box::pin(async move { engine.sync_without_deferred_orders().await }))
+            .await
+    }
+
     /// Starts a history pass as a task of its own (see [`OkxEngine::sync_position_history`]).
     /// Only the arena reads the history, so a failure must not make the account unhealthy (that
     /// pauses its agents); the pass is tried again after the next sync.
@@ -1094,7 +1153,7 @@ impl OkxEngine {
 
         // Written before anything is sent, so a crash can never leave an order we do not know
         // about.
-        let _staged = self.stage_order(&order.id)?;
+        let _staged = self.stage_order(UnsentOrder::Submission(order.id.clone()))?;
         self.insert_submission(order.clone(), close_selection)
             .await?;
 

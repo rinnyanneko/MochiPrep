@@ -225,7 +225,10 @@ impl RuntimeHandle {
             armed.clone(),
             link.clone(),
         );
-        let sync = engine.sync().await.map_err(|error| error.to_string());
+        let sync = engine
+            .sync_before_registration()
+            .await
+            .map_err(|error| error.to_string());
         if let Err(error) = &sync {
             if engine.last_sync().is_none() {
                 // A sync whose writes were refused because the account changed meanwhile says why.

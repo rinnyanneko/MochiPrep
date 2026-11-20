@@ -30,8 +30,11 @@ const ACCOUNT: &str = "acct_okx";
 /// 2027-01-15T08:00:00Z: far from a UTC day boundary.
 const START: i64 = 1_800_000_000_000;
 
+type DeferredSaveHook = (String, Box<dyn FnOnce() + Send>);
+
 struct Local {
     inner: Mutex<(SqlitePaperStore, Vec<InstrumentSpecification>)>,
+    after_deferred_save: Mutex<Option<DeferredSaveHook>>,
 }
 
 impl StoreAccess for Local {
@@ -42,6 +45,20 @@ impl StoreAccess for Local {
                 store: &inner.0,
                 instruments: &inner.1,
             });
+            let mut hook = self.after_deferred_save.lock().unwrap();
+            if hook.as_ref().is_some_and(|(id, _)| {
+                inner.0.get_order(id).unwrap().is_some_and(|order| {
+                    order
+                        .reject_reason
+                        .as_deref()
+                        .is_some_and(|reason| reason.starts_with("Awaiting confirmation: deferred"))
+                })
+            }) {
+                let (_, action) = hook.take().unwrap();
+                drop(inner);
+                drop(hook);
+                action();
+            }
         }
         Box::pin(async {})
     }
@@ -131,6 +148,7 @@ async fn connect(extra: Vec<InstrumentSpecification>) -> Harness {
     instruments.extend(extra);
     let store = Arc::new(Local {
         inner: Mutex::new((store, instruments)),
+        after_deferred_save: Mutex::new(None),
     });
     let clock = Arc::new(AtomicI64::new(START));
     let quote_time = Arc::new(AtomicI64::new(0));
@@ -3416,6 +3434,30 @@ async fn a_reached_deferred_target_revalidates_the_position_after_recording_subm
 }
 
 #[tokio::test]
+async fn a_deferred_algo_revalidates_the_position_after_recording_submission() {
+    let (h, entry) = resting_target().await;
+    let id = format!("{}:deferred:tp", entry.id);
+    let unsent = h.order_row(&id);
+    h.okx.state().fill_resting();
+    h.advance(1);
+    let fake = h.okx.clone();
+    *h.store.after_deferred_save.lock().unwrap() = Some((
+        id.clone(),
+        Box::new(move || {
+            fake.state()
+                .position
+                .as_mut()
+                .unwrap()
+                .insert("tradeId".into(), json!("2"));
+        }),
+    ));
+    h.sync().await;
+    assert!(h.store.after_deferred_save.lock().unwrap().is_none());
+    assert!(h.algo_placed().is_empty());
+    assert_eq!(h.order_row(&id), unsent);
+}
+
+#[tokio::test]
 async fn a_quote_from_before_the_fill_cannot_trigger_a_market_exit() {
     let (h, entry) = resting_target().await;
     let client_id = mochi_okx::to_cl_ord_id(&entry.client_order_id);
@@ -3563,6 +3605,96 @@ async fn a_partial_market_target_keeps_trailing_on_the_remaining_entry_quantity(
     assert_eq!(trail.status, OrderStatus::Open);
     assert_eq!(trail.quantity, "0.0005");
     assert_eq!(h.algo_placed()[0]["sz"], "0.05");
+}
+
+#[tokio::test]
+async fn a_late_partial_target_fill_keeps_the_deferred_trail_on_the_remainder() {
+    let h = connect(Vec::new()).await;
+    h.okx.state().rest_limit_orders = true;
+    let mut request = order();
+    request.order_type = EntryOrderType::Limit;
+    request.price = Some("74500".into());
+    request.take_profit = Some("78000".into());
+    request.trailing_stop = Some(ratio("0.01"));
+    let entry = h.engine.place_order(request).await.unwrap().order;
+    h.okx.state().fill_resting();
+    h.okx.state().drop_next_request = true;
+    h.advance(1);
+    *h.prices.lock().unwrap() = ("78999".into(), "79001".into(), "79000".into());
+
+    let post = h.okx.hold_next("POST", "/trade/order");
+    let engine = h.engine.clone();
+    let sync = tokio::spawn(async move { engine.sync().await });
+    tokio::time::timeout(std::time::Duration::from_secs(2), post.reached())
+        .await
+        .unwrap();
+    // Let the target send, but leave the unsent trail waiting for a fresh quote.
+    h.quote_time.store(START - 60_000, Ordering::SeqCst);
+    post.release();
+    sync.await.unwrap().unwrap();
+    let target_id = format!("{}:deferred:tp", entry.id);
+    let trail_id = format!("{}:trail", entry.id);
+    assert_eq!(h.order_row(&target_id).status, OrderStatus::Open);
+    let placements = h.count("POST /api/v5/trade/order");
+
+    h.advance(60_001);
+    h.sync().await;
+    let target = h.order_row(&target_id);
+    assert_eq!(target.status, OrderStatus::Canceled);
+    assert_eq!(h.order_row(&trail_id).status, OrderStatus::Open);
+    assert!(h.algo_placed().is_empty());
+
+    // The sibling still matters after other orders push it out of the recent list.
+    h.store(|s| {
+        for i in 0..500 {
+            let filler = Order {
+                id: format!("filler_{i}"),
+                client_order_id: format!("filler_{i}"),
+                created_at: target.created_at + i + 1,
+                reject_reason: None,
+                ..target.clone()
+            };
+            s.insert_order(&filler).unwrap();
+        }
+    });
+
+    let client_id = mochi_okx::to_cl_ord_id(&target.client_order_id);
+    let filled_at = h.clock.load(Ordering::SeqCst).to_string();
+    {
+        let mut okx = h.okx.state();
+        // The fill and the reduced position are visible before order lookup recovers.
+        okx.recent_fills.push(row(json!({
+            "instId": "BTC-USDT-SWAP", "ordId": "late-target", "tradeId": "2",
+            "clOrdId": client_id, "fillSz": "0.05", "fillTime": filled_at,
+            "posSide": "net", "subType": "5",
+        })));
+        let position = okx.position.as_mut().unwrap();
+        position.insert("tradeId".into(), json!("2"));
+        position.insert("uTime".into(), json!(filled_at));
+        position.insert("pos".into(), json!("0.05"));
+    }
+    h.quote_time.store(0, Ordering::SeqCst);
+    h.sync().await;
+    let trail = h.order_row(&trail_id);
+    assert_eq!(trail.status, OrderStatus::Open, "{:?}", trail.reject_reason);
+    assert!(h.algo_placed().is_empty());
+    assert_eq!(h.order_row(&target_id).status, OrderStatus::Canceled);
+    assert_eq!(h.count("POST /api/v5/trade/order"), placements);
+
+    h.okx.state().orders.insert(
+        client_id,
+        row(json!({
+            "ordId": "late-target", "state": "canceled", "accFillSz": "0.05",
+            "avgPx": "79000", "fee": "0", "pnl": "0",
+        })),
+    );
+    h.sync().await;
+    let trail = h.order_row(&trail_id);
+    assert_eq!(trail.status, OrderStatus::Open, "{:?}", trail.reject_reason);
+    assert_eq!(trail.quantity, "0.0005");
+    assert_eq!(h.algo_placed()[0]["sz"], "0.05");
+    assert_eq!(h.order_row(&target_id).filled_quantity, "0.0005");
+    assert_eq!(h.count("POST /api/v5/trade/order"), placements);
 }
 
 #[tokio::test]
