@@ -1448,7 +1448,7 @@ impl OkxEngine {
                 // Some system reductions do not change tradeId.
                 && before.get("uTime") == after.get("uTime")
             });
-        *snapshot = fresh;
+        snapshot.update_positions(fresh);
         Ok(same)
     }
 
@@ -1807,7 +1807,9 @@ impl OkxEngine {
             OrderSide::Buy => PositionSide::Short,
             OrderSide::Sell => PositionSide::Long,
         };
-        *snapshot = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
+        snapshot.update_positions(PositionSnapshot::new(
+            self.deps.client.get_positions().await?,
+        )?);
         let Some((position, original_size)) = isolated_net_position(&snapshot.open, &inst) else {
             return Ok(false);
         };
@@ -1823,7 +1825,9 @@ impl OkxEngine {
         {
             return Ok(false);
         }
-        *snapshot = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
+        snapshot.update_positions(PositionSnapshot::new(
+            self.deps.client.get_positions().await?,
+        )?);
         let Some((position, signed_size)) = isolated_net_position(&snapshot.open, &inst) else {
             return Ok(false);
         };
@@ -2019,7 +2023,9 @@ impl OkxEngine {
                 false
             };
         // Read fresh after the parent/stop calls, which may have outlived the earlier snapshot.
-        *snapshot = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
+        snapshot.update_positions(PositionSnapshot::new(
+            self.deps.client.get_positions().await?,
+        )?);
         let Some((position, signed_size)) = isolated_net_position(&snapshot.open, &inst_id) else {
             if confirming {
                 return Ok(());
@@ -2455,10 +2461,7 @@ impl OkxEngine {
             }
             result => {
                 // An unanswered market order may already have changed the position.
-                snapshot.forget(inst_id);
-                self.state()
-                    .positions
-                    .retain(|p| p.position.symbol != row.symbol);
+                snapshot.post_exit_unverified = true;
                 if let Err(error) = result {
                     row.reject_reason = Some(format!("Awaiting confirmation: {error}"));
                     self.save(row.clone()).await?;
@@ -2466,7 +2469,9 @@ impl OkxEngine {
             }
         }
         self.sync_order(row, registry).await?;
-        *snapshot = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
+        snapshot.update_positions(PositionSnapshot::new(
+            self.deps.client.get_positions().await?,
+        )?);
         Ok(())
     }
 
@@ -2571,12 +2576,12 @@ impl OkxEngine {
                 let refreshed = self.pending_protection().await;
                 let post_exit = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
                 let position_changed = snapshot.held != post_exit.held;
-                *snapshot = post_exit;
+                snapshot.update_positions(post_exit);
                 let refreshed = if position_changed {
                     let refreshed = self.pending_protection().await?;
                     let latest = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
                     let changed_again = snapshot.held != latest.held;
-                    *snapshot = latest;
+                    snapshot.update_positions(latest);
                     if changed_again {
                         return Err(EngineError::message(
                             "Position changed during protection readback",
@@ -2587,6 +2592,7 @@ impl OkxEngine {
                     refreshed?
                 };
                 *balance = self.deps.client.get_usdt_balance().await?;
+                snapshot.post_exit_unverified = false;
                 self.reconcile_protection_pass(refreshed, snapshot, false)
                     .await?
                     .ok_or_else(|| EngineError::message("Protection changed during readback"))
@@ -2732,7 +2738,7 @@ impl OkxEngine {
                     .await?;
             }
         }
-        if refresh_readback {
+        if refresh_readback || snapshot.post_exit_unverified {
             return Ok(None);
         }
 

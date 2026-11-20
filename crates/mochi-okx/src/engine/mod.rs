@@ -1108,9 +1108,14 @@ impl OkxEngine {
                     .await?;
                 let mut order = order
                     .ok_or_else(|| EngineError::message(format!("Unknown order {order_id}")))?;
-                // A confirmed ordinary order can be canceled independently of recovery.
-                // A known-unsent marker may change into a deferred algo when restored.
-                if order.exchange_order_id.as_deref().is_none_or(str::is_empty) {
+                // OKX accepts a cancellation by client ID. Only this order's
+                // own recovery can change it from a market order to an unsent algo.
+                let needs_restore = engine
+                    .dispatch()
+                    .restore_order
+                    .as_ref()
+                    .is_some_and(|pending| pending.id() == order.id);
+                if needs_restore {
                     if let Some(restored) = engine
                         .restore_unsent_order()
                         .await?
@@ -1148,8 +1153,21 @@ impl OkxEngine {
 
     /// Full reconciliation with the exchange. Throws, and marks the account unhealthy, on failure.
     pub async fn sync(self: &Arc<Self>) -> Result<(), EngineError> {
-        self.queued(DeferredRestore::Required, |engine| {
-            Box::pin(async move { engine.sync_now().await })
+        self.queued(DeferredRestore::AllowPending, |engine| {
+            Box::pin(async move {
+                match engine.restore_unsent_order().await {
+                    Ok(_) => engine.sync_now().await,
+                    Err(error @ (EngineError::Stopped | EngineError::SessionRetired)) => Err(error),
+                    Err(error) => {
+                        // Failed recovery only blocks more deferred submissions. Orders
+                        // already at OKX can still fill and must be reconciled.
+                        match engine.sync_without_deferred_orders().await {
+                            Err(EngineError::Stopped) => Err(EngineError::Stopped),
+                            _ => Err(error),
+                        }
+                    }
+                }
+            })
         })
         .await
     }

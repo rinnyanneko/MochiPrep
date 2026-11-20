@@ -3530,10 +3530,37 @@ async fn a_store_failure_restoring_a_deferred_exit_does_not_block_manual_reducti
 }
 
 #[tokio::test]
-async fn an_unrelated_restore_failure_does_not_block_canceling_a_confirmed_order() {
+async fn an_unrelated_restore_failure_does_not_block_order_lookup_or_cancellation() {
+    for lost_response in [false, true] {
+        let (h, id, order) = resting_reduction_during_restore_failure(lost_response).await;
+        let marker = h.order_row(&id);
+        // Fake OKX logs ordinary cancel requests and answers 404.
+        let result = h.engine.cancel_order(&order.id).await.unwrap_err();
+        assert_eq!(
+            result.to_string(),
+            "OKX 404: Unhandled /api/v5/trade/cancel-order"
+        );
+        assert_eq!(h.count("POST /api/v5/trade/cancel-order"), 1);
+        assert_eq!(h.order_row(&id), marker);
+    }
+}
+
+#[tokio::test]
+async fn failed_restore_does_not_block_periodic_readback_of_a_filled_reduction() {
+    let (h, id, order) = resting_reduction_during_restore_failure(true).await;
+    let marker = h.order_row(&id);
+    h.okx.state().fill_resting();
+    let err = h.engine.sync().await.unwrap_err();
+    assert!(err.to_string().contains("exit restore refused"));
+    assert_eq!(h.order_row(&order.id).status, OrderStatus::Filled);
+    assert!(h.engine.positions().is_empty());
+    assert!(!h.engine.healthy());
+    assert_eq!(h.order_row(&id), marker);
+}
+
+async fn resting_reduction_during_restore_failure(lost_response: bool) -> (Harness, String, Order) {
     let (h, id, _) = fail_deferred_exit_restore(false).await;
     h.disarm();
-    let marker = h.order_row(&id);
     let mut request = order();
     request.client_order_id = "resting-reduction-during-restore".into();
     request.side = OrderSide::Sell;
@@ -3542,6 +3569,11 @@ async fn an_unrelated_restore_failure_does_not_block_canceling_a_confirmed_order
     request.reduce_only = Some(true);
     request.stop_loss = None;
     let position_id = h.engine.positions()[0].position.id.clone();
+    if lost_response {
+        let mut okx = h.okx.state();
+        okx.lose_next_response = true;
+        okx.lookup_error_code = Some("50001".into());
+    }
     let order = h
         .engine
         .reduce_position(request, position_id)
@@ -3549,15 +3581,9 @@ async fn an_unrelated_restore_failure_does_not_block_canceling_a_confirmed_order
         .unwrap()
         .order;
     assert_eq!(order.status, OrderStatus::Open);
-    assert!(order.exchange_order_id.is_some());
-    // Fake OKX logs ordinary cancel requests and answers 404.
-    let result = h.engine.cancel_order(&order.id).await.unwrap_err();
-    assert_eq!(
-        result.to_string(),
-        "OKX 404: Unhandled /api/v5/trade/cancel-order"
-    );
-    assert_eq!(h.count("POST /api/v5/trade/cancel-order"), 1);
-    assert_eq!(h.order_row(&id), marker);
+    assert_eq!(order.exchange_order_id.is_none(), lost_response);
+    h.okx.state().lookup_error_code = None;
+    (h, id, order)
 }
 
 #[tokio::test]
@@ -3758,6 +3784,13 @@ async fn both_reached_targets_close_their_own_entries_even_after_a_failed_refres
         h.advance(1);
         *h.prices.lock().unwrap() = ("79999".into(), "80001".into(), "80000".into());
         assert_eq!(h.engine.sync().await.is_err(), fail_refresh);
+        if fail_refresh {
+            assert_eq!(h.okx.state().position.as_ref().unwrap()["pos"], "0.1");
+            assert!(!h.engine.healthy());
+            let positions = h.engine.positions();
+            assert_eq!(positions.len(), 1);
+            assert_eq!(positions[0].position.quantity, "0.002");
+        }
         h.sync().await;
         for entry in [first, second] {
             let row = h.order_row(&format!("{}:deferred:tp", entry.id));
@@ -4498,7 +4531,8 @@ async fn a_failed_target_refresh_does_not_use_the_old_size_for_a_fractional_clos
     h.advance(1);
     *h.prices.lock().unwrap() = ("78099".into(), "78101".into(), "78100".into());
     assert!(h.engine.sync().await.is_err());
-    assert!(h.engine.positions().is_empty());
+    assert!(!h.engine.healthy());
+    assert_eq!(h.view().position.quantity, "0.004");
     assert_eq!(h.okx.state().position.as_ref().unwrap()["pos"], "0.3");
     h.disarm();
     let close = h

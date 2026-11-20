@@ -32,16 +32,17 @@ fn dec_or_zero(value: Option<&Value>) -> Result<mochi_decimal::Dec, EngineError>
     dec(&truthy_text(value).unwrap_or_else(|| "0".into()))
 }
 
+#[derive(Clone)]
 pub(super) struct PositionSnapshot {
     pub(super) open: Vec<Row>,
     pub(super) held: HashMap<String, Held>,
+    pub(super) post_exit_unverified: bool,
 }
 
 impl PositionSnapshot {
-    pub(super) fn forget(&mut self, inst_id: &str) {
-        self.open
-            .retain(|row| row.get("instId").and_then(Value::as_str) != Some(inst_id));
-        self.held.remove(inst_id);
+    pub(super) fn update_positions(&mut self, snapshot: Self) {
+        self.open = snapshot.open;
+        self.held = snapshot.held;
     }
 
     pub(super) fn new(rows: Vec<Row>) -> Result<Self, EngineError> {
@@ -72,7 +73,11 @@ impl PositionSnapshot {
             }
             open.push(row);
         }
-        Ok(Self { open, held })
+        Ok(Self {
+            open,
+            held,
+            post_exit_unverified: false,
+        })
     }
 
     fn protection_keys(&self, registry: &Registry) -> HashMap<String, String> {
@@ -351,6 +356,7 @@ impl OkxEngine {
         );
         let mut usdt = usdt?;
         let mut snapshot = PositionSnapshot::new(remote?)?;
+        let pre_protection = snapshot.clone();
         let protection = match algos {
             Ok(algos) => {
                 self.reconcile_protection(algos, &mut snapshot, &mut usdt, submit_deferred)
@@ -358,6 +364,11 @@ impl OkxEngine {
             }
             Err(error) => Err(error),
         };
+        // A market exit can change both balance and positions. If either
+        // readback failed, keep the coherent pre-exit view and report it stale.
+        if snapshot.post_exit_unverified {
+            snapshot = pre_protection;
+        }
         let keys = snapshot.protection_keys(&registry);
         let protection = match protection {
             Ok(protection) => protection,
