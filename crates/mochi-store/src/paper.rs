@@ -6,7 +6,7 @@ use std::cell::Cell;
 use mochi_core::paper::{CloseAmount, CloseSelection, PaperStore, StoreFailure, StoreFailureKind};
 use mochi_domain::{
     DataSource, EquityPoint, ExchangeExecutionCursor, ExchangePositionRecord, Fill, LedgerEvent,
-    Order, PaperAccount, Position, RiskSettings,
+    Order, OrderSide, PaperAccount, Position, RiskSettings,
 };
 use rusqlite::{params, Connection, Row};
 use serde::de::DeserializeOwned;
@@ -628,6 +628,35 @@ impl PaperStore for SqlitePaperStore {
             params![account_id, reason, limit_param(limit)],
             to_order,
         )
+    }
+
+    fn any_canceled_order_for_recovery(
+        &self,
+        account_id: &str,
+        symbol: &str,
+        side: OrderSide,
+        reason: &str,
+        matches: &dyn Fn(&Order) -> bool,
+    ) -> Result<bool, StoreFailure> {
+        let mut stmt = self
+            .conn
+            .prepare_cached(
+                "SELECT * FROM orders WHERE account_id=? AND status='CANCELED' AND reject_reason=?
+             AND symbol=? AND side=? AND (exchange_order_id IS NULL OR exchange_order_id='')",
+            )
+            .map_err(failure)?;
+        let orders = stmt
+            .query_map(
+                params![account_id, reason, symbol, enum_text(&side)],
+                to_order,
+            )
+            .map_err(failure)?;
+        for order in orders {
+            if matches(&order.map_err(failure)?) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn mark_order_recovery_checked(

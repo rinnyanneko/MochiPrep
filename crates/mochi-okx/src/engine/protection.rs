@@ -282,12 +282,11 @@ pub(super) fn is_reached_exit(row: &Order) -> bool {
         && deferred_parent_id(row, Leg::Tp).is_some()
 }
 
-fn retired_reached_exit(row: &Order) -> Option<(String, String)> {
-    (is_reached_exit(row)
-        && row.status == OrderStatus::Canceled
-        && row.reject_reason.as_deref() == Some(REACHED_EXIT_UNCONFIRMED)
-        && row.exchange_order_id.as_deref().is_none_or(str::is_empty))
-    .then(|| (to_cl_ord_id(&row.client_order_id), row.symbol.clone()))
+fn is_confirmed_reached_exit(order: &Order, symbol: &str, side: OrderSide) -> bool {
+    order.symbol == symbol
+        && order.side == side
+        && order.status != OrderStatus::Rejected
+        && is_reached_exit(order)
 }
 
 struct PositionHistory<'a> {
@@ -949,7 +948,7 @@ impl OkxEngine {
         options: ProtectionOrderOptions,
     ) -> Result<ProtectionResult, EngineError> {
         let (account_id, symbol) = (account_id.to_string(), symbol.to_string());
-        self.queued(move |engine| {
+        self.queued(super::DeferredRestore::Required, move |engine| {
             Box::pin(async move {
                 engine
                     .apply_protection(account_id, symbol, protection, options)
@@ -1886,12 +1885,7 @@ impl OkxEngine {
             let orders = rows.find_orders_by_exchange_ids(&account_id, &ids)?;
             Ok(orders
                 .into_iter()
-                .filter(|order| {
-                    order.symbol == symbol
-                        && order.side == side
-                        && order.status != OrderStatus::Rejected
-                        && is_reached_exit(order)
-                })
+                .filter(|order| is_confirmed_reached_exit(order, &symbol, side))
                 .filter_map(|order| {
                     let parent = deferred_parent_id(&order, Leg::Tp)?.to_owned();
                     Some((order.exchange_order_id?, parent))
@@ -1901,37 +1895,66 @@ impl OkxEngine {
         .await
     }
 
+    async fn awaiting_exit_attribution(
+        &self,
+        row: &Order,
+        mut exchange_ids: Vec<String>,
+        client_ids: HashSet<String>,
+    ) -> Result<bool, EngineError> {
+        if exchange_ids.is_empty() && client_ids.is_empty() {
+            return Ok(false);
+        }
+        exchange_ids.sort_unstable();
+        exchange_ids.dedup();
+        let account_id = row.account_id.clone();
+        let symbol = row.symbol.clone();
+        let side = row.side;
+        self.rows(move |rows| {
+            // Retired targets can still fill. Their venue ID is a hash of the
+            // local key, so compare it only among eligible recovery candidates.
+            if !client_ids.is_empty()
+                && rows.any_canceled_order_for_recovery(
+                    &account_id,
+                    &symbol,
+                    side,
+                    REACHED_EXIT_UNCONFIRMED,
+                    &|order| {
+                        is_reached_exit(order)
+                            && client_ids.contains(&to_cl_ord_id(&order.client_order_id))
+                    },
+                )?
+            {
+                return Ok(true);
+            }
+            // Another engine may have confirmed the exit after our first
+            // read and removed it from recovery. Retry attribution next sync.
+            Ok(rows
+                .find_orders_by_exchange_ids(&account_id, &exchange_ids)?
+                .iter()
+                .any(|order| is_confirmed_reached_exit(order, &symbol, side)))
+        })
+        .await
+    }
+
     async fn submit_deferred_protection(
         &self,
         row: &mut Order,
         registry: &Registry,
         snapshot: &mut PositionSnapshot,
-        retired_exits: &mut HashMap<String, String>,
     ) -> Result<(), EngineError> {
         let leg =
             leg_of(row).ok_or_else(|| EngineError::message("Invalid deferred protection leg"))?;
         let parent_id = deferred_parent_id(row, leg)
             .ok_or_else(|| EngineError::message("Invalid deferred protection id"))?
             .to_string();
-        let (parent, entry_target) = self
-            .rows(move |rows| {
-                // Newer orders may have pushed this entry's target out of the recent list.
-                let target = if leg == Leg::Trail {
-                    rows.get_order(&format!("{parent_id}{PER_ENTRY_TARGET_SUFFIX}"))?
-                } else {
-                    None
-                };
-                Ok((rows.get_order(&parent_id)?, target))
-            })
+        let parent = self
+            .rows(move |rows| Ok(rows.get_order(&parent_id)?))
             .await?;
         let Some(parent) = parent else {
             return self
                 .close_row(row, "Deferred protection canceled: parent missing")
                 .await;
         };
-        if let Some((client_id, symbol)) = entry_target.as_ref().and_then(retired_reached_exit) {
-            retired_exits.insert(client_id, symbol);
-        }
         let id = row.id.clone();
         let linked_replacements = self
             .rows(move |rows| Ok(rows.target_replacements(&id)?))
@@ -2154,6 +2177,7 @@ impl OkxEngine {
                 .iter()
                 .filter(|other| {
                     other.symbol == row.symbol
+                        && other.side == row.side
                         && is_reached_exit(other)
                         && other.exchange_order_id.as_deref().is_none_or(str::is_empty)
                 })
@@ -2168,22 +2192,28 @@ impl OkxEngine {
             // Only a reduction in this entry's interval can make the unanswered exit
             // relevant. Local submission time and exchange fill time can disagree.
             let close_subtype = if short { "6" } else { "5" };
-            let awaiting_sibling = fills.iter().any(|fill| {
-                last_trade_id(fill)
-                    .is_some_and(|id| (first_entry_trade..=position_trade).contains(&id))
-                    && fill.get("subType").and_then(Value::as_str) == Some(close_subtype)
-                    && match fill.get("clOrdId").and_then(Value::as_str) {
-                        Some(id) if !id.is_empty() => {
-                            unresolved.contains(id) || retired_exits.get(id) == Some(&row.symbol)
-                        }
-                        // Only an active unresolved target can justify waiting on an
-                        // anonymous reduction. Retired ones require a matching ID.
-                        _ => !unresolved.is_empty(),
-                    }
-            });
             let reached_exit_parents = self
                 .reached_exit_parents(row, &inst_id, &fills, close_subtype)
                 .await?;
+            let unattributed_closings = fills.iter().filter(|fill| {
+                last_trade_id(fill)
+                    .is_some_and(|id| (first_entry_trade..=position_trade).contains(&id))
+                    && fill.get("instId").and_then(Value::as_str) == Some(inst_id.as_str())
+                    && fill.get("posSide").and_then(Value::as_str) == Some("net")
+                    && fill.get("subType").and_then(Value::as_str) == Some(close_subtype)
+                    && fill
+                        .get("ordId")
+                        .and_then(Value::as_str)
+                        .is_none_or(|id| !reached_exit_parents.contains_key(id))
+            });
+            let awaiting_active = unattributed_closings.clone().any(|fill| {
+                match fill.get("clOrdId").and_then(Value::as_str) {
+                    Some(id) if !id.is_empty() => unresolved.contains(id),
+                    // Only an active unresolved target can justify waiting on an
+                    // anonymous reduction. Retired ones require a matching ID.
+                    _ => !unresolved.is_empty(),
+                }
+            });
             let history = PositionHistory {
                 inst_id: &inst_id,
                 fills: &fills,
@@ -2203,7 +2233,7 @@ impl OkxEngine {
                 Some(quantity) if quantity.gt(&super::zero()) => quantity,
                 // An unattributed reduction could belong to our own unanswered exit.
                 // Let lookup identify it before rejecting another entry's intent.
-                _ if awaiting_sibling => return Ok(()),
+                _ if awaiting_active => return Ok(()),
                 // The position and parent can become visible before the fills endpoint catches up.
                 None if confirming
                     || row.reject_reason.as_deref() == Some(DEFERRED_POSITION_ADJUSTED) =>
@@ -2211,6 +2241,34 @@ impl OkxEngine {
                     return Ok(());
                 }
                 _ => {
+                    let exchange_ids = if fills.len() < RECENT_FILLS_LIMIT {
+                        unattributed_closings
+                            .clone()
+                            .filter_map(|fill| fill.get("ordId").and_then(Value::as_str))
+                            .filter(|id| !id.is_empty())
+                            .map(str::to_owned)
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    let client_ids = unattributed_closings
+                        .filter_map(|fill| fill.get("clOrdId").and_then(Value::as_str))
+                        .filter(|id| {
+                            id.len() == 32
+                                && id.bytes().all(|byte| {
+                                    byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+                                })
+                        })
+                        .map(str::to_owned)
+                        .collect();
+                    if self
+                        .awaiting_exit_attribution(row, exchange_ids, client_ids)
+                        .await?
+                    {
+                        // A client ID can justify waiting. Only order lookup can
+                        // persist the exchange ID used to prove position lifetime.
+                        return Ok(());
+                    }
                     return self
                         .close_row(
                             row,
@@ -2558,7 +2616,6 @@ impl OkxEngine {
         let mut rows: Vec<Order> = open.into_iter().filter(is_leg).collect();
         let open_count = rows.len();
         let open_ids: HashSet<String> = rows.iter().map(|r| r.id.clone()).collect();
-        let mut retired_exits = recent.iter().filter_map(retired_reached_exit).collect();
         rows.extend(
             recent
                 .into_iter()
@@ -2630,14 +2687,11 @@ impl OkxEngine {
                 if !submit_deferred {
                     continue;
                 }
-                self.submit_deferred_protection(slot, &registry, snapshot, &mut retired_exits)
+                self.submit_deferred_protection(slot, &registry, snapshot)
                     .await?;
                 refresh_readback |= snapshot.held != initial_held
                     || (slot.order_type == OrderType::Market
                         && slot.status != OrderStatus::Rejected);
-                if let Some((client_id, symbol)) = retired_reached_exit(slot) {
-                    retired_exits.insert(client_id, symbol);
-                }
                 if is_leg(slot) && slot.status == OrderStatus::Open && !is_deferred(slot) {
                     if let Some(remote) = self.lookup_algo(&slot.id).await? {
                         if remote

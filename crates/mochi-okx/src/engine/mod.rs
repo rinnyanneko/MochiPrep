@@ -78,6 +78,14 @@ pub trait LiveRows {
         reason: &str,
         limit: usize,
     ) -> Result<Vec<Order>, StoreFailure>;
+    fn any_canceled_order_for_recovery(
+        &self,
+        account_id: &str,
+        symbol: &str,
+        side: OrderSide,
+        reason: &str,
+        matches: &dyn Fn(&Order) -> bool,
+    ) -> Result<bool, StoreFailure>;
     fn mark_order_recovery_checked(
         &self,
         order_id: &str,
@@ -189,6 +197,17 @@ impl<S: PaperStore> LiveRows for Rows<'_, S> {
     ) -> Result<Vec<Order>, StoreFailure> {
         self.store
             .list_canceled_orders_for_recovery(account_id, reason, limit)
+    }
+    fn any_canceled_order_for_recovery(
+        &self,
+        account_id: &str,
+        symbol: &str,
+        side: OrderSide,
+        reason: &str,
+        matches: &dyn Fn(&Order) -> bool,
+    ) -> Result<bool, StoreFailure> {
+        self.store
+            .any_canceled_order_for_recovery(account_id, symbol, side, reason, matches)
     }
     fn mark_order_recovery_checked(
         &self,
@@ -384,12 +403,13 @@ pub struct OkxEngine {
 #[derive(Default)]
 struct DispatchState {
     retired: bool,
-    unsent_order: Option<PendingDispatch>,
+    staged_order: Option<UnsentOrder>,
+    restore_order: Option<UnsentOrder>,
 }
 
-struct PendingDispatch {
-    order: UnsentOrder,
-    restore_needed: bool,
+enum DeferredRestore {
+    Required,
+    AllowPending,
 }
 
 /// In-memory proof of non-dispatch for a staged order that needs finalizing.
@@ -483,13 +503,7 @@ struct StagedOrder<'a>(&'a Mutex<DispatchState>);
 impl Drop for StagedOrder<'_> {
     fn drop(&mut self) {
         let mut dispatch = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if dispatch
-            .unsent_order
-            .as_ref()
-            .is_some_and(|pending| !pending.restore_needed)
-        {
-            dispatch.unsent_order = None;
-        }
+        dispatch.staged_order = None;
     }
 }
 
@@ -586,11 +600,15 @@ impl OkxEngine {
         })
     }
 
-    /// Stops new dispatches and returns the order, if any, that never reached handoff.
-    pub fn retire(&self) -> Option<UnsentOrder> {
+    /// Stops new dispatches and returns the orders that never reached handoff.
+    pub fn retire(&self) -> Vec<UnsentOrder> {
         let mut dispatch = self.dispatch();
         dispatch.retired = true;
-        dispatch.unsent_order.take().map(|pending| pending.order)
+        // Finalize the current submission first if an older restore keeps failing.
+        [dispatch.staged_order.take(), dispatch.restore_order.take()]
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     pub(super) fn check_dispatch(&self) -> Result<(), EngineError> {
@@ -607,30 +625,21 @@ impl OkxEngine {
         let mut dispatch = self.dispatch();
         dispatch.check()?;
         // The account's queue allows at most one submission at a time.
-        debug_assert!(dispatch.unsent_order.is_none());
-        dispatch.unsent_order = Some(PendingDispatch {
-            order,
-            restore_needed: false,
-        });
+        debug_assert!(dispatch.staged_order.is_none());
+        dispatch.staged_order = Some(order);
         Ok(StagedOrder(&self.dispatch))
     }
 
     fn abandon_staged_order(&self) -> Result<(), EngineError> {
         let mut dispatch = self.dispatch();
         dispatch.check()?;
-        if let Some(pending) = &mut dispatch.unsent_order {
-            pending.restore_needed = true;
-        }
+        debug_assert!(dispatch.restore_order.is_none());
+        dispatch.restore_order = dispatch.staged_order.take();
         Ok(())
     }
 
     async fn restore_unsent_order(&self) -> Result<Option<Order>, EngineError> {
-        if !self
-            .dispatch()
-            .unsent_order
-            .as_ref()
-            .is_some_and(|pending| pending.restore_needed)
-        {
+        if self.dispatch().restore_order.is_none() {
             return Ok(None);
         }
         let dispatch = self.dispatch.clone();
@@ -639,12 +648,12 @@ impl OkxEngine {
         self.rows(move |rows| {
             let mut dispatch = dispatch.lock().unwrap_or_else(PoisonError::into_inner);
             dispatch.check()?;
-            let Some(pending) = dispatch.unsent_order.as_ref() else {
+            let Some(pending) = dispatch.restore_order.as_ref() else {
                 return Ok(None);
             };
-            let restored = pending.order.finalize(rows, &account_id, now)?;
+            let restored = pending.finalize(rows, &account_id, now)?;
             // A failed transaction leaves the token for the next queued operation or retirement.
-            dispatch.unsent_order = None;
+            dispatch.restore_order = None;
             Ok(restored)
         })
         .await
@@ -657,11 +666,11 @@ impl OkxEngine {
             return Err(EngineError::OpeningDisarmed);
         }
         if dispatch
-            .unsent_order
+            .staged_order
             .as_ref()
-            .is_some_and(|pending| pending.order.id() == order.id)
+            .is_some_and(|pending| pending.id() == order.id)
         {
-            dispatch.unsent_order = None;
+            dispatch.staged_order = None;
         }
         Ok(())
     }
@@ -734,12 +743,15 @@ impl OkxEngine {
     /// caller stops waiting: an order half sent must still be recorded.
     async fn queued<T: Send + 'static>(
         self: &Arc<Self>,
+        restore: DeferredRestore,
         work: impl FnOnce(Arc<Self>) -> BoxFuture<'static, Result<T, EngineError>> + Send + 'static,
     ) -> Result<T, EngineError> {
         let engine = self.clone();
         tokio::spawn(async move {
             let _turn = engine.queue.lock().await;
-            engine.restore_unsent_order().await?;
+            if matches!(restore, DeferredRestore::Required) {
+                engine.restore_unsent_order().await?;
+            }
             work(engine.clone()).await
         })
         .await
@@ -802,7 +814,7 @@ impl OkxEngine {
         self: &Arc<Self>,
         request: OrderRequest,
     ) -> Result<OrderResult, EngineError> {
-        self.queued(move |engine| {
+        self.queued(DeferredRestore::Required, move |engine| {
             Box::pin(async move {
                 let mut prepared = engine
                     .prepare(&request.account_id, &request.client_order_id)
@@ -837,7 +849,7 @@ impl OkxEngine {
         request: OrderRequest,
         position_id: String,
     ) -> Result<OrderResult, EngineError> {
-        self.queued(move |engine| {
+        self.queued(DeferredRestore::AllowPending, move |engine| {
             Box::pin(async move {
                 let mut request = request;
                 if request.reduce_only != Some(true)
@@ -956,7 +968,7 @@ impl OkxEngine {
         self: &Arc<Self>,
         intent: CloseIntent,
     ) -> Result<OrderResult, EngineError> {
-        self.queued(move |engine| {
+        self.queued(DeferredRestore::AllowPending, move |engine| {
             Box::pin(async move {
                 let CloseIntent {
                     account_id,
@@ -1088,7 +1100,7 @@ impl OkxEngine {
 
     pub async fn cancel_order(self: &Arc<Self>, order_id: &str) -> Result<(), EngineError> {
         let order_id = order_id.to_string();
-        self.queued(move |engine| {
+        self.queued(DeferredRestore::AllowPending, move |engine| {
             Box::pin(async move {
                 let id = order_id.clone();
                 let (order, registry) = engine
@@ -1096,6 +1108,17 @@ impl OkxEngine {
                     .await?;
                 let mut order = order
                     .ok_or_else(|| EngineError::message(format!("Unknown order {order_id}")))?;
+                // A confirmed ordinary order can be canceled independently of recovery.
+                // A known-unsent marker may change into a deferred algo when restored.
+                if order.exchange_order_id.as_deref().is_none_or(str::is_empty) {
+                    if let Some(restored) = engine
+                        .restore_unsent_order()
+                        .await?
+                        .filter(|restored| restored.id == order.id)
+                    {
+                        order = restored;
+                    }
+                }
                 if order.status != OrderStatus::Open {
                     return Err(EngineError::message(format!(
                         "Order {order_id} is {}",
@@ -1125,15 +1148,19 @@ impl OkxEngine {
 
     /// Full reconciliation with the exchange. Throws, and marks the account unhealthy, on failure.
     pub async fn sync(self: &Arc<Self>) -> Result<(), EngineError> {
-        self.queued(|engine| Box::pin(async move { engine.sync_now().await }))
-            .await
+        self.queued(DeferredRestore::Required, |engine| {
+            Box::pin(async move { engine.sync_now().await })
+        })
+        .await
     }
 
     /// A connection candidate can read back orders while the current session still
     /// owns dispatch. Deferred orders become eligible after registration.
     pub async fn sync_before_registration(self: &Arc<Self>) -> Result<(), EngineError> {
-        self.queued(|engine| Box::pin(async move { engine.sync_without_deferred_orders().await }))
-            .await
+        self.queued(DeferredRestore::Required, |engine| {
+            Box::pin(async move { engine.sync_without_deferred_orders().await })
+        })
+        .await
     }
 
     /// Starts a history pass as a task of its own (see [`OkxEngine::sync_position_history`]).
@@ -1277,7 +1304,14 @@ impl OkxEngine {
         }
 
         let _ = self.sync_order(&mut order, registry).await;
-        let _ = self.sync_now().await;
+        // Reduce-only orders can stage independently of a failed deferred restore.
+        // Until that restore completes, reconcile positions without staging another protection.
+        let restore_pending = self.dispatch().restore_order.is_some();
+        if restore_pending {
+            let _ = self.sync_without_deferred_orders().await;
+        } else {
+            let _ = self.sync_now().await;
+        }
         let id = order.id.clone();
         self.rows(move |rows| {
             let order = rows

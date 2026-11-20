@@ -5,7 +5,7 @@
 
 use mochi_domain::{
     DataSource, EquityPoint, ExchangeExecutionCursor, ExchangePositionRecord, Fill, LedgerEvent,
-    Order, PaperAccount, Position,
+    Order, OrderSide, PaperAccount, Position,
 };
 
 /// A storage error. The engine's reaction is the same whatever the cause (roll back and report),
@@ -107,6 +107,15 @@ pub trait PaperStore {
         reason: &str,
         limit: usize,
     ) -> Result<Vec<Order>, StoreFailure>;
+    /// Tests unresolved recovery candidates for exact account, symbol and side.
+    fn any_canceled_order_for_recovery(
+        &self,
+        account_id: &str,
+        symbol: &str,
+        side: OrderSide,
+        reason: &str,
+        matches: &dyn Fn(&Order) -> bool,
+    ) -> Result<bool, StoreFailure>;
     fn mark_order_recovery_checked(
         &self,
         order_id: &str,

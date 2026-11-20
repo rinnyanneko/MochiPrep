@@ -601,9 +601,6 @@ impl Runtime {
         for id in &pending {
             let _ = self.restore_retired_order(id);
         }
-        if self.retired_unsent_orders.len() < pending.len() {
-            self.invalidate(&[Topic::Orders]);
-        }
         self.exchanges
             .iter()
             .map(|(id, session)| (id.clone(), session.engine.clone()))

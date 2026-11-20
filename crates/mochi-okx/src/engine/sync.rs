@@ -302,7 +302,10 @@ impl OkxEngine {
         // stays OPEN and is tried again next sync, nothing resent; it fails this sync, but not
         // before the other orders, positions and protection are brought in line. Only an OKX or
         // shutdown failure stops the pass at once.
-        let mut order_error: Option<EngineError> = None;
+        let mut order_error =
+            self.dispatch().restore_order.is_some().then(|| {
+                EngineError::message("An unsent OKX protection order is awaiting recovery")
+            });
         for mut order in open.into_iter().filter(|o| !is_leg(o)) {
             let reached_exit = is_reached_exit(&order);
             let recovering = order.status == OrderStatus::Canceled
@@ -322,14 +325,22 @@ impl OkxEngine {
                 // Move even an unanswered lookup behind orders that have not had a turn.
                 // Keep this checkpoint across restarts without changing the order's status.
                 let checked_at = self.now();
-                self.rows(move |rows| {
-                    Ok(rows.mark_order_recovery_checked(
-                        &order.id,
-                        REACHED_EXIT_UNCONFIRMED,
-                        checked_at,
-                    )?)
-                })
-                .await?;
+                if let Err(error) = self
+                    .rows(move |rows| {
+                        Ok(rows.mark_order_recovery_checked(
+                            &order.id,
+                            REACHED_EXIT_UNCONFIRMED,
+                            checked_at,
+                        )?)
+                    })
+                    .await
+                {
+                    if matches!(error, EngineError::Stopped) {
+                        return Err(error);
+                    }
+                    // A checkpoint failure must not hide a position that has already closed.
+                    order_error.get_or_insert(error);
+                }
             }
         }
         let client = &self.deps.client;

@@ -11,7 +11,7 @@ use futures_util::future::BoxFuture;
 use mochi_core::paper::{DailyRisk, PaperStore, ProtectionResult};
 use mochi_domain::{
     AccountBalance, AccountVenue, Order, OrderRequest, OrderResult, PaperAccount, PositionView,
-    Protection,
+    Protection, Topic,
 };
 use mochi_okx::engine::{
     EngineError, OkxEngine, OkxEngineDeps, Rows, StoreAccess, StoreWork, UnsentOrder,
@@ -183,7 +183,7 @@ impl SessionLink {
 }
 
 impl ExchangeSession {
-    fn retire(self) -> Option<UnsentOrder> {
+    fn retire(self) -> Vec<UnsentOrder> {
         let unsent = self.engine.retire();
         self.armed.store(false, Ordering::SeqCst);
         unsent
@@ -248,32 +248,48 @@ impl Runtime {
         self.exchanges.get(account_id)
     }
 
-    /// Keep the unsent token until finalization succeeds, without keeping the old session alive.
+    /// Keep the unsent orders until finalization succeeds, without keeping the old session alive.
     pub(super) fn retire_exchange_session(&mut self, account_id: &str) -> Result<(), EngineError> {
-        if let Some(unsent) = self
-            .exchanges
-            .remove(account_id)
-            .and_then(ExchangeSession::retire)
-        {
-            self.retired_unsent_orders
-                .insert(account_id.to_owned(), unsent);
+        if let Some(session) = self.exchanges.remove(account_id) {
+            let unsent = session.retire();
+            if !unsent.is_empty() {
+                self.retired_unsent_orders
+                    .entry(account_id.to_owned())
+                    .or_default()
+                    .extend(unsent);
+            }
         }
         self.restore_retired_order(account_id)
     }
 
     pub(super) fn restore_retired_order(&mut self, account_id: &str) -> Result<(), EngineError> {
-        if let Some(unsent) = self.retired_unsent_orders.get(account_id) {
-            unsent.finalize(
-                &Rows {
-                    store: self.engine().store(),
-                    instruments: self.instruments(),
-                },
-                account_id,
-                (self.okx.now)(),
-            )?;
-            self.retired_unsent_orders.remove(account_id);
+        let Some(mut orders) = self.retired_unsent_orders.remove(account_id) else {
+            return Ok(());
+        };
+        let count = orders.len();
+        let mut failure = None;
+        {
+            let rows = Rows {
+                store: self.engine().store(),
+                instruments: self.instruments(),
+            };
+            let now = (self.okx.now)();
+            orders.retain(|order| match order.finalize(&rows, account_id, now) {
+                Ok(_) => false,
+                Err(error) => {
+                    failure.get_or_insert(error);
+                    true
+                }
+            });
         }
-        Ok(())
+        if orders.len() < count {
+            self.invalidate(&[Topic::Orders]);
+        }
+        if !orders.is_empty() {
+            self.retired_unsent_orders
+                .insert(account_id.to_owned(), orders);
+        }
+        failure.map_or(Ok(()), Err)
     }
 
     /// Whether the session `link` belongs to may still write to the store (see [`SessionLink`]).

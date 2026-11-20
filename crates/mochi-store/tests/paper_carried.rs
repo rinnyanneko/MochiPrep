@@ -16,7 +16,7 @@ use mochi_core::paper::{
 use mochi_domain::registry::Instruments;
 use mochi_domain::{
     DataSource, EquityPoint, ExchangeExecutionCursor, Fill, LedgerEvent, Order, OrderRequest,
-    OrderStatus, PaperAccount, Position, Protection, Quote,
+    OrderSide, OrderStatus, PaperAccount, Position, Protection, Quote,
 };
 use mochi_store::{open_database, open_in_memory, SqlitePaperStore};
 use serde_json::json;
@@ -307,6 +307,17 @@ impl PaperStore for AuditedStore {
     ) -> Result<Vec<Order>, StoreFailure> {
         self.inner
             .list_canceled_orders_for_recovery(account_id, reason, limit)
+    }
+    fn any_canceled_order_for_recovery(
+        &self,
+        account_id: &str,
+        symbol: &str,
+        side: OrderSide,
+        reason: &str,
+        matches: &dyn Fn(&Order) -> bool,
+    ) -> Result<bool, StoreFailure> {
+        self.inner
+            .any_canceled_order_for_recovery(account_id, symbol, side, reason, matches)
     }
     fn mark_order_recovery_checked(
         &self,

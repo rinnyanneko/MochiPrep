@@ -331,7 +331,7 @@ pub struct Runtime {
     /// Connected exchange accounts by account id. Memory only: a restart forgets them.
     exchanges: std::collections::HashMap<String, execution::ExchangeSession>,
     /// Proof of non-dispatch from retired sessions whose finalization has yet to commit.
-    retired_unsent_orders: std::collections::HashMap<String, mochi_okx::engine::UnsentOrder>,
+    retired_unsent_orders: std::collections::HashMap<String, Vec<mochi_okx::engine::UnsentOrder>>,
     /// Counts changes to exchange sessions and saved keys: every registered session, disconnect
     /// and forgotten key. A connect notes it when it starts and is refused if its account changed
     /// after that, so a connect or unlock reconnect still out on OKX never undoes a disconnect,
