@@ -2189,9 +2189,9 @@ async fn manual_reconnect_retries_restoring_an_unsent_exit_after_a_store_failure
 
 async fn reconnect_restores_deferred_exit(fail_first: bool) {
     let w = World::new().await;
+    w.rt.suspend_periodic_okx_sync_for_test().await.unwrap();
     let account = w.connect("OKX_LIVE").await;
     w.arm(&account.id, ARM_PHRASE).await.unwrap();
-    w.rt.suspend_periodic_okx_sync_for_test().await.unwrap();
     w.okx.state().rest_limit_orders = true;
     let (status, entry) = w
         .send(
@@ -2304,9 +2304,9 @@ async fn reconnect_restores_deferred_exit(fail_first: bool) {
 #[tokio::test]
 async fn manual_reconnect_waits_until_registration_to_send_deferred_protection() {
     let w = World::new().await;
+    w.rt.suspend_periodic_okx_sync_for_test().await.unwrap();
     let account = w.connect("OKX_LIVE").await;
     w.arm(&account.id, ARM_PHRASE).await.unwrap();
-    w.rt.suspend_periodic_okx_sync_for_test().await.unwrap();
     w.okx.state().rest_limit_orders = true;
     let (status, result) = w
         .send(
