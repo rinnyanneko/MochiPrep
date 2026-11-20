@@ -24,9 +24,16 @@ function releaseFixture(t) {
   const out = join(root, 'assets');
   return {
     out,
-    run: (tag) => spawnSync(process.execPath, [script, tag, 'example/MochiPrep', out], {
+    run: (tag, { args = [], env = {} } = {}) => spawnSync(process.execPath, [script, tag, 'example/MochiPrep', out, ...args], {
       cwd: repo,
       encoding: 'utf8',
+      // Use Git's default archive settings for reproducible fixture output.
+      env: {
+        ...process.env,
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_CONFIG_GLOBAL: join(root, 'gitconfig'),
+        ...env,
+      },
     }),
   };
 }
@@ -54,10 +61,19 @@ test('the release PKGBUILD pins the tagged version and verifies its release sour
   assert.equal(createHash('sha256').update(readFileSync(archive)).digest('hex'), checksum);
 });
 
-test('a tag that disagrees with the archived Cargo version produces no release files', (t) => {
+test('the committed Cargo version is checked even without Git on PATH', (t) => {
   const { out, run } = releaseFixture(t);
-  const result = run('v2.3.5');
+  // A mismatch stops before compression, which can require a gzip executable on older Git.
+  const result = run('v2.3.5', { env: { PATH: '' } });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /expected v2\.3\.4/);
+  assert.equal(existsSync(out), false);
+});
+
+test('an explicit Git executable must use an absolute path', (t) => {
+  const { out, run } = releaseFixture(t);
+  const result = run('v2.3.4', { args: ['git'] });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Git executable must be an absolute path/);
   assert.equal(existsSync(out), false);
 });
