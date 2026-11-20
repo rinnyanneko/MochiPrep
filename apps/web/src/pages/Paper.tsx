@@ -63,14 +63,18 @@ function ResetAccount({ account }: { account: AccountView }) {
   );
 }
 
-function matchesQuantityStep(quantity: string, step: string): boolean {
-  const decimal = /^\d*\.?\d+$/;
-  if (!decimal.test(quantity) || !decimal.test(step)) return false;
-  const [whole = '', fraction = ''] = quantity.split('.');
-  const [stepWhole = '', stepFraction = ''] = step.split('.');
-  const precision = Math.max(fraction.length, stepFraction.length);
+function matchesStep(value: string, step: string): boolean {
+  if (!/^\d*\.?\d+$/.test(value)) return false;
+  // The instrument registry keeps the exchange's tick string, which may include an exponent.
+  const parsedStep = /^\+?(\d*\.?\d*)(?:e([+-]?\d+))?$/i.exec(step);
+  const stepExponent = Number(parsedStep?.[2] ?? 0);
+  if (!parsedStep || Math.abs(stepExponent) > 100_000) return false;
+  const [whole = '', fraction = ''] = value.split('.');
+  const [stepWhole = '', stepFraction = ''] = parsedStep[1]!.split('.');
+  const stepPrecision = stepFraction.length - stepExponent;
+  const precision = Math.max(fraction.length, stepPrecision);
   const units = BigInt(whole + fraction.padEnd(precision, '0'));
-  const increment = BigInt(stepWhole + stepFraction.padEnd(precision, '0'));
+  const increment = BigInt(stepWhole + stepFraction + '0'.repeat(precision - stepPrecision));
   return increment > 0n && units % increment === 0n;
 }
 
@@ -91,6 +95,7 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
 
   const exchange = account.venue !== 'PAPER';
   const boundReduction = exchange && reduceOnly;
+  const reductionLimit = boundReduction && type === 'LIMIT';
   const reducible = positions.filter((position) => position.accountId === account.id && position.symbol === symbol && position.closeSupported === true);
   const selected = reducible.find((position) => position.id === positionId);
   const orderSide = boundReduction && selected ? (selected.side === 'LONG' ? 'SELL' : 'BUY') : side;
@@ -99,7 +104,8 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
     if (enabled && exchange) setPositionId(reducible.length === 1 ? reducible[0]!.id : '');
   };
   const instrument = INSTRUMENTS[symbol]!;
-  const reference = type === 'LIMIT' ? Number(limit) : Number(orderSide === 'BUY' ? quote?.ask : quote?.bid);
+  const limitPrice = reductionLimit ? limit.trim() : limit;
+  const reference = type === 'LIMIT' ? Number(limitPrice) : Number(orderSide === 'BUY' ? quote?.ask : quote?.bid);
   const step = Number(instrument.quantityStep);
   const rawQty = mode === 'QTY' ? Number(amount) : (Number(amount) * leverage) / (reference || Infinity);
   const quantity = boundReduction ? Number(reduceQuantity) : Number((Math.floor(rawQty / step + 1e-9) * step).toFixed(8));
@@ -110,11 +116,12 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
   const mmr = Number(instrument.maintenanceMarginRate);
   const liq = side === 'BUY' ? reference * (1 - 1 / leverage + mmr) : reference * (1 + 1 / leverage - mmr);
   const reductionSize = reduceQuantity.trim();
-  const validStep = !boundReduction || matchesQuantityStep(reductionSize, instrument.quantityStep);
+  const validStep = !boundReduction || matchesStep(reductionSize, instrument.quantityStep);
+  const invalidLimitTick = reductionLimit && !!limitPrice && !matchesStep(limitPrice, instrument.priceTick);
   const valid = Number.isFinite(quantity) && quantity >= Number(instrument.minQuantity)
     && (boundReduction
       ? !!selected && quantity <= Number(selected.quantity)
-        && validStep && (type === 'MARKET' || reference > 0)
+        && validStep && (type === 'MARKET' || (Number.isFinite(reference) && reference > 0 && !invalidLimitTick))
       : reference > 0 && !!quote);
   const displayedQuantity = boundReduction ? reductionSize : qty(quantity);
   const canConfirm = valid && confirmation !== null
@@ -131,7 +138,7 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
         side: orderSide,
         type,
         quantity: boundReduction ? reductionSize : String(quantity),
-        price: type === 'LIMIT' ? limit : null,
+        price: type === 'LIMIT' ? limitPrice : null,
         leverage,
         reduceOnly,
         stopLoss: !reduceOnly && stop.trim() ? stop.trim() : null,
@@ -159,7 +166,10 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
         {!boundReduction && <Segmented label="Size unit" value={mode} onChange={setMode} options={[{ value: 'MARGIN', label: 'Margin' }, { value: 'QTY', label: 'Quantity' }]} />}
       </div>
       {type === 'LIMIT' && (
-        <Field label="Limit price"><Input inputMode="decimal" aria-label="Limit price" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder={quote?.last} /></Field>
+        <Field label="Limit price">
+          <Input inputMode="decimal" aria-label="Limit price" aria-invalid={invalidLimitTick || undefined} value={limit} onChange={(e) => setLimit(e.target.value)} placeholder={quote?.last} />
+          {invalidLimitTick && <span className="mt-1 block text-xs text-warn">Limit price must be a multiple of {instrument.priceTick} {instrument.quoteCurrency}.</span>}
+        </Field>
       )}
       {boundReduction && (
         <Field label="Position to reduce">
@@ -213,7 +223,7 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
             ['Type', `${type}${reduceOnly ? ' · reduce only' : ''}`],
             ['Quantity', `${displayedQuantity} ${instrument.baseCurrency}`],
             ...(boundReduction && selected ? [['Position', `${selected.side} · Isolated`]] : []),
-            ['Reference price', price(reference, symbol)],
+            [reductionLimit ? 'Limit price' : 'Reference price', reductionLimit ? limitPrice : price(reference, symbol)],
             ['Notional', `${money(notional)} USDT`],
             ['Margin', reduceOnly ? '–' : `${money(margin)} USDT at ${leverage}x`],
             ['Estimated fee', `${money(fee, 4)} USDT`],

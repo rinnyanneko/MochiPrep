@@ -380,23 +380,25 @@ impl Runtime {
         epoch: u64,
     ) -> Result<PaperAccount, ApiError> {
         if let Err(error) = self.registration_refusal(&account, reconnect, epoch) {
-            session.retire();
+            let _ = session.engine.retire();
             return Err(error);
         }
         // The limits this connect brought, written only now that it is registering.
         if let Err(error) = self.engine().store().save_account_profile(&account) {
-            session.retire();
+            let _ = session.engine.retire();
             return Err(self.api_error(error));
         }
         self.bump_session(&account.id);
+        if let Some(old) = self.exchanges.remove(&account.id) {
+            old.retire(self.engine().store(), (self.okx.now)())
+                .map_err(|error| self.api_error(error))?;
+        }
         session.link.registered.store(true, Ordering::SeqCst);
         let engine = session.engine.clone();
         session
             .armed
             .store(engine.venue() == Venue::OkxDemo, Ordering::SeqCst);
-        if let Some(old) = self.exchanges.insert(account.id.clone(), session) {
-            old.retire();
-        }
+        self.exchanges.insert(account.id.clone(), session);
         let now = unix_ms();
         if let Some(vault) = remember {
             // Checked again: the vault may have been turned off or reset while OKX was
@@ -437,16 +439,16 @@ impl Runtime {
     pub fn disconnect_exchange(&mut self, account_id: &str) -> Result<(), ApiError> {
         // First, before anything fallible: a connect still out must not undo this.
         self.bump_session(account_id);
-        if let Some(old) = self.exchanges.remove(account_id) {
-            old.retire();
-        }
+        let finalized = self.exchanges.remove(account_id).map_or(Ok(()), |old| {
+            old.retire(self.engine().store(), (self.okx.now)())
+        });
         mochi_store::delete_sealed_exchange_credentials(self.connection(), account_id)
             .map_err(|e| self.api_error(e))?;
         self.pause_account_agents(account_id, "OKX disconnected")?;
         // Every running agent is paused now, so no lost-sync pause is owed any more.
         self.pause_owed.remove(account_id);
-        self.invalidate(&[Topic::Accounts, Topic::Exchange]);
-        Ok(())
+        self.invalidate(&[Topic::Accounts, Topic::Orders, Topic::Exchange]);
+        finalized.map_err(|error| self.api_error(error))
     }
 
     /// Node's `arm`, its checks in Node's order.

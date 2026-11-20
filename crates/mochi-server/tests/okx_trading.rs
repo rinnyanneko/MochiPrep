@@ -328,6 +328,88 @@ async fn generic_okx_reduce_only_orders_require_the_selected_close_route() {
 }
 
 #[tokio::test]
+async fn disconnect_rejects_an_order_waiting_on_leverage_before_a_retry() {
+    let w = world(true).await;
+    w.state
+        .runtime
+        .suspend_periodic_okx_sync_for_test()
+        .await
+        .unwrap();
+    let leverage = w.okx.hold_next("POST", "/account/set-leverage");
+    let request = order("retired-before-dispatch");
+    let ((status, _), ()) = tokio::join!(
+        send(&w.state, "POST", "/api/orders", Some(request.clone())),
+        async {
+            let timeout = std::time::Duration::from_secs(2);
+            tokio::time::timeout(timeout, leverage.reached())
+                .await
+                .unwrap();
+            let path = format!("/api/exchange/okx/{ACCOUNT}/disconnect");
+            assert_eq!(send(&w.state, "POST", &path, None).await.0, 200);
+            w.state
+                .runtime
+                .attach_okx_for_test(ACCOUNT, fake::credentials(), true)
+                .await
+                .unwrap();
+            let (status, retry) = send(&w.state, "POST", "/api/orders", Some(request)).await;
+            assert_eq!(status, 200);
+            assert_eq!(retry["duplicate"], true);
+            assert_eq!(retry["order"]["status"], "REJECTED");
+            assert!(retry["order"]["rejectReason"]
+                .as_str()
+                .unwrap()
+                .contains("before order dispatch"));
+            assert!(w.okx.state().placed.is_empty());
+            leverage.release();
+        }
+    );
+    assert_eq!(status, 400);
+    assert!(w.okx.state().placed.is_empty());
+    w.state.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn disconnect_leaves_a_handed_off_order_for_lookup() {
+    let w = world(true).await;
+    w.state
+        .runtime
+        .suspend_periodic_okx_sync_for_test()
+        .await
+        .unwrap();
+    let placement = w.okx.hold_next("POST", "/trade/order");
+    let request = order("retired-after-dispatch");
+    let ((status, _), ()) = tokio::join!(
+        send(&w.state, "POST", "/api/orders", Some(request.clone())),
+        async {
+            tokio::time::timeout(std::time::Duration::from_secs(2), placement.reached())
+                .await
+                .unwrap();
+            let path = format!("/api/exchange/okx/{ACCOUNT}/disconnect");
+            assert_eq!(send(&w.state, "POST", &path, None).await.0, 200);
+            w.state
+                .runtime
+                .attach_okx_for_test(ACCOUNT, fake::credentials(), true)
+                .await
+                .unwrap();
+            let (status, retry) =
+                send(&w.state, "POST", "/api/orders", Some(request.clone())).await;
+            assert_eq!(status, 200);
+            assert_eq!(retry["duplicate"], true);
+            assert_eq!(retry["order"]["status"], "OPEN");
+            placement.release();
+        }
+    );
+    assert_eq!(status, 400);
+    w.state.runtime.sync_exchanges().await.unwrap();
+    let (status, retry) = send(&w.state, "POST", "/api/orders", Some(request)).await;
+    assert_eq!(status, 200);
+    assert_eq!(retry["duplicate"], true);
+    assert_eq!(retry["order"]["status"], "FILLED");
+    assert_eq!(w.okx.state().placed.len(), 1);
+    w.state.runtime.shutdown().await;
+}
+
+#[tokio::test]
 async fn stop_all_prevents_opening_while_leverage_is_in_flight() {
     let w = world(true).await;
     w.state
@@ -399,6 +481,11 @@ async fn selected_okx_market_and_limit_orders_can_reduce_an_exact_quantity() {
             .0,
         400
     );
+    assert_eq!(w.okx.state().placed.len(), 1);
+    let mut off_tick = request.clone();
+    off_tick["price"] = json!("76000.04");
+    let (status, result) = send(&w.state, "POST", "/api/orders", Some(off_tick)).await;
+    assert_eq!(status, 400, "{result}");
     assert_eq!(w.okx.state().placed.len(), 1);
     let (status, result) = send(&w.state, "POST", "/api/orders", Some(request.clone())).await;
     assert_eq!(status, 200, "{result}");

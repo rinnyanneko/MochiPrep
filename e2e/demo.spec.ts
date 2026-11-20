@@ -198,6 +198,16 @@ test('separate OKX take profits show the size of each order', async ({ page }) =
 });
 
 test('OKX market and limit reductions send the selected isolated position', async ({ page }) => {
+  await page.route('**/api/instruments', async (route) => {
+    const response = await route.fetch();
+    const instruments = await response.json() as { symbol: string; priceTick: string }[];
+    await route.fulfill({
+      response,
+      json: instruments.map((instrument) => instrument.symbol === 'BTCUSDT'
+        ? { ...instrument, priceTick: '1e-1' }
+        : instrument),
+    });
+  });
   await page.route('**/api/accounts', async (route) => {
     const response = await route.fetch();
     const accounts = await response.json() as { id: string; name: string; venue: string }[];
@@ -243,10 +253,17 @@ test('OKX market and limit reductions send the selected isolated position', asyn
   await size.fill('0.00019');
   await expect(review).toBeDisabled();
   await size.fill('0.0004');
-  for (const [type, limit] of [['Market', null], ['Limit', '76000']] as const) {
+  for (const [type, limit] of [['Market', null], ['Limit', '76000.1']] as const) {
     await page.getByRole('button', { name: type, exact: true }).click();
-    if (limit) await page.getByRole('textbox', { name: 'Limit price' }).fill(limit);
+    if (limit) {
+      const price = page.getByRole('textbox', { name: 'Limit price' });
+      await price.fill('76000.04');
+      await expect(review).toBeDisabled();
+      await expect(page.getByText(/price.*multiple of 1e-1/i)).toBeVisible();
+      await price.fill(limit);
+    }
     await review.click();
+    if (limit) await expect(page.getByRole('dialog').getByText(limit, { exact: true })).toBeVisible();
     const request = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/api/orders'));
     await page.getByRole('button', { name: 'Place order', exact: true }).click();
     expect((await request).postDataJSON()).toMatchObject({

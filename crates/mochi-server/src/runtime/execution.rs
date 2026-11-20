@@ -8,10 +8,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
-use mochi_core::paper::{DailyRisk, PaperStore, ProtectionResult};
+use mochi_core::paper::{DailyRisk, PaperStore, ProtectionResult, StoreFailure};
 use mochi_domain::{
-    AccountBalance, AccountVenue, Order, OrderRequest, OrderResult, PaperAccount, PositionView,
-    Protection,
+    AccountBalance, AccountVenue, Order, OrderRequest, OrderResult, OrderStatus, PaperAccount,
+    PositionView, Protection,
 };
 use mochi_okx::engine::{EngineError, OkxEngine, OkxEngineDeps, Rows, StoreAccess, StoreWork};
 use mochi_okx::{Clock, Credentials, NetTransport, OkxClient, Transport, Venue};
@@ -181,12 +181,26 @@ impl SessionLink {
 }
 
 impl ExchangeSession {
-    /// The engine reads arming through this flag. Node's engine reads the account's current
-    /// session, so an engine whose session was replaced or removed is never armed; clearing the
-    /// flag keeps that for anything still holding the old engine.
-    pub(super) fn retire(&self) {
-        self.engine.retire();
+    /// Finalize the unsent order on the runtime task before a replacement can serve retries.
+    pub(super) fn retire(self, store: &impl PaperStore, now: i64) -> Result<(), StoreFailure> {
+        let unsent = self.engine.retire();
         self.armed.store(false, Ordering::SeqCst);
+        let Some(id) = unsent else {
+            return Ok(());
+        };
+        store.transaction(|| {
+            if let Some(mut order) = store.get_order(&id)?.filter(|order| {
+                order.account_id == self.link.account_id
+                    && order.status == OrderStatus::Open
+                    && order.exchange_order_id.as_deref().is_none_or(str::is_empty)
+            }) {
+                order.status = OrderStatus::Rejected;
+                order.reject_reason = Some(EngineError::SessionRetired.to_string());
+                order.updated_at = now;
+                store.save_order(&order)?;
+            }
+            Ok(())
+        })
     }
 }
 
@@ -759,12 +773,15 @@ impl RuntimeHandle {
                 link: link.clone(),
             };
             r.bump_session(&id);
-            link.registered.store(true, Ordering::SeqCst);
-            if let Some(old) = r.exchanges.insert(id, session) {
-                old.retire();
+            if let Some(old) = r.exchanges.remove(&id) {
+                old.retire(r.engine().store(), (r.okx.now)())
+                    .map_err(|error| r.api_error(error))?;
             }
+            link.registered.store(true, Ordering::SeqCst);
+            r.exchanges.insert(id, session);
+            Ok(())
         })
-        .await
+        .await?
     }
 
     /// Arms or disarms a session without the phrase.

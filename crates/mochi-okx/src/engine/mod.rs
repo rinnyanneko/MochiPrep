@@ -15,7 +15,6 @@ mod sync;
 mod views;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use mochi_core::paper::{CloseAmount, CloseSelection, DailyRisk, PaperStore, StoreFailure};
@@ -324,6 +323,8 @@ pub enum EngineError {
     SessionRetired,
     #[error("NOT_ARMED: real-money orders are switched off for this account")]
     OpeningDisarmed,
+    #[error(transparent)]
+    LeverageSetup(OkxError),
 }
 
 impl EngineError {
@@ -374,10 +375,36 @@ struct State {
 pub struct OkxEngine {
     deps: OkxEngineDeps,
     state: Mutex<State>,
-    retired: AtomicBool,
+    dispatch: Mutex<DispatchState>,
     /// Node's `serialized`: one operation at a time, in arrival order (tokio's mutex is fair), so
     /// two callers can never both pass the same exposure check. Sync takes the same queue.
     queue: tokio::sync::Mutex<()>,
+}
+
+#[derive(Default)]
+struct DispatchState {
+    retired: bool,
+    unsent_order: Option<String>,
+}
+
+impl DispatchState {
+    fn check(&self) -> Result<(), EngineError> {
+        if self.retired {
+            return Err(EngineError::SessionRetired);
+        }
+        Ok(())
+    }
+}
+
+struct StagedOrder<'a>(&'a Mutex<DispatchState>);
+
+impl Drop for StagedOrder<'_> {
+    fn drop(&mut self) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .unsent_order = None;
+    }
 }
 
 /// The registry as one operation saw it.
@@ -468,21 +495,45 @@ impl OkxEngine {
         Arc::new(OkxEngine {
             deps,
             state: Mutex::new(State::default()),
-            retired: AtomicBool::new(false),
+            dispatch: Mutex::new(DispatchState::default()),
             queue: tokio::sync::Mutex::new(()),
         })
     }
 
-    /// Closes the dispatch gate for an old session without interrupting orders already handed off.
-    pub fn retire(&self) {
-        self.retired.store(true, Ordering::SeqCst);
+    /// Stops new dispatches and returns the ordinary order, if any, that never reached handoff.
+    pub fn retire(&self) -> Option<String> {
+        let mut dispatch = self.dispatch();
+        dispatch.retired = true;
+        dispatch.unsent_order.take()
     }
 
     pub(super) fn check_dispatch(&self) -> Result<(), EngineError> {
         // Retirement before this handoff forbids a mutation. After handoff,
         // a request with an unknown outcome must be resolved by lookup.
-        if self.retired.load(Ordering::SeqCst) {
-            return Err(EngineError::SessionRetired);
+        self.dispatch().check()
+    }
+
+    fn dispatch(&self) -> MutexGuard<'_, DispatchState> {
+        self.dispatch.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn stage_order(&self, order_id: &str) -> Result<StagedOrder<'_>, EngineError> {
+        let mut dispatch = self.dispatch();
+        dispatch.check()?;
+        // The account's queue allows at most one ordinary submission at a time.
+        debug_assert!(dispatch.unsent_order.is_none());
+        dispatch.unsent_order = Some(order_id.to_owned());
+        Ok(StagedOrder(&self.dispatch))
+    }
+
+    fn handoff_order(&self, order: &Order) -> Result<(), EngineError> {
+        let mut dispatch = self.dispatch();
+        dispatch.check()?;
+        if !order.reduce_only && !(self.deps.is_armed)() {
+            return Err(EngineError::OpeningDisarmed);
+        }
+        if dispatch.unsent_order.as_deref() == Some(order.id.as_str()) {
+            dispatch.unsent_order = None;
         }
         Ok(())
     }
@@ -677,17 +728,17 @@ impl OkxEngine {
                     if !value.gt(&zero()) {
                         return Err(EngineError::message("Limit price must be positive"));
                     }
-                    Some(value.to_fixed())
+                    Some(value)
                 } else {
                     None
                 };
-                request.price = limit_price.clone();
+                request.price = limit_price.as_ref().map(Dec::to_fixed);
                 let quantity = dec(&request.quantity)?;
                 let selection = CloseSelection {
                     position_id: Some(position_id),
                     amount: CloseAmount::Quantity {
                         quantity: quantity.to_fixed(),
-                        limit_price,
+                        limit_price: request.price.clone(),
                     },
                 };
                 let mut prepared = engine.prepare(&request.account_id, &request.client_order_id).await?;
@@ -696,6 +747,15 @@ impl OkxEngine {
                         return Err(close_retry_changed());
                     }
                     return engine.check_close_retry(prior, &request.symbol, &selection).await;
+                }
+                if let Some(price) = limit_price {
+                    let tick = &prepared.registry.get(&request.symbol)?.price_tick;
+                    let aligned = price.round_to_step(&dec(tick)?).map_err(step_error)?;
+                    if !price.eq_value(&aligned) {
+                        return Err(EngineError::message(format!(
+                            "Reduction limit price must be a multiple of {tick}"
+                        )));
+                    }
                 }
                 let (position, leverage) = engine
                     .read_selected_close(&request.symbol, selection, &prepared.registry)
@@ -1034,6 +1094,7 @@ impl OkxEngine {
 
         // Written before anything is sent, so a crash can never leave an order we do not know
         // about.
+        let _staged = self.stage_order(&order.id)?;
         self.insert_submission(order.clone(), close_selection)
             .await?;
 
@@ -1063,7 +1124,7 @@ impl OkxEngine {
         match self.send(&mut order, &inst_id, &body).await {
             Ok(()) => {}
             Err(error @ EngineError::SessionRetired) => return Err(error),
-            Err(error @ EngineError::OpeningDisarmed) => {
+            Err(error @ (EngineError::OpeningDisarmed | EngineError::LeverageSetup(_))) => {
                 return self.finish_rejected(order, error.to_string()).await;
             }
             Err(EngineError::Okx(OkxError::Rejection { code, message })) => {
@@ -1109,13 +1170,14 @@ impl OkxEngine {
             if !(self.deps.is_armed)() {
                 return Err(EngineError::OpeningDisarmed);
             }
-            client.set_leverage(inst_id, order.leverage).await?;
+            // An uncertain leverage result still means the order itself never went out.
+            client
+                .set_leverage(inst_id, order.leverage)
+                .await
+                .map_err(EngineError::LeverageSetup)?;
         }
-        self.check_dispatch()?;
         // Stop All can disarm this account while the leverage request is in flight.
-        if !order.reduce_only && !(self.deps.is_armed)() {
-            return Err(EngineError::OpeningDisarmed);
-        }
+        self.handoff_order(order)?;
         order.exchange_order_id = Some(client.place_order(body).await?);
         let row = order.clone();
         self.rows(move |rows| Ok(rows.save_order(&row)?)).await
