@@ -8,12 +8,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
-use mochi_core::paper::{DailyRisk, PaperStore, ProtectionResult, StoreFailure};
+use mochi_core::paper::{DailyRisk, PaperStore, ProtectionResult};
 use mochi_domain::{
     AccountBalance, AccountVenue, Order, OrderRequest, OrderResult, PaperAccount, PositionView,
     Protection,
 };
-use mochi_okx::engine::{EngineError, OkxEngine, OkxEngineDeps, Rows, StoreAccess, StoreWork};
+use mochi_okx::engine::{
+    EngineError, OkxEngine, OkxEngineDeps, Rows, StoreAccess, StoreWork, UnsentOrder,
+};
 use mochi_okx::{Clock, Credentials, NetTransport, OkxClient, Transport, Venue};
 use tokio::sync::{broadcast, mpsc};
 use zeroize::Zeroizing;
@@ -181,24 +183,10 @@ impl SessionLink {
 }
 
 impl ExchangeSession {
-    /// Finalize the unsent order on the runtime task before a replacement can serve retries.
-    pub(super) fn retire(self, store: &impl PaperStore, now: i64) -> Result<(), StoreFailure> {
+    fn retire(self) -> Option<UnsentOrder> {
         let unsent = self.engine.retire();
         self.armed.store(false, Ordering::SeqCst);
-        let Some(unsent) = unsent else {
-            return Ok(());
-        };
-        store.transaction(|| {
-            if let Some(mut order) = store
-                .get_order(unsent.id())?
-                .filter(|order| order.account_id == self.link.account_id)
-            {
-                if unsent.finalize(&mut order, now) {
-                    store.save_order(&order)?;
-                }
-            }
-            Ok(())
-        })
+        unsent
     }
 }
 
@@ -258,6 +246,34 @@ impl Runtime {
 
     pub(super) fn exchange_session(&self, account_id: &str) -> Option<&ExchangeSession> {
         self.exchanges.get(account_id)
+    }
+
+    /// Keep the unsent token until finalization succeeds, without keeping the old session alive.
+    pub(super) fn retire_exchange_session(&mut self, account_id: &str) -> Result<(), EngineError> {
+        if let Some(unsent) = self
+            .exchanges
+            .remove(account_id)
+            .and_then(ExchangeSession::retire)
+        {
+            self.retired_unsent_orders
+                .insert(account_id.to_owned(), unsent);
+        }
+        self.restore_retired_order(account_id)
+    }
+
+    pub(super) fn restore_retired_order(&mut self, account_id: &str) -> Result<(), EngineError> {
+        if let Some(unsent) = self.retired_unsent_orders.get(account_id) {
+            unsent.finalize(
+                &Rows {
+                    store: self.engine().store(),
+                    instruments: self.instruments(),
+                },
+                account_id,
+                (self.okx.now)(),
+            )?;
+            self.retired_unsent_orders.remove(account_id);
+        }
+        Ok(())
     }
 
     /// Whether the session `link` belongs to may still write to the store (see [`SessionLink`]).
@@ -737,6 +753,8 @@ impl RuntimeHandle {
                 let account = r.require_account(&id)?;
                 let venue = okx_venue(account.venue)
                     .ok_or_else(|| ApiError::bad_request("Not an exchange account"))?;
+                r.restore_retired_order(&id)
+                    .map_err(|error| r.api_error(error))?;
                 Ok((venue, r.okx.clone(), r.live(), r.session_seq))
             })
             .await??;
@@ -771,10 +789,8 @@ impl RuntimeHandle {
                 link: link.clone(),
             };
             r.bump_session(&id);
-            if let Some(old) = r.exchanges.remove(&id) {
-                old.retire(r.engine().store(), (r.okx.now)())
-                    .map_err(|error| r.api_error(error))?;
-            }
+            r.retire_exchange_session(&id)
+                .map_err(|error| r.api_error(error))?;
             link.registered.store(true, Ordering::SeqCst);
             r.exchanges.insert(id, session);
             Ok(())

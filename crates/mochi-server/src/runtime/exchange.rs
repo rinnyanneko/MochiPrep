@@ -208,6 +208,8 @@ impl RuntimeHandle {
                 // Checked before the first sync too, so a connect that will be refused does not
                 // reconcile an account the owner has just disconnected or connected anew.
                 r.registration_refusal(&account, reconnect, epoch)?;
+                r.restore_retired_order(&account.id)
+                    .map_err(|error| r.api_error(error))?;
                 Ok::<_, ApiError>(account)
             })
             .await??;
@@ -392,9 +394,10 @@ impl Runtime {
             return Err(self.api_error(error));
         }
         self.bump_session(&account.id);
-        if let Some(old) = self.exchanges.remove(&account.id) {
-            old.retire(self.engine().store(), (self.okx.now)())
-                .map_err(|error| self.api_error(error))?;
+        if let Err(error) = self.retire_exchange_session(&account.id) {
+            let _ = session.engine.retire();
+            self.invalidate(CONNECTED);
+            return Err(self.api_error(error));
         }
         session.link.registered.store(true, Ordering::SeqCst);
         let engine = session.engine.clone();
@@ -442,9 +445,7 @@ impl Runtime {
     pub fn disconnect_exchange(&mut self, account_id: &str) -> Result<(), ApiError> {
         // First, before anything fallible: a connect still out must not undo this.
         self.bump_session(account_id);
-        let finalized = self.exchanges.remove(account_id).map_or(Ok(()), |old| {
-            old.retire(self.engine().store(), (self.okx.now)())
-        });
+        let finalized = self.retire_exchange_session(account_id);
         mochi_store::delete_sealed_exchange_credentials(self.connection(), account_id)
             .map_err(|e| self.api_error(e))?;
         self.pause_account_agents(account_id, "OKX disconnected")?;
@@ -594,8 +595,15 @@ impl Runtime {
         Ok(statuses)
     }
 
-    /// Every session's engine, for a sync pass.
-    pub(super) fn session_engines(&self) -> Vec<(String, Arc<OkxEngine>)> {
+    /// Retry local finalization on the sync cadence even for disconnected accounts.
+    pub(super) fn prepare_exchange_sync(&mut self) -> Vec<(String, Arc<OkxEngine>)> {
+        let pending: Vec<_> = self.retired_unsent_orders.keys().cloned().collect();
+        for id in &pending {
+            let _ = self.restore_retired_order(id);
+        }
+        if self.retired_unsent_orders.len() < pending.len() {
+            self.invalidate(&[Topic::Orders]);
+        }
         self.exchanges
             .iter()
             .map(|(id, session)| (id.clone(), session.engine.clone()))

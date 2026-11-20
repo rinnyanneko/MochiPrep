@@ -3458,6 +3458,119 @@ async fn a_deferred_algo_revalidates_the_position_after_recording_submission() {
 }
 
 #[tokio::test]
+async fn a_deferred_exit_retries_restoring_its_intent_after_a_store_failure() {
+    for reached in [false, true] {
+        let (h, entry) = resting_target().await;
+        let id = format!("{}:deferred:tp", entry.id);
+        h.okx.state().fill_resting();
+        h.advance(1);
+        if reached {
+            *h.prices.lock().unwrap() = ("78099".into(), "78101".into(), "78100".into());
+        }
+        let position = h.okx.state().position.clone();
+        let early_reads: Vec<_> = (0..3)
+            .map(|_| h.okx.hold_next("GET", "/account/positions"))
+            .collect();
+        let before_dispatch = h.okx.hold_next("GET", "/account/positions");
+        let (sync, ()) = tokio::join!(h.engine.sync(), async {
+            let timeout = std::time::Duration::from_secs(2);
+            for read in early_reads {
+                tokio::time::timeout(timeout, read.reached()).await.unwrap();
+                read.release();
+            }
+            tokio::time::timeout(timeout, before_dispatch.reached())
+                .await
+                .unwrap();
+            h.store(|s| {
+                s.connection()
+                    .execute_batch(&format!(
+                        "CREATE TRIGGER refuse_exit_restore BEFORE UPDATE ON orders
+                         WHEN OLD.id = '{id}' BEGIN SELECT RAISE(ABORT, 'exit restore refused'); END"
+                    ))
+                    .unwrap();
+            });
+            h.okx
+                .state()
+                .position
+                .as_mut()
+                .unwrap()
+                .insert("tradeId".into(), json!("2"));
+            before_dispatch.release();
+        });
+        assert!(sync
+            .unwrap_err()
+            .to_string()
+            .contains("exit restore refused"));
+        assert_eq!(h.okx.state().placed.len(), 1);
+        assert!(h.algo_placed().is_empty());
+        h.store(|s| {
+            s.connection()
+                .execute_batch("DROP TRIGGER refuse_exit_restore")
+                .unwrap()
+        });
+        h.okx.state().position = position;
+        h.sync().await;
+        assert_eq!(h.okx.state().placed.len(), if reached { 2 } else { 1 });
+        assert_eq!(h.algo_placed().len(), if reached { 0 } else { 1 });
+        assert!(h.order_row(&id).exchange_order_id.is_some());
+    }
+}
+
+#[tokio::test]
+async fn connection_readback_cannot_expire_a_marker_after_its_intent_was_restored() {
+    for reached in [false, true] {
+        let (h, entry) = resting_target().await;
+        let id = format!("{}:deferred:tp", entry.id);
+        let original = h.order_row(&id);
+        h.okx.state().fill_resting();
+        h.advance(1);
+        if reached {
+            *h.prices.lock().unwrap() = ("78099".into(), "78101".into(), "78100".into());
+        }
+        let early_reads: Vec<_> = (0..3)
+            .map(|_| h.okx.hold_next("GET", "/account/positions"))
+            .collect();
+        let before_dispatch = h.okx.hold_next("GET", "/account/positions");
+        let old = h.engine.clone();
+        let sync = tokio::spawn(async move { old.sync().await });
+        let timeout = std::time::Duration::from_secs(2);
+        for read in early_reads {
+            tokio::time::timeout(timeout, read.reached()).await.unwrap();
+            read.release();
+        }
+        tokio::time::timeout(timeout, before_dispatch.reached())
+            .await
+            .unwrap();
+        h.advance(61_000);
+        let lookup = if reached {
+            "/trade/order"
+        } else {
+            "/trade/order-algo"
+        };
+        let before_expiry = h.okx.hold_next("GET", lookup);
+        let candidate = restart(&h);
+        let readback = tokio::spawn(async move { candidate.sync_before_registration().await });
+        tokio::time::timeout(timeout, before_expiry.reached())
+            .await
+            .unwrap();
+        h.okx
+            .state()
+            .position
+            .as_mut()
+            .unwrap()
+            .insert("tradeId".into(), json!("2"));
+        before_dispatch.release();
+        sync.await.unwrap().unwrap();
+        assert_eq!(h.order_row(&id), original);
+        before_expiry.release();
+        readback.await.unwrap().unwrap();
+        assert_eq!(h.order_row(&id), original);
+        assert_eq!(h.okx.state().placed.len(), 1);
+        assert!(h.algo_placed().is_empty());
+    }
+}
+
+#[tokio::test]
 async fn a_quote_from_before_the_fill_cannot_trigger_a_market_exit() {
     let (h, entry) = resting_target().await;
     let client_id = mochi_okx::to_cl_ord_id(&entry.client_order_id);
@@ -3559,6 +3672,54 @@ async fn another_reached_target_keeps_its_allocation_when_the_first_is_partially
     );
     assert_eq!(h.okx.state().placed.last().unwrap()["sz"], "0.1");
     assert_eq!(h.okx.state().position.as_ref().unwrap()["pos"], "0.05");
+}
+
+#[tokio::test]
+async fn an_older_resolved_target_preserves_another_entrys_deferred_trail() {
+    let (h, first) = resting_target().await;
+    let mut request = order();
+    request.order_type = EntryOrderType::Limit;
+    request.price = Some("74500".into());
+    request.trailing_stop = Some(ratio("0.01"));
+    let second = h.engine.place_order(request).await.unwrap().order;
+    h.okx.state().fill_resting();
+    h.okx.state().fail_positions_after_reduce = true;
+    h.advance(1);
+    *h.prices.lock().unwrap() = ("78999".into(), "79001".into(), "79000".into());
+
+    // Record the completed target, then interrupt sync before the other trail can place.
+    assert!(h.engine.sync().await.is_err());
+    let target = h.order_row(&format!("{}:deferred:tp", first.id));
+    let trail_id = format!("{}:trail", second.id);
+    assert_eq!(target.status, OrderStatus::Filled);
+    assert!(target.exchange_order_id.is_some());
+    assert!(h.order_row(&trail_id).exchange_order_id.is_none());
+    let placements = h.count("POST /api/v5/trade/order");
+    h.store(|s| {
+        for i in 0..500 {
+            let filler = Order {
+                id: format!("history_{i}"),
+                client_order_id: format!("history_{i}"),
+                status: OrderStatus::Canceled,
+                exchange_order_id: None,
+                created_at: target.created_at + i + 1,
+                ..first.clone()
+            };
+            s.insert_order(&filler).unwrap();
+        }
+        assert!(s
+            .list_orders(ACCOUNT, 500)
+            .unwrap()
+            .iter()
+            .all(|o| o.id != target.id));
+    });
+
+    h.sync().await;
+    let trail = h.order_row(&trail_id);
+    assert_eq!(trail.status, OrderStatus::Open, "{:?}", trail.reject_reason);
+    assert_eq!(trail.quantity, "0.001");
+    assert_eq!(h.algo_placed()[0]["sz"], "0.1");
+    assert_eq!(h.count("POST /api/v5/trade/order"), placements);
 }
 
 #[tokio::test]

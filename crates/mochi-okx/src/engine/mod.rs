@@ -375,7 +375,7 @@ struct State {
 pub struct OkxEngine {
     deps: OkxEngineDeps,
     state: Mutex<State>,
-    dispatch: Mutex<DispatchState>,
+    dispatch: Arc<Mutex<DispatchState>>,
     /// Node's `serialized`: one operation at a time, in arrival order (tokio's mutex is fair), so
     /// two callers can never both pass the same exposure check. Sync takes the same queue.
     queue: tokio::sync::Mutex<()>,
@@ -384,24 +384,54 @@ pub struct OkxEngine {
 #[derive(Default)]
 struct DispatchState {
     retired: bool,
-    unsent_order: Option<UnsentOrder>,
+    unsent_order: Option<PendingDispatch>,
 }
 
-/// Durable state to finalize once a session loses dispatch ownership.
+struct PendingDispatch {
+    order: UnsentOrder,
+    restore_needed: bool,
+}
+
+/// In-memory proof of non-dispatch for a staged order that needs finalizing.
 pub enum UnsentOrder {
     Submission(String),
-    Deferred(Box<Order>),
+    Deferred {
+        original: Box<Order>,
+        marker: Box<Order>,
+    },
 }
 
 impl UnsentOrder {
-    pub fn id(&self) -> &str {
+    fn id(&self) -> &str {
         match self {
             Self::Submission(id) => id,
-            Self::Deferred(order) => &order.id,
+            Self::Deferred { original, .. } => &original.id,
         }
     }
 
-    pub fn finalize(self, order: &mut Order, now: i64) -> bool {
+    pub fn finalize(
+        &self,
+        rows: &dyn LiveRows,
+        account_id: &str,
+        now: i64,
+    ) -> Result<Option<Order>, EngineError> {
+        let mut current = None;
+        rows.transaction(&mut || {
+            if let Some(mut order) = rows
+                .get_order(self.id())?
+                .filter(|order| order.account_id == account_id)
+            {
+                if self.restore(&mut order, now) {
+                    rows.save_order(&order)?;
+                }
+                current = Some(order);
+            }
+            Ok(())
+        })?;
+        Ok(current)
+    }
+
+    fn restore(&self, order: &mut Order, now: i64) -> bool {
         if order
             .exchange_order_id
             .as_deref()
@@ -415,19 +445,23 @@ impl UnsentOrder {
                 order.reject_reason = Some(EngineError::SessionRetired.to_string());
                 order.updated_at = now;
             }
-            Self::Deferred(original)
-                if order.status == OrderStatus::Open
-                    || (order.status == OrderStatus::Canceled
-                        && matches!(
-                            order.reject_reason.as_deref(),
-                            Some(
-                                protection::REACHED_EXIT_UNCONFIRMED | protection::ALGO_NOT_ARRIVED
-                            )
-                        )) =>
-            {
-                // A connection's readback may already have expired an old marker.
-                // Neither this marker nor its expiry attests to any exchange dispatch.
-                *order = *original;
+            Self::Deferred { original, marker } => {
+                if *order != **marker {
+                    // A connection's readback may already have expired this marker.
+                    // Confirm it is still the same attempt before restoring its intent.
+                    let mut expired = marker.as_ref().clone();
+                    expired.status = OrderStatus::Canceled;
+                    expired.reject_reason = Some(if marker.order_type == OrderType::Market {
+                        protection::REACHED_EXIT_UNCONFIRMED.into()
+                    } else {
+                        protection::ALGO_NOT_ARRIVED.into()
+                    });
+                    expired.updated_at = order.updated_at;
+                    if *order != expired {
+                        return false;
+                    }
+                }
+                order.clone_from(original);
             }
             _ => return false,
         }
@@ -448,10 +482,14 @@ struct StagedOrder<'a>(&'a Mutex<DispatchState>);
 
 impl Drop for StagedOrder<'_> {
     fn drop(&mut self) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .unsent_order = None;
+        let mut dispatch = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if dispatch
+            .unsent_order
+            .as_ref()
+            .is_some_and(|pending| !pending.restore_needed)
+        {
+            dispatch.unsent_order = None;
+        }
     }
 }
 
@@ -543,7 +581,7 @@ impl OkxEngine {
         Arc::new(OkxEngine {
             deps,
             state: Mutex::new(State::default()),
-            dispatch: Mutex::new(DispatchState::default()),
+            dispatch: Arc::new(Mutex::new(DispatchState::default())),
             queue: tokio::sync::Mutex::new(()),
         })
     }
@@ -552,7 +590,7 @@ impl OkxEngine {
     pub fn retire(&self) -> Option<UnsentOrder> {
         let mut dispatch = self.dispatch();
         dispatch.retired = true;
-        dispatch.unsent_order.take()
+        dispatch.unsent_order.take().map(|pending| pending.order)
     }
 
     pub(super) fn check_dispatch(&self) -> Result<(), EngineError> {
@@ -570,8 +608,46 @@ impl OkxEngine {
         dispatch.check()?;
         // The account's queue allows at most one submission at a time.
         debug_assert!(dispatch.unsent_order.is_none());
-        dispatch.unsent_order = Some(order);
+        dispatch.unsent_order = Some(PendingDispatch {
+            order,
+            restore_needed: false,
+        });
         Ok(StagedOrder(&self.dispatch))
+    }
+
+    fn abandon_staged_order(&self) -> Result<(), EngineError> {
+        let mut dispatch = self.dispatch();
+        dispatch.check()?;
+        if let Some(pending) = &mut dispatch.unsent_order {
+            pending.restore_needed = true;
+        }
+        Ok(())
+    }
+
+    async fn restore_unsent_order(&self) -> Result<Option<Order>, EngineError> {
+        if !self
+            .dispatch()
+            .unsent_order
+            .as_ref()
+            .is_some_and(|pending| pending.restore_needed)
+        {
+            return Ok(None);
+        }
+        let dispatch = self.dispatch.clone();
+        let account_id = self.deps.account_id.clone();
+        let now = self.now();
+        self.rows(move |rows| {
+            let mut dispatch = dispatch.lock().unwrap_or_else(PoisonError::into_inner);
+            dispatch.check()?;
+            let Some(pending) = dispatch.unsent_order.as_ref() else {
+                return Ok(None);
+            };
+            let restored = pending.order.finalize(rows, &account_id, now)?;
+            // A failed transaction leaves the token for the next queued operation or retirement.
+            dispatch.unsent_order = None;
+            Ok(restored)
+        })
+        .await
     }
 
     fn handoff_order(&self, order: &Order) -> Result<(), EngineError> {
@@ -583,7 +659,7 @@ impl OkxEngine {
         if dispatch
             .unsent_order
             .as_ref()
-            .is_some_and(|pending| pending.id() == order.id)
+            .is_some_and(|pending| pending.order.id() == order.id)
         {
             dispatch.unsent_order = None;
         }
@@ -663,6 +739,7 @@ impl OkxEngine {
         let engine = self.clone();
         tokio::spawn(async move {
             let _turn = engine.queue.lock().await;
+            engine.restore_unsent_order().await?;
             work(engine.clone()).await
         })
         .await

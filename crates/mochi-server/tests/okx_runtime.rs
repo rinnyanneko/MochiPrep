@@ -2179,6 +2179,15 @@ async fn a_connect_out_on_okx_across_a_vault_reset_and_new_password_saves_no_key
 
 #[tokio::test]
 async fn manual_reconnect_restores_a_deferred_exit_that_had_not_reached_dispatch() {
+    reconnect_restores_deferred_exit(false).await;
+}
+
+#[tokio::test]
+async fn manual_reconnect_retries_restoring_an_unsent_exit_after_a_store_failure() {
+    reconnect_restores_deferred_exit(true).await;
+}
+
+async fn reconnect_restores_deferred_exit(fail_first: bool) {
     let w = World::new().await;
     let account = w.connect("OKX_LIVE").await;
     w.arm(&account.id, ARM_PHRASE).await.unwrap();
@@ -2225,6 +2234,43 @@ async fn manual_reconnect_restores_a_deferred_exit_that_had_not_reached_dispatch
             .unwrap()
             .unwrap();
         assert!(reason.contains("submission started"));
+        if fail_first {
+            let trigger = format!(
+                "CREATE TRIGGER refuse_exit_restore BEFORE UPDATE ON orders
+                 WHEN OLD.id = '{id}' BEGIN SELECT RAISE(ABORT, 'exit restore refused'); END"
+            );
+            w.rt.call(move |r| r.connection().execute_batch(&trigger).unwrap())
+                .await
+                .unwrap();
+            // Let the entry's pending invalidation flush before observing this reconnect.
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            let mut events = w.rt.subscribe();
+            let error = w.connect_with("OKX_LIVE", false).await.unwrap_err();
+            assert!(
+                error.message().contains("exit restore refused"),
+                "{error:?}"
+            );
+            assert!(w.okx.state().algo_placed.is_empty());
+            assert_eq!(w.statuses().await[0]["connected"], false);
+            tokio::time::timeout(timeout, async {
+                loop {
+                    if let ServerEvent::Invalidate { topics } = events.recv().await.unwrap() {
+                        if topics.contains(&Topic::Exchange) {
+                            break;
+                        }
+                    }
+                }
+            })
+            .await
+            .expect("reconnect failure should publish the disconnected state");
+            w.rt.call(|r| {
+                r.connection()
+                    .execute_batch("DROP TRIGGER refuse_exit_restore")
+                    .unwrap()
+            })
+            .await
+            .unwrap();
+        }
         assert_eq!(w.connect("OKX_LIVE").await.id, account.id);
         assert!(w.okx.state().algo_placed.is_empty());
         w.rt.sync_exchanges().await.unwrap();

@@ -164,18 +164,12 @@ impl OkxEngine {
                         }
                     }
                 }
-                order.status = OrderStatus::Canceled;
-                order.reject_reason = Some(
-                    if is_reached_exit(order) {
-                        REACHED_EXIT_UNCONFIRMED
-                    } else {
-                        "OKX has no record of this order"
-                    }
-                    .into(),
-                );
-                order.updated_at = at;
-                let row = order.clone();
-                self.rows(move |rows| Ok(rows.save_order(&row)?)).await?;
+                let reason = if is_reached_exit(order) {
+                    REACHED_EXIT_UNCONFIRMED
+                } else {
+                    "OKX has no record of this order"
+                };
+                self.expire_unconfirmed_order(order, reason, at).await?;
             }
             return Ok(());
         };
@@ -229,6 +223,37 @@ impl OkxEngine {
             unbuilt.map_or(Ok(()), Err)
         })
         .await
+    }
+
+    pub(super) async fn expire_unconfirmed_order(
+        &self,
+        row: &mut Order,
+        reason: &'static str,
+        at: i64,
+    ) -> Result<(), EngineError> {
+        let observed = row.clone();
+        let current = self
+            .rows(move |rows| {
+                let mut current = None;
+                rows.transaction(&mut || {
+                    current = rows.get_order(&observed.id)?;
+                    if let Some(order) = current.as_mut().filter(|order| **order == observed) {
+                        // A connection's readback can overlap the active session restoring
+                        // a known-unsent order. Its late lookup may only expire what it saw.
+                        order.status = OrderStatus::Canceled;
+                        order.reject_reason = Some(reason.into());
+                        order.updated_at = at;
+                        rows.save_order(order)?;
+                    }
+                    Ok(())
+                })?;
+                Ok(current)
+            })
+            .await?;
+        if let Some(current) = current {
+            *row = current;
+        }
+        Ok(())
     }
 
     /// Full reconciliation, inside the queue. On failure the error is kept and the account
