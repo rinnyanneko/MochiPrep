@@ -14,7 +14,7 @@
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use axum::routing::{delete, post, put};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use mochi_core::paper::PaperStore;
 use mochi_domain::Topic;
@@ -28,12 +28,30 @@ use crate::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/orders", post(place))
-        .route("/api/orders/{id}", delete(cancel))
+        .route("/api/orders/{id}", get(read_order).delete(cancel))
         .route("/api/positions/{account_id}/{symbol}/close", post(close))
         .route(
             "/api/positions/{account_id}/{symbol}/protection",
             put(protection),
         )
+}
+
+async fn read_order(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<mochi_domain::Order>, ApiError> {
+    let order = state
+        .runtime
+        .call(move |runtime| {
+            runtime
+                .engine()
+                .store()
+                .get_order(&id)
+                .map_err(|error| runtime.api_error(error))?
+                .ok_or_else(|| ApiError::not_found("Unknown order"))
+        })
+        .await??;
+    Ok(Json(order))
 }
 
 async fn place(

@@ -1,5 +1,5 @@
 import { Plus, RotateCcw, TriangleAlert } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { INSTRUMENTS, TIMEFRAMES, type Fill, type LedgerEvent, type Order, type OrderRequest, type OrderResult, type Position, type PositionView, type SymbolId, type Timeframe } from '@mochiprep/shared';
 import { ChartTradeSummary, MarketChart } from '@/components/charts';
 import { useTradeOverlay } from '@/components/useTradeOverlay';
@@ -78,37 +78,85 @@ function matchesStep(value: string, step: string): boolean {
   return increment > 0n && units % increment === 0n;
 }
 
-type OrderConfirmation = {
+type PendingReduction = {
   request: Readonly<OrderRequest>;
+  lookupId?: string;
+};
+
+type OrderConfirmation = PendingReduction & {
   retry: boolean;
   summary?: [string, string][];
 };
 
-function readPendingReduction(key: string, accountId: string): Readonly<OrderRequest> | null {
+function parsePendingReduction(raw: string | null, accountId: string): PendingReduction | null {
   try {
-    const request = JSON.parse(sessionStorage.getItem(key) ?? 'null') as OrderRequest | null;
+    const stored = JSON.parse(raw ?? 'null') as PendingReduction | OrderRequest | null;
+    if (!stored) return null;
+    const request = 'request' in stored ? stored.request : stored;
     if (request?.accountId === accountId && request.reduceOnly === true
       && typeof request.clientOrderId === 'string' && request.clientOrderId.startsWith('ui:')
       && typeof request.positionId === 'string' && typeof request.symbol === 'string'
       && (request.side === 'BUY' || request.side === 'SELL') && typeof request.quantity === 'string'
       && isInteger(request.leverage) && request.stopLoss === null && request.takeProfit === null
       && ((request.type === 'MARKET' && request.price === null)
-        || (request.type === 'LIMIT' && typeof request.price === 'string'))) return request;
+        || (request.type === 'LIMIT' && typeof request.price === 'string'))) {
+      return { request, lookupId: 'lookupId' in stored && typeof stored.lookupId === 'string' ? stored.lookupId : undefined };
+    }
   } catch {
-    // The ticket still holds the request when browser storage is unavailable.
+    // Ignore invalid entries without losing other pending reductions.
   }
   return null;
 }
 
-function persistPendingReduction(key: string, request: Readonly<OrderRequest>, clear = false) {
-  try {
-    if (!clear) sessionStorage.setItem(key, JSON.stringify(request));
-    // A request from an unmounted ticket may finish after a newer attempt was saved.
-    else if (readPendingReduction(key, request.accountId)?.clientOrderId === request.clientOrderId) {
-      sessionStorage.removeItem(key);
+function readPendingReductions(key: string, accountId: string): PendingReduction[] {
+  const pending = new Map<string, PendingReduction>();
+  const add = (raw: string | null) => {
+    const value = parsePendingReduction(raw, accountId);
+    if (value && (value.lookupId || !pending.get(value.request.clientOrderId)?.lookupId)) {
+      pending.set(value.request.clientOrderId, value);
     }
-  } catch {
-    // The ticket can still retain the request for a retry before navigation.
+  };
+  for (const name of ['sessionStorage', 'localStorage'] as const) {
+    try {
+      const storage = window[name];
+      add(storage.getItem(key));
+      for (let i = 0; i < storage.length; i += 1) {
+        const entry = storage.key(i);
+        if (entry?.startsWith(`${key}/`)) add(storage.getItem(entry));
+      }
+    } catch {
+      // The other storage may still be available.
+    }
+  }
+  return [...pending.values()];
+}
+
+function persistPendingReduction(key: string, pending: PendingReduction, clear = false) {
+  const { request } = pending;
+  const requestKey = `${key}/${request.clientOrderId}`;
+  const saved = clear ? undefined : readPendingReductions(key, request.accountId)
+    .find((item) => item.request.clientOrderId === request.clientOrderId);
+  const entry = { request, lookupId: saved?.lookupId ?? pending.lookupId };
+  let persisted = false;
+  for (const name of ['localStorage', 'sessionStorage'] as const) {
+    try {
+      const storage = window[name];
+      if (clear || persisted) {
+        storage.removeItem(requestKey);
+      } else {
+        const current = parsePendingReduction(storage.getItem(requestKey), request.accountId);
+        if (!current || (entry.lookupId && !current.lookupId)) {
+          storage.setItem(requestKey, JSON.stringify(entry));
+        }
+        persisted = true;
+      }
+      // Remove matching legacy entries once per-request storage has succeeded.
+      if (parsePendingReduction(storage.getItem(key), request.accountId)?.request.clientOrderId === request.clientOrderId) {
+        storage.removeItem(key);
+      }
+    } catch {
+      // Fall back to this tab's storage or keep the request in memory.
+    }
   }
 }
 
@@ -138,12 +186,30 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
   const [reduceQuantity, setReduceQuantity] = useState('');
   const exchange = account.venue !== 'PAPER';
   const pendingKey = `mochiprep.pending-reduction.${account.id}`;
+  const [pendingReductions, setPendingReductions] = useState(() =>
+    exchange ? readPendingReductions(pendingKey, account.id) : []);
   const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(() => {
-    const request = exchange ? readPendingReduction(pendingKey, account.id) : null;
-    return request ? { request, retry: true } : null;
+    const [pending] = pendingReductions;
+    return pending ? { ...pending, retry: true } : null;
   });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!exchange) return;
+    const updateFromOtherWindow = (event: StorageEvent) => {
+      if (event.key && event.key !== pendingKey && !event.key.startsWith(`${pendingKey}/`)) return;
+      const pending = readPendingReductions(pendingKey, account.id);
+      setPendingReductions(pending);
+      setConfirmation((current) => {
+        if (submitting || (current && (!current.retry || dialogOpen))) return current;
+        const next = pending.find((item) => item.request.clientOrderId === current?.request.clientOrderId) ?? pending[0];
+        return next ? { ...next, retry: true } : null;
+      });
+    };
+    window.addEventListener('storage', updateFromOtherWindow);
+    return () => window.removeEventListener('storage', updateFromOtherWindow);
+  }, [account.id, dialogOpen, exchange, pendingKey, submitting]);
 
   const boundReduction = exchange && reduceOnly;
   const reductionLimit = boundReduction && type === 'LIMIT';
@@ -179,8 +245,17 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
     valid && confirmation.request.symbol === symbol && (!boundReduction || confirmation.request.positionId === selected?.id)
   ));
 
+  const refreshPendingReductions = () => {
+    const pending = exchange ? readPendingReductions(pendingKey, account.id) : [];
+    setPendingReductions(pending);
+    return pending;
+  };
+
   const review = () => {
-    if (!confirmation?.retry) {
+    const [pending] = refreshPendingReductions();
+    if (!confirmation?.retry && pending) {
+      setConfirmation({ ...pending, retry: true });
+    } else if (!confirmation?.retry) {
       setConfirmation({
         request: {
           accountId: account.id,
@@ -219,41 +294,56 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
     if (!confirmation?.retry) setConfirmation(null);
   };
 
+  const finishConfirmation = () => {
+    const [next] = refreshPendingReductions();
+    setConfirmation(next ? { ...next, retry: true } : null);
+    setDialogOpen(false);
+  };
+
   const discardRetry = () => {
     if (!confirmation?.retry || submitting) return;
-    persistPendingReduction(pendingKey, confirmation.request, true);
-    setConfirmation(null);
-    setDialogOpen(false);
+    persistPendingReduction(pendingKey, confirmation, true);
+    finishConfirmation();
   };
 
   const submit = async () => {
     if (!confirmation || !canConfirm) return;
     const { request } = confirmation;
+    let { lookupId } = confirmation;
     const selectedReduction = request.positionId !== undefined;
+    if (selectedReduction && !lookupId) {
+      lookupId = readPendingReductions(pendingKey, account.id)
+        .find((item) => item.request.clientOrderId === request.clientOrderId)?.lookupId;
+    }
     setSubmitting(true);
     // Persist before sending so a reload while in flight can use the same idempotency key.
-    if (selectedReduction) persistPendingReduction(pendingKey, request);
+    if (selectedReduction) persistPendingReduction(pendingKey, { request, lookupId });
     const result = await attempt(async () => {
-      const response = await api.post<OrderResult>('/orders', request);
-      if (!response?.order?.status || (selectedReduction && response.order.clientOrderId !== request.clientOrderId)) {
+      const order = lookupId
+        ? await api.get<Order>(`/orders/${encodeURIComponent(lookupId)}`)
+        : (await api.post<OrderResult>('/orders', request))?.order;
+      if (!order?.status || (selectedReduction && order.clientOrderId !== request.clientOrderId)) {
         throw new Error('The order response was incomplete.');
       }
-      return response;
+      return order;
     });
     setSubmitting(false);
-    // The HTTP route can report an error after dispatch. A matching order result, including a
-    // rejection, settles this request. Until then the same key lets the engine look it up.
-    if (selectedReduction && !result) {
-      setConfirmation({ request, retry: true });
+    // An open order without an exchange ID may still have reached OKX.
+    if (selectedReduction && (!result || (result.status === 'OPEN' && !result.exchangeOrderId))) {
+      const pending = { request, lookupId: result?.id ?? lookupId };
+      if (result) persistPendingReduction(pendingKey, pending);
+      const saved = refreshPendingReductions()
+        .find((item) => item.request.clientOrderId === request.clientOrderId);
+      setConfirmation({ ...pending, lookupId: saved?.lookupId ?? pending.lookupId, retry: true });
       return;
     }
-    if (selectedReduction) persistPendingReduction(pendingKey, request, true);
-    setConfirmation(null);
-    setDialogOpen(false);
+    if (selectedReduction) persistPendingReduction(pendingKey, confirmation, true);
+    finishConfirmation();
     if (result) {
-      const { order } = result;
+      const order = result;
       const toast = useApp.getState().toast;
       if (order.status === 'REJECTED') toast('error', `Order rejected: ${order.rejectReason}`);
+      else if (order.status === 'CANCELED') toast('info', 'Order canceled');
       else toast('info', order.status === 'FILLED' ? `Filled ${order.quantity} @ ${order.avgFillPrice}` : 'Limit order is resting');
       if (order.status === 'FILLED') useApp.setState({ lastFillAt: Date.now() });
     }
@@ -323,7 +413,28 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
           </p>
         )}
         {confirmation?.retry && (
-          <p role="status" className="mb-3 text-sm text-warn">The order outcome is unclear. Retry with the same order ID, or check Order history before discarding the retry.</p>
+          <p role="status" className="mb-3 text-sm text-warn">{confirmation.lookupId
+            ? 'OKX has yet to confirm this order. Check its status or review Order history before discarding it.'
+            : 'The order outcome is unclear. Retry with the same order ID, or check Order history before discarding the retry.'}</p>
+        )}
+        {confirmation?.retry && pendingReductions.length > 1 && (
+          <Field label="Pending reduction">
+            <Select
+              aria-label="Pending reduction"
+              disabled={submitting}
+              value={confirmation.request.clientOrderId}
+              onChange={(event) => {
+                const pending = pendingReductions.find((item) => item.request.clientOrderId === event.target.value);
+                if (pending) setConfirmation({ ...pending, retry: true });
+              }}
+            >
+              {pendingReductions.map(({ request }) => (
+                <option key={request.clientOrderId} value={request.clientOrderId}>
+                  {request.symbol} · {request.type} · {request.quantity}{request.price ? ` @ ${request.price}` : ''}
+                </option>
+              ))}
+            </Select>
+          </Field>
         )}
         <dl className="num space-y-1 text-[13px]">
           {confirmation && (confirmation.summary ?? reductionSummary(confirmation.request)).map(([k, v]) => (
@@ -335,7 +446,7 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
             ? <Button disabled={submitting} onClick={discardRetry}>Discard retry</Button>
             : <Button disabled={submitting} onClick={closeDialog}>Cancel</Button>}
           <Button variant={confirmation?.request.side === 'BUY' ? 'long' : 'short'} disabled={!canConfirm} onClick={submit}>
-            {submitting ? 'Submitting…' : confirmation?.retry ? 'Retry reduction' : account.venue === 'OKX_LIVE' ? 'Place real order' : 'Place order'}
+            {submitting ? 'Submitting…' : confirmation?.lookupId ? 'Check order status' : confirmation?.retry ? 'Retry reduction' : account.venue === 'OKX_LIVE' ? 'Place real order' : 'Place order'}
           </Button>
         </div>
       </Dialog>

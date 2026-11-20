@@ -487,11 +487,29 @@ async fn selected_okx_market_and_limit_orders_can_reduce_an_exact_quantity() {
     let (status, result) = send(&w.state, "POST", "/api/orders", Some(off_tick)).await;
     assert_eq!(status, 400, "{result}");
     assert_eq!(w.okx.state().placed.len(), 1);
+    {
+        let mut okx = w.okx.state();
+        okx.lose_next_response = true;
+        okx.lookup_error_code = Some("50001".into());
+    }
     let (status, result) = send(&w.state, "POST", "/api/orders", Some(request.clone())).await;
     assert_eq!(status, 200, "{result}");
     assert_eq!(result["order"]["status"], "OPEN");
     assert_eq!(result["order"]["quantity"], "0.0004");
+    assert_eq!(result["order"]["exchangeOrderId"], Value::Null);
     assert_eq!(w.okx.state().placed.last().unwrap()["px"], "76000");
+    let lookup = format!("/api/orders/{}", result["order"]["id"].as_str().unwrap());
+    let (status, observed) = send(&w.state, "GET", &lookup, None).await;
+    assert_eq!(status, 200);
+    assert_eq!(observed, result["order"]);
+    w.okx.state().lookup_error_code = None;
+    w.state.runtime.sync_okx_for_test(ACCOUNT).await.unwrap();
+    let (status, confirmed) = send(&w.state, "GET", &lookup, None).await;
+    assert_eq!(status, 200);
+    assert_eq!(confirmed["clientOrderId"], "reduce-limit");
+    assert_eq!(confirmed["status"], "OPEN");
+    assert!(confirmed["exchangeOrderId"].is_string());
+    assert_eq!(w.okx.state().placed.len(), 2);
 
     let mut mismatch = request.clone();
     mismatch["quantity"] = json!("0.0003");

@@ -197,8 +197,9 @@ test('separate OKX take profits show the size of each order', async ({ page }) =
   await expect(table.getByRole('cell', { name: '0.0000003', exact: true })).toBeVisible();
 });
 
-test('OKX market and limit reductions send the selected isolated position', async ({ page }) => {
-  await page.route('**/api/instruments', async (route) => {
+test('OKX market and limit reductions send the selected isolated position', async ({ page: firstPage, context }) => {
+  let page = firstPage;
+  await context.route('**/api/instruments', async (route) => {
     const response = await route.fetch();
     const instruments = await response.json() as { symbol: string; priceTick: string }[];
     await route.fulfill({
@@ -208,7 +209,7 @@ test('OKX market and limit reductions send the selected isolated position', asyn
         : instrument),
     });
   });
-  await page.route('**/api/accounts', async (route) => {
+  await context.route('**/api/accounts', async (route) => {
     const response = await route.fetch();
     const accounts = await response.json() as { id: string; name: string; venue: string }[];
     await route.fulfill({
@@ -219,7 +220,7 @@ test('OKX market and limit reductions send the selected isolated position', asyn
     });
   });
   const positionId = 'okx:BTC-USDT-SWAP:isolated:LONG:test:1';
-  await page.route('**/api/accounts/*/positions', (route) => {
+  await context.route('**/api/accounts/*/positions', (route) => {
     const path = new URL(route.request().url()).pathname.split('/');
     const accountId = path.at(-2);
     const position = {
@@ -233,15 +234,19 @@ test('OKX market and limit reductions send the selected isolated position', asyn
       { ...position, id: positionId, marginMode: 'isolated', closeSupported: true },
     ] });
   });
-  let loseOrderResponse = false;
-  await page.route('**/api/orders', (route) => {
-    if (loseOrderResponse) {
-      loseOrderResponse = false;
-      return route.abort('connectionreset');
+  let unconfirmedOrder = false;
+  let orderReadback: Record<string, unknown> | undefined;
+  await context.route('**/api/orders', (route) => {
+    if (unconfirmedOrder) {
+      unconfirmedOrder = false;
+      const order = route.request().postDataJSON();
+      orderReadback = { ...order, id: 'pending-okx-reduction', status: 'OPEN', exchangeOrderId: 'fake-okx-order' };
+      return route.fulfill({ json: { order: { ...orderReadback, exchangeOrderId: null }, fills: [], duplicate: false } });
     }
     const order = route.request().postDataJSON();
-    return route.fulfill({ json: { order: { ...order, status: 'OPEN' }, fills: [], duplicate: false } });
+    return route.fulfill({ json: { order: { ...order, status: 'OPEN', exchangeOrderId: 'fake-okx-order' }, fills: [], duplicate: false } });
   });
+  await context.route('**/api/orders/pending-okx-reduction', (route) => route.fulfill({ json: orderReadback }));
   await page.goto('/');
   const demo = page.getByTestId('try-demo');
   await expect(demo.or(page.getByTestId('total-equity'))).toBeVisible();
@@ -274,7 +279,7 @@ test('OKX market and limit reductions send the selected isolated position', asyn
     await review.click();
     if (limit) {
       await expect(page.getByRole('dialog').getByText(limit, { exact: true })).toBeVisible();
-      loseOrderResponse = true;
+      unconfirmedOrder = true;
     }
     const request = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/api/orders'));
     await page.getByRole('button', { name: 'Place order', exact: true }).click();
@@ -287,15 +292,28 @@ test('OKX market and limit reductions send the selected isolated position', asyn
     if (limit) {
       expect(body.clientOrderId).not.toBe(marketClientOrderId);
       const dialog = page.getByRole('dialog');
-      await expect(dialog.getByRole('button', { name: 'Retry reduction' })).toBeEnabled();
+      await expect(dialog.getByRole('button', { name: 'Check order status' })).toBeEnabled();
       await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-      await page.reload();
+      await page.evaluate((request) => {
+        const other = { ...request, clientOrderId: 'ui:other-window', quantity: '0.0001' };
+        localStorage.setItem(`mochiprep.pending-reduction.${other.accountId}/${other.clientOrderId}`, JSON.stringify({ request: other }));
+      }, body);
+      const url = page.url();
+      await page.close();
+      page = await context.newPage();
+      await page.goto(url);
       await page.getByLabel('Paper account').selectOption({ label: 'Demo terminal (OKX demo)' });
       await page.getByRole('button', { name: 'Review pending reduction' }).click();
-      await expect(dialog.getByText(limit, { exact: true })).toBeVisible();
-      const retry = page.waitForRequest((req) => req.method() === 'POST' && req.url().endsWith('/api/orders'));
-      await dialog.getByRole('button', { name: 'Retry reduction' }).click();
-      expect((await retry).postDataJSON()).toEqual(body);
+      const reopenedDialog = page.getByRole('dialog');
+      await reopenedDialog.getByLabel('Pending reduction').selectOption(body.clientOrderId);
+      await expect(reopenedDialog.getByText(limit, { exact: true })).toBeVisible();
+      const readback = page.waitForRequest((req) => req.method() === 'GET' && req.url().endsWith('/api/orders/pending-okx-reduction'));
+      await reopenedDialog.getByRole('button', { name: 'Check order status' }).click();
+      await readback;
+      await expect(reopenedDialog).toHaveCount(0);
+      await page.getByRole('button', { name: 'Review pending reduction' }).click();
+      await expect(reopenedDialog.getByText('0.0001 BTC', { exact: true })).toBeVisible();
+      await reopenedDialog.getByRole('button', { name: 'Discard retry' }).click();
     } else {
       marketClientOrderId = body.clientOrderId;
     }
