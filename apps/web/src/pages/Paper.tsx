@@ -7,7 +7,7 @@ import { PageTitle } from '@/components/Shell';
 import { SignalsCard } from '@/components/SignalsCard';
 import { AccountPicker, ClosedPositionsTable, FillsTable, LedgerTable, OrdersTable, PositionsTable, useCurrentAccount, VenueBadge } from '@/components/trading';
 import { Badge, Button, Card, Dialog, Field, Input, Segmented, Select, Stat, Tabs } from '@/components/ui';
-import { api } from '@/lib/api';
+import { api, isNotDispatched } from '@/lib/api';
 import { isInteger, isString, oneOf, useRemembered } from '@/lib/remembered';
 import { money, pnlClass, price, qty, signedMoney } from '@/lib/format';
 import { attempt, useApp, useQuery, useSymbols, type AccountView } from '@/store';
@@ -63,7 +63,17 @@ function ResetAccount({ account }: { account: AccountView }) {
   );
 }
 
+// The API's decimal rule needs a digit before the point, so `.5` is sent as `0.5`.
+function normalizeDecimal(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.startsWith('.') ? `0${trimmed}` : trimmed;
+}
+
+// Mirrors the server's decimal string limit, applied after normalization.
+const MAX_DECIMAL_LENGTH = 40;
+
 function matchesStep(value: string, step: string): boolean {
+  if (value.length > MAX_DECIMAL_LENGTH) return false;
   if (!/^\d*\.?\d+$/.test(value)) return false;
   // The instrument registry keeps the exchange's tick string, which may include an exponent.
   const parsedStep = /^\+?(\d*\.?\d*)(?:e([+-]?\d+))?$/i.exec(step);
@@ -222,7 +232,7 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
     if (enabled && exchange) setPositionId(reducible.length === 1 ? reducible[0]!.id : '');
   };
   const instrument = INSTRUMENTS[symbol]!;
-  const limitPrice = reductionLimit ? limit.trim() : limit;
+  const limitPrice = reductionLimit ? normalizeDecimal(limit) : limit;
   const reference = type === 'LIMIT' ? Number(limitPrice) : Number(orderSide === 'BUY' ? quote?.ask : quote?.bid);
   const step = Number(instrument.quantityStep);
   const rawQty = mode === 'QTY' ? Number(amount) : (Number(amount) * leverage) / (reference || Infinity);
@@ -233,7 +243,7 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
   const fee = notional * feeRate;
   const mmr = Number(instrument.maintenanceMarginRate);
   const liq = side === 'BUY' ? reference * (1 - 1 / leverage + mmr) : reference * (1 + 1 / leverage - mmr);
-  const reductionSize = reduceQuantity.trim();
+  const reductionSize = normalizeDecimal(reduceQuantity);
   const validStep = !boundReduction || matchesStep(reductionSize, instrument.quantityStep);
   const invalidLimitTick = reductionLimit && !!limitPrice && !matchesStep(limitPrice, instrument.priceTick);
   const valid = Number.isFinite(quantity) && quantity >= Number(instrument.minQuantity)
@@ -322,16 +332,28 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
       return;
     }
     setSubmitting(true);
+    let notDispatched = false;
     const result = await attempt(async () => {
-      const order = lookupId
-        ? await api.get<Order>(`/orders/${encodeURIComponent(lookupId)}`)
-        : (await api.post<OrderResult>('/orders', request))?.order;
-      if (!order?.status || (selectedReduction && order.clientOrderId !== request.clientOrderId)) {
-        throw new Error('The order response was incomplete.');
+      try {
+        const order = lookupId
+          ? await api.get<Order>(`/orders/${encodeURIComponent(lookupId)}`)
+          : (await api.post<OrderResult>('/orders', request))?.order;
+        if (!order?.status || (selectedReduction && order.clientOrderId !== request.clientOrderId)) {
+          throw new Error('The order response was incomplete.');
+        }
+        return order;
+      } catch (error) {
+        notDispatched = !lookupId && isNotDispatched(error);
+        throw error;
       }
-      return order;
     });
     setSubmitting(false);
+    // Refused before reaching OKX: drop the key and let the user correct the ticket.
+    if (selectedReduction && notDispatched) {
+      persistPendingReduction(pendingKey, confirmation, true);
+      finishConfirmation();
+      return;
+    }
     // An open order without an exchange ID may still have reached OKX.
     if (selectedReduction && (!result || (result.status === 'OPEN' && !result.exchangeOrderId))) {
       const pending = { request, lookupId: result?.id ?? lookupId };

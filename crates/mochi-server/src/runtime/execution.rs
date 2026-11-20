@@ -262,6 +262,29 @@ impl Runtime {
         self.restore_retired_order(account_id)
     }
 
+    /// An orderly shutdown loses every in-memory proof of non-dispatch, so the sessions
+    /// are retired and those proofs written one last time. A proof that still cannot be
+    /// saved is reported; its order stays lookup-only after the restart.
+    pub(super) fn drain_unsent_orders_for_shutdown(&mut self) {
+        let accounts: Vec<String> = self
+            .exchanges
+            .keys()
+            .chain(self.retired_unsent_orders.keys())
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        for account_id in accounts {
+            if let Err(error) = self.retire_exchange_session(&account_id) {
+                tracing::warn!(
+                    account = %account_id,
+                    error = %self.redact(&error.to_string()),
+                    "could not record unsent OKX orders before shutdown"
+                );
+            }
+        }
+    }
+
     pub(super) fn restore_retired_order(&mut self, account_id: &str) -> Result<(), EngineError> {
         let Some(mut orders) = self.retired_unsent_orders.remove(account_id) else {
             return Ok(());
@@ -601,8 +624,10 @@ impl OkxExecution {
     /// A thrown engine error, as Node's handler answers it: 400, secrets removed on the task,
     /// the exchange keys included.
     async fn refused(&self, error: EngineError) -> ApiError {
+        let not_dispatched = matches!(error, EngineError::RefusedBeforeDispatch(_));
         let text = error.to_string();
         match self.runtime.call(move |r| r.api_error(text)).await {
+            Ok(error) if not_dispatched => ApiError::not_dispatched(error.message()),
             Ok(error) | Err(error) => error,
         }
     }

@@ -344,6 +344,11 @@ pub enum EngineError {
     OpeningDisarmed,
     #[error(transparent)]
     LeverageSetup(OkxError),
+    /// A selected-position reduction refused before anything reached OKX, with any
+    /// staged row already recorded as rejected. The caller may correct and resubmit
+    /// under a new client order ID.
+    #[error("{0}")]
+    RefusedBeforeDispatch(String),
 }
 
 impl EngineError {
@@ -405,6 +410,9 @@ struct DispatchState {
     retired: bool,
     staged_order: Option<UnsentOrder>,
     restore_order: Option<UnsentOrder>,
+    /// Submissions refused before dispatch whose rejection could not be written yet.
+    /// Kept apart from `restore_order`, so they never wait on a deferred restore.
+    unsent_rejections: Vec<UnsentOrder>,
 }
 
 enum DeferredRestore {
@@ -415,6 +423,11 @@ enum DeferredRestore {
 /// In-memory proof of non-dispatch for a staged order that needs finalizing.
 pub enum UnsentOrder {
     Submission(String),
+    /// A submission refused before dispatch, with the refusal to record.
+    Rejection {
+        id: String,
+        reason: String,
+    },
     Deferred {
         original: Box<Order>,
         marker: Box<Order>,
@@ -424,7 +437,7 @@ pub enum UnsentOrder {
 impl UnsentOrder {
     fn id(&self) -> &str {
         match self {
-            Self::Submission(id) => id,
+            Self::Submission(id) | Self::Rejection { id, .. } => id,
             Self::Deferred { original, .. } => &original.id,
         }
     }
@@ -463,6 +476,11 @@ impl UnsentOrder {
             Self::Submission(_) if order.status == OrderStatus::Open => {
                 order.status = OrderStatus::Rejected;
                 order.reject_reason = Some(EngineError::SessionRetired.to_string());
+                order.updated_at = now;
+            }
+            Self::Rejection { reason, .. } if order.status == OrderStatus::Open => {
+                order.status = OrderStatus::Rejected;
+                order.reject_reason = Some(reason.clone());
                 order.updated_at = now;
             }
             Self::Deferred { original, marker } => {
@@ -605,10 +623,13 @@ impl OkxEngine {
         let mut dispatch = self.dispatch();
         dispatch.retired = true;
         // Finalize the current submission first if an older restore keeps failing.
-        [dispatch.staged_order.take(), dispatch.restore_order.take()]
-            .into_iter()
-            .flatten()
-            .collect()
+        let mut unsent: Vec<UnsentOrder> =
+            [dispatch.staged_order.take(), dispatch.restore_order.take()]
+                .into_iter()
+                .flatten()
+                .collect();
+        unsent.append(&mut dispatch.unsent_rejections);
+        unsent
     }
 
     pub(super) fn check_dispatch(&self) -> Result<(), EngineError> {
@@ -636,6 +657,36 @@ impl OkxEngine {
         debug_assert!(dispatch.restore_order.is_none());
         dispatch.restore_order = dispatch.staged_order.take();
         Ok(())
+    }
+
+    /// Whether `id` was refused before dispatch and its rejection is still unwritten.
+    pub(super) fn is_unsent_rejection(&self, id: &str) -> bool {
+        self.dispatch()
+            .unsent_rejections
+            .iter()
+            .any(|pending| pending.id() == id)
+    }
+
+    /// Writes the rejections held in memory. Each one that still fails stays held.
+    pub(super) async fn finalize_unsent_rejections(&self) -> Result<(), EngineError> {
+        if self.dispatch().unsent_rejections.is_empty() {
+            return Ok(());
+        }
+        let dispatch = self.dispatch.clone();
+        let account_id = self.deps.account_id.clone();
+        let now = self.now();
+        self.rows(move |rows| {
+            let mut dispatch = dispatch.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut failure = None;
+            for pending in std::mem::take(&mut dispatch.unsent_rejections) {
+                if let Err(error) = pending.finalize(rows, &account_id, now) {
+                    failure.get_or_insert(error);
+                    dispatch.unsent_rejections.push(pending);
+                }
+            }
+            failure.map_or(Ok(()), Err)
+        })
+        .await
     }
 
     async fn restore_unsent_order(&self) -> Result<Option<Order>, EngineError> {
@@ -749,6 +800,9 @@ impl OkxEngine {
         let engine = self.clone();
         tokio::spawn(async move {
             let _turn = engine.queue.lock().await;
+            // A held rejection is retried on every turn. While it fails, sync skips its
+            // order and an exact retry still sees it open, never sent.
+            let _ = engine.finalize_unsent_rejections().await;
             if matches!(restore, DeferredRestore::Required) {
                 engine.restore_unsent_order().await?;
             }
@@ -828,7 +882,9 @@ impl OkxEngine {
                         if stored.is_some_and(|stored| {
                             matches!(stored.amount, CloseAmount::Quantity { .. })
                         }) {
-                            return Err(close_changed());
+                            // The key already names a selected reduction, so this is not
+                            // a refusal before dispatch.
+                            return Err(EngineError::message(CLOSE_CHANGED));
                         }
                     }
                     return Ok(prior);
@@ -902,8 +958,9 @@ impl OkxEngine {
                     .read_selected_close(&request.symbol, selection, &prepared.registry)
                     .await?;
                 if !quantity.gt(&zero()) || quantity.gt(&position.held) {
-                    return Err(EngineError::message(
-                        "Reduction quantity must be positive and cannot exceed the selected position",
+                    return Err(EngineError::RefusedBeforeDispatch(
+                        "Reduction quantity must be positive and cannot exceed the selected position"
+                            .into(),
                     ));
                 }
                 request.leverage = leverage;
@@ -1014,9 +1071,14 @@ impl OkxEngine {
         let stored = self
             .rows(move |rows| Ok(rows.close_selection(&order_id)?))
             .await?;
-        // Preserve same-symbol fraction retries from before their inputs were stored.
+        // Preserve same-symbol fraction retries from before their inputs were stored. A
+        // request bound to a position needs a stored selection: without one it cannot
+        // tell whether the earlier close reduced the position it names.
         let matches = stored.as_ref().map_or_else(
-            || matches!(selection.amount, CloseAmount::Fraction(_)),
+            || {
+                selection.position_id.is_none()
+                    && matches!(selection.amount, CloseAmount::Fraction(_))
+            },
             |stored| stored == selection,
         );
         if !prior.order.reduce_only || prior.order.symbol != symbol || !matches {
@@ -1173,10 +1235,11 @@ impl OkxEngine {
     }
 
     /// A connection candidate can read back orders while the current session still
-    /// owns dispatch. Deferred orders become eligible after registration.
+    /// owns dispatch. It sends nothing to OKX: deferred exits, covers and cleanup
+    /// cancels wait for the first sync after registration.
     pub async fn sync_before_registration(self: &Arc<Self>) -> Result<(), EngineError> {
         self.queued(DeferredRestore::Required, |engine| {
-            Box::pin(async move { engine.sync_without_deferred_orders().await })
+            Box::pin(async move { engine.sync_read_only().await })
         })
         .await
     }
@@ -1296,9 +1359,9 @@ impl OkxEngine {
             .await;
             if let Err(error) = checked {
                 if order.agent_id.is_some() {
-                    return self.finish_rejected(order, error.to_string()).await;
+                    return self.finish_unsent(order, error.to_string()).await;
                 }
-                self.finish_rejected(order, error.to_string()).await?;
+                self.finish_unsent(order, error.to_string()).await?;
                 return Err(error);
             }
         }
@@ -1306,7 +1369,7 @@ impl OkxEngine {
             Ok(()) => {}
             Err(error @ EngineError::SessionRetired) => return Err(error),
             Err(error @ (EngineError::OpeningDisarmed | EngineError::LeverageSetup(_))) => {
-                return self.finish_rejected(order, error.to_string()).await;
+                return self.finish_unsent(order, error.to_string()).await;
             }
             Err(EngineError::Okx(OkxError::Rejection { code, message })) => {
                 let reason = OkxError::Rejection { code, message }.to_string();
@@ -1447,6 +1510,31 @@ impl OkxEngine {
         })
     }
 
+    /// Records a refusal for a submission that may still be staged. If the write fails
+    /// while the order is still known unsent, the proof is held until it commits.
+    async fn finish_unsent(
+        &self,
+        order: Order,
+        reason: String,
+    ) -> Result<OrderResult, EngineError> {
+        let id = order.id.clone();
+        let result = self.finish_rejected(order, reason.clone()).await;
+        if result.is_err() {
+            let mut dispatch = self.dispatch();
+            if dispatch
+                .staged_order
+                .as_ref()
+                .is_some_and(|pending| pending.id() == id)
+            {
+                dispatch.staged_order = None;
+                dispatch
+                    .unsent_rejections
+                    .push(UnsentOrder::Rejection { id, reason });
+            }
+        }
+        result
+    }
+
     async fn finish_rejected(
         &self,
         mut order: Order,
@@ -1465,8 +1553,12 @@ impl OkxEngine {
     }
 }
 
+const CLOSE_CHANGED: &str = "The selected OKX position has changed. Refresh and try again.";
+
+/// Raised only before dispatch: by the first position read, or by the final recheck
+/// once its rejection is recorded.
 fn close_changed() -> EngineError {
-    EngineError::message("The selected OKX position has changed. Refresh and try again.")
+    EngineError::RefusedBeforeDispatch(CLOSE_CHANGED.into())
 }
 
 fn close_retry_changed() -> EngineError {

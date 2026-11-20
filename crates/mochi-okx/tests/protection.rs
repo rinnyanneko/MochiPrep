@@ -2392,9 +2392,16 @@ async fn deferred_protection_does_not_cross_a_close_and_reopen_proven_by_fills()
         }
     }
     h.sync().await;
+    // Fills carry no margin mode, so these anonymous fills could be cross-margin. The
+    // intent waits for the confirmation window, then cancels instead of guessing.
+    assert!(h.algo_placed().is_empty());
+    h.advance(10_000);
+    h.sync().await;
+    let trail = h.order_row(&format!("{}:trail", entry.id));
+    assert_eq!(trail.status, OrderStatus::Canceled);
     assert_eq!(
-        h.order_row(&format!("{}:trail", entry.id)).status,
-        OrderStatus::Canceled
+        trail.reject_reason.as_deref(),
+        Some("Deferred protection canceled: entry position lifetime cannot be confirmed")
     );
     assert!(h.algo_placed().is_empty());
 }
@@ -3158,7 +3165,7 @@ async fn an_amended_limit_stop_cannot_take_the_place_of_a_trailing_stop() {
 }
 
 #[tokio::test]
-async fn a_deferred_target_only_sizes_the_parent_fills_from_the_current_position() {
+async fn a_deferred_target_does_not_split_the_parent_around_fills_of_unknown_margin_mode() {
     let (h, entry) = resting_target().await;
     {
         let mut okx = h.okx.state();
@@ -3198,13 +3205,20 @@ async fn a_deferred_target_only_sizes_the_parent_fills_from_the_current_position
         }
     }
     h.sync().await;
-    let targets = h.algo_placed();
-    assert_eq!(targets.len(), 1);
-    assert_eq!(targets[0]["tpTriggerPx"], "78000");
-    assert_eq!(targets[0]["sz"], "0.05");
+    // An isolated entry split by another order's fills, here a close at trade 2, could be
+    // split by a cross-margin trade on the same instrument. No allocation is sent for
+    // trade 4 alone: the target waits, then cancels with its reason.
+    assert!(h.algo_placed().is_empty());
+    let id = format!("{}:deferred:tp", entry.id);
+    assert_eq!(h.order_row(&id).status, OrderStatus::Open);
+    h.advance(10_000);
+    h.sync().await;
+    assert!(h.algo_placed().is_empty());
+    let target = h.order_row(&id);
+    assert_eq!(target.status, OrderStatus::Canceled);
     assert_eq!(
-        h.order_row(&format!("{}:deferred:tp", entry.id)).quantity,
-        "0.0005"
+        target.reject_reason.as_deref(),
+        Some("Deferred protection canceled: entry position lifetime cannot be confirmed")
     );
 }
 
@@ -3243,7 +3257,7 @@ async fn a_deferred_target_does_not_use_fill_record_time_to_rule_out_late_adl() 
 
 #[tokio::test]
 async fn a_deferred_target_accounts_for_adl_after_the_last_ordinary_trade() {
-    let (h, _) = resting_target().await;
+    let (h, entry) = resting_target().await;
     {
         let mut okx = h.okx.state();
         okx.fill_resting();
@@ -3279,6 +3293,18 @@ async fn a_deferred_target_accounts_for_adl_after_the_last_ordinary_trade() {
     h.sync().await;
     assert_eq!(h.count("POST /api/v5/trade/order"), placed);
     assert_eq!(h.view().position.quantity, "0.002");
+    // The ordinary fill times alone already precede the update, so only reading the
+    // ADL row retires the target. Ignoring it would leave the target open.
+    let target = h.order_row(&format!("{}:deferred:tp", entry.id));
+    assert_eq!(target.status, OrderStatus::Canceled);
+    assert!(
+        target
+            .reject_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("position lifetime")),
+        "{:?}",
+        target.reject_reason
+    );
 }
 
 #[tokio::test]
@@ -4654,4 +4680,94 @@ async fn a_fixed_stop_edit_keeps_unsent_optional_exits_on_the_filled_entry() {
     let protection = h.engine.protection_of("BTCUSDT");
     assert_eq!(protection.take_profit.as_deref(), Some("78000"));
     assert_eq!(protection.trailing_stop, Some(ratio("0.01")));
+}
+
+#[tokio::test]
+async fn a_refused_reduction_keeps_its_proof_of_non_dispatch_until_the_rejection_commits() {
+    let h = Harness::with_position().await;
+    let mut request = order();
+    request.client_order_id = "refused-before-dispatch".into();
+    request.side = OrderSide::Sell;
+    request.reduce_only = Some(true);
+    request.stop_loss = None;
+    let position_id = h.engine.positions()[0].position.id.clone();
+    let first_read = h.okx.hold_next("GET", "/account/positions");
+    let final_read = h.okx.hold_next("GET", "/account/positions");
+    let placed = h.okx.state().placed.len();
+    let (result, ()) = tokio::join!(h.engine.reduce_position(request, position_id), async {
+        let timeout = std::time::Duration::from_secs(2);
+        tokio::time::timeout(timeout, first_read.reached())
+            .await
+            .unwrap();
+        first_read.release();
+        tokio::time::timeout(timeout, final_read.reached())
+            .await
+            .unwrap();
+        // The position changes before the final recheck, and the rejection cannot be written.
+        h.okx
+            .state()
+            .position
+            .as_mut()
+            .unwrap()
+            .insert("pos".into(), json!("0.05"));
+        h.store(|s| {
+            s.connection()
+                .execute_batch(
+                    "CREATE TRIGGER refuse_rejection BEFORE UPDATE ON orders
+                     WHEN NEW.status = 'REJECTED' BEGIN SELECT RAISE(ABORT, 'rejection refused'); END",
+                )
+                .unwrap()
+        });
+        final_read.release();
+    });
+    assert!(result.is_err());
+    assert_eq!(h.okx.state().placed.len(), placed);
+    let id = h
+        .store(|s| s.get_order_by_client_id(ACCOUNT, "refused-before-dispatch"))
+        .unwrap()
+        .unwrap()
+        .id;
+    assert_eq!(h.order_row(&id).status, OrderStatus::Open);
+
+    // While the write keeps failing, sync does not look up an order that never left.
+    let lookups = h.count("GET /api/v5/trade/order");
+    let _ = h.engine.sync().await;
+    assert_eq!(h.count("GET /api/v5/trade/order"), lookups);
+    assert_eq!(h.order_row(&id).status, OrderStatus::Open);
+
+    h.store(|s| {
+        s.connection()
+            .execute_batch("DROP TRIGGER refuse_rejection")
+            .unwrap()
+    });
+    h.sync().await;
+    let row = h.order_row(&id);
+    assert_eq!(row.status, OrderStatus::Rejected);
+    assert_eq!(
+        row.reject_reason.as_deref(),
+        Some("The selected OKX position has changed. Refresh and try again.")
+    );
+    assert_eq!(h.count("GET /api/v5/trade/order"), lookups);
+    assert!(h.engine.retire().is_empty());
+}
+
+#[tokio::test]
+async fn a_connection_readback_before_registration_sends_no_algo_cancel() {
+    let h = Harness::with_position().await;
+    let old = h.protection_rows().remove(0);
+    h.okx.state().cancel_fails = true;
+    h.set(stop("74500")).await.unwrap();
+    h.okx.state().cancel_fails = false;
+    assert_eq!(h.algo_state(&old.id), "live");
+
+    // A candidate still waiting to register must leave the current session's algos alone.
+    let attempts = h.count("POST /api/v5/trade/cancel-algos");
+    h.engine.sync_before_registration().await.unwrap();
+    assert_eq!(h.count("POST /api/v5/trade/cancel-algos"), attempts);
+    assert_eq!(h.algo_state(&old.id), "live");
+    assert_eq!(h.view().external_protection, [cancel_pending("74000")]);
+
+    h.sync().await;
+    assert_eq!(h.count("POST /api/v5/trade/cancel-algos"), attempts + 1);
+    assert_eq!(h.algo_state(&old.id), "canceled");
 }

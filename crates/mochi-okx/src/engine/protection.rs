@@ -20,7 +20,7 @@ use mochi_domain::{
 };
 use serde_json::Value;
 
-use super::sync::{isolated_net, PositionSnapshot};
+use super::sync::{isolated_net, PositionSnapshot, VenueWrites};
 use super::{
     align, align_trailing, dec, is_leg, side_text, to_body, to_contracts, EngineError, LiveRows,
     OkxEngine, Registry, NEVER_ARRIVED_AFTER_MS,
@@ -297,6 +297,9 @@ struct PositionHistory<'a> {
     side: PositionSide,
     contracts: &'a Dec,
     reached_exit_parents: &'a HashMap<String, String>,
+    /// OKX order IDs of MochiPrep's own orders, which are always isolated. Fills do not
+    /// carry a margin mode, so an ordinary fill from any other order could be cross.
+    isolated_orders: &'a HashSet<String>,
 }
 
 enum EntryInterval {
@@ -346,6 +349,17 @@ impl PositionHistory<'_> {
                 || row.get("posSide").and_then(Value::as_str) != Some("net")
             {
                 return Some(EntryInterval::Different);
+            }
+            // A cross-margin fill on the same instrument can sit between isolated entry
+            // fills. Until the fill's margin mode is known, the interval stays unresolved
+            // rather than splitting the entry into a smaller allocation.
+            if trade.is_some()
+                && row
+                    .get("ordId")
+                    .and_then(Value::as_str)
+                    .is_none_or(|id| !self.isolated_orders.contains(id))
+            {
+                return None;
             }
             let opening = row.get("subType").and_then(Value::as_str) == Some(open_type);
             let own_exit = if opening {
@@ -1853,6 +1867,40 @@ impl OkxEngine {
         Ok(true)
     }
 
+    /// The OKX order IDs among `fills` on `inst_id` that belong to this account's own
+    /// orders. Every order MochiPrep sends is isolated.
+    async fn own_order_ids(
+        &self,
+        row: &Order,
+        inst_id: &str,
+        fills: &[Row],
+        entry_order_id: &str,
+    ) -> Result<HashSet<String>, EngineError> {
+        let mut ids: Vec<String> = fills
+            .iter()
+            .filter(|fill| fill.get("instId").and_then(Value::as_str) == Some(inst_id))
+            .filter_map(|fill| fill.get("ordId").and_then(Value::as_str))
+            .filter(|id| !id.is_empty() && *id != entry_order_id)
+            .map(str::to_owned)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        let mut own = HashSet::from([entry_order_id.to_owned()]);
+        if ids.is_empty() {
+            return Ok(own);
+        }
+        let account_id = row.account_id.clone();
+        let found = self
+            .rows(move |rows| Ok(rows.find_orders_by_exchange_ids(&account_id, &ids)?))
+            .await?;
+        own.extend(
+            found
+                .into_iter()
+                .filter_map(|order| order.exchange_order_id),
+        );
+        Ok(own)
+    }
+
     async fn reached_exit_parents(
         &self,
         row: &Order,
@@ -2220,6 +2268,7 @@ impl OkxEngine {
                     _ => !unresolved.is_empty(),
                 }
             });
+            let isolated_orders = self.own_order_ids(row, &inst_id, &fills, order_id).await?;
             let history = PositionHistory {
                 inst_id: &inst_id,
                 fills: &fills,
@@ -2228,6 +2277,7 @@ impl OkxEngine {
                 side,
                 contracts: &observed.contracts,
                 reached_exit_parents: &reached_exit_parents,
+                isolated_orders: &isolated_orders,
             };
             let filled = match proven_entry_contracts(
                 &history,
@@ -2564,10 +2614,10 @@ impl OkxEngine {
         algos: Vec<Row>,
         snapshot: &mut PositionSnapshot,
         balance: &mut Option<Row>,
-        submit_deferred: bool,
+        writes: VenueWrites,
     ) -> Result<ProtectionMap, EngineError> {
         match self
-            .reconcile_protection_pass(algos, snapshot, submit_deferred)
+            .reconcile_protection_pass(algos, snapshot, writes)
             .await?
         {
             Some(result) => Ok(result),
@@ -2593,7 +2643,7 @@ impl OkxEngine {
                 };
                 *balance = self.deps.client.get_usdt_balance().await?;
                 snapshot.post_exit_unverified = false;
-                self.reconcile_protection_pass(refreshed, snapshot, false)
+                self.reconcile_protection_pass(refreshed, snapshot, writes.without_deferred())
                     .await?
                     .ok_or_else(|| EngineError::message("Protection changed during readback"))
             }
@@ -2604,7 +2654,7 @@ impl OkxEngine {
         &self,
         algos: Vec<Row>,
         snapshot: &mut PositionSnapshot,
-        submit_deferred: bool,
+        writes: VenueWrites,
     ) -> Result<Option<ProtectionMap>, EngineError> {
         let at = self.now();
         let account_id = self.deps.account_id.clone();
@@ -2690,7 +2740,7 @@ impl OkxEngine {
                 continue;
             }
             if is_deferred(slot) {
-                if !submit_deferred {
+                if !writes.submit_deferred() {
                     continue;
                 }
                 self.submit_deferred_protection(slot, &registry, snapshot)
@@ -2915,6 +2965,9 @@ impl OkxEngine {
             let Some(level) = tightest_level(leg, position.side, group)? else {
                 continue;
             };
+            if !writes.maintain_algos() {
+                continue;
+            }
             if limits.is_none() {
                 limits = Some(self.context().await?.limits);
             }
@@ -2945,6 +2998,10 @@ impl OkxEngine {
             if !reasons.contains(reason) {
                 reasons.push(*reason);
             }
+        }
+        if !writes.maintain_algos() {
+            // The rows stay open, so the first sync with dispatch sends these cancels.
+            return Ok(Some(result));
         }
         let mut failure = None;
         for reason in reasons {

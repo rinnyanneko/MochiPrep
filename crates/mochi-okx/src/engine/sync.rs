@@ -32,6 +32,36 @@ fn dec_or_zero(value: Option<&Value>) -> Result<mochi_decimal::Dec, EngineError>
     dec(&truthy_text(value).unwrap_or_else(|| "0".into()))
 }
 
+/// Which protection changes a reconciliation may send to OKX. Order lookups and
+/// local bookkeeping happen in every mode.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum VenueWrites {
+    /// Deferred exits, covering algos and cleanup cancels.
+    All,
+    /// Covering algos and cleanup cancels, but no deferred exit.
+    NoDeferred,
+    /// Nothing: the readback only observes.
+    None,
+}
+
+impl VenueWrites {
+    pub(super) fn submit_deferred(self) -> bool {
+        self == Self::All
+    }
+
+    pub(super) fn maintain_algos(self) -> bool {
+        self != Self::None
+    }
+
+    /// A second pass after an exit never submits another deferred exit.
+    pub(super) fn without_deferred(self) -> Self {
+        match self {
+            Self::All => Self::NoDeferred,
+            other => other,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct PositionSnapshot {
     pub(super) open: Vec<Row>,
@@ -294,27 +324,31 @@ impl OkxEngine {
     /// Full reconciliation, inside the queue. On failure the error is kept and the account
     /// reads as unhealthy until a sync succeeds.
     pub(super) async fn sync_now(&self) -> Result<(), EngineError> {
-        self.sync_with_deferred_protection(true).await
+        self.sync_with(VenueWrites::All).await
     }
 
-    /// Read back an unanswered placement during an edit, or take a connection's
-    /// first snapshot, without dispatching deferred exits.
+    /// Read back an unanswered placement during an edit, or after a failed
+    /// deferred recovery, without dispatching deferred exits.
     pub(super) async fn sync_without_deferred_orders(&self) -> Result<(), EngineError> {
-        self.sync_with_deferred_protection(false).await
+        self.sync_with(VenueWrites::NoDeferred).await
     }
 
-    async fn sync_with_deferred_protection(
-        &self,
-        submit_deferred: bool,
-    ) -> Result<(), EngineError> {
-        let result = self.reconcile(submit_deferred).await;
+    /// A connection candidate's first snapshot. The current session still owns the
+    /// account's algos, and a failed connect must leave them as they were.
+    pub(super) async fn sync_read_only(&self) -> Result<(), EngineError> {
+        self.sync_with(VenueWrites::None).await
+    }
+
+    async fn sync_with(&self, writes: VenueWrites) -> Result<(), EngineError> {
+        let result = self.reconcile(writes).await;
         if let Err(error) = &result {
             self.state().sync_error = Some(error.to_string());
         }
         result
     }
 
-    async fn reconcile(&self, submit_deferred: bool) -> Result<(), EngineError> {
+    async fn reconcile(&self, writes: VenueWrites) -> Result<(), EngineError> {
+        let _ = self.finalize_unsent_rejections().await;
         let account_id = self.deps.account_id.clone();
         let (open, registry) = {
             let account_id = account_id.clone();
@@ -341,7 +375,11 @@ impl OkxEngine {
             self.dispatch().restore_order.is_some().then(|| {
                 EngineError::message("An unsent OKX protection order is awaiting recovery")
             });
-        for mut order in open.into_iter().filter(|o| !is_leg(o)) {
+        // An order refused before dispatch has nothing at OKX to look up.
+        for mut order in open
+            .into_iter()
+            .filter(|o| !is_leg(o) && !self.is_unsent_rejection(&o.id))
+        {
             let reached_exit = is_reached_exit(&order);
             let recovering = order.status == OrderStatus::Canceled
                 && order.reject_reason.as_deref() == Some(REACHED_EXIT_UNCONFIRMED);
@@ -389,7 +427,7 @@ impl OkxEngine {
         let pre_protection = snapshot.clone();
         let protection = match algos {
             Ok(algos) => {
-                self.reconcile_protection(algos, &mut snapshot, &mut usdt, submit_deferred)
+                self.reconcile_protection(algos, &mut snapshot, &mut usdt, writes)
                     .await
             }
             Err(error) => Err(error),

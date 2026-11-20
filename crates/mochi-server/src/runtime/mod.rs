@@ -1037,6 +1037,7 @@ async fn run(mut runtime: Runtime, mut inbox: mpsc::Receiver<Command>, mut live:
             // runtime closes the database before `shutdown` returns.
             runtime.set_playing(false);
             runtime.live.stop();
+            runtime.drain_unsent_orders_for_shutdown();
             // Mark shutdown before dropping pending reply senders.
             inbox.close();
             drop(runtime);

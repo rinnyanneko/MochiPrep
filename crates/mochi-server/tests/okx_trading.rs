@@ -290,8 +290,11 @@ async fn a_disarmed_okx_account_can_still_close_and_cancel_refusals_keep_node_te
     assert_eq!(
         (status, error),
         (
-            400,
-            json!({ "error": "The selected OKX position has changed. Refresh and try again." })
+            409,
+            json!({
+                "error": "The selected OKX position has changed. Refresh and try again.",
+                "code": "NOT_DISPATCHED",
+            })
         )
     );
     w.state.runtime.shutdown().await;
@@ -470,7 +473,7 @@ async fn selected_okx_market_and_limit_orders_can_reduce_an_exact_quantity() {
         send(&w.state, "POST", "/api/orders", Some(oversized))
             .await
             .0,
-        400
+        409
     );
     assert_eq!(w.okx.state().placed.len(), 1);
     let mut off_step = request.clone();
@@ -535,7 +538,7 @@ async fn selected_okx_market_and_limit_orders_can_reduce_an_exact_quantity() {
     request["clientOrderId"] = json!("stale-selection");
     assert_eq!(
         send(&w.state, "POST", "/api/orders", Some(request)).await.0,
-        400
+        409
     );
     assert_eq!(w.okx.state().placed.len(), 3);
     w.state.runtime.shutdown().await;
@@ -631,7 +634,8 @@ async fn manual_okx_close_never_substitutes_the_isolated_position_for_a_selected
         .unwrap()
         .insert("tradeId".into(), json!("99"));
     let body = json!({ "fraction": 1, "clientOrderId": "stale", "positionId": isolated["id"] });
-    assert_eq!(send(&w.state, "POST", &close_path, Some(body)).await.0, 400);
+    let (status, error) = send(&w.state, "POST", &close_path, Some(body)).await;
+    assert_eq!((status, &error["code"]), (409, &json!("NOT_DISPATCHED")));
     assert_eq!(w.okx.state().placed.len(), 1);
     w.state.runtime.sync_exchanges().await.unwrap();
     let (_, fresh) = send(&w.state, "GET", &path, None).await;
@@ -661,7 +665,8 @@ async fn manual_okx_close_never_substitutes_the_isolated_position_for_a_selected
             .insert("tradeId".into(), json!("100"));
         final_check.release();
     });
-    assert_eq!(status, 400);
+    // Refused on the final recheck, after the rejection was recorded.
+    assert_eq!(status, 409);
     assert_eq!(w.okx.state().placed.len(), 1);
     w.state.runtime.sync_exchanges().await.unwrap();
     let (_, fresh) = send(&w.state, "GET", &path, None).await;

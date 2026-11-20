@@ -388,13 +388,16 @@ impl Runtime {
             let _ = session.engine.retire();
             return Err(error);
         }
-        // The limits this connect brought, written only now that it is registering.
-        if let Err(error) = self.engine().store().save_account_profile(&account) {
-            let _ = session.engine.retire();
-            return Err(self.api_error(error));
-        }
         self.bump_session(&account.id);
         if let Err(error) = self.retire_exchange_session(&account.id) {
+            let _ = session.engine.retire();
+            self.invalidate(CONNECTED);
+            return Err(self.api_error(error));
+        }
+        // The limits this connect brought, written only once the old session's orders are
+        // finalized, so a failed replacement leaves the previous limits in place. The old
+        // session is already gone here, so a failure still publishes the disconnect.
+        if let Err(error) = self.engine().store().save_account_profile(&account) {
             let _ = session.engine.retire();
             self.invalidate(CONNECTED);
             return Err(self.api_error(error));
