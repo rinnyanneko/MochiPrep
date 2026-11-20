@@ -9,11 +9,10 @@
 #
 # Every dependency below is in Arch's official repositories, so makepkg -s installs them.
 #
-# Before makepkg: create the v$pkgver tag on GitHub, then replace the SKIP checksum with the real
-# sha256sum of the release tarball (`updpkgsums`).
+# The release workflow fills in the version and checksum and attaches this recipe to the release.
 
 pkgname=mochiprep
-pkgver=0.1.0
+pkgver=@PKGVER@
 pkgrel=1
 pkgdesc="Your cute little AI trading companion: local-first, BYOK paper and OKX perpetuals terminal"
 arch=('x86_64' 'aarch64')
@@ -31,8 +30,8 @@ makedepends=(
   'nodejs'        # >= 22.13
   'pnpm'          # any version: pnpm switches to the 12.21.0 that package.json pins
 )
-source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+source=("https://github.com/@GITHUB_REPOSITORY@/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
+sha256sums=('@SHA256@')
 
 _srcdir="MochiPrep-$pkgver"
 

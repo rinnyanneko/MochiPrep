@@ -58,6 +58,63 @@ jobs:
           fi
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
+  arch:
+    needs: draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: arch-release-${{ needs.draft.outputs.release-id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate Arch release files
+        run: node scripts/arch-release.mjs "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" "$RUNNER_TEMP/arch-release"
+      - name: Upload Arch release files to the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.draft.outputs.release-id }}
+        run: |
+          release="repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"
+          if [[ "$(gh api "$release" --jq .draft)" != true ]]; then
+            echo "::error::Release $RELEASE_ID is not a draft."
+            exit 1
+          fi
+          assets=$(gh api "$release/assets?per_page=100" --paginate \
+            --jq '.[] | [.name, .state, .id, .digest] | @tsv')
+          # Upload the archive first so the recipe always has a source. A retry reuses
+          # successful uploads and refuses to replace an asset with different bytes.
+          for asset in "$RUNNER_TEMP"/arch-release/*.tar.gz "$RUNNER_TEMP"/arch-release/PKGBUILD; do
+            name=${asset##*/}
+            read -r state id digest <<< "$(awk -F '\t' -v name="$name" '$1 == name { print $2, $3, $4 }' <<< "$assets")"
+            case "$state" in
+              uploaded)
+                checksum=$(sha256sum "$asset")
+                if [[ "$digest" == "sha256:${checksum%% *}" ]]; then continue; fi
+                echo "::error::The draft already has a different $name."
+                exit 1
+                ;;
+              starter)
+                # GitHub may leave an empty asset after a failed upload.
+                gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$id"
+                ;;
+              "") ;;
+              *)
+                echo "::error::Unexpected state '$state' for $name."
+                exit 1
+                ;;
+            esac
+            curl -fsS --proto '=https' -o /dev/null -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/octet-stream" \
+              --data-binary "@$asset" \
+              "https://uploads.github.com/$release/assets?name=$name"
+          done
+
   build:
     needs: draft
     # build.yml cannot exceed these permissions, and tauri-action needs write to upload assets.

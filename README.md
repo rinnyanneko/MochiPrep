@@ -20,7 +20,7 @@ Download the build for your system from the [latest GitHub release](https://gith
 
 ### Arch Linux
 
-The [PKGBUILD](packaging/arch/PKGBUILD) builds MochiPrep from the release source. It is not on the AUR yet. Download it into an empty folder, then run:
+Download the [latest PKGBUILD](https://github.com/rinnyanneko/MochiPrep/releases/latest/download/PKGBUILD) into an empty folder. GitHub Actions generates it for each release with a SHA-256 checksum for the matching source archive. The following commands build and install MochiPrep from the official release.
 
 ```bash
 sudo pacman -S --needed base-devel
@@ -46,7 +46,7 @@ The installers are not code-signed by Windows or Apple, so your system warns you
 
 - Windows, macOS and the Linux AppImage update from the tray. When a newer release exists, the menu shows an update item. Clicking it downloads, installs and restarts.
 - A `.deb` updates through your package manager. The tray only shows that a new version exists and opens the release page.
-- The Arch package updates when you run `makepkg -si` again with a newer PKGBUILD. The tray only shows that a new version exists.
+- To update the Arch package, download the latest release's PKGBUILD and run `makepkg -si` again. The tray shows when an update is available.
 - The launcher checks for a new version at start and every 24 hours. Turn this off with **Check for updates automatically** in Settings.
 
 ## Build from source
