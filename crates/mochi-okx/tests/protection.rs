@@ -3750,6 +3750,34 @@ async fn connection_readback_cannot_expire_a_marker_after_its_intent_was_restore
 }
 
 #[tokio::test]
+async fn a_stale_order_lookup_cannot_reopen_a_fill_saved_by_another_session() {
+    for response_has_fill in [false, true] {
+        let (h, entry) = resting_target().await;
+        let lookup = h.okx.hold_next("GET", "/trade/order");
+        let mut filled = entry.clone();
+        filled.status = OrderStatus::Filled;
+        filled.filled_quantity = entry.quantity.clone();
+        filled.avg_fill_price = Some("74500".into());
+        filled.updated_at += 1;
+        let (sync, ()) = tokio::join!(h.engine.sync_before_registration(), async {
+            tokio::time::timeout(std::time::Duration::from_secs(2), lookup.reached())
+                .await
+                .unwrap();
+            // The active session saved the updated order, but did not have a usable fill.
+            h.store(|store| store.save_order(&filled).unwrap());
+            if response_has_fill {
+                h.okx.state().fill_resting();
+            }
+            lookup.release();
+        });
+        sync.unwrap();
+        assert_eq!(h.order_row(&entry.id), filled);
+        let fills = h.store(|store| store.list_fills_by_order(&entry.id).unwrap());
+        assert_eq!(fills.len(), usize::from(response_has_fill));
+    }
+}
+
+#[tokio::test]
 async fn a_quote_from_before_the_fill_cannot_trigger_a_market_exit() {
     let (h, entry) = resting_target().await;
     let client_id = mochi_okx::to_cl_ord_id(&entry.client_order_id);

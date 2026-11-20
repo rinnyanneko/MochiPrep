@@ -178,56 +178,86 @@ impl OkxEngine {
             }
             return Ok(());
         };
-        let spec = registry.get(&order.symbol)?;
-        order.exchange_order_id = nullish_text(remote.get("ordId"));
-        order.reject_reason = None;
+        let observed = order.clone();
+        let mut row = observed.clone();
+        let spec = registry.get(&row.symbol)?;
+        row.exchange_order_id = nullish_text(remote.get("ordId"));
+        row.reject_reason = None;
         let filled = dec_or_zero(remote.get("accFillSz"))?.mul(&dec(&spec.venue_contract_value)?);
-        order.filled_quantity = filled.to_fixed();
+        row.filled_quantity = filled.to_fixed();
         if let Some(average) = truthy_text(remote.get("avgPx")) {
-            order.avg_fill_price = Some(average);
+            row.avg_fill_price = Some(average);
         }
-        order.updated_at = at;
+        row.updated_at = at;
         match remote.get("state").and_then(Value::as_str) {
-            Some("filled") => order.status = OrderStatus::Filled,
-            Some("canceled" | "mmp_canceled") => order.status = OrderStatus::Canceled,
+            Some("filled") => row.status = OrderStatus::Filled,
+            Some("canceled" | "mmp_canceled") => row.status = OrderStatus::Canceled,
             // Live or partly filled: still working on OKX.
-            _ => order.status = OrderStatus::Open,
+            _ => row.status = OrderStatus::Open,
         }
-        let execution = if filled.gt(&super::zero()) && order.agent_id.is_some() {
+        let execution = if filled.gt(&super::zero()) && row.agent_id.is_some() {
             super::history::execution_of(&remote)
         } else {
             None
         };
-        let row = order.clone();
         let attached =
             row.status != OrderStatus::Open && filled.gt(&super::zero()) && !row.reduce_only;
         // As in Node, the order is saved even when its fill then cannot be built.
-        let (fill, unbuilt) = match fill_of(order, &remote, &filled, at) {
+        let (fill, unbuilt) = match fill_of(&row, &remote, &filled, at) {
             Some(Ok(fill)) => (Some(fill), None),
             Some(Err(error)) => (None, Some(error)),
             None => (None, None),
         };
         // One transaction: a final status saved without its fill or protection rows would never
         // be looked at again, since only OPEN orders are synced.
-        self.rows(move |rows| {
-            rows.transaction(&mut || {
-                rows.save_order(&row)?;
-                if let Some((trade_id, at)) = &execution {
-                    rows.record_exchange_execution(&row.id, trade_id, *at)?;
-                }
-                if attached {
-                    record_attached(rows, &row, &filled, at)?;
-                }
-                if let Some(fill) = &fill {
-                    if rows.list_fills_by_order(&row.id)?.is_empty() {
-                        rows.insert_fill(fill)?;
+        let updated = self
+            .rows(move |rows| {
+                let mut current = None;
+                rows.transaction(&mut || {
+                    // While a connection candidate waits on OKX, the active session may
+                    // already confirm this order. Keep the newer local result in that case.
+                    current = rows.get_order(&row.id)?;
+                    let unchanged = current.as_ref() == Some(&observed);
+                    if unchanged {
+                        rows.save_order(&row)?;
+                        if let Some((trade_id, at)) = &execution {
+                            rows.record_exchange_execution(&row.id, trade_id, *at)?;
+                        }
+                        if attached {
+                            record_attached(rows, &row, &filled, at)?;
+                        }
                     }
+                    if let Some(fill) = &fill {
+                        // The other session may have stored a terminal state without a
+                        // usable fill. Complete it only if both views agree on the execution.
+                        let same_execution = current.as_ref().is_some_and(|saved| {
+                            saved.status == row.status
+                                && saved.filled_quantity == row.filled_quantity
+                                && row
+                                    .exchange_order_id
+                                    .as_deref()
+                                    .is_some_and(|id| !id.is_empty())
+                                && saved.exchange_order_id == row.exchange_order_id
+                        });
+                        if (unchanged || same_execution)
+                            && rows.list_fills_by_order(&row.id)?.is_empty()
+                        {
+                            rows.insert_fill(fill)?;
+                        }
+                    }
+                    Ok(())
+                })?;
+                if current.as_ref() == Some(&observed) {
+                    unbuilt.map_or(Ok(Some(row)), Err)
+                } else {
+                    Ok(current)
                 }
-                Ok(())
-            })?;
-            unbuilt.map_or(Ok(()), Err)
-        })
-        .await
+            })
+            .await?;
+        if let Some(updated) = updated {
+            *order = updated;
+        }
+        Ok(())
     }
 
     pub(super) async fn expire_unconfirmed_order(
