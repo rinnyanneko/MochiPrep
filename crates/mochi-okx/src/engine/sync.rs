@@ -202,7 +202,7 @@ impl OkxEngine {
                 let reason = if is_reached_exit(order) {
                     REACHED_EXIT_UNCONFIRMED
                 } else {
-                    "OKX has no record of this order"
+                    super::ORDER_NOT_ARRIVED
                 };
                 self.expire_unconfirmed_order(order, reason, at).await?;
             }
@@ -268,6 +268,16 @@ impl OkxEngine {
                                     .as_deref()
                                     .is_some_and(|id| !id.is_empty())
                                 && saved.exchange_order_id == row.exchange_order_id
+                                // A known average price must also agree, or the fill
+                                // would contradict the saved order.
+                                && saved.avg_fill_price.as_deref().is_none_or(|saved| {
+                                    row.avg_fill_price.as_deref().is_some_and(|seen| {
+                                        dec(saved)
+                                            .ok()
+                                            .zip(dec(seen).ok())
+                                            .is_some_and(|(saved, seen)| saved.eq_value(&seen))
+                                    })
+                                })
                         });
                         if (unchanged || same_execution)
                             && rows.list_fills_by_order(&row.id)?.is_empty()

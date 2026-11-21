@@ -391,6 +391,7 @@ impl Runtime {
         self.bump_session(&account.id);
         if let Err(error) = self.retire_exchange_session(&account.id) {
             let _ = session.engine.retire();
+            self.pause_after_failed_replacement(&account.id);
             self.invalidate(CONNECTED);
             return Err(self.api_error(error));
         }
@@ -399,6 +400,7 @@ impl Runtime {
         // session is already gone here, so a failure still publishes the disconnect.
         if let Err(error) = self.engine().store().save_account_profile(&account) {
             let _ = session.engine.retire();
+            self.pause_after_failed_replacement(&account.id);
             self.invalidate(CONNECTED);
             return Err(self.api_error(error));
         }
@@ -441,6 +443,21 @@ impl Runtime {
         }
         self.invalidate(CONNECTED);
         Ok(account)
+    }
+
+    /// The old session is gone and no new one registered, so the account is disconnected.
+    /// Its agents stop as on a disconnect; a later reconnect never restarts them unasked.
+    /// A pause that fails stays owed, which keeps them unscheduled until it succeeds.
+    fn pause_after_failed_replacement(&mut self, account_id: &str) {
+        match self.pause_account_agents(account_id, "OKX disconnected") {
+            Ok(()) => {
+                self.pause_owed.remove(account_id);
+            }
+            Err(error) => {
+                tracing::warn!(error = %error.message(), "could not pause agents after a failed reconnect");
+                self.pause_owed.insert(account_id.to_string());
+            }
+        }
     }
 
     /// Node's `disconnectExchange`. Also forgets saved credentials, so a disconnected account

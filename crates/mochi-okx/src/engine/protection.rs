@@ -2576,13 +2576,35 @@ impl OkxEngine {
                 .as_ref()
                 .is_some_and(|price| row.trigger_price.as_ref() != Some(price))
         {
+            let observed = row.clone();
             row.exchange_order_id = algo_id;
             row.reject_reason = None;
             if trigger.is_some() {
                 row.trigger_price = trigger;
             }
             row.updated_at = at;
-            self.save(row.clone()).await?;
+            let update = row.clone();
+            // A connection candidate reads while the active session can still retire this
+            // row. Save only over the row as read, so a stale copy never reopens it.
+            let current = self
+                .rows(move |rows| {
+                    let mut current = None;
+                    rows.transaction(&mut || {
+                        current = rows.get_order(&update.id)?;
+                        if current.as_ref() == Some(&observed) {
+                            rows.save_order(&update)?;
+                        }
+                        Ok(())
+                    })?;
+                    Ok(current.filter(|current| *current != observed))
+                })
+                .await?;
+            if let Some(current) = current {
+                *row = current;
+                if row.status != OrderStatus::Open {
+                    return Ok(());
+                }
+            }
         }
         match alive.iter_mut().find(|(i, _)| *i == index) {
             Some(entry) => entry.1 = algo.clone(),
@@ -2641,7 +2663,16 @@ impl OkxEngine {
                 } else {
                     refreshed?
                 };
-                *balance = self.deps.client.get_usdt_balance().await?;
+                let post_exit_balance = self.deps.client.get_usdt_balance().await?;
+                // The balance must describe the positions published with it. A change
+                // during the balance read leaves both stale for the next sync.
+                let after_balance = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
+                if snapshot.held != after_balance.held {
+                    return Err(EngineError::message(
+                        "Position changed while reading the post-exit balance",
+                    ));
+                }
+                *balance = post_exit_balance;
                 snapshot.post_exit_unverified = false;
                 self.reconcile_protection_pass(refreshed, snapshot, writes.without_deferred())
                     .await?

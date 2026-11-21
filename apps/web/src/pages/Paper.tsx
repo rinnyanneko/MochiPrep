@@ -141,13 +141,14 @@ function readPendingReductions(key: string, accountId: string): PendingReduction
   return [...pending.values()];
 }
 
-function persistPendingReduction(key: string, pending: PendingReduction, clear = false) {
+/** Saves (or clears) a pending reduction. Answers the store that holds it, or null. */
+function persistPendingReduction(key: string, pending: PendingReduction, clear = false): 'localStorage' | 'sessionStorage' | null {
   const { request } = pending;
   const requestKey = `${key}/${request.clientOrderId}`;
   const saved = clear ? undefined : readPendingReductions(key, request.accountId)
     .find((item) => item.request.clientOrderId === request.clientOrderId);
   const entry = { request, lookupId: saved?.lookupId ?? pending.lookupId };
-  let persisted = false;
+  let persisted: 'localStorage' | 'sessionStorage' | null = null;
   for (const name of ['localStorage', 'sessionStorage'] as const) {
     try {
       const storage = window[name];
@@ -158,7 +159,7 @@ function persistPendingReduction(key: string, pending: PendingReduction, clear =
         if (!current || (entry.lookupId && !current.lookupId)) {
           storage.setItem(requestKey, JSON.stringify(entry));
         }
-        persisted = true;
+        persisted = name;
       }
       // Remove matching legacy entries once per-request storage has succeeded.
       if (parsePendingReduction(storage.getItem(key), request.accountId)?.request.clientOrderId === request.clientOrderId) {
@@ -326,9 +327,15 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
       lookupId = readPendingReductions(pendingKey, account.id)
         .find((item) => item.request.clientOrderId === request.clientOrderId)?.lookupId;
     }
-    // Persist before sending so a reload while in flight can use the same idempotency key.
-    if (selectedReduction && !lookupId && !persistPendingReduction(pendingKey, { request })) {
-      useApp.getState().toast('error', 'Browser storage is required to confirm this reduction.');
+    // Persist before sending so a reload or a new tab can use the same idempotency key.
+    // Session storage ends with its tab, so it cannot recover a lost answer from another one.
+    // A retry of an already stored request reuses its key, so it may still be sent.
+    const stored = selectedReduction && readPendingReductions(pendingKey, account.id)
+      .some((item) => item.request.clientOrderId === request.clientOrderId);
+    if (selectedReduction && !lookupId && !stored && persistPendingReduction(pendingKey, { request }) !== 'localStorage') {
+      // Only the entry this attempt just wrote is removed: nothing was sent under it.
+      persistPendingReduction(pendingKey, { request }, true);
+      useApp.getState().toast('error', 'Browser storage that survives closing this tab is required to confirm this reduction.');
       return;
     }
     setSubmitting(true);

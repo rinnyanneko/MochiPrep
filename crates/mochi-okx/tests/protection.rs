@@ -3257,54 +3257,72 @@ async fn a_deferred_target_does_not_use_fill_record_time_to_rule_out_late_adl() 
 
 #[tokio::test]
 async fn a_deferred_target_accounts_for_adl_after_the_last_ordinary_trade() {
-    let (h, entry) = resting_target().await;
-    {
-        let mut okx = h.okx.state();
-        okx.fill_resting();
-        let position = okx.position.as_mut().unwrap();
-        let later_trade = position["tradeId"]
-            .as_str()
-            .unwrap()
-            .parse::<u64>()
-            .unwrap()
-            + 1;
-        position.insert("tradeId".into(), json!(later_trade.to_string()));
-        position.insert("pos".into(), json!("0.2"));
-        position.insert("uTime".into(), json!("1800000000002"));
-        // The position also held 0.1 older contracts. ADL lowers it from 0.3 to 0.2,
-        // which still reconciles arithmetically with the two recent buys.
-        okx.recent_fills.extend([
-            row(json!({
+    for with_adl in [true, false] {
+        let (h, entry) = resting_target().await;
+        {
+            let mut okx = h.okx.state();
+            okx.fill_resting();
+            let position = okx.position.as_mut().unwrap();
+            let later_trade = position["tradeId"]
+                .as_str()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap()
+                + 1;
+            position.insert("tradeId".into(), json!(later_trade.to_string()));
+            position.insert("pos".into(), json!("0.2"));
+            position.insert("uTime".into(), json!("1800000000002"));
+            // The position also held 0.1 older contracts. ADL lowers it from 0.3 to 0.2,
+            // which still reconciles arithmetically with the two recent buys.
+            okx.recent_fills.push(row(json!({
                 "instId": "BTC-USDT-SWAP", "ordId": "later-entry",
                 "tradeId": later_trade.to_string(), "fillTime": "1800000000001",
                 "ts": "1800000000002",
                 "posSide": "net", "subType": "3", "fillSz": "0.1",
-            })),
-            row(json!({
-                "instId": "BTC-USDT-SWAP", "ordId": "adl",
-                "tradeId": "-1", "fillTime": "1800000000002",
-                "posSide": "net", "subType": "125", "fillSz": "0.1",
-            })),
-        ]);
+            })));
+            if with_adl {
+                okx.recent_fills.push(row(json!({
+                    "instId": "BTC-USDT-SWAP", "ordId": "adl",
+                    "tradeId": "-1", "fillTime": "1800000000002",
+                    "posSide": "net", "subType": "125", "fillSz": "0.1",
+                })));
+            }
+        }
+        // The later buy is MochiPrep's own isolated order, so only the ADL row can
+        // break the interval.
+        let mut later = entry.clone();
+        later.id = "later-entry-row".into();
+        later.client_order_id = "later-entry".into();
+        later.status = OrderStatus::Filled;
+        later.exchange_order_id = Some("later-entry".into());
+        h.store(|s| s.insert_order(&later).unwrap());
+        h.advance(1);
+        *h.prices.lock().unwrap() = ("78999".into(), "79001".into(), "79000".into());
+        let placed = h.count("POST /api/v5/trade/order");
+        h.sync().await;
+        assert_eq!(h.count("POST /api/v5/trade/order"), placed);
+        assert_eq!(h.view().position.quantity, "0.002");
+        let target = h.order_row(&format!("{}:deferred:tp", entry.id));
+        if with_adl {
+            assert_eq!(target.status, OrderStatus::Canceled);
+            assert!(
+                target
+                    .reject_reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("position lifetime")),
+                "{:?}",
+                target.reject_reason
+            );
+        } else {
+            // The update time is still unexplained, so the target waits for evidence.
+            assert_eq!(
+                target.status,
+                OrderStatus::Open,
+                "{:?}",
+                target.reject_reason
+            );
+        }
     }
-    h.advance(1);
-    *h.prices.lock().unwrap() = ("78999".into(), "79001".into(), "79000".into());
-    let placed = h.count("POST /api/v5/trade/order");
-    h.sync().await;
-    assert_eq!(h.count("POST /api/v5/trade/order"), placed);
-    assert_eq!(h.view().position.quantity, "0.002");
-    // The ordinary fill times alone already precede the update, so only reading the
-    // ADL row retires the target. Ignoring it would leave the target open.
-    let target = h.order_row(&format!("{}:deferred:tp", entry.id));
-    assert_eq!(target.status, OrderStatus::Canceled);
-    assert!(
-        target
-            .reject_reason
-            .as_deref()
-            .is_some_and(|reason| reason.contains("position lifetime")),
-        "{:?}",
-        target.reject_reason
-    );
 }
 
 #[tokio::test]
@@ -3777,13 +3795,19 @@ async fn connection_readback_cannot_expire_a_marker_after_its_intent_was_restore
 
 #[tokio::test]
 async fn a_stale_order_lookup_cannot_reopen_a_fill_saved_by_another_session() {
-    for response_has_fill in [false, true] {
+    // The fake fills a resting order at 75000. A saved order at another price must not
+    // receive a fill that contradicts it.
+    for (response_has_fill, saved_price, backfilled) in [
+        (false, "74500", false),
+        (true, "74500", false),
+        (true, "75000.0", true),
+    ] {
         let (h, entry) = resting_target().await;
         let lookup = h.okx.hold_next("GET", "/trade/order");
         let mut filled = entry.clone();
         filled.status = OrderStatus::Filled;
         filled.filled_quantity = entry.quantity.clone();
-        filled.avg_fill_price = Some("74500".into());
+        filled.avg_fill_price = Some(saved_price.into());
         filled.updated_at += 1;
         let (sync, ()) = tokio::join!(h.engine.sync_before_registration(), async {
             tokio::time::timeout(std::time::Duration::from_secs(2), lookup.reached())
@@ -3799,7 +3823,7 @@ async fn a_stale_order_lookup_cannot_reopen_a_fill_saved_by_another_session() {
         sync.unwrap();
         assert_eq!(h.order_row(&entry.id), filled);
         let fills = h.store(|store| store.list_fills_by_order(&entry.id).unwrap());
-        assert_eq!(fills.len(), usize::from(response_has_fill));
+        assert_eq!(fills.len(), usize::from(backfilled));
     }
 }
 
@@ -4770,4 +4794,122 @@ async fn a_connection_readback_before_registration_sends_no_algo_cancel() {
     h.sync().await;
     assert_eq!(h.count("POST /api/v5/trade/cancel-algos"), attempts + 1);
     assert_eq!(h.algo_state(&old.id), "canceled");
+}
+
+#[tokio::test]
+async fn a_position_change_during_the_post_exit_balance_read_keeps_the_snapshot_stale() {
+    let (h, entry) = resting_target().await;
+    h.okx.state().fill_resting();
+    let reopened = h.okx.state().position.clone();
+    h.advance(1);
+    *h.prices.lock().unwrap() = ("78099".into(), "78101".into(), "78100".into());
+    let first = h.okx.hold_next("GET", "/account/balance");
+    let post_exit = h.okx.hold_next("GET", "/account/balance");
+    let engine = h.engine.clone();
+    let sync = tokio::spawn(async move { engine.sync().await });
+    let timeout = std::time::Duration::from_secs(2);
+    tokio::time::timeout(timeout, first.reached())
+        .await
+        .unwrap();
+    first.release();
+    tokio::time::timeout(timeout, post_exit.reached())
+        .await
+        .unwrap();
+    // The exit closed the position, and a new one opens while the balance is read.
+    assert!(h.okx.state().position.is_none());
+    h.okx.state().position = reopened;
+    post_exit.release();
+    let error = sync.await.unwrap().unwrap_err();
+    assert!(error.to_string().contains("post-exit balance"), "{error}");
+    assert!(!h.engine.healthy());
+    assert_eq!(h.okx.state().placed.len(), 2);
+    assert_eq!(
+        h.order_row(&format!("{}:deferred:tp", entry.id)).status,
+        OrderStatus::Filled
+    );
+
+    h.sync().await;
+    assert!(h.engine.healthy());
+    assert_eq!(h.okx.state().placed.len(), 2);
+}
+
+#[tokio::test]
+async fn a_held_rejection_survives_a_candidate_expiring_the_unsent_order() {
+    let h = Harness::with_position().await;
+    let mut request = order();
+    request.client_order_id = "refused-then-expired".into();
+    request.side = OrderSide::Sell;
+    request.reduce_only = Some(true);
+    request.stop_loss = None;
+    let position_id = h.engine.positions()[0].position.id.clone();
+    let first_read = h.okx.hold_next("GET", "/account/positions");
+    let final_read = h.okx.hold_next("GET", "/account/positions");
+    let (result, ()) = tokio::join!(h.engine.reduce_position(request, position_id), async {
+        let timeout = std::time::Duration::from_secs(2);
+        tokio::time::timeout(timeout, first_read.reached())
+            .await
+            .unwrap();
+        first_read.release();
+        tokio::time::timeout(timeout, final_read.reached())
+            .await
+            .unwrap();
+        h.okx
+            .state()
+            .position
+            .as_mut()
+            .unwrap()
+            .insert("pos".into(), json!("0.05"));
+        h.store(|s| {
+            s.connection()
+                .execute_batch(
+                    "CREATE TRIGGER refuse_rejection BEFORE UPDATE ON orders
+                     WHEN NEW.status = 'REJECTED' BEGIN SELECT RAISE(ABORT, 'rejection refused'); END",
+                )
+                .unwrap()
+        });
+        final_read.release();
+    });
+    assert!(result.is_err());
+    let id = h
+        .store(|s| s.get_order_by_client_id(ACCOUNT, "refused-then-expired"))
+        .unwrap()
+        .unwrap()
+        .id;
+
+    // The store recovers, and a connection candidate that cannot see the proof expires
+    // the order before the old engine gets another turn.
+    h.store(|s| {
+        s.connection()
+            .execute_batch("DROP TRIGGER refuse_rejection")
+            .unwrap()
+    });
+    h.advance(60_000);
+    let candidate = restart(&h);
+    candidate.sync_before_registration().await.unwrap();
+    let expired = h.order_row(&id);
+    assert_eq!(expired.status, OrderStatus::Canceled);
+    assert_eq!(
+        expired.reject_reason.as_deref(),
+        Some("OKX has no record of this order")
+    );
+
+    let retired = h.engine.retire();
+    assert_eq!(retired.len(), 1);
+    let local = h.store.inner.lock().unwrap();
+    let finalized = retired[0]
+        .finalize(
+            &Rows {
+                store: &local.0,
+                instruments: &local.1,
+            },
+            ACCOUNT,
+            START,
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(finalized.status, OrderStatus::Rejected);
+    assert_eq!(
+        finalized.reject_reason.as_deref(),
+        Some("The selected OKX position has changed. Refresh and try again.")
+    );
 }

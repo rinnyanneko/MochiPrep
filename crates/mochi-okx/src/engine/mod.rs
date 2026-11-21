@@ -39,6 +39,8 @@ use crate::ids::{to_algo_cl_ord_id, to_cl_ord_id, to_inst_id};
 const MAX_SNAPSHOT_AGE_MS: i64 = 30_000;
 /// An order OKX still has no record of after this long never arrived.
 const NEVER_ARRIVED_AFTER_MS: i64 = 60_000;
+/// Why a readback closes an order OKX has no record of.
+pub(super) const ORDER_NOT_ARRIVED: &str = "OKX has no record of this order";
 const EQUITY_EVERY_MS: i64 = 60_000;
 
 /// The rows the engine reads and writes, which are the paper tables. `list_open_orders` must return
@@ -478,7 +480,13 @@ impl UnsentOrder {
                 order.reject_reason = Some(EngineError::SessionRetired.to_string());
                 order.updated_at = now;
             }
-            Self::Rejection { reason, .. } if order.status == OrderStatus::Open => {
+            // A connection candidate cannot see this proof, so its readback may already
+            // have expired the never-sent order. The refusal is the accurate record.
+            Self::Rejection { reason, .. }
+                if order.status == OrderStatus::Open
+                    || (order.status == OrderStatus::Canceled
+                        && order.reject_reason.as_deref() == Some(ORDER_NOT_ARRIVED)) =>
+            {
                 order.status = OrderStatus::Rejected;
                 order.reject_reason = Some(reason.clone());
                 order.updated_at = now;

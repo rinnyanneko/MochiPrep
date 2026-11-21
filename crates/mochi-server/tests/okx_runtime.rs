@@ -2520,3 +2520,55 @@ async fn reconnect_keeps_an_unanswered_market_target_and_allows_manual_exit() {
     assert_eq!(target.status, mochi_domain::OrderStatus::Open);
     w.rt.shutdown().await;
 }
+
+/// A reconnect that retires the old session but cannot save its profile leaves the account
+/// disconnected, so its agents stop as on a disconnect and a later connect never restarts them.
+#[tokio::test]
+async fn a_failed_session_replacement_pauses_the_accounts_agents() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    let agent = w.agent_on(&account.id, "AUTO").await;
+    let id = agent.clone();
+    w.rt.call(move |r| r.start_agent(&id).unwrap())
+        .await
+        .unwrap();
+    let input: OkxConnectInput = validate::parse_body(
+        Schema::OkxConnect,
+        &json!({
+            "apiKey": API_KEY, "secretKey": SECRET_KEY, "passphrase": PASSPHRASE,
+            "name": "OKX", "environment": "OKX_LIVE", "remember": false,
+        }),
+    )
+    .unwrap();
+    let hold = w.okx.hold_next("GET", "/account/balance");
+    let (again, ()) = tokio::join!(w.rt.connect_okx(input, None), async {
+        hold.reached().await;
+        w.rt.call(|r| {
+            r.connection()
+                .execute_batch(
+                    "CREATE TRIGGER refuse_profile BEFORE UPDATE OF live_limits ON accounts
+                     BEGIN SELECT RAISE(ABORT, 'profile refused'); END",
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+        hold.release();
+    });
+    assert!(again.is_err());
+    assert_eq!(w.statuses().await[0]["connected"], false);
+    let id = agent.clone();
+    let running: bool =
+        w.rt.call(move |r| {
+            r.connection()
+                .query_row("SELECT running FROM agents WHERE id = ?", [&id], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert!(!running);
+    w.rt.shutdown().await;
+}
