@@ -217,7 +217,7 @@ impl OkxEngine {
                 let reason = if is_reached_exit(order) {
                     REACHED_EXIT_UNCONFIRMED
                 } else {
-                    super::ORDER_NOT_ARRIVED
+                    super::ORDER_UNCONFIRMED
                 };
                 self.expire_unconfirmed_order(order, reason, at).await?;
             }
@@ -382,11 +382,13 @@ impl OkxEngine {
                 // A locally retired target stays lookup-only. Protection can
                 // wait on matching fill evidence while lookup catches up.
                 const RECOVERY_BATCH: usize = 10;
-                pending.extend(rows.list_canceled_orders_for_recovery(
-                    &account_id,
-                    REACHED_EXIT_UNCONFIRMED,
-                    RECOVERY_BATCH,
-                )?);
+                for reason in [REACHED_EXIT_UNCONFIRMED, super::ORDER_UNCONFIRMED] {
+                    pending.extend(rows.list_canceled_orders_for_recovery(
+                        &account_id,
+                        reason,
+                        RECOVERY_BATCH,
+                    )?);
+                }
                 Ok((pending, Registry(rows.instruments())))
             })
             .await?
@@ -406,12 +408,27 @@ impl OkxEngine {
             .filter(|o| !is_leg(o) && !self.is_unsent_rejection(&o.id))
         {
             let reached_exit = is_reached_exit(&order);
-            let recovering = order.status == OrderStatus::Canceled
-                && order.reject_reason.as_deref() == Some(REACHED_EXIT_UNCONFIRMED);
+            let recovering = (order.status == OrderStatus::Canceled)
+                .then_some(order.reject_reason.as_deref())
+                .flatten()
+                .filter(|reason| {
+                    [REACHED_EXIT_UNCONFIRMED, super::ORDER_UNCONFIRMED].contains(reason)
+                })
+                .map(|reason| {
+                    if reason == REACHED_EXIT_UNCONFIRMED {
+                        REACHED_EXIT_UNCONFIRMED
+                    } else {
+                        super::ORDER_UNCONFIRMED
+                    }
+                });
+            let mut answered = false;
             match self.sync_order(&mut order, &registry).await {
-                Ok(()) => {}
+                Ok(()) => answered = true,
                 Err(error @ EngineError::Stopped) => return Err(error),
-                Err(error @ EngineError::Okx(_)) if !reached_exit => return Err(error),
+                // A recovery lookup must not stop the readback of orders still open.
+                Err(error @ EngineError::Okx(_)) if !reached_exit && recovering.is_none() => {
+                    return Err(error)
+                }
                 Err(error) => {
                     order_error.get_or_insert(EngineError::Message(format!(
                         "Could not record OKX order {}: {error}",
@@ -419,17 +436,33 @@ impl OkxEngine {
                     )));
                 }
             }
-            if recovering {
+            if let Some(reason) = recovering {
+                let checked_at = self.now();
+                // Only a lookup that OKX answered with "no such order" can end the
+                // recovery: any record of the order would have changed this row. The
+                // window starts at the local expiry, the row's last update.
+                if answered
+                    && order.status == OrderStatus::Canceled
+                    && order.reject_reason.as_deref() == Some(super::ORDER_UNCONFIRMED)
+                    && checked_at.saturating_sub(order.updated_at) >= super::UNCONFIRMED_LOOKUP_MS
+                {
+                    // Long past any delay in OKX's records: OKX never had this order.
+                    if let Err(error) = self
+                        .expire_unconfirmed_order(&mut order, super::ORDER_NOT_ARRIVED, checked_at)
+                        .await
+                    {
+                        if matches!(error, EngineError::Stopped) {
+                            return Err(error);
+                        }
+                        order_error.get_or_insert(error);
+                    }
+                    continue;
+                }
                 // Move even an unanswered lookup behind orders that have not had a turn.
                 // Keep this checkpoint across restarts without changing the order's status.
-                let checked_at = self.now();
                 if let Err(error) = self
                     .rows(move |rows| {
-                        Ok(rows.mark_order_recovery_checked(
-                            &order.id,
-                            REACHED_EXIT_UNCONFIRMED,
-                            checked_at,
-                        )?)
+                        Ok(rows.mark_order_recovery_checked(&order.id, reason, checked_at)?)
                     })
                     .await
                 {

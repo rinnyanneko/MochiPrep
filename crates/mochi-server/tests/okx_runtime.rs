@@ -2521,19 +2521,39 @@ async fn reconnect_keeps_an_unanswered_market_target_and_allows_manual_exit() {
     w.rt.shutdown().await;
 }
 
-/// A reconnect that retires the old session but cannot save its profile leaves the account
-/// disconnected, so its agents stop as on a disconnect and a later connect never restarts them.
+/// A reconnect whose new limits cannot be saved changes nothing: the old session stays
+/// connected with its agents and limits, so its positions can still be closed through it.
 #[tokio::test]
-async fn a_failed_session_replacement_pauses_the_accounts_agents() {
+async fn a_reconnect_that_cannot_save_its_limits_keeps_the_current_session() {
     let w = World::new().await;
     let account = w.connect("OKX_LIVE").await;
     w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.place(&account.id).await;
     let agent = w.agent_on(&account.id, "AUTO").await;
     let id = agent.clone();
     w.rt.call(move |r| r.start_agent(&id).unwrap())
         .await
         .unwrap();
-    let input: OkxConnectInput = validate::parse_body(
+    let id = account.id.clone();
+    let limits = move |w: &World| {
+        let id = id.clone();
+        let rt = w.rt.clone();
+        async move {
+            rt.call(move |r| {
+                r.engine()
+                    .store()
+                    .get_account(&id)
+                    .unwrap()
+                    .unwrap()
+                    .live_limits
+                    .unwrap()
+            })
+            .await
+            .unwrap()
+        }
+    };
+    let before = limits(&w).await;
+    let mut input: OkxConnectInput = validate::parse_body(
         Schema::OkxConnect,
         &json!({
             "apiKey": API_KEY, "secretKey": SECRET_KEY, "passphrase": PASSPHRASE,
@@ -2541,6 +2561,7 @@ async fn a_failed_session_replacement_pauses_the_accounts_agents() {
         }),
     )
     .unwrap();
+    input.limits.max_quote_age_sec = before.max_quote_age_sec + 1.0;
     let hold = w.okx.hold_next("GET", "/account/balance");
     let (again, ()) = tokio::join!(w.rt.connect_okx(input, None), async {
         hold.reached().await;
@@ -2557,18 +2578,28 @@ async fn a_failed_session_replacement_pauses_the_accounts_agents() {
         hold.release();
     });
     assert!(again.is_err());
-    assert_eq!(w.statuses().await[0]["connected"], false);
-    let id = agent.clone();
-    let running: bool =
-        w.rt.call(move |r| {
-            r.connection()
-                .query_row("SELECT running FROM agents WHERE id = ?", [&id], |row| {
-                    row.get(0)
-                })
-                .unwrap()
-        })
-        .await
-        .unwrap();
-    assert!(!running);
+    assert_eq!(w.statuses().await[0]["connected"], true);
+    assert_eq!(w.statuses().await[0]["armed"], true);
+    assert_eq!(limits(&w).await, before);
+    assert!(w.agent(&agent).await.running);
+
+    let (_, positions) = w
+        .send(
+            "GET",
+            &format!("/api/accounts/{}/positions", account.id),
+            None,
+        )
+        .await;
+    let placed = w.placed();
+    let (status, result) = w
+        .send(
+            "POST",
+            &format!("/api/positions/{}/BTCUSDT/close", account.id),
+            Some(json!({ "fraction": 1, "clientOrderId": "close-after-failed-reconnect", "positionId": positions[0]["id"] })),
+        )
+        .await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(w.placed(), placed + 1);
+    assert!(w.okx.state().position.is_none());
     w.rt.shutdown().await;
 }

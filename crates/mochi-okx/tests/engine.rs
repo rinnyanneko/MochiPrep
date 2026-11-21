@@ -731,12 +731,85 @@ async fn keeps_an_order_that_never_arrived_open_then_closes_it_once_okx_has_no_r
     h.backdate(&result.order.id, 61_000);
     h.engine.sync().await.unwrap();
     let row = h.store(|s| s.get_order(&result.order.id).unwrap().unwrap());
+    // A local expiry, not an OKX cancellation: lookup continues.
+    assert_eq!(row.status, OrderStatus::Canceled);
+    assert_eq!(
+        row.reject_reason.as_deref(),
+        Some("OKX has no record of this order yet; check its outcome in OKX")
+    );
+    let lookups = || {
+        h.okx
+            .state()
+            .calls
+            .iter()
+            .filter(|c| *c == "GET /api/v5/trade/order")
+            .count()
+    };
+    let before = lookups();
+    h.engine.sync().await.unwrap();
+    assert_eq!(lookups(), before + 1);
+
+    // A failed lookup three days after the expiry does not end the recovery.
+    let expired_days_ago = |h: &Harness| {
+        h.store(|s| {
+            s.connection()
+                .execute(
+                    "UPDATE orders SET updated_at=? WHERE id=?",
+                    (START - 3 * 24 * 60 * 60 * 1_000, result.order.id.clone()),
+                )
+                .unwrap()
+        })
+    };
+    expired_days_ago(&h);
+    h.okx.state().lookup_error_code = Some("50001".into());
+    let _ = h.engine.sync().await;
+    let row = h.store(|s| s.get_order(&result.order.id).unwrap().unwrap());
+    assert_eq!(
+        row.reject_reason.as_deref(),
+        Some("OKX has no record of this order yet; check its outcome in OKX")
+    );
+    h.okx.state().lookup_error_code = None;
+
+    // Three days after the expiry, OKX still has no record: the order never arrived.
+    h.engine.sync().await.unwrap();
+    let row = h.store(|s| s.get_order(&result.order.id).unwrap().unwrap());
     assert_eq!(row.status, OrderStatus::Canceled);
     assert_eq!(
         row.reject_reason.as_deref(),
         Some("OKX has no record of this order")
     );
+    let before = lookups();
+    h.engine.sync().await.unwrap();
+    assert_eq!(lookups(), before);
     assert!(h.placed().is_empty());
+}
+
+#[tokio::test]
+async fn an_order_expired_locally_returns_when_okx_later_reports_it_live() {
+    let h = connect_default().await;
+    h.arm();
+    h.okx.state().rest_limit_orders = true;
+    let placed = h
+        .engine
+        .place_order(resting_entry("BTCUSDT"))
+        .await
+        .unwrap()
+        .order;
+    assert_eq!(placed.status, OrderStatus::Open);
+    // OKX answers "order does not exist" for longer than the arrival window.
+    h.okx.state().lookup_error_code = Some("51603".into());
+    h.backdate(&placed.id, 61_000);
+    h.engine.sync().await.unwrap();
+    let row = h.store(|s| s.get_order(&placed.id).unwrap().unwrap());
+    assert_eq!(row.status, OrderStatus::Canceled);
+
+    h.okx.state().lookup_error_code = None;
+    h.engine.sync().await.unwrap();
+    let row = h.store(|s| s.get_order(&placed.id).unwrap().unwrap());
+    assert_eq!(row.status, OrderStatus::Open);
+    assert!(row.exchange_order_id.is_some());
+    assert_eq!(row.reject_reason, None);
+    assert_eq!(h.placed().len(), 1);
 }
 
 /// An order younger than a minute that OKX does not know is left alone: it may still arrive.

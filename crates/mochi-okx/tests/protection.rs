@@ -4900,7 +4900,7 @@ async fn a_held_rejection_survives_a_candidate_expiring_the_unsent_order() {
     assert_eq!(expired.status, OrderStatus::Canceled);
     assert_eq!(
         expired.reject_reason.as_deref(),
-        Some("OKX has no record of this order")
+        Some("OKX has no record of this order yet; check its outcome in OKX")
     );
 
     let retired = h.engine.retire();
@@ -4978,4 +4978,94 @@ async fn a_replaced_stop_is_reopened_only_while_okx_still_lists_it_live() {
             assert_eq!(h.engine.protection_of("BTCUSDT"), stop("74000"));
         }
     }
+}
+
+#[tokio::test]
+async fn a_refusal_is_not_reported_as_not_dispatched_once_the_key_may_be_in_use() {
+    for retire in [false, true] {
+        let h = Harness::with_position().await;
+        let mut request = order();
+        request.client_order_id = "shared-reduction-key".into();
+        request.side = OrderSide::Sell;
+        request.reduce_only = Some(true);
+        request.stop_loss = None;
+        let position_id = h.engine.positions()[0].position.id.clone();
+        let first_read = h.okx.hold_next("GET", "/account/positions");
+        let (result, ()) = tokio::join!(h.engine.reduce_position(request, position_id), async {
+            tokio::time::timeout(std::time::Duration::from_secs(2), first_read.reached())
+                .await
+                .unwrap();
+            if retire {
+                // A reconnect replaced this session while it waited on OKX.
+                let _ = h.engine.retire();
+            } else {
+                // Another session already filled an order under the same key.
+                let mut used = h.order_row(&h.protection_rows()[0].id);
+                used.id = "successor-order".into();
+                used.client_order_id = "shared-reduction-key".into();
+                used.status = OrderStatus::Filled;
+                h.store(|s| s.insert_order(&used).unwrap());
+            }
+            // That order closed the position the refused request selected.
+            h.okx.state().position = None;
+            first_read.release();
+        });
+        let error = result.unwrap_err();
+        assert!(
+            matches!(error, EngineError::Message(_)),
+            "retire={retire}: {error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "The selected OKX position has changed. Refresh and try again."
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_system_fill_between_the_parent_fills_does_not_halve_the_target() {
+    let (h, entry) = resting_target().await;
+    {
+        let mut okx = h.okx.state();
+        okx.fill_resting();
+        let order = okx
+            .orders
+            .get_mut(&mochi_okx::to_cl_ord_id(&entry.client_order_id))
+            .unwrap();
+        order.insert("tradeId".into(), json!("2"));
+        let ord_id = order["ordId"].clone();
+        let position = okx.position.as_mut().unwrap();
+        position.insert("tradeId".into(), json!("2"));
+        position.insert("pos".into(), json!("0.1"));
+        position.insert("uTime".into(), json!("1800000002000"));
+        okx.recent_fills.clear();
+        // Cross-margin ADL on the same pair sits between the two isolated entry fills.
+        // The isolated position still holds both fills' 0.1 contracts.
+        for (id, order_id, kind, size, at) in [
+            ("1", ord_id.clone(), "3", "0.05", "1800000001000"),
+            ("-1", json!("adl"), "125", "0.3", "1800000001500"),
+            ("2", ord_id, "3", "0.05", "1800000002000"),
+        ] {
+            okx.recent_fills.push(row(json!({
+                "instId": "BTC-USDT-SWAP", "ordId": order_id, "tradeId": id,
+                "fillTime": at, "ts": at,
+                "posSide": "net", "subType": kind, "fillSz": size,
+            })));
+        }
+    }
+    h.sync().await;
+    // Counting only the second fill would send a target for half the position.
+    assert!(h.algo_placed().is_empty());
+    let id = format!("{}:deferred:tp", entry.id);
+    h.advance(10_000);
+    h.sync().await;
+    assert!(h.algo_placed().is_empty());
+    let target = h.order_row(&id);
+    assert_ne!(target.quantity, "0.0005");
+    assert_eq!(
+        target.status,
+        OrderStatus::Canceled,
+        "{:?}",
+        target.reject_reason
+    );
 }

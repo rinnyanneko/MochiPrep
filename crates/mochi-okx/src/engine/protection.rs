@@ -303,8 +303,14 @@ struct PositionHistory<'a> {
 }
 
 enum EntryInterval {
-    Different,
-    Continuous { own_reduction: Dec },
+    /// The position changed since this fill. `system` marks a break by an ADL or
+    /// liquidation fill, whose margin mode OKX does not state.
+    Different {
+        system: bool,
+    },
+    Continuous {
+        own_reduction: Dec,
+    },
 }
 
 impl PositionHistory<'_> {
@@ -348,7 +354,7 @@ impl PositionHistory<'_> {
             if row.get("instId").and_then(Value::as_str) != Some(self.inst_id)
                 || row.get("posSide").and_then(Value::as_str) != Some("net")
             {
-                return Some(EntryInterval::Different);
+                return Some(EntryInterval::Different { system: false });
             }
             // A cross-margin fill on the same instrument can sit between isolated entry
             // fills. Until the fill's margin mode is known, the interval stays unresolved
@@ -372,7 +378,9 @@ impl PositionHistory<'_> {
                 let Some(source) = source
                     .filter(|_| row.get("subType").and_then(Value::as_str) == Some(close_type))
                 else {
-                    return Some(EntryInterval::Different);
+                    return Some(EntryInterval::Different {
+                        system: trade.is_none(),
+                    });
                 };
                 source == parent
             };
@@ -388,7 +396,7 @@ impl PositionHistory<'_> {
         let mut contracts = self.contracts.clone();
         for (_, row, opening, own_exit) in changes.into_iter().rev() {
             if !contracts.gt(&super::zero()) {
-                return Some(EntryInterval::Different);
+                return Some(EntryInterval::Different { system: false });
             }
             let size = dec(row.get("fillSz")?.as_str()?).ok()?;
             if !size.gt(&super::zero()) {
@@ -426,6 +434,7 @@ fn proven_entry_contracts(
     let mut remaining = super::zero();
     let mut own_reduction = super::zero();
     let mut trades = HashSet::new();
+    let (mut split_by_system, mut continuous) = (false, false);
     for fill in history.fills {
         if fill.get("ordId").and_then(Value::as_str) != Some(order_id) {
             continue;
@@ -439,15 +448,23 @@ fn proven_entry_contracts(
             return None;
         }
         total = total.add(&size);
-        if let EntryInterval::Continuous {
-            own_reduction: reduced,
-        } = history.entry_interval(trade, parent_id)?
-        {
-            remaining = remaining.add(&size);
-            // The intervals overlap. The oldest proven entry interval includes all
-            // confirmed reductions for this parent since that execution.
-            own_reduction = own_reduction.max(&reduced);
+        match history.entry_interval(trade, parent_id)? {
+            EntryInterval::Continuous {
+                own_reduction: reduced,
+            } => {
+                continuous = true;
+                remaining = remaining.add(&size);
+                // The intervals overlap. The oldest proven entry interval includes all
+                // confirmed reductions for this parent since that execution.
+                own_reduction = own_reduction.max(&reduced);
+            }
+            EntryInterval::Different { system } => split_by_system |= system,
         }
+    }
+    // A system fill between the parent's fills may be cross-margin ADL on the same pair.
+    // Counting only the later fills would then protect part of an intact position.
+    if split_by_system && continuous {
+        return None;
     }
     let remaining = remaining.sub(&own_reduction).max(&super::zero());
     (trades.contains(&entry_trade) && total.eq_value(expected) && remaining.lte(history.contracts))

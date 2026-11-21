@@ -64,6 +64,14 @@ function ResetAccount({ account }: { account: AccountView }) {
 }
 
 // The API's decimal rule needs a digit before the point, so `.5` is sent as `0.5`.
+// The engine's ORDER_UNCONFIRMED reason (crates/mochi-okx/src/engine/mod.rs): OKX had no
+// record of the order yet, so the server keeps looking it up.
+const UNCONFIRMED_EXPIRY = 'OKX has no record of this order yet; check its outcome in OKX';
+
+function isUnconfirmedExpiry(order: Order): boolean {
+  return order.status === 'CANCELED' && !order.exchangeOrderId && order.rejectReason === UNCONFIRMED_EXPIRY;
+}
+
 function normalizeDecimal(value: string): string {
   const trimmed = value.trim();
   return trimmed.startsWith('.') ? `0${trimmed}` : trimmed;
@@ -369,8 +377,9 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
       finishConfirmation();
       return;
     }
-    // An open order without an exchange ID may still have reached OKX.
-    if (selectedReduction && (!result || (result.status === 'OPEN' && !result.exchangeOrderId))) {
+    // An open order without an exchange ID may still have reached OKX, and a local expiry
+    // is not an OKX cancellation: the server keeps looking it up.
+    if (selectedReduction && (!result || (result.status === 'OPEN' && !result.exchangeOrderId) || isUnconfirmedExpiry(result))) {
       const pending = { request, lookupId: result?.id ?? lookupId };
       if (result) persistPendingReduction(pendingKey, pending);
       const saved = refreshPendingReductions()

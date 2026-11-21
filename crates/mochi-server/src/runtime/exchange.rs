@@ -388,18 +388,33 @@ impl Runtime {
             let _ = session.engine.retire();
             return Err(error);
         }
+        // The limits this connect brought, written before the old session is touched: a
+        // failed write leaves that session connected, so its positions can still be closed.
+        let previous = self
+            .engine()
+            .store()
+            .get_account(&account.id)
+            .map_err(|error| self.api_error(error));
+        let previous = match previous {
+            Ok(previous) => previous,
+            Err(error) => {
+                let _ = session.engine.retire();
+                return Err(error);
+            }
+        };
+        if let Err(error) = self.engine().store().save_account_profile(&account) {
+            let _ = session.engine.retire();
+            return Err(self.api_error(error));
+        }
         self.bump_session(&account.id);
         if let Err(error) = self.retire_exchange_session(&account.id) {
             let _ = session.engine.retire();
-            self.pause_after_failed_replacement(&account.id);
-            self.invalidate(CONNECTED);
-            return Err(self.api_error(error));
-        }
-        // The limits this connect brought, written only once the old session's orders are
-        // finalized, so a failed replacement leaves the previous limits in place. The old
-        // session is already gone here, so a failure still publishes the disconnect.
-        if let Err(error) = self.engine().store().save_account_profile(&account) {
-            let _ = session.engine.retire();
+            // No new session registers, so the previous limits stay in force.
+            if let Some(previous) = &previous {
+                if let Err(restore) = self.engine().store().save_account_profile(previous) {
+                    tracing::warn!(error = %self.redact(&restore.to_string()), "could not restore account limits after a failed reconnect");
+                }
+            }
             self.pause_after_failed_replacement(&account.id);
             self.invalidate(CONNECTED);
             return Err(self.api_error(error));

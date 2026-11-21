@@ -39,8 +39,17 @@ use crate::ids::{to_algo_cl_ord_id, to_cl_ord_id, to_inst_id};
 const MAX_SNAPSHOT_AGE_MS: i64 = 30_000;
 /// An order OKX still has no record of after this long never arrived.
 const NEVER_ARRIVED_AFTER_MS: i64 = 60_000;
-/// Why a readback closes an order OKX has no record of.
+/// Why a readback finally closes an order OKX never recorded, once
+/// [`ORDER_UNCONFIRMED`] has been looked up for [`UNCONFIRMED_LOOKUP_MS`].
 pub(super) const ORDER_NOT_ARRIVED: &str = "OKX has no record of this order";
+/// A local expiry, not an OKX cancellation: OKX had no record of the order after
+/// [`NEVER_ARRIVED_AFTER_MS`], so it leaves the open list but is still looked up, and a
+/// later answer (live, filled or canceled) replaces this state. The web UI keeps its
+/// retry key for this reason.
+pub(super) const ORDER_UNCONFIRMED: &str =
+    "OKX has no record of this order yet; check its outcome in OKX";
+/// How long an unconfirmed order keeps being looked up, from its local expiry.
+pub(super) const UNCONFIRMED_LOOKUP_MS: i64 = 3 * 24 * 60 * 60 * 1_000;
 const EQUITY_EVERY_MS: i64 = 60_000;
 
 /// The rows the engine reads and writes, which are the paper tables. `list_open_orders` must return
@@ -485,7 +494,10 @@ impl UnsentOrder {
             Self::Rejection { reason, .. }
                 if order.status == OrderStatus::Open
                     || (order.status == OrderStatus::Canceled
-                        && order.reject_reason.as_deref() == Some(ORDER_NOT_ARRIVED)) =>
+                        && matches!(
+                            order.reject_reason.as_deref(),
+                            Some(ORDER_NOT_ARRIVED | ORDER_UNCONFIRMED)
+                        )) =>
             {
                 order.status = OrderStatus::Rejected;
                 order.reject_reason = Some(reason.clone());
@@ -913,6 +925,16 @@ impl OkxEngine {
         request: OrderRequest,
         position_id: String,
     ) -> Result<OrderResult, EngineError> {
+        let key = (request.account_id.clone(), request.client_order_id.clone());
+        let result = self.reduce_selected(request, position_id).await;
+        self.confirm_not_dispatched(result, &key.0, &key.1).await
+    }
+
+    async fn reduce_selected(
+        self: &Arc<Self>,
+        request: OrderRequest,
+        position_id: String,
+    ) -> Result<OrderResult, EngineError> {
         self.queued(DeferredRestore::AllowPending, move |engine| {
             Box::pin(async move {
                 let mut request = request;
@@ -1030,6 +1052,52 @@ impl OkxEngine {
     }
 
     async fn dispatch_close(
+        self: &Arc<Self>,
+        intent: CloseIntent,
+    ) -> Result<OrderResult, EngineError> {
+        let key = (intent.account_id.clone(), intent.client_order_id.clone());
+        let result = self.dispatch_close_queued(intent).await;
+        self.confirm_not_dispatched(result, &key.0, &key.1).await
+    }
+
+    /// A refusal before dispatch tells the client to drop its key, so it holds only while
+    /// that key is unused. A retired session cannot see what its successor did, and another
+    /// session may have sent an order under the same key meanwhile: then the refusal is
+    /// answered as a plain error, and the client resolves the key by lookup.
+    async fn confirm_not_dispatched(
+        &self,
+        result: Result<OrderResult, EngineError>,
+        account_id: &str,
+        client_order_id: &str,
+    ) -> Result<OrderResult, EngineError> {
+        let Err(EngineError::RefusedBeforeDispatch(message)) = result else {
+            return result;
+        };
+        if self.dispatch().retired {
+            return Err(EngineError::Message(message));
+        }
+        let (account_id, client_order_id) = (account_id.to_owned(), client_order_id.to_owned());
+        let used = self
+            .rows(move |rows| Ok(rows.get_order_by_client_id(&account_id, &client_order_id)?))
+            .await;
+        // The session may have been replaced while the store answered.
+        if self.dispatch().retired {
+            return Err(EngineError::Message(message));
+        }
+        match used {
+            // Only this session's own rejection of the same refusal leaves the key unused.
+            Ok(Some(order))
+                if order.status != OrderStatus::Rejected
+                    || order.reject_reason.as_deref() != Some(message.as_str()) =>
+            {
+                Err(EngineError::Message(message))
+            }
+            Ok(_) => Err(EngineError::RefusedBeforeDispatch(message)),
+            Err(_) => Err(EngineError::Message(message)),
+        }
+    }
+
+    async fn dispatch_close_queued(
         self: &Arc<Self>,
         intent: CloseIntent,
     ) -> Result<OrderResult, EngineError> {
