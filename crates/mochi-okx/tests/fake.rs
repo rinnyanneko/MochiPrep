@@ -140,19 +140,12 @@ async fn fills_a_market_order_with_its_attached_algos() {
     let client = client(&okx, Venue::OkxDemo);
     client.set_leverage("BTC-USDT-SWAP", 3).await.unwrap();
     let mut body = market(Side::Buy, "10", "entry");
-    body.attach_algo_ords = Some(vec![
-        AttachAlgoOrd {
-            attach_algo_cl_ord_id: Some(to_algo_cl_ord_id("ord_1:sl")),
-            sl_trigger_px: Some("74000".into()),
-            sl_ord_px: Some("-1".into()),
-            ..AttachAlgoOrd::default()
-        },
-        AttachAlgoOrd {
-            attach_algo_cl_ord_id: Some(to_algo_cl_ord_id("ord_1:trail")),
-            callback_ratio: Some("0.02".into()),
-            ..AttachAlgoOrd::default()
-        },
-    ]);
+    body.attach_algo_ords = Some(vec![AttachAlgoOrd {
+        attach_algo_cl_ord_id: Some(to_algo_cl_ord_id("ord_1:sl")),
+        sl_trigger_px: Some("74000".into()),
+        sl_ord_px: Some("-1".into()),
+        ..AttachAlgoOrd::default()
+    }]);
     assert_eq!(client.place_order(&body).await.unwrap(), "1");
     let order = client
         .get_order("BTC-USDT-SWAP", &to_cl_ord_id("entry"))
@@ -161,8 +154,8 @@ async fn fills_a_market_order_with_its_attached_algos() {
         .unwrap();
     assert_eq!(
         Value::Object(order),
-        json!({ "ordId": "1", "clOrdId": to_cl_ord_id("entry"), "state": "filled", "accFillSz": "10",
-                "avgPx": "75000", "fee": "-0.05", "pnl": "0" })
+        json!({ "ordId": "1", "clOrdId": to_cl_ord_id("entry"), "state": "filled", "fillSz": "10", "accFillSz": "10",
+                "avgPx": "75000", "fee": "-0.05", "pnl": "0", "fillTime": "1800000000000", "tradeId": "1" })
     );
     let positions = client.get_positions().await.unwrap();
     assert_eq!(positions[0]["pos"], "10");
@@ -174,14 +167,13 @@ async fn fills_a_market_order_with_its_attached_algos() {
     assert_eq!(
         Value::Object(stops[0].clone()),
         json!({ "algoId": "A1", "algoClOrdId": to_algo_cl_ord_id("ord_1:sl"), "instId": "BTC-USDT-SWAP",
-                "state": "live", "side": "sell", "sz": "10", "slTriggerPx": "74000", "ordType": "conditional" })
+                "state": "live", "side": "sell", "sz": "10", "slTriggerPx": "74000", "slOrdPx": "-1", "ordType": "conditional" })
     );
     let trails = client
         .get_pending_algos(PendingAlgoType::MoveOrderStop)
         .await
         .unwrap();
-    assert_eq!(trails[0]["moveTriggerPx"], "74250");
-    assert_eq!(trails[0]["callbackRatio"], "0.02");
+    assert!(trails.is_empty());
 
     // Closing leaves the attached algos live: the engine's cleanup is what is tested.
     client
@@ -268,7 +260,8 @@ async fn places_cancels_and_refuses_algos() {
         .unwrap();
     assert_eq!(found["algoId"], algo_id.as_str());
     assert_eq!(found["ordType"], "conditional");
-    assert!(!found.contains_key("tdMode") && !found.contains_key("slOrdPx"));
+    assert!(!found.contains_key("tdMode"));
+    assert_eq!(found["slOrdPx"], "-1");
 
     okx.state().cancel_fails = true;
     let cancel = [CancelAlgo {
@@ -341,4 +334,30 @@ async fn answers_unhandled_paths_with_404() {
         error.to_string(),
         "OKX 404: Unhandled /api/v5/trade/cancel-order"
     );
+}
+
+#[tokio::test]
+async fn rejects_attached_fixed_and_trailing_stops_without_filling() {
+    let okx = FakeOkx::new();
+    let mut body = market(Side::Buy, "1", "mixed-stops");
+    body.attach_algo_ords = Some(vec![
+        AttachAlgoOrd {
+            sl_trigger_px: Some("74000".into()),
+            sl_ord_px: Some("-1".into()),
+            ..Default::default()
+        },
+        AttachAlgoOrd {
+            callback_ratio: Some("0.015".into()),
+            active_px: Some("76000".into()),
+            ..Default::default()
+        },
+    ]);
+    let error = client(&okx, Venue::OkxDemo)
+        .place_order(&body)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("54091"));
+    assert!(okx.state().position.is_none());
+    assert!(okx.state().orders.is_empty());
+    assert!(okx.state().algos.is_empty());
 }

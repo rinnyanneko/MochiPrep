@@ -53,6 +53,12 @@ pub struct FakeState {
     pub down: bool,
     /// Applies the next order on the exchange, then loses the response.
     pub lose_next_response: bool,
+    /// Applies the next order before returning OKX's ambiguous timeout code.
+    pub timeout_next_response: bool,
+    pub fail_lookup_after_timeout: bool,
+    /// Fails the first positions read after the next reduce-only order fills.
+    pub fail_positions_after_reduce: bool,
+    fail_next_positions: bool,
     /// Loses the next order before it reaches the exchange.
     pub drop_next_request: bool,
     pub reject_next: Option<Refusal>,
@@ -69,6 +75,7 @@ pub struct FakeState {
     pub position: Option<Row>,
     /// Additional rows returned alongside the position managed by mock order fills.
     pub other_positions: Vec<Row>,
+    pub recent_fills: Vec<Row>,
     /// `account/positions-history` rows, in any order; served newest `uTime` first.
     pub positions_history: Vec<Row>,
     pub execution_history: Vec<Row>,
@@ -86,6 +93,8 @@ pub struct FakeState {
     pub canceled_algo_ids: Vec<String>,
     /// Applies the next algo order, then loses the response.
     pub lose_next_algo_response: bool,
+    /// Loses the next algo placement before applying it.
+    pub drop_next_algo_request: bool,
     pub reject_next_algo: Option<Refusal>,
     /// Refuses every algo placement this matches.
     pub reject_algo_if: Option<AlgoPredicate>,
@@ -93,6 +102,8 @@ pub struct FakeState {
     pub cancel_fails: bool,
     /// Makes algo lookups (pending list and single lookup) fail.
     pub algo_lookup_down: bool,
+    /// Refuses algo detail lookups while the pending lists remain available.
+    pub algo_lookup_error_code: Option<String>,
     /// Limit orders rest, live and unfilled, until [`FakeState::fill_resting`]; market orders
     /// still fill at once.
     pub rest_limit_orders: bool,
@@ -101,6 +112,7 @@ pub struct FakeState {
     /// Requests to hold at the transport, each once; see [`FakeOkx::hold_next`].
     holds: Vec<Arc<Hold>>,
     algo_seq: u64,
+    trade_seq: u64,
 }
 
 impl Default for FakeState {
@@ -112,6 +124,10 @@ impl Default for FakeState {
             equity: "1000".into(),
             down: false,
             lose_next_response: false,
+            timeout_next_response: false,
+            fail_lookup_after_timeout: false,
+            fail_positions_after_reduce: false,
+            fail_next_positions: false,
             drop_next_request: false,
             reject_next: None,
             reject_row_next: None,
@@ -123,6 +139,7 @@ impl Default for FakeState {
             orders: IndexMap::new(),
             position: None,
             other_positions: Vec::new(),
+            recent_fills: Vec::new(),
             positions_history: Vec::new(),
             execution_history: Vec::new(),
             history_down: false,
@@ -133,14 +150,17 @@ impl Default for FakeState {
             algo_placed: Vec::new(),
             canceled_algo_ids: Vec::new(),
             lose_next_algo_response: false,
+            drop_next_algo_request: false,
             reject_next_algo: None,
             reject_algo_if: None,
             cancel_fails: false,
             algo_lookup_down: false,
+            algo_lookup_error_code: None,
             rest_limit_orders: false,
             resting: Vec::new(),
             holds: Vec::new(),
             algo_seq: 0,
+            trade_seq: 0,
         }
     }
 }
@@ -166,6 +186,26 @@ impl FakeState {
         };
         self.algos.insert(key, algo.clone());
         algo
+    }
+
+    /// Simulate canceling the remaining quantity after an execution, including OKX's rule
+    /// that Split TP attachments only appear after a complete fill.
+    pub fn cancel_resting_after_partial_fill(&mut self, contracts: &str) {
+        let mut entry = self.resting.remove(0);
+        entry.insert("sz".into(), json!(contracts));
+        if entry
+            .get("attachAlgoOrds")
+            .and_then(Value::as_array)
+            .is_some_and(|legs| legs.len() > 1)
+        {
+            entry.remove("attachAlgoOrds");
+        }
+        fill(self, &entry);
+        let key = text(entry.get("clOrdId")).unwrap();
+        self.orders
+            .get_mut(&key)
+            .unwrap()
+            .insert("state".into(), json!("canceled"));
     }
 
     /// Fills every resting limit order, oldest first, as the market reaching their prices would.
@@ -318,6 +358,17 @@ impl FakeOkx {
                 "ccy": "USDT", "eq": state.equity, "availEq": state.equity, "upl": "0",
             }] }])));
         }
+        if ends("/trade/fills") {
+            let inst_id = param("instId");
+            let rows: Vec<_> = state
+                .recent_fills
+                .iter()
+                .rev()
+                .filter(|row| text(row.get("instId")) == inst_id)
+                .take(crate::client::RECENT_FILLS_LIMIT)
+                .collect();
+            return Ok(ok(json!(rows)));
+        }
         if ends("/trade/fills-history") {
             let bill = |row: &Row| text(row.get("billId")).and_then(|id| id.parse::<u64>().ok());
             let after = param("after").and_then(|id| id.parse::<u64>().ok());
@@ -361,10 +412,13 @@ impl FakeOkx {
             return Ok(ok(json!(rows)));
         }
         if ends("/account/positions") {
+            if std::mem::take(&mut state.fail_next_positions) {
+                return Ok(answer(json!([]), "50001", "Systems are busy"));
+            }
             let positions: Vec<_> = state
-                .position
+                .other_positions
                 .iter()
-                .chain(&state.other_positions)
+                .chain(state.position.iter())
                 .collect();
             return Ok(ok(json!(positions)));
         }
@@ -403,6 +457,9 @@ impl FakeOkx {
         if ends("/trade/order-algo") && method == "GET" {
             if state.algo_lookup_down {
                 return Ok(answer(json!([]), "50001", "Systems are busy"));
+            }
+            if let Some(code) = &state.algo_lookup_error_code {
+                return Ok(answer(json!([]), code, "Algo lookup refused"));
             }
             let algo = param("algoClOrdId").and_then(|id| state.algos.get(&id).cloned());
             return Ok(ok(match algo {
@@ -503,7 +560,7 @@ fn algo_fields(element: &Row) -> Row {
     let trailing = element.contains_key("callbackRatio") || element.contains_key("callbackSpread");
     let mut fields: Row = element
         .iter()
-        .filter(|(key, _)| !matches!(key.as_str(), "attachAlgoClOrdId" | "slOrdPx" | "tpOrdPx"))
+        .filter(|(key, _)| key.as_str() != "attachAlgoClOrdId")
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     fields.insert(
@@ -521,6 +578,9 @@ fn algo_fields(element: &Row) -> Row {
 }
 
 fn place_algo(state: &mut FakeState, body: Value) -> Result<HttpReply, String> {
+    if std::mem::take(&mut state.drop_next_algo_request) {
+        return Err("fetch failed".into());
+    }
     state.algo_placed.push(body.clone());
     let refused = state.reject_next_algo.is_some()
         || state
@@ -538,12 +598,7 @@ fn place_algo(state: &mut FakeState, body: Value) -> Result<HttpReply, String> {
     let ord_type = body.get("ordType").cloned().unwrap_or(Value::Null);
     let mut fields: Row = body
         .iter()
-        .filter(|(key, _)| {
-            !matches!(
-                key.as_str(),
-                "tdMode" | "reduceOnly" | "slOrdPx" | "tpOrdPx" | "ordType"
-            )
-        })
+        .filter(|(key, _)| !matches!(key.as_str(), "tdMode" | "reduceOnly" | "ordType"))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     let trailing = ord_type == json!("move_order_stop");
@@ -580,6 +635,42 @@ fn place(state: &mut FakeState, order: Value) -> Result<HttpReply, String> {
     if let Some(refusal) = state.reject_row_next.take() {
         return Ok(ok(json!([refusal_row(&refusal, "ordId")])));
     }
+    if let Some(legs) = order.get("attachAlgoOrds").and_then(Value::as_array) {
+        let trailing = legs
+            .iter()
+            .any(|l| l.get("callbackRatio").is_some() || l.get("callbackSpread").is_some());
+        let fixed = legs.iter().any(|l| l.get("slTriggerPx").is_some());
+        if trailing && fixed {
+            return Ok(answer(
+                json!([refusal_row(
+                    &Refusal::new(
+                        "54091",
+                        "You can only attach one SL when placing a trailing stop order."
+                    ),
+                    "ordId"
+                )]),
+                "1",
+                "",
+            ));
+        }
+        if legs.len() > 1
+            && legs
+                .iter()
+                .any(|l| l.get("tpTriggerPx").is_some() && l.get("sz").is_none())
+        {
+            return Ok(answer(
+                json!([refusal_row(
+                    &Refusal::new(
+                        "51089",
+                        "The size of the TP order among split TPs attached cannot be empty"
+                    ),
+                    "ordId"
+                )]),
+                "1",
+                "",
+            ));
+        }
+    }
     let mut order = object(&order);
     let ord_id = state.placed.len().to_string();
     order.insert("ordId".into(), json!(ord_id));
@@ -599,6 +690,19 @@ fn place(state: &mut FakeState, order: Value) -> Result<HttpReply, String> {
         state.resting.push(order);
     } else {
         fill(state, &order);
+        if order.get("reduceOnly") == Some(&json!(true))
+            && std::mem::take(&mut state.fail_positions_after_reduce)
+        {
+            state.fail_next_positions = true;
+        }
+    }
+    if std::mem::take(&mut state.timeout_next_response) {
+        if std::mem::take(&mut state.fail_lookup_after_timeout) {
+            state.lookup_error_code = Some("50001".into());
+        }
+        let mut reply = answer(json!([]), "50004", "API endpoint request timeout");
+        reply.status = 400;
+        return Ok(reply);
     }
     if state.lose_next_response {
         state.lose_next_response = false;
@@ -616,9 +720,14 @@ fn fill(state: &mut FakeState, order: &Row) {
     let sz = order.get("sz").cloned().unwrap_or(Value::Null);
     let buy = order.get("side") == Some(&json!("buy"));
     let mut filled = Row::new();
-    filled.insert("ordId".into(), ord_id);
+    state.trade_seq += 1;
+    let trade_id = state.trade_seq.to_string();
+    filled.insert("tradeId".into(), json!(trade_id));
+    filled.insert("ordId".into(), ord_id.clone());
     filled.insert("clOrdId".into(), cl_ord_id.clone());
     filled.insert("state".into(), json!("filled"));
+    filled.insert("fillTime".into(), json!("1800000000000"));
+    filled.insert("fillSz".into(), sz.clone());
     filled.insert("accFillSz".into(), sz.clone());
     filled.insert("avgPx".into(), json!(PRICE));
     filled.insert("fee".into(), json!("-0.05"));
@@ -638,13 +747,28 @@ fn fill(state: &mut FakeState, order: &Row) {
             .as_ref()
             .and_then(|position| position.get("pos")),
     );
+    let subtype = match (
+        buy,
+        held.is_zero() || held.is_negative() == signed.is_negative(),
+    ) {
+        (true, true) => "3",
+        (false, true) => "4",
+        (false, false) => "5",
+        (true, false) => "6",
+    };
+    state.recent_fills.push(object(&json!({
+        "instId": order.get("instId"), "ordId": ord_id, "tradeId": trade_id,
+        "clOrdId": cl_ord_id,
+        "fillSz": sz, "fillTime": "1800000000000", "ts": "1800000000001",
+        "posSide": "net", "subType": subtype,
+    })));
     let size = held.add(&signed);
     state.position = if size.is_zero() {
         None
     } else {
         Some(object(&json!({
             "instId": order.get("instId"), "pos": size.to_fixed(), "avgPx": PRICE, "markPx": PRICE,
-            "upl": "0", "lever": "3", "liqPx": "50000", "margin": "10", "mgnMode": "isolated",
+            "upl": "0", "lever": "3", "liqPx": "50000", "margin": "10", "mgnMode": "isolated", "posSide": "net", "tradeId": trade_id, "uTime": "1800000000000", "cTime": "1800000000000",
         })))
     };
     // Attached algos go live on the fill. They are left alone when the position closes, so the

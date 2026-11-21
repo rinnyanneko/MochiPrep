@@ -7,6 +7,7 @@ import type {
   Fill,
   LedgerEvent,
   Order,
+  OrderResult,
   Position,
   PositionView,
   Protection,
@@ -82,8 +83,10 @@ type TrailKind = TrailingStopSpec['kind'] | 'NONE';
 function ProtectionDialog({ position, onClose }: { position: PositionView; onClose(): void }) {
   const [stop, setStop] = useState(position.stopLoss ?? '');
   const [target, setTarget] = useState(position.takeProfit ?? '');
+  const [targetEdited, setTargetEdited] = useState(false);
   const current = position.trailingStop;
   const [kind, setKind] = useState<TrailKind>(current?.kind ?? 'NONE');
+  const [trailEdited, setTrailEdited] = useState(false);
   // A ratio is shown as a percent: 0.01 reads 1.
   const [callback, setCallback] = useState(current ? (current.kind === 'RATIO' ? shiftPoint(current.callback, 2) : current.callback) : '');
   const [activation, setActivation] = useState(current?.activationPrice ?? '');
@@ -98,7 +101,8 @@ function ProtectionDialog({ position, onClose }: { position: PositionView; onClo
       api.put<{ pending: boolean }>(`/positions/${position.accountId}/${position.symbol}/protection`, {
         stopLoss: stop.trim() || null,
         takeProfit: target.trim() || null,
-        trailingStop,
+        keepTakeProfit: !targetEdited,
+        ...(trailEdited ? { trailingStop } : {}),
       }),
     );
     setSaving(false);
@@ -111,7 +115,7 @@ function ProtectionDialog({ position, onClose }: { position: PositionView; onClo
     <Dialog open onOpenChange={onClose} title={`Protection for ${position.symbol}`} description={`${position.side} ${qty(position.quantity)} from ${price(position.entryPrice, position.symbol)}. Leave a field empty to remove it.`}>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Stop loss"><Input inputMode="decimal" value={stop} onChange={(e) => setStop(e.target.value)} /></Field>
-        <Field label="Take profit"><Input inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} /></Field>
+        <Field label="Take profit"><Input inputMode="decimal" value={target} onChange={(e) => { setTarget(e.target.value); setTargetEdited(true); }} /></Field>
       </div>
       <div className="mt-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
@@ -119,17 +123,17 @@ function ProtectionDialog({ position, onClose }: { position: PositionView; onClo
           <Segmented<TrailKind>
             label="Trailing stop kind"
             value={kind}
-            onChange={setKind}
+            onChange={(value) => { setKind(value); setTrailEdited(true); }}
             options={[{ value: 'NONE', label: 'None' }, { value: 'RATIO', label: 'Percent' }, { value: 'SPREAD', label: 'Price' }]}
           />
         </div>
         {kind !== 'NONE' && (
           <div className="grid grid-cols-2 gap-3">
             <Field label={kind === 'RATIO' ? 'Callback (%)' : 'Callback (USDT)'}>
-              <Input aria-label="Trailing callback" inputMode="decimal" value={callback} onChange={(e) => setCallback(e.target.value)} />
+              <Input aria-label="Trailing callback" inputMode="decimal" value={callback} onChange={(e) => { setCallback(e.target.value); setTrailEdited(true); }} />
             </Field>
             <Field label="Activation price" hint="Optional">
-              <Input aria-label="Trailing activation price" inputMode="decimal" value={activation} onChange={(e) => setActivation(e.target.value)} />
+              <Input aria-label="Trailing activation price" inputMode="decimal" value={activation} onChange={(e) => { setActivation(e.target.value); setTrailEdited(true); }} />
             </Field>
           </div>
         )}
@@ -168,7 +172,11 @@ function ProtectionExtras({ p }: { p: PositionView }) {
 export function PositionsTable({ positions, actions = true, editable = true, accountNames }: { positions: PositionView[]; actions?: boolean; editable?: boolean; accountNames?: Map<string, string> }) {
   const [editing, setEditing] = useState<PositionView | null>(null);
   const close = (p: PositionView, fraction: number) =>
-    attempt(() => api.post(`/positions/${p.accountId}/${p.symbol}/close`, { fraction, clientOrderId: `ui:${crypto.randomUUID()}` }));
+    attempt(async () => {
+      const result = await api.post<OrderResult>(`/positions/${p.accountId}/${p.symbol}/close`, { fraction, positionId: p.id, clientOrderId: `ui:${crypto.randomUUID()}` });
+      if (result.order.status === 'REJECTED') throw new Error(result.order.rejectReason ?? 'Close order was rejected');
+      return result;
+    });
   return (
     <>
       <Table
@@ -179,7 +187,7 @@ export function PositionsTable({ positions, actions = true, editable = true, acc
           <tr key={p.id} data-testid="position-row">
             {accountNames && <td className="text-ink-2">{accountNames.get(p.accountId)}</td>}
             <td className="font-semibold">{p.symbol}</td>
-            <td>{sideBadge(p.side)}</td>
+            <td>{sideBadge(p.side)}{p.marginMode && <span className="ml-1 text-xs capitalize text-ink-3">{p.marginMode}</span>}</td>
             <td className="num">{qty(p.quantity)}</td>
             <td className="num">{price(p.entryPrice, p.symbol)}</td>
             <td className="num">{price(p.markPrice, p.symbol)}</td>
@@ -193,11 +201,13 @@ export function PositionsTable({ positions, actions = true, editable = true, acc
             <td className={cn('num font-semibold', pnlClass(p.unrealizedPnl))}>{signedMoney(p.unrealizedPnl)}</td>
             {actions && (
               <td>
-                <div className="flex justify-end gap-1">
+                {p.closeSupported === false ? (
+                  <div className="text-right text-xs text-ink-3">Close in OKX</div>
+                ) : <div className="flex justify-end gap-1">
                   {editable && <Button size="icon" variant="ghost" aria-label={`Edit stop and target for ${p.symbol}`} onClick={() => setEditing(p)}><Pencil /></Button>}
                   <Button size="sm" onClick={() => close(p, 0.5)}>Close 50%</Button>
                   <Button size="sm" variant="danger" onClick={() => close(p, 1)}>Close</Button>
-                </div>
+                </div>}
               </td>
             )}
           </tr>
@@ -211,7 +221,7 @@ export function PositionsTable({ positions, actions = true, editable = true, acc
 const ORDER_LABEL: Record<Order['type'], string> = { MARKET: 'Market', LIMIT: 'Limit', STOP_MARKET: 'Stop loss', TAKE_PROFIT_MARKET: 'Take profit', TRAILING_STOP_MARKET: 'Trailing stop' };
 const ORDER_TONE: Record<Order['status'], Tone> = { OPEN: 'info', FILLED: 'up', CANCELED: 'neutral', REJECTED: 'down' };
 
-export function OrdersTable({ orders, cancellable, emptyText }: { orders: Order[]; cancellable?: boolean; emptyText: string }) {
+export function OrdersTable({ orders, cancellable, exchange, emptyText }: { orders: Order[]; cancellable?: boolean; exchange: boolean; emptyText: string }) {
   const dateTime = useDateTime();
   return (
     <Table head={['Time', 'Symbol', 'Side', 'Type', 'Size', 'Price', 'Status', 'Order', ...(cancellable ? [''] : [])]} empty={orders.length === 0 && emptyText}>
@@ -221,7 +231,7 @@ export function OrdersTable({ orders, cancellable, emptyText }: { orders: Order[
           <td className="font-semibold">{o.symbol}</td>
           <td className="font-semibold">{orderSide(o.side)}</td>
           <td>{ORDER_LABEL[o.type]}{o.reduceOnly ? <span className="text-ink-3"> · reduce</span> : ''}</td>
-          <td className="num">{o.closePosition ? 'Position' : qty(o.quantity)}</td>
+          <td className="num">{exchange ? o.quantity : o.closePosition ? 'Position' : qty(o.quantity)}</td>
           <td className="num">{price(o.avgFillPrice ?? o.price ?? o.triggerPrice, o.symbol)}</td>
           <td title={o.rejectReason ?? undefined}>
             <Badge tone={ORDER_TONE[o.status]}>{o.status}</Badge>

@@ -179,6 +179,8 @@ export interface OrderRequest {
   price?: string | null;
   leverage: number;
   reduceOnly?: boolean;
+  /** Required for a new OKX reduce-only order. Identifies the selected isolated position. */
+  positionId?: string;
   stopLoss?: string | null;
   takeProfit?: string | null;
   trailingStop?: TrailingStopSpec | null;
@@ -200,7 +202,7 @@ export interface Order {
   triggerPrice: string | null;
   leverage: number;
   reduceOnly: boolean;
-  /** SL/TP orders always close whatever is left of the position when they trigger. */
+  /** Marks protection. Paper protection covers the remaining position, while OKX protection has an explicit quantity. */
   closePosition: boolean;
   status: OrderStatus;
   filledQuantity: string;
@@ -271,6 +273,8 @@ export interface Position {
 }
 
 export interface PositionView extends Position {
+  marginMode?: string;
+  closeSupported?: boolean;
   markPrice: string | null;
   unrealizedPnl: string;
   stopLoss: string | null;

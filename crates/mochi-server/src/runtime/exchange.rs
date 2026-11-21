@@ -208,13 +208,14 @@ impl RuntimeHandle {
                 // Checked before the first sync too, so a connect that will be refused does not
                 // reconcile an account the owner has just disconnected or connected anew.
                 r.registration_refusal(&account, reconnect, epoch)?;
+                r.restore_retired_order(&account.id)
+                    .map_err(|error| r.api_error(error))?;
                 Ok::<_, ApiError>(account)
             })
             .await??;
 
-        // 8-9. Trading is only possible once a full reconciliation has succeeded. The session is
-        // unarmed until it is registered, so its first sync places nothing a protection change
-        // would need arming for.
+        // 8-9. A verified position snapshot can support reduce-only exits even if protection
+        // reconciliation failed. The engine remains unhealthy until a full sync succeeds.
         let armed = Arc::new(AtomicBool::new(false));
         let link = SessionLink::new(&account.id, epoch);
         let engine = okx_engine(
@@ -226,28 +227,42 @@ impl RuntimeHandle {
             armed.clone(),
             link.clone(),
         );
-        if let Err(error) = engine.sync().await {
-            // A sync whose writes were refused because the account changed meanwhile says why.
-            let changed = account.clone();
-            let refusal = self
-                .call(move |r| r.registration_refusal(&changed, reconnect, epoch).err())
-                .await?;
-            return Err(match refusal {
-                Some(refusal) => refusal,
-                None => self.refused(error.to_string(), &secrets).await,
-            });
+        let sync = engine
+            .sync_before_registration()
+            .await
+            .map_err(|error| error.to_string());
+        if let Err(error) = &sync {
+            if engine.last_sync().is_none() {
+                // A sync whose writes were refused because the account changed meanwhile says why.
+                let changed = account.clone();
+                let refusal = self
+                    .call(move |r| r.registration_refusal(&changed, reconnect, epoch).err())
+                    .await?;
+                return Err(match refusal {
+                    Some(refusal) => refusal,
+                    None => self.refused(error.clone(), &secrets).await,
+                });
+            }
         }
         let session = ExchangeSession {
-            engine,
+            was_healthy: true,
+            engine: engine.clone(),
             armed,
             secrets,
-            was_healthy: true,
             link,
         };
         // 10-12. Register, save or forget the key, and take the first balance.
         let remember = remember.then_some(vault);
-        self.call(move |r| r.register_session(account, session, remember, &saved, reconnect, epoch))
-            .await?
+        self.call(move |r| {
+            let account_id = account.id.clone();
+            let registered =
+                r.register_session(account, session, remember, &saved, reconnect, epoch);
+            if sync.is_err() {
+                r.after_sync(&account_id, &engine, sync);
+            }
+            registered
+        })
+        .await?
     }
 
     /// A refusal, as Node's error handler sends it: 400, the key's own values removed too.
@@ -356,7 +371,7 @@ impl Runtime {
         Ok(())
     }
 
-    /// Steps 10-12, once the first sync succeeded. A new manual session replaces the old one,
+    /// Steps 10-12, after the first position and balance snapshot. A manual session replaces the old one,
     /// which resets arming to the venue's default. A connect whose account changed while it was
     /// out (see [`Self::registration_refusal`]) registers nothing and saves nothing. `remember`
     /// is the vault generation the owner asked to save the key under.
@@ -370,23 +385,46 @@ impl Runtime {
         epoch: u64,
     ) -> Result<PaperAccount, ApiError> {
         if let Err(error) = self.registration_refusal(&account, reconnect, epoch) {
-            session.retire();
+            let _ = session.engine.retire();
             return Err(error);
         }
-        // The limits this connect brought, written only now that it is registering.
+        // The limits this connect brought, written before the old session is touched: a
+        // failed write leaves that session connected, so its positions can still be closed.
+        let previous = self
+            .engine()
+            .store()
+            .get_account(&account.id)
+            .map_err(|error| self.api_error(error));
+        let previous = match previous {
+            Ok(previous) => previous,
+            Err(error) => {
+                let _ = session.engine.retire();
+                return Err(error);
+            }
+        };
         if let Err(error) = self.engine().store().save_account_profile(&account) {
-            session.retire();
+            let _ = session.engine.retire();
             return Err(self.api_error(error));
         }
         self.bump_session(&account.id);
+        if let Err(error) = self.retire_exchange_session(&account.id) {
+            let _ = session.engine.retire();
+            // No new session registers, so the previous limits stay in force.
+            if let Some(previous) = &previous {
+                if let Err(restore) = self.engine().store().save_account_profile(previous) {
+                    tracing::warn!(error = %self.redact(&restore.to_string()), "could not restore account limits after a failed reconnect");
+                }
+            }
+            self.pause_after_failed_replacement(&account.id);
+            self.invalidate(CONNECTED);
+            return Err(self.api_error(error));
+        }
         session.link.registered.store(true, Ordering::SeqCst);
         let engine = session.engine.clone();
         session
             .armed
             .store(engine.venue() == Venue::OkxDemo, Ordering::SeqCst);
-        if let Some(old) = self.exchanges.insert(account.id.clone(), session) {
-            old.retire();
-        }
+        self.exchanges.insert(account.id.clone(), session);
         let now = unix_ms();
         if let Some(vault) = remember {
             // Checked again: the vault may have been turned off or reset while OKX was
@@ -422,21 +460,34 @@ impl Runtime {
         Ok(account)
     }
 
+    /// The old session is gone and no new one registered, so the account is disconnected.
+    /// Its agents stop as on a disconnect; a later reconnect never restarts them unasked.
+    /// A pause that fails stays owed, which keeps them unscheduled until it succeeds.
+    fn pause_after_failed_replacement(&mut self, account_id: &str) {
+        match self.pause_account_agents(account_id, "OKX disconnected") {
+            Ok(()) => {
+                self.pause_owed.remove(account_id);
+            }
+            Err(error) => {
+                tracing::warn!(error = %error.message(), "could not pause agents after a failed reconnect");
+                self.pause_owed.insert(account_id.to_string());
+            }
+        }
+    }
+
     /// Node's `disconnectExchange`. Also forgets saved credentials, so a disconnected account
     /// does not return on the next unlock.
     pub fn disconnect_exchange(&mut self, account_id: &str) -> Result<(), ApiError> {
         // First, before anything fallible: a connect still out must not undo this.
         self.bump_session(account_id);
-        if let Some(old) = self.exchanges.remove(account_id) {
-            old.retire();
-        }
+        let finalized = self.retire_exchange_session(account_id);
         mochi_store::delete_sealed_exchange_credentials(self.connection(), account_id)
             .map_err(|e| self.api_error(e))?;
         self.pause_account_agents(account_id, "OKX disconnected")?;
         // Every running agent is paused now, so no lost-sync pause is owed any more.
         self.pause_owed.remove(account_id);
-        self.invalidate(&[Topic::Accounts, Topic::Exchange]);
-        Ok(())
+        self.invalidate(&[Topic::Accounts, Topic::Orders, Topic::Exchange]);
+        finalized.map_err(|error| self.api_error(error))
     }
 
     /// Node's `arm`, its checks in Node's order.
@@ -490,9 +541,15 @@ impl Runtime {
         let Some(account) = account.filter(|a| a.venue != AccountVenue::Paper) else {
             return Ok(());
         };
-        if !self.exchanges.contains_key(&account.id) {
+        let Some(session) = self.exchanges.get(&account.id) else {
             return Err(ApiError::bad_request(format!(
                 "{} is not connected to OKX",
+                account.name
+            )));
+        };
+        if !session.engine.healthy() {
+            return Err(ApiError::bad_request(format!(
+                "{} must sync with OKX before its agents can start",
                 account.name
             )));
         }
@@ -573,8 +630,12 @@ impl Runtime {
         Ok(statuses)
     }
 
-    /// Every session's engine, for a sync pass.
-    pub(super) fn session_engines(&self) -> Vec<(String, Arc<OkxEngine>)> {
+    /// Retry local finalization on the sync cadence even for disconnected accounts.
+    pub(super) fn prepare_exchange_sync(&mut self) -> Vec<(String, Arc<OkxEngine>)> {
+        let pending: Vec<_> = self.retired_unsent_orders.keys().cloned().collect();
+        for id in &pending {
+            let _ = self.restore_retired_order(id);
+        }
         self.exchanges
             .iter()
             .map(|(id, session)| (id.clone(), session.engine.clone()))

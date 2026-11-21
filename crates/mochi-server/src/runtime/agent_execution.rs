@@ -26,6 +26,20 @@ pub(super) fn settle(r: &mut Value, outcome: &str, detail: Option<String>) {
     r["outcome"] = json!(outcome);
     r["outcomeDetail"] = json!(detail);
 }
+
+pub(super) fn position_binding_field(action: AiAction) -> Option<&'static str> {
+    match action {
+        AiAction::Close => Some("closePositionId"),
+        AiAction::Protect => Some("protectPositionId"),
+        _ => None,
+    }
+}
+
+pub(super) struct RiskPosition<'a> {
+    pub bound_id: Option<&'a str>,
+    pub protection: Option<&'a Protection>,
+}
+
 fn plain(n: Option<f64>) -> Option<String> {
     n.map(|n| Dec::from_js_number(n).to_fixed())
 }
@@ -87,6 +101,10 @@ pub fn effective_risk(a: &RiskSettings, c: Option<&RiskSettings>) -> RiskSetting
 /// What an approved decision sends to its engine.
 pub(super) enum Act {
     Place(OrderRequest),
+    CloseOkx {
+        request: OrderRequest,
+        position_id: String,
+    },
     Protect {
         account_id: String,
         symbol: String,
@@ -106,6 +124,15 @@ impl Act {
     pub(super) async fn run(self, engine: Arc<dyn ExecutionEngine>) -> Acted {
         match self {
             Act::Place(request) => Acted::Placed(engine.place_order(request).await.map(Box::new)),
+            Act::CloseOkx {
+                request,
+                position_id,
+            } => Acted::Placed(
+                engine
+                    .close_agent_position(request, position_id)
+                    .await
+                    .map(Box::new),
+            ),
             Act::Protect {
                 account_id,
                 symbol,
@@ -176,12 +203,12 @@ pub(super) fn settle_acted(r: &mut Value, acted: Acted) {
                     "ORDER_PLACED",
                     Some("Protection change sent to OKX, awaiting confirmation".into()),
                 );
-            } else if same_protection(&result.before, &result.after) {
+            } else if result.retired_deferred || !same_protection(&result.before, &result.after) {
+                settle(r, "EXECUTED", Some("Protection updated".into()));
+            } else {
                 // The engine aligns prices to the tick, so a target that differed only off the
                 // tick changes nothing.
                 settle(r, "HOLD", Some("Protection already as requested".into()));
-            } else {
-                settle(r, "EXECUTED", Some("Protection updated".into()));
             }
         }
     }
@@ -246,7 +273,7 @@ impl Runtime {
         }
     }
 
-    /// Node's `engine.getPositions(accountId)`.
+    /// Positions the agent can manage. Account risk still sees every open position.
     pub(super) fn venue_positions(
         &self,
         target: &ExecutionTarget,
@@ -257,7 +284,11 @@ impl Runtime {
                 .engine
                 .position_views(account_id)
                 .map_err(|e| self.api_error(e)),
-            ExecutionTarget::Okx(engine) => Ok(engine.positions()),
+            ExecutionTarget::Okx(engine) => Ok(engine
+                .positions()
+                .into_iter()
+                .filter(|view| view.close_supported == Some(true))
+                .collect()),
         }
     }
 
@@ -346,7 +377,7 @@ impl Runtime {
             ExecutionTarget::Okx(engine) => Ok(engine
                 .positions()
                 .iter()
-                .any(|p| p.position.symbol == a.symbol)
+                .any(|p| p.position.symbol == a.symbol && p.close_supported == Some(true))
                 .then(|| engine.protection_of(&a.symbol))),
         }
     }
@@ -357,12 +388,47 @@ impl Runtime {
         account: &PaperAccount,
         d: &AiDecisionData,
         quote: Option<Quote>,
-        protection: Option<Protection>,
+        position_context: RiskPosition<'_>,
         target: &ExecutionTarget,
-    ) -> Result<RiskResult, ApiError> {
+    ) -> Result<(RiskResult, Option<mochi_okx::engine::CheckedProtection>), ApiError> {
         let risk: RiskSettings =
             serde_json::from_str(a.risk.get()).map_err(|e| self.api_error(e))?;
         let daily = self.venue_daily_risk(target, &a.account_id)?;
+        let (open_positions, checked) = if d.action == AiAction::Protect
+            && matches!(target, ExecutionTarget::Okx(_))
+        {
+            let mut positions = self
+                .venue_positions(target, &a.account_id)?
+                .into_iter()
+                .map(|view| view.position)
+                .filter(|position| position.symbol == a.symbol);
+            let position = positions.next();
+            if positions.next().is_some() {
+                return Err(ApiError::bad_request(
+                    "Several isolated OKX positions match",
+                ));
+            }
+            let checked = position
+                .as_ref()
+                .map(|position| {
+                    let before = position_context.protection.cloned().ok_or_else(|| {
+                        ApiError::bad_request("The OKX position changed while checking protection")
+                    })?;
+                    Ok::<_, ApiError>(mochi_okx::engine::CheckedProtection {
+                        position_id: position.id.clone(),
+                        quantity: position.quantity.clone(),
+                        before,
+                    })
+                })
+                .transpose()?;
+            (position.into_iter().collect(), checked)
+        } else if d.action == AiAction::Close && matches!(target, ExecutionTarget::Okx(_)) {
+            // The model and the close command both bind to the manageable isolated position.
+            let position = self.position_target(a, target, position_context.bound_id)?;
+            (position.into_iter().collect(), None)
+        } else {
+            (self.venue_open_positions(target, &a.account_id)?, None)
+        };
         let verdict = evaluate_risk(
             &RiskInput {
                 decision: d.clone(),
@@ -371,22 +437,40 @@ impl Runtime {
                 quote,
                 now: self.market_now(account.source),
                 balance: self.venue_balance(target, &a.account_id)?,
-                open_positions: self.venue_open_positions(target, &a.account_id)?,
+                open_positions,
                 daily_pnl: daily.daily_pnl,
                 day_start_equity: daily.day_start_equity,
                 fees: account.config.clone(),
                 allow_trailing_stop: a.allow_trailing_stop,
-                protection,
+                protection: position_context.protection.cloned(),
             },
             self.engine.instruments(),
         );
         if let Some(c) = verdict.checks.iter().find(|c| c.id == "input" && !c.passed) {
             return Err(ApiError::bad_request(self.redact(&c.detail)));
         }
-        Ok(verdict)
+        Ok((verdict, checked))
     }
 
     // ---- acting ---------------------------------------------------------------------------
+
+    pub(super) fn position_target(
+        &self,
+        a: &rows::Agent,
+        target: &ExecutionTarget,
+        position_id: Option<&str>,
+    ) -> Result<Option<Position>, ApiError> {
+        let Some(position_id) = position_id else {
+            return Ok(None);
+        };
+        let mut positions = self
+            .venue_positions(target, &a.account_id)?
+            .into_iter()
+            .map(|view| view.position)
+            .filter(|position| position.symbol == a.symbol);
+        let position = positions.next().filter(|p| p.id == position_id);
+        Ok(position.filter(|_| positions.next().is_none()))
+    }
 
     /// Node's `execute`: what an approved decision sends. A paper account's act runs here and
     /// the record is settled; an exchange's is returned for the caller to send off the task.
@@ -396,8 +480,9 @@ impl Runtime {
         d: &AiDecisionData,
         r: &mut Value,
         target: &ExecutionTarget,
+        checked: Option<mochi_okx::engine::CheckedProtection>,
     ) -> Result<Option<Outgoing>, ApiError> {
-        let act = self.act_for(a, d, r, target)?;
+        let act = self.act_for(a, d, r, target, checked)?;
         match target {
             ExecutionTarget::Paper => {
                 let acted = self.act_now(act);
@@ -416,6 +501,7 @@ impl Runtime {
         d: &AiDecisionData,
         r: &Value,
         target: &ExecutionTarget,
+        checked: Option<mochi_okx::engine::CheckedProtection>,
     ) -> Result<Act, ApiError> {
         let decision_id = r["id"].as_str().map(String::from);
         if d.action == AiAction::Protect {
@@ -429,7 +515,9 @@ impl Runtime {
                     client_order_id: format!("protect:{}", r["id"].as_str().unwrap_or_default()),
                     agent_id: Some(a.id.clone()),
                     decision_id,
-                    keep_trailing: false,
+                    keep_trailing: d.trailing_stop.is_none(),
+                    keep_take_profit: false,
+                    checked,
                 },
             });
         }
@@ -463,13 +551,16 @@ impl Runtime {
         };
         if d.action == AiAction::Close {
             let p = self
-                .venue_positions(target, &a.account_id)?
-                .into_iter()
-                .map(|view| view.position)
-                .find(|p| p.symbol == a.symbol)
+                .position_target(a, target, r["closePositionId"].as_str())?
                 .ok_or_else(|| {
-                    ApiError::bad_request("The position changed while it was being checked")
+                    ApiError::bad_request("The position changed since it was analyzed")
                 })?;
+            if let ExecutionTarget::Okx(_) = target {
+                return Ok(Act::CloseOkx {
+                    request,
+                    position_id: p.id,
+                });
+            }
             request.side = if p.side == PositionSide::Long {
                 OrderSide::Sell
             } else {
@@ -498,6 +589,9 @@ impl Runtime {
     /// A paper act, on the task.
     fn act_now(&mut self, act: Act) -> Acted {
         match act {
+            Act::CloseOkx { .. } => {
+                Acted::Placed(Err(ApiError::bad_request("An OKX position is required")))
+            }
             Act::Place(request) => {
                 let result = self.engine.place_order(request);
                 Acted::Placed(result.map(Box::new).map_err(|e| self.api_error(e)))
@@ -564,6 +658,16 @@ impl Runtime {
         let target = self.execution(&account)?;
         let d: AiDecisionData =
             serde_json::from_value(r["decision"].clone()).map_err(|e| self.api_error(e))?;
+        let binding = position_binding_field(d.action);
+        let position_id = binding.and_then(|field| r[field].as_str());
+        if binding.is_some() && self.position_target(&a, &target, position_id)?.is_none() {
+            settle(
+                &mut r,
+                "SIGNAL_EXPIRED",
+                Some("The position changed since it was analyzed".into()),
+            );
+            return self.save_signal(r).map(SignalStep::Done);
+        }
         let protection = self.current_protection(&a, &target)?;
         let before = serde_json::from_value::<Protection>(r["protectionBefore"].clone()).ok();
         // A PROTECT was judged against the stops it saw; applied over newer ones it could undo
@@ -578,14 +682,29 @@ impl Runtime {
             );
             return self.save_signal(r).map(SignalStep::Done);
         }
-        let risk = self.assess(
+        let (risk, checked) = self.assess(
             &a,
             &account,
             &d,
             self.market_quote(account.source, &a.symbol),
-            protection,
+            RiskPosition {
+                bound_id: position_id,
+                protection: protection.as_ref(),
+            },
             &target,
         )?;
+        // OKX sync can publish another snapshot while risk is being evaluated.
+        if checked
+            .as_ref()
+            .is_some_and(|checked| Some(checked.position_id.as_str()) != position_id)
+        {
+            settle(
+                &mut r,
+                "SIGNAL_EXPIRED",
+                Some("The position changed since it was analyzed".into()),
+            );
+            return self.save_signal(r).map(SignalStep::Done);
+        }
         r["risk"] = json!(risk);
         if !risk.approved {
             settle(
@@ -595,7 +714,7 @@ impl Runtime {
             );
             return self.save_signal(r).map(SignalStep::Done);
         }
-        match self.execute_decision(&a, &d, &mut r, &target)? {
+        match self.execute_decision(&a, &d, &mut r, &target, checked)? {
             None => self.save_signal(r).map(SignalStep::Done),
             Some(outgoing) => {
                 let token = format!("signal_{}", uuid::Uuid::new_v4());

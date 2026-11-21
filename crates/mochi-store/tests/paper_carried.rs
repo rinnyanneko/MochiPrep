@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use mochi_core::paper::CloseSelection;
 use mochi_core::paper::{
     CreateAccountArgs, EngineEvent, PaperEngineDeps, PaperExecutionEngine, PaperStore,
     StoreFailure, StoreFailureKind,
@@ -15,7 +16,7 @@ use mochi_core::paper::{
 use mochi_domain::registry::Instruments;
 use mochi_domain::{
     DataSource, EquityPoint, ExchangeExecutionCursor, Fill, LedgerEvent, Order, OrderRequest,
-    OrderStatus, PaperAccount, Position, Protection, Quote,
+    OrderSide, OrderStatus, PaperAccount, Position, Protection, Quote,
 };
 use mochi_store::{open_database, open_in_memory, SqlitePaperStore};
 use serde_json::json;
@@ -254,6 +255,29 @@ impl PaperStore for AuditedStore {
     fn get_order(&self, id: &str) -> Result<Option<Order>, StoreFailure> {
         self.inner.get_order(id)
     }
+    fn record_close_selection(
+        &self,
+        order_id: &str,
+        selection: &CloseSelection,
+    ) -> Result<(), StoreFailure> {
+        self.write("record_close_selection");
+        self.inner.record_close_selection(order_id, selection)
+    }
+    fn close_selection(&self, order_id: &str) -> Result<Option<CloseSelection>, StoreFailure> {
+        self.inner.close_selection(order_id)
+    }
+    fn link_target_replacement(
+        &self,
+        deferred_order_id: &str,
+        replacement_order_id: &str,
+    ) -> Result<(), StoreFailure> {
+        self.write("link_target_replacement");
+        self.inner
+            .link_target_replacement(deferred_order_id, replacement_order_id)
+    }
+    fn target_replacements(&self, deferred_order_id: &str) -> Result<Vec<Order>, StoreFailure> {
+        self.inner.target_replacements(deferred_order_id)
+    }
     fn get_order_by_client_id(
         &self,
         account_id: &str,
@@ -274,6 +298,36 @@ impl PaperStore for AuditedStore {
     }
     fn list_orders(&self, account_id: &str, limit: usize) -> Result<Vec<Order>, StoreFailure> {
         self.inner.list_orders(account_id, limit)
+    }
+    fn list_canceled_orders_for_recovery(
+        &self,
+        account_id: &str,
+        reason: &str,
+        limit: usize,
+    ) -> Result<Vec<Order>, StoreFailure> {
+        self.inner
+            .list_canceled_orders_for_recovery(account_id, reason, limit)
+    }
+    fn any_canceled_order_for_recovery(
+        &self,
+        account_id: &str,
+        symbol: &str,
+        side: OrderSide,
+        reason: &str,
+        matches: &dyn Fn(&Order) -> bool,
+    ) -> Result<bool, StoreFailure> {
+        self.inner
+            .any_canceled_order_for_recovery(account_id, symbol, side, reason, matches)
+    }
+    fn mark_order_recovery_checked(
+        &self,
+        order_id: &str,
+        reason: &str,
+        checked_at: i64,
+    ) -> Result<(), StoreFailure> {
+        self.write("mark_order_recovery_checked");
+        self.inner
+            .mark_order_recovery_checked(order_id, reason, checked_at)
     }
     fn find_orders_by_exchange_ids(
         &self,

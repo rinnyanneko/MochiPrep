@@ -282,16 +282,15 @@ async fn sends_a_well_formed_isolated_order_with_exchange_side_protection() {
     };
     assert!(hex32(&sent["clOrdId"]));
     let legs = sent["attachAlgoOrds"].as_array().unwrap();
-    assert_eq!(legs.len(), 2);
+    assert_eq!(legs.len(), 1);
     assert!(hex32(&legs[0]["attachAlgoClOrdId"]));
-    assert!(hex32(&legs[1]["attachAlgoClOrdId"]));
     assert_eq!(
         legs[0],
         json!({ "attachAlgoClOrdId": legs[0]["attachAlgoClOrdId"], "slTriggerPx": "74000", "slOrdPx": "-1" })
     );
     assert_eq!(
-        legs[1],
-        json!({ "attachAlgoClOrdId": legs[1]["attachAlgoClOrdId"], "tpTriggerPx": "77000", "tpOrdPx": "-1" })
+        h.engine.protection_of("BTCUSDT").take_profit.as_deref(),
+        Some("77000")
     );
     // Key order on the wire, as Node builds the body.
     let keys: Vec<_> = sent.as_object().unwrap().keys().cloned().collect();
@@ -468,11 +467,11 @@ async fn a_resting_entry_on_another_pair_never_blocks_a_reduce_only_exit() {
     assert_eq!(eth.order.status, OrderStatus::Open);
     // Now over the ceiling: a BTC position and a resting ETH entry against a limit of 1.
     set_max_open_positions(&h, 1.0);
-    let mut exit = order();
-    exit.side = OrderSide::Sell;
-    exit.reduce_only = Some(true);
-    exit.stop_loss = None;
-    let exit = h.engine.place_order(exit).await.unwrap();
+    let exit = h
+        .engine
+        .close_position(ACCOUNT, "BTCUSDT", 1.0, "exit")
+        .await
+        .unwrap();
     assert_eq!(exit.order.status, OrderStatus::Filled, "{}", reason(&exit));
     assert!(h.okx.state().position.is_none());
 }
@@ -496,17 +495,17 @@ async fn refuses_an_order_larger_than_available_margin() {
 }
 
 #[tokio::test]
-async fn refuses_a_reduce_only_order_on_the_same_side_as_the_position() {
+async fn refuses_an_unbound_reduce_only_order() {
     let h = connect_default().await;
     h.arm();
     h.engine.place_order(order()).await.unwrap();
     let mut request = order();
     request.reduce_only = Some(true);
     request.stop_loss = None;
-    let result = h.engine.place_order(request).await.unwrap();
+    let result = h.engine.place_order(request).await.unwrap_err();
     assert_eq!(
-        reason(&result),
-        "REDUCE_ONLY_NO_POSITION: nothing to reduce"
+        result.to_string(),
+        "Select an OKX position for this reduce-only order"
     );
     assert_eq!(h.placed().len(), 1);
 }
@@ -532,7 +531,7 @@ async fn stops_new_positions_once_the_daily_loss_limit_is_reached() {
 }
 
 #[tokio::test]
-async fn still_lets_a_disarmed_account_exit_clipped_to_the_position_size() {
+async fn still_lets_a_disarmed_account_fully_close_a_position() {
     let h = connect_default().await;
     h.arm();
     h.engine.place_order(order()).await.unwrap();
@@ -542,12 +541,11 @@ async fn still_lets_a_disarmed_account_exit_clipped_to_the_position_size() {
     eth.stop_loss = Some("1".into());
     let blocked = h.engine.place_order(eth).await.unwrap();
     assert!(reason(&blocked).starts_with("NOT_ARMED"));
-    let mut exit = order();
-    exit.side = OrderSide::Sell;
-    exit.quantity = "5".into();
-    exit.reduce_only = Some(true);
-    exit.stop_loss = None;
-    let exit = h.engine.place_order(exit).await.unwrap();
+    let exit = h
+        .engine
+        .close_position(ACCOUNT, "BTCUSDT", 1.0, "exit")
+        .await
+        .unwrap();
     assert_eq!(exit.order.status, OrderStatus::Filled);
     assert_eq!(exit.order.quantity, "0.001");
     assert_eq!(h.placed()[1]["sz"], "0.1");
@@ -733,12 +731,85 @@ async fn keeps_an_order_that_never_arrived_open_then_closes_it_once_okx_has_no_r
     h.backdate(&result.order.id, 61_000);
     h.engine.sync().await.unwrap();
     let row = h.store(|s| s.get_order(&result.order.id).unwrap().unwrap());
+    // A local expiry, not an OKX cancellation: lookup continues.
+    assert_eq!(row.status, OrderStatus::Canceled);
+    assert_eq!(
+        row.reject_reason.as_deref(),
+        Some("OKX has no record of this order yet; check its outcome in OKX")
+    );
+    let lookups = || {
+        h.okx
+            .state()
+            .calls
+            .iter()
+            .filter(|c| *c == "GET /api/v5/trade/order")
+            .count()
+    };
+    let before = lookups();
+    h.engine.sync().await.unwrap();
+    assert_eq!(lookups(), before + 1);
+
+    // A failed lookup three days after the expiry does not end the recovery.
+    let expired_days_ago = |h: &Harness| {
+        h.store(|s| {
+            s.connection()
+                .execute(
+                    "UPDATE orders SET updated_at=? WHERE id=?",
+                    (START - 3 * 24 * 60 * 60 * 1_000, result.order.id.clone()),
+                )
+                .unwrap()
+        })
+    };
+    expired_days_ago(&h);
+    h.okx.state().lookup_error_code = Some("50001".into());
+    let _ = h.engine.sync().await;
+    let row = h.store(|s| s.get_order(&result.order.id).unwrap().unwrap());
+    assert_eq!(
+        row.reject_reason.as_deref(),
+        Some("OKX has no record of this order yet; check its outcome in OKX")
+    );
+    h.okx.state().lookup_error_code = None;
+
+    // Three days after the expiry, OKX still has no record: the order never arrived.
+    h.engine.sync().await.unwrap();
+    let row = h.store(|s| s.get_order(&result.order.id).unwrap().unwrap());
     assert_eq!(row.status, OrderStatus::Canceled);
     assert_eq!(
         row.reject_reason.as_deref(),
         Some("OKX has no record of this order")
     );
+    let before = lookups();
+    h.engine.sync().await.unwrap();
+    assert_eq!(lookups(), before);
     assert!(h.placed().is_empty());
+}
+
+#[tokio::test]
+async fn an_order_expired_locally_returns_when_okx_later_reports_it_live() {
+    let h = connect_default().await;
+    h.arm();
+    h.okx.state().rest_limit_orders = true;
+    let placed = h
+        .engine
+        .place_order(resting_entry("BTCUSDT"))
+        .await
+        .unwrap()
+        .order;
+    assert_eq!(placed.status, OrderStatus::Open);
+    // OKX answers "order does not exist" for longer than the arrival window.
+    h.okx.state().lookup_error_code = Some("51603".into());
+    h.backdate(&placed.id, 61_000);
+    h.engine.sync().await.unwrap();
+    let row = h.store(|s| s.get_order(&placed.id).unwrap().unwrap());
+    assert_eq!(row.status, OrderStatus::Canceled);
+
+    h.okx.state().lookup_error_code = None;
+    h.engine.sync().await.unwrap();
+    let row = h.store(|s| s.get_order(&placed.id).unwrap().unwrap());
+    assert_eq!(row.status, OrderStatus::Open);
+    assert!(row.exchange_order_id.is_some());
+    assert_eq!(row.reject_reason, None);
+    assert_eq!(h.placed().len(), 1);
 }
 
 /// An order younger than a minute that OKX does not know is left alone: it may still arrive.
@@ -869,7 +940,7 @@ async fn reads_positions_and_balance_from_okx() {
     let positions = h.engine.positions();
     assert_eq!(positions.len(), 1);
     let view = serde_json::to_value(&positions[0]).unwrap();
-    assert_eq!(view["id"], "okx:BTC-USDT-SWAP");
+    assert_eq!(view["id"], "okx:BTC-USDT-SWAP:isolated:LONG::1");
     assert_eq!(view["side"], "LONG");
     assert_eq!(view["quantity"], "0.001");
     assert_eq!(view["entryPrice"], "75000");

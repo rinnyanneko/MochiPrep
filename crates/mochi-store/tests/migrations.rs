@@ -72,7 +72,7 @@ fn migration_list_matches_directory() {
 }
 
 #[test]
-fn opens_node_database_without_reapplying() {
+fn upgrades_node_database_without_reapplying_its_migrations() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("node.sqlite");
     std::fs::copy(golden_path("node-created.sqlite"), &path).unwrap();
@@ -95,6 +95,7 @@ fn opens_node_database_without_reapplying() {
         .map(|(name, _)| *name)
         .collect();
     assert_eq!(added, expected);
+    assert!(table_exists(&conn, "deferred_target_replacements"));
     let name: String = conn
         .query_row(
             "SELECT name FROM accounts WHERE id = 'acct_golden'",
@@ -103,6 +104,8 @@ fn opens_node_database_without_reapplying() {
         )
         .unwrap();
     assert_eq!(name, "Golden");
+    drop(conn);
+    assert_eq!(applied_at(&open_database(&path).unwrap()), applied);
 }
 
 fn applied_at(conn: &Connection) -> Vec<(String, i64)> {
@@ -116,24 +119,65 @@ fn applied_at(conn: &Connection) -> Vec<(String, i64)> {
 #[test]
 fn older_schema_gets_only_the_new_migration() {
     let conn = open_in_memory_bare();
-    let older = MIGRATIONS.len() - 1;
-    migrate_with(&conn, &MIGRATIONS[..older]).unwrap();
+    let replacement_migration = "009_deferred_target_replacements.sql";
+    let older: Vec<_> = MIGRATIONS
+        .iter()
+        .copied()
+        .filter(|(name, _)| *name != replacement_migration)
+        .collect();
+    migrate_with(&conn, &older).unwrap();
     conn.execute_batch(
         "INSERT INTO providers (id, name, kind, default_model, created_at) \
          VALUES ('p1', 'P', 'mock', 'm', 1)",
     )
     .unwrap();
     let before = migration_names(&conn);
-    assert_eq!(before.len(), older);
+    assert_eq!(before.len(), older.len());
 
     migrate_with(&conn, MIGRATIONS).unwrap();
     let after = migration_names(&conn);
     let added: Vec<&String> = after.iter().filter(|n| !before.contains(n)).collect();
-    assert_eq!(added, vec![MIGRATIONS[older].0]);
+    assert_eq!(added, vec![replacement_migration]);
     let rows: i64 = conn
         .query_row("SELECT COUNT(*) FROM providers", [], |r| r.get(0))
         .unwrap();
     assert_eq!(rows, 1);
+}
+
+#[test]
+fn close_quantity_upgrade_preserves_fraction_selections() {
+    let conn = open_in_memory_bare();
+    let quantity_migration = MIGRATIONS
+        .iter()
+        .position(|(name, _)| *name == "013_okx_close_quantities.sql")
+        .unwrap();
+    migrate_with(&conn, &MIGRATIONS[..quantity_migration]).unwrap();
+    conn.execute_batch(
+        "INSERT INTO accounts (id,name,source,initial_balance,wallet_balance,used_margin,
+           realized_pnl,fees_paid,funding_paid,config,created_at)
+         VALUES ('a','A','LIVE','0','0','0','0','0','0','{}',1);
+         INSERT INTO orders (id,account_id,client_order_id,symbol,side,type,quantity,leverage,
+            reduce_only,close_position,status,filled_quantity,reserved_margin,created_at,updated_at)
+         VALUES ('o','a','key','BTCUSDT','SELL','MARKET','0.001',1,1,0,'FILLED','0.001','0',1,1);
+         INSERT INTO okx_close_intents (order_id, position_id, fraction)
+         VALUES ('o', 'isolated-long', 0.5);",
+    )
+    .unwrap();
+    migrate_with(&conn, MIGRATIONS).unwrap();
+    let saved = conn
+        .query_row(
+            "SELECT position_id, fraction, quantity FROM okx_close_selections WHERE order_id='o'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, f64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(saved, ("isolated-long".to_owned(), 0.5, None));
 }
 
 /// A connection with no migrations run, unlike `open_in_memory`.
@@ -290,7 +334,11 @@ fn exchange_position_history_keys_a_reused_pos_id_by_its_open_time() {
 #[test]
 fn execution_evidence_upgrade_reopens_completed_position_history_backfill() {
     let conn = open_in_memory_bare();
-    let old = &MIGRATIONS[..MIGRATIONS.len() - 1];
+    let evidence = MIGRATIONS
+        .iter()
+        .position(|(name, _)| *name == "010_exchange_execution_evidence.sql")
+        .unwrap();
+    let old = &MIGRATIONS[..evidence];
     migrate_with(&conn, old).unwrap();
     conn.execute_batch(
         "INSERT INTO accounts (id,name,source,initial_balance,wallet_balance,used_margin,

@@ -51,12 +51,32 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../migrations/008_trailing_stop.sql"),
     ),
     (
+        "009_deferred_target_replacements.sql",
+        include_str!("../migrations/009_deferred_target_replacements.sql"),
+    ),
+    (
         "009_exchange_position_history.sql",
         include_str!("../migrations/009_exchange_position_history.sql"),
     ),
     (
         "010_exchange_execution_evidence.sql",
         include_str!("../migrations/010_exchange_execution_evidence.sql"),
+    ),
+    (
+        "011_exchange_order_recovery.sql",
+        include_str!("../migrations/011_exchange_order_recovery.sql"),
+    ),
+    (
+        "012_okx_close_intents.sql",
+        include_str!("../migrations/012_okx_close_intents.sql"),
+    ),
+    (
+        "013_okx_close_quantities.sql",
+        include_str!("../migrations/013_okx_close_quantities.sql"),
+    ),
+    (
+        "014_exchange_order_id_lookup.sql",
+        include_str!("../migrations/014_exchange_order_id_lookup.sql"),
     ),
 ];
 
