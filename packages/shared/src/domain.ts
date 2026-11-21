@@ -466,6 +466,32 @@ export interface Agent {
   createdAt: number;
 }
 
+/** The agent form settings a template saves. Provider, model, symbol and account belong to the agent. */
+export interface AgentTemplateFields {
+  name: string;
+  description: string;
+  strategy: string;
+  timeframe: Timeframe;
+  intervalSec: number;
+  executionMode: ExecutionMode;
+  risk: RiskSettings;
+  useNews: boolean;
+  allowTrailingStop: boolean;
+}
+
+/**
+ * A saved set of agent form settings. Applying one only pre-fills the new-agent form: the agent
+ * is still validated on creation, and every order still passes the risk engine.
+ * Built-ins are read-only (duplicate to edit); deleting one hides it until restored.
+ */
+export interface AgentTemplate extends AgentTemplateFields {
+  id: string;
+  builtIn: boolean;
+  /** Null for built-ins, which are defined by the app rather than saved. */
+  createdAt: number | null;
+  updatedAt: number | null;
+}
+
 export type ProviderKind = 'MOCK' | 'OPENAI_COMPATIBLE' | 'OPENAI' | 'ANTHROPIC' | 'GEMINI' | 'DEEPSEEK' | 'OPENCODE';
 
 export interface ProviderConfig {
@@ -650,7 +676,7 @@ export type ServerEvent =
   | { type: 'invalidate'; topics: Topic[] }
   | { type: 'toast'; level: 'info' | 'warn' | 'error'; message: string };
 
-export type Topic = 'accounts' | 'orders' | 'positions' | 'agents' | 'decisions' | 'providers' | 'arena' | 'exchange' | 'instruments' | 'news' | 'vault';
+export type Topic = 'accounts' | 'orders' | 'positions' | 'agents' | 'decisions' | 'providers' | 'arena' | 'exchange' | 'instruments' | 'news' | 'vault' | 'templates';
 
 /** OFF: no master password, AI keys are stored unencrypted. LOCKED: secrets are sealed and not yet loaded. */
 export type VaultStatus = 'OFF' | 'LOCKED' | 'UNLOCKED';
