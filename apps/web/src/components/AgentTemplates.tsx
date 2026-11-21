@@ -1,5 +1,5 @@
 import { Copy, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DEFAULT_RISK_SETTINGS, TIMEFRAMES, type AgentTemplate, type AgentTemplateFields, type DataSource, type RiskSettings, type Timeframe } from '@mochiprep/shared';
 import { Badge, Button, Dialog, Field, Input, Segmented, Select, Textarea } from '@/components/ui';
 import { api } from '@/lib/api';
@@ -105,9 +105,22 @@ const BLANK: AgentTemplateFields = {
 function TemplateEditor({ id, initial, onClose }: { id?: string; initial: AgentTemplateFields; onClose(): void }) {
   const [form, setForm] = useState<AgentTemplateFields>(initial);
   const set = (patch: Partial<AgentTemplateFields>) => setForm((f) => ({ ...f, ...patch }));
+  const [saving, setSaving] = useState(false);
+  // Cancelling unmounts this editor; a save still in flight must not then close the next one.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const save = async () => {
+    if (saving) return;
+    setSaving(true);
     const body = templateBody(form);
     const done = await attempt(() => (id ? api.put(`/agent-templates/${id}`, body) : api.post('/agent-templates', body)));
+    if (!mounted.current) return;
+    setSaving(false);
     if (done) onClose();
   };
   return (
@@ -119,7 +132,7 @@ function TemplateEditor({ id, initial, onClose }: { id?: string; initial: AgentT
       <AgentSettingsFields value={form} onChange={set} />
       <div className="mt-4 flex justify-end gap-2">
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="primary" disabled={!form.name.trim()} onClick={save}>{id ? 'Save template' : 'Create template'}</Button>
+        <Button variant="primary" disabled={saving || !form.name.trim()} onClick={save}>{id ? 'Save template' : 'Create template'}</Button>
       </div>
     </Dialog>
   );
