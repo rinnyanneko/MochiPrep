@@ -926,8 +926,25 @@ impl OkxEngine {
         position_id: String,
     ) -> Result<OrderResult, EngineError> {
         let key = (request.account_id.clone(), request.client_order_id.clone());
+        // The refusal is recorded under the request's key, as any refused order is, so
+        // that a retry under the same key finds it instead of claiming the key anew.
+        let claim = dec(&request.quantity).ok().map(|quantity| {
+            let selection = CloseSelection {
+                position_id: Some(position_id.clone()),
+                amount: CloseAmount::Quantity {
+                    quantity: quantity.to_fixed(),
+                    limit_price: request
+                        .price
+                        .as_deref()
+                        .and_then(|price| dec(price).ok())
+                        .map(|price| price.to_fixed()),
+                },
+            };
+            (self.build_order(&request), selection)
+        });
         let result = self.reduce_selected(request, position_id).await;
-        self.confirm_not_dispatched(result, &key.0, &key.1).await
+        self.confirm_not_dispatched(result, &key.0, &key.1, claim)
+            .await
     }
 
     async fn reduce_selected(
@@ -1057,18 +1074,24 @@ impl OkxEngine {
     ) -> Result<OrderResult, EngineError> {
         let key = (intent.account_id.clone(), intent.client_order_id.clone());
         let result = self.dispatch_close_queued(intent).await;
-        self.confirm_not_dispatched(result, &key.0, &key.1).await
+        // A fractional close cannot build its order once the position is gone, so only
+        // a refusal already recorded on its own row stays NOT_DISPATCHED.
+        self.confirm_not_dispatched(result, &key.0, &key.1, None)
+            .await
     }
 
     /// A refusal before dispatch tells the client to drop its key, so it holds only while
-    /// that key is unused. A retired session cannot see what its successor did, and another
-    /// session may have sent an order under the same key meanwhile: then the refusal is
-    /// answered as a plain error, and the client resolves the key by lookup.
+    /// this session owns that key and nothing was sent under it. A retired session cannot
+    /// see what its successor did. Otherwise the key is claimed in the store, atomically by
+    /// its unique constraint: a refusal recorded under it settles any later request with
+    /// the same key, and a key already taken means another request may have sent an order.
+    /// Then the refusal is a plain error, and the client resolves the key by lookup.
     async fn confirm_not_dispatched(
         &self,
         result: Result<OrderResult, EngineError>,
         account_id: &str,
         client_order_id: &str,
+        claim: Option<(Order, CloseSelection)>,
     ) -> Result<OrderResult, EngineError> {
         let Err(EngineError::RefusedBeforeDispatch(message)) = result else {
             return result;
@@ -1080,20 +1103,25 @@ impl OkxEngine {
         let used = self
             .rows(move |rows| Ok(rows.get_order_by_client_id(&account_id, &client_order_id)?))
             .await;
-        // The session may have been replaced while the store answered.
-        if self.dispatch().retired {
-            return Err(EngineError::Message(message));
-        }
-        match used {
-            // Only this session's own rejection of the same refusal leaves the key unused.
-            Ok(Some(order))
-                if order.status != OrderStatus::Rejected
-                    || order.reject_reason.as_deref() != Some(message.as_str()) =>
-            {
-                Err(EngineError::Message(message))
+        let claimed = match used {
+            // The final recheck recorded this session's own rejection of the same refusal.
+            Ok(Some(order)) => {
+                order.status == OrderStatus::Rejected
+                    && order.reject_reason.as_deref() == Some(message.as_str())
             }
-            Ok(_) => Err(EngineError::RefusedBeforeDispatch(message)),
-            Err(_) => Err(EngineError::Message(message)),
+            Ok(None) => match claim {
+                Some((order, selection)) => self
+                    .reject(order, message.clone(), Some(selection))
+                    .await
+                    .is_ok(),
+                None => false,
+            },
+            Err(_) => false,
+        };
+        if claimed {
+            Err(EngineError::RefusedBeforeDispatch(message))
+        } else {
+            Err(EngineError::Message(message))
         }
     }
 

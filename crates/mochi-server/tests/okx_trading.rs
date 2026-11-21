@@ -290,11 +290,10 @@ async fn a_disarmed_okx_account_can_still_close_and_cancel_refusals_keep_node_te
     assert_eq!(
         (status, error),
         (
-            409,
-            json!({
-                "error": "The selected OKX position has changed. Refresh and try again.",
-                "code": "NOT_DISPATCHED",
-            })
+            // A fractional close cannot record an order once its position is gone, so its
+            // refusal is a plain error and the key is resolved by lookup.
+            400,
+            json!({ "error": "The selected OKX position has changed. Refresh and try again." })
         )
     );
     w.state.runtime.shutdown().await;
@@ -467,7 +466,10 @@ async fn selected_okx_market_and_limit_orders_can_reduce_an_exact_quantity() {
     request["quantity"] = json!("0.0004");
     request["positionId"] = positions[0]["id"].clone();
     w.okx.state().rest_limit_orders = true;
+    // A refusal before dispatch is recorded under its key, so the ticket corrects the
+    // request under a new one.
     let mut oversized = request.clone();
+    oversized["clientOrderId"] = json!("reduce-limit-oversized");
     oversized["quantity"] = json!("0.002");
     assert_eq!(
         send(&w.state, "POST", "/api/orders", Some(oversized))
@@ -635,7 +637,7 @@ async fn manual_okx_close_never_substitutes_the_isolated_position_for_a_selected
         .insert("tradeId".into(), json!("99"));
     let body = json!({ "fraction": 1, "clientOrderId": "stale", "positionId": isolated["id"] });
     let (status, error) = send(&w.state, "POST", &close_path, Some(body)).await;
-    assert_eq!((status, &error["code"]), (409, &json!("NOT_DISPATCHED")));
+    assert_eq!((status, &error["code"]), (400, &Value::Null));
     assert_eq!(w.okx.state().placed.len(), 1);
     w.state.runtime.sync_exchanges().await.unwrap();
     let (_, fresh) = send(&w.state, "GET", &path, None).await;

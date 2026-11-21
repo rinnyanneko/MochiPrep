@@ -2564,7 +2564,9 @@ async fn a_reconnect_that_cannot_save_its_limits_keeps_the_current_session() {
     input.limits.max_quote_age_sec = before.max_quote_age_sec + 1.0;
     let hold = w.okx.hold_next("GET", "/account/balance");
     let (again, ()) = tokio::join!(w.rt.connect_okx(input, None), async {
-        hold.reached().await;
+        tokio::time::timeout(std::time::Duration::from_secs(2), hold.reached())
+            .await
+            .unwrap();
         w.rt.call(|r| {
             r.connection()
                 .execute_batch(

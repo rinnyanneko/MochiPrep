@@ -2624,10 +2624,11 @@ impl OkxEngine {
             // A connection candidate reads while the active session can still retire this
             // row. Save only over the row as read, so a stale copy never reopens it.
             if let Some(current) = self.save_if_unchanged(observed, row.clone()).await? {
+                // `algo` was read before that change, so it is not used for this row. Left
+                // out of `alive`, an open row is looked up again in this pass and confirmed
+                // against its stored state; a closed one stays closed.
                 *row = current;
-                if row.status != OrderStatus::Open {
-                    return Ok(());
-                }
+                return Ok(());
             }
         }
         match alive.iter_mut().find(|(i, _)| *i == index) {

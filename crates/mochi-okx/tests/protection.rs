@@ -5069,3 +5069,46 @@ async fn a_system_fill_between_the_parent_fills_does_not_halve_the_target() {
         target.reject_reason
     );
 }
+
+#[tokio::test]
+async fn a_refusal_before_dispatch_claims_its_key_for_later_requests() {
+    let h = Harness::with_position().await;
+    let mut request = order();
+    request.client_order_id = "claimed-reduction-key".into();
+    request.side = OrderSide::Sell;
+    request.reduce_only = Some(true);
+    request.stop_loss = None;
+    let position_id = h.engine.positions()[0].position.id.clone();
+    // The selected position closes before the first read.
+    h.okx.state().position = None;
+    let placed = h.okx.state().placed.len();
+    let error = h
+        .engine
+        .reduce_position(request.clone(), position_id.clone())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, EngineError::RefusedBeforeDispatch(_)),
+        "{error:?}"
+    );
+    let row = h
+        .store(|s| s.get_order_by_client_id(ACCOUNT, "claimed-reduction-key"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.status, OrderStatus::Rejected);
+    assert_eq!(
+        row.reject_reason.as_deref(),
+        Some("The selected OKX position has changed. Refresh and try again.")
+    );
+
+    // Another request under the same key finds the recorded refusal; nothing is sent.
+    let again = h
+        .engine
+        .reduce_position(request, position_id)
+        .await
+        .unwrap();
+    assert!(again.duplicate);
+    assert_eq!(again.order.id, row.id);
+    assert_eq!(again.order.status, OrderStatus::Rejected);
+    assert_eq!(h.okx.state().placed.len(), placed);
+}

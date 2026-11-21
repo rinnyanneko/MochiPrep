@@ -68,8 +68,9 @@ function ResetAccount({ account }: { account: AccountView }) {
 // record of the order yet, so the server keeps looking it up.
 const UNCONFIRMED_EXPIRY = 'OKX has no record of this order yet; check its outcome in OKX';
 
+// An order OKX acknowledged can also expire this way, so its exchange ID is not checked.
 function isUnconfirmedExpiry(order: Order): boolean {
-  return order.status === 'CANCELED' && !order.exchangeOrderId && order.rejectReason === UNCONFIRMED_EXPIRY;
+  return order.status === 'CANCELED' && order.rejectReason === UNCONFIRMED_EXPIRY;
 }
 
 function normalizeDecimal(value: string): string {
