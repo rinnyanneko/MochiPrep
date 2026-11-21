@@ -14,6 +14,7 @@ pub mod providers;
 pub mod replay;
 pub mod state;
 pub mod static_files;
+pub mod templates;
 pub mod vault;
 
 use axum::extract::State;
@@ -40,6 +41,7 @@ pub fn router() -> Router<AppState> {
         .merge(accounts::router())
         .merge(orders::router())
         .merge(agents::router())
+        .merge(templates::router())
         .merge(providers::router())
         .merge(replay::router())
         .merge(vault::router())

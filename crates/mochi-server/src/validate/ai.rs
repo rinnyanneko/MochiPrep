@@ -271,6 +271,46 @@ pub(super) fn agent_input(input: Input) -> Checked {
     f.defaulted("allowTrailingStop", json!(false), check_bool);
     f.strict()
 }
+/// The agent form fields a template saves: no provider, model, symbol or account, which belong
+/// to the agent being created. The same bounds as [`agent_input`], since a template only
+/// pre-fills that form.
+pub(super) fn agent_template_input(input: Input) -> Checked {
+    let mut f = Fields::new(input)?;
+    f.required("name", |v| check_string(v, &StringRule::trimmed(60)));
+    f.defaulted("description", json!(""), |v| {
+        check_string(
+            v,
+            &StringRule {
+                min: None,
+                ..StringRule::trimmed(300)
+            },
+        )
+    });
+    f.required("strategy", |v| {
+        check_string(
+            v,
+            &StringRule {
+                max: Some(8000),
+                ..StringRule::PLAIN
+            },
+        )
+    });
+    f.required("timeframe", |v| check_enum(v, TIMEFRAMES));
+    f.required("intervalSec", |v| {
+        check_number(v, &NumberRule::int(10.0, 86400.0))
+    });
+    f.defaulted("executionMode", json!("SIGNAL"), |v| {
+        check_enum(v, &["AUTO", "SIGNAL"])
+    });
+    f.defaulted(
+        "risk",
+        serde_json::to_value(default_risk_settings()).expect("finite default risk"),
+        risk,
+    );
+    f.defaulted("useNews", json!(false), check_bool);
+    f.defaulted("allowTrailingStop", json!(false), check_bool);
+    f.strict()
+}
 fn ai_trailing(input: Input) -> Checked {
     let mut f = Fields::new(input)?;
     f.required("kind", |v| check_enum(v, TRAILING_KINDS));

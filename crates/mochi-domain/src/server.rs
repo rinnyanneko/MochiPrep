@@ -67,6 +67,7 @@ pub enum Topic {
     Instruments,
     News,
     Vault,
+    Templates,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

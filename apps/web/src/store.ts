@@ -98,7 +98,7 @@ export function useDateTime() {
 }
 
 let toastId = 0;
-const ALL_TOPICS: Topic[] = ['accounts', 'orders', 'positions', 'agents', 'decisions', 'providers', 'arena', 'exchange', 'instruments', 'vault'];
+const ALL_TOPICS: Topic[] = ['accounts', 'orders', 'positions', 'agents', 'decisions', 'providers', 'arena', 'exchange', 'instruments', 'vault', 'templates'];
 
 export const useApp = create<State>((set, get) => ({
   connected: false,
@@ -116,7 +116,7 @@ export const useApp = create<State>((set, get) => ({
   exchange: [],
   signals: [],
   symbols: [...DEFAULT_SYMBOLS],
-  versions: { accounts: 0, orders: 0, positions: 0, agents: 0, decisions: 0, providers: 0, arena: 0, exchange: 0, instruments: 0, news: 0, vault: 0 },
+  versions: { accounts: 0, orders: 0, positions: 0, agents: 0, decisions: 0, providers: 0, arena: 0, exchange: 0, instruments: 0, news: 0, vault: 0, templates: 0 },
   page: (location.hash.slice(1) as Page) || 'dashboard',
   source: remembered('mochi.source', 'REPLAY') as DataSource,
   accountId: null,

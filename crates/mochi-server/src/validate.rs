@@ -77,6 +77,8 @@ pub enum Schema {
     ProviderKey,
     ProviderTest,
     AgentInput,
+    /// Agent template body, for `POST`/`PUT /api/agent-templates`. No Node counterpart.
+    AgentTemplateInput,
     CreateAccount,
     PlaceOrder,
     ClosePosition,
@@ -243,6 +245,7 @@ pub fn check(schema: Schema, input: Option<&Value>) -> Result<Value, ApiError> {
         Schema::ProviderKey => ai::provider_key(input),
         Schema::ProviderTest => ai::provider_test(input),
         Schema::AgentInput => ai::agent_input(input),
+        Schema::AgentTemplateInput => ai::agent_template_input(input),
         Schema::CreateAccount => create_account(input),
         Schema::PlaceOrder => place_order(input),
         Schema::ClosePosition => close_position(input),
