@@ -289,6 +289,31 @@ test('OKX market and limit reductions send the selected isolated position', asyn
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
   await page.evaluate(() => window.dispatchEvent(new Event('restore-test-storage')));
 
+  // Session storage alone ends with its tab, so it cannot hold the reduction reference.
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (this === window.localStorage && key.startsWith('mochiprep.pending-reduction.')) {
+        throw new DOMException('Storage is full', 'QuotaExceededError');
+      }
+      original.call(this, key, value);
+    };
+    window.addEventListener('restore-test-storage', () => {
+      Storage.prototype.setItem = original;
+    }, { once: true });
+  });
+  // Wait for the first refusal's toast to expire, so only a new one can match.
+  const storageToast = page.getByText('Browser storage is required to confirm this reduction.');
+  await expect(storageToast).toHaveCount(0, { timeout: 15_000 });
+  await review.click();
+  await page.getByRole('button', { name: 'Place order', exact: true }).click();
+  await expect(storageToast).toBeVisible();
+  expect(submittedOrders).toBe(0);
+  expect(await page.evaluate(() => Object.keys(sessionStorage)
+    .filter((key) => key.startsWith('mochiprep.pending-reduction.')))).toEqual([]);
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('restore-test-storage')));
+
   let marketClientOrderId: string | undefined;
   for (const [type, limit] of [['Market', null], ['Limit', '76000.1']] as const) {
     await page.getByRole('button', { name: type, exact: true }).click();

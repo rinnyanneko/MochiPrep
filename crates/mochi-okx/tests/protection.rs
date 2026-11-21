@@ -4798,39 +4798,49 @@ async fn a_connection_readback_before_registration_sends_no_algo_cancel() {
 
 #[tokio::test]
 async fn a_position_change_during_the_post_exit_balance_read_keeps_the_snapshot_stale() {
-    let (h, entry) = resting_target().await;
-    h.okx.state().fill_resting();
-    let reopened = h.okx.state().position.clone();
-    h.advance(1);
-    *h.prices.lock().unwrap() = ("78099".into(), "78101".into(), "78100".into());
-    let first = h.okx.hold_next("GET", "/account/balance");
-    let post_exit = h.okx.hold_next("GET", "/account/balance");
-    let engine = h.engine.clone();
-    let sync = tokio::spawn(async move { engine.sync().await });
-    let timeout = std::time::Duration::from_secs(2);
-    tokio::time::timeout(timeout, first.reached())
-        .await
-        .unwrap();
-    first.release();
-    tokio::time::timeout(timeout, post_exit.reached())
-        .await
-        .unwrap();
-    // The exit closed the position, and a new one opens while the balance is read.
-    assert!(h.okx.state().position.is_none());
-    h.okx.state().position = reopened;
-    post_exit.release();
-    let error = sync.await.unwrap().unwrap_err();
-    assert!(error.to_string().contains("post-exit balance"), "{error}");
-    assert!(!h.engine.healthy());
-    assert_eq!(h.okx.state().placed.len(), 2);
-    assert_eq!(
-        h.order_row(&format!("{}:deferred:tp", entry.id)).status,
-        OrderStatus::Filled
-    );
+    for cross in [false, true] {
+        let (h, entry) = resting_target().await;
+        h.okx.state().fill_resting();
+        let reopened = h.okx.state().position.clone();
+        h.advance(1);
+        *h.prices.lock().unwrap() = ("78099".into(), "78101".into(), "78100".into());
+        let first = h.okx.hold_next("GET", "/account/balance");
+        let post_exit = h.okx.hold_next("GET", "/account/balance");
+        let engine = h.engine.clone();
+        let sync = tokio::spawn(async move { engine.sync().await });
+        let timeout = std::time::Duration::from_secs(2);
+        tokio::time::timeout(timeout, first.reached())
+            .await
+            .unwrap();
+        first.release();
+        tokio::time::timeout(timeout, post_exit.reached())
+            .await
+            .unwrap();
+        // The exit closed the position. While the balance is read, either a new isolated
+        // position opens, or a cross-margin position on another pair does.
+        assert!(h.okx.state().position.is_none());
+        if cross {
+            h.okx.state().other_positions.push(row(json!({
+                "instId": "ETH-USDT-SWAP", "mgnMode": "cross", "posSide": "net",
+                "pos": "1", "uTime": "1800000000005",
+            })));
+        } else {
+            h.okx.state().position = reopened.clone();
+        }
+        post_exit.release();
+        let error = sync.await.unwrap().unwrap_err();
+        assert!(error.to_string().contains("post-exit balance"), "{error}");
+        assert!(!h.engine.healthy());
+        assert_eq!(h.okx.state().placed.len(), 2);
+        assert_eq!(
+            h.order_row(&format!("{}:deferred:tp", entry.id)).status,
+            OrderStatus::Filled
+        );
 
-    h.sync().await;
-    assert!(h.engine.healthy());
-    assert_eq!(h.okx.state().placed.len(), 2);
+        h.sync().await;
+        assert!(h.engine.healthy());
+        assert_eq!(h.okx.state().placed.len(), 2);
+    }
 }
 
 #[tokio::test]
@@ -4912,4 +4922,60 @@ async fn a_held_rejection_survives_a_candidate_expiring_the_unsent_order() {
         finalized.reject_reason.as_deref(),
         Some("The selected OKX position has changed. Refresh and try again.")
     );
+}
+
+#[tokio::test]
+async fn a_replaced_stop_is_reopened_only_while_okx_still_lists_it_live() {
+    for gone_before_lookup in [false, true] {
+        let h = Harness::with_position().await;
+        let old = h.protection_rows().remove(0);
+        h.okx.state().cancel_fails = true;
+        h.set(stop("74500")).await.unwrap();
+        h.okx.state().cancel_fails = false;
+        let replacement = h
+            .protection_rows()
+            .into_iter()
+            .find(|row| row.id != old.id && row.status == OrderStatus::Open)
+            .unwrap();
+        // The replacement triggered, so only the old stop is still pending on OKX.
+        h.okx
+            .state()
+            .algos
+            .get_mut(&to_algo_cl_ord_id(&replacement.id))
+            .unwrap()
+            .insert("state".into(), json!("effective"));
+        let replacement_lookup = h.okx.hold_next("GET", "/trade/order-algo");
+        let old_lookup = h.okx.hold_next("GET", "/trade/order-algo");
+        let engine = h.engine.clone();
+        let sync = tokio::spawn(async move { engine.sync().await });
+        let timeout = std::time::Duration::from_secs(2);
+        tokio::time::timeout(timeout, replacement_lookup.reached())
+            .await
+            .unwrap();
+        replacement_lookup.release();
+        tokio::time::timeout(timeout, old_lookup.reached())
+            .await
+            .unwrap();
+        if gone_before_lookup {
+            // The pending list was read before the old stop left OKX.
+            h.okx
+                .state()
+                .algos
+                .get_mut(&to_algo_cl_ord_id(&old.id))
+                .unwrap()
+                .insert("state".into(), json!("canceled"));
+        }
+        old_lookup.release();
+        let _ = sync.await.unwrap();
+        let row = h.order_row(&old.id);
+        if gone_before_lookup {
+            assert_eq!(row.status, OrderStatus::Canceled);
+            assert_eq!(row.reject_reason.as_deref(), Some("Replaced"));
+            assert_ne!(h.engine.protection_of("BTCUSDT"), stop("74000"));
+        } else {
+            // A stop OKX still confirms live after a failed cancel is taken up again.
+            assert_eq!(row.status, OrderStatus::Open);
+            assert_eq!(h.engine.protection_of("BTCUSDT"), stop("74000"));
+        }
+    }
 }

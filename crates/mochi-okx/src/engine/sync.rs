@@ -110,6 +110,21 @@ impl PositionSnapshot {
         })
     }
 
+    /// Every open position as it would be published, cross-margin ones included, in a
+    /// stable order. Two readbacks with the same identity describe the same account.
+    pub(super) fn identity(&self) -> Vec<[Option<String>; 5]> {
+        let mut identity: Vec<_> = self
+            .open
+            .iter()
+            .map(|row| {
+                ["instId", "mgnMode", "posSide", "pos", "uTime"]
+                    .map(|field| nullish_text(row.get(field)))
+            })
+            .collect();
+        identity.sort();
+        identity
+    }
+
     fn protection_keys(&self, registry: &Registry) -> HashMap<String, String> {
         let mut keys = HashMap::new();
         let mut seen = HashSet::new();

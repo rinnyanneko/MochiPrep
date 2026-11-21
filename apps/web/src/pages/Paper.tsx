@@ -96,6 +96,8 @@ type PendingReduction = {
 type OrderConfirmation = PendingReduction & {
   retry: boolean;
   summary?: [string, string][];
+  /** This request's key was saved to localStorage before it was first sent. */
+  durable?: boolean;
 };
 
 function parsePendingReduction(raw: string | null, accountId: string): PendingReduction | null {
@@ -329,14 +331,20 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
     }
     // Persist before sending so a reload or a new tab can use the same idempotency key.
     // Session storage ends with its tab, so it cannot recover a lost answer from another one.
-    // A retry of an already stored request reuses its key, so it may still be sent.
-    const stored = selectedReduction && readPendingReductions(pendingKey, account.id)
-      .some((item) => item.request.clientOrderId === request.clientOrderId);
-    if (selectedReduction && !lookupId && !stored && persistPendingReduction(pendingKey, { request }) !== 'localStorage') {
-      // Only the entry this attempt just wrote is removed: nothing was sent under it.
-      persistPendingReduction(pendingKey, { request }, true);
-      useApp.getState().toast('error', 'Browser storage that survives closing this tab is required to confirm this reduction.');
-      return;
+    // A retry of a request saved before it was sent reuses its key, so it may still be
+    // sent even if storage became unavailable since.
+    const stored = selectedReduction && (confirmation.durable === true
+      || readPendingReductions(pendingKey, account.id)
+        .some((item) => item.request.clientOrderId === request.clientOrderId));
+    let durable = confirmation.durable === true;
+    if (selectedReduction && !lookupId && !stored) {
+      durable = persistPendingReduction(pendingKey, { request }) === 'localStorage';
+      if (!durable) {
+        // Only the entry this attempt just wrote is removed: nothing was sent under it.
+        persistPendingReduction(pendingKey, { request }, true);
+        useApp.getState().toast('error', 'Browser storage is required to confirm this reduction.');
+        return;
+      }
     }
     setSubmitting(true);
     let notDispatched = false;
@@ -367,7 +375,7 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
       if (result) persistPendingReduction(pendingKey, pending);
       const saved = refreshPendingReductions()
         .find((item) => item.request.clientOrderId === request.clientOrderId);
-      setConfirmation({ ...pending, lookupId: saved?.lookupId ?? pending.lookupId, retry: true });
+      setConfirmation({ ...pending, lookupId: saved?.lookupId ?? pending.lookupId, retry: true, durable: durable || stored || undefined });
       return;
     }
     if (selectedReduction) persistPendingReduction(pendingKey, confirmation, true);

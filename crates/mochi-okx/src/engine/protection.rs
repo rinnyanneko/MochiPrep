@@ -2560,6 +2560,27 @@ impl OkxEngine {
     }
 
     /// A row OKX lists live: it carries the algoId and no stale reason.
+    /// Saves `update` only if the stored row still equals `observed`, in one transaction.
+    /// Answers the newer stored row when another session changed it first.
+    async fn save_if_unchanged(
+        &self,
+        observed: Order,
+        update: Order,
+    ) -> Result<Option<Order>, EngineError> {
+        self.rows(move |rows| {
+            let mut current = None;
+            rows.transaction(&mut || {
+                current = rows.get_order(&update.id)?;
+                if current.as_ref() == Some(&observed) {
+                    rows.save_order(&update)?;
+                }
+                Ok(())
+            })?;
+            Ok(current.filter(|current| *current != observed))
+        })
+        .await
+    }
+
     async fn confirm(
         &self,
         row: &mut Order,
@@ -2583,23 +2604,9 @@ impl OkxEngine {
                 row.trigger_price = trigger;
             }
             row.updated_at = at;
-            let update = row.clone();
             // A connection candidate reads while the active session can still retire this
             // row. Save only over the row as read, so a stale copy never reopens it.
-            let current = self
-                .rows(move |rows| {
-                    let mut current = None;
-                    rows.transaction(&mut || {
-                        current = rows.get_order(&update.id)?;
-                        if current.as_ref() == Some(&observed) {
-                            rows.save_order(&update)?;
-                        }
-                        Ok(())
-                    })?;
-                    Ok(current.filter(|current| *current != observed))
-                })
-                .await?;
-            if let Some(current) = current {
+            if let Some(current) = self.save_if_unchanged(observed, row.clone()).await? {
                 *row = current;
                 if row.status != OrderStatus::Open {
                     return Ok(());
@@ -2667,7 +2674,10 @@ impl OkxEngine {
                 // The balance must describe the positions published with it. A change
                 // during the balance read leaves both stale for the next sync.
                 let after_balance = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
-                if snapshot.held != after_balance.held {
+                // Cross-margin positions are published too, so they must also agree.
+                if snapshot.held != after_balance.held
+                    || snapshot.identity() != after_balance.identity()
+                {
                     return Err(EngineError::message(
                         "Position changed while reading the post-exit balance",
                     ));
@@ -2886,6 +2896,7 @@ impl OkxEngine {
         // later position: those are marked POSITION_CLOSED, so a cancel that fails again cannot
         // let a later same-side position take the algo up.
         for (i, algo) in strays {
+            let observed = rows[i].clone();
             rows[i].exchange_order_id = nullish_text(algo.get("algoId"));
             let key = key_of(&rows[i]);
             let row = &rows[i];
@@ -2902,14 +2913,28 @@ impl OkxEngine {
             } else if closed_for_good || groups.iter().any(|(k, _)| *k == key) {
                 cancel.push((i, algo, None));
             } else {
+                // The pending list may predate a replacement that has since triggered or
+                // gone. Reopen only a stop OKX still lists live now, over the row as read.
+                let Some(live) = self.lookup_algo(&row.id).await?.filter(|remote| {
+                    remote
+                        .get("state")
+                        .and_then(Value::as_str)
+                        .is_some_and(|state| ALIVE_STATES.contains(&state))
+                }) else {
+                    continue;
+                };
                 let mut row = row.clone();
                 row.status = OrderStatus::Open;
                 row.reject_reason = None;
-                row.trigger_price = live_trigger(&row, &algo).or(row.trigger_price);
+                row.trigger_price = live_trigger(&row, &live).or(row.trigger_price);
                 row.updated_at = at;
-                self.save(row.clone()).await?;
+                if let Some(current) = self.save_if_unchanged(observed, row.clone()).await? {
+                    // Another session settled this row first. Keep its newer state.
+                    rows[i] = current;
+                    continue;
+                }
                 rows[i] = row;
-                groups.push((key, vec![(i, algo)]));
+                groups.push((key, vec![(i, live)]));
             }
         }
 
