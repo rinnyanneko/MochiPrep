@@ -1,0 +1,65 @@
+# OpenAI Codex Security: https://github.com/openai/codex-security/tree/main/github-action
+# Needs the repository secret CODEX_SECURITY_API_KEY (an OpenAI API key). Dependabot PRs
+# need it as a Dependabot secret too, or their scan fails.
+name: Codex Security
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  schedule:
+    - cron: "23 7 * * 1" # Mondays at 07:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: codex-security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr:
+    name: Scan PR changes
+    # Fork PRs get no secrets, so only same-repository PRs are scanned.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # The diff scan needs history back to the PR's merge base.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan PR changes
+        uses: openai/codex-security@bf650710f36c16936324efe250a49cdd9f2da037 # action-v0.10.1
+        with:
+          scope: diff
+          model: gpt-5.6-sol
+          effort: high
+          max-cost: "5"
+          fail-on-severity: high
+        env:
+          OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
+
+  repository:
+    name: Scan the repository
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan the repository
+        uses: openai/codex-security@bf650710f36c16936324efe250a49cdd9f2da037 # action-v0.10.1
+        with:
+          scope: repository
+          model: gpt-5.6-sol
+          effort: high
+          max-cost: "5"
+          # Report only: the weekly scan reviews code already merged.
+          fail-on-severity: none
+        env:
+          OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
