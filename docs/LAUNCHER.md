@@ -28,6 +28,7 @@ Changing the port starts those saved preferences fresh, because they belong to t
 - On macOS there is no Dock icon. Quit is only in the tray menu, and it asks first.
 - On Linux without a tray (for example GNOME without the AppIndicator extension), a small panel window with the same items replaces the tray icon.
 - Quitting the launcher stops the backend cleanly.
+- The interface window loads the backend over http. Its only native access is two commands for its update notice and Quit button: reading whether an update is offered, and asking to quit. The launcher grants them to that window only while it shows the running backend's own address, and Quit still asks first as above. Any script running in the interface can use these two commands, and nothing more.
 
 ## Updates
 

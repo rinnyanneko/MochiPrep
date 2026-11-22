@@ -32,6 +32,8 @@ Go through these steps in order, and stop at the first surprise.
 
 Closing isolated net positions is available while disarmed. The close request identifies the selected row; MochiPrep checks that identity and size against OKX before sizing and again before submission. OKX accepts an instrument and margin mode on its order endpoint, so this check cannot lock the position against trades happening after the last read. Close cross-margin positions in OKX.
 
+This changed the API in v0.1.1: on an OKX account, `POST /api/positions/{accountId}/{symbol}/close` now requires the `positionId` of the row to close, and answers 400 without it. Paper accounts do not need it. A script, or a web page cached from an earlier version, that closes OKX positions without it must send it.
+
 To reduce an isolated position by a specified quantity, select **Reduce only** on the trading ticket, choose the position, then choose Market or Limit. The ticket sends the selected `positionId` with `reduceOnly: true` to `POST /api/orders`. MochiPrep verifies that the order reduces that position and the requested quantity fits. OKX handles the matching and lifetime of a resting reduce-only limit order.
 
 An agent in Suggest mode can run without arming, because it places no orders. Accepting a suggestion needs an armed account, except for a close, and the risk checks run again at that moment.
