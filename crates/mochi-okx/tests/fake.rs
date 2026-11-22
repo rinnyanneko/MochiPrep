@@ -248,6 +248,71 @@ async fn loses_or_drops_orders_and_refuses_on_request() {
     assert_eq!(error.to_string(), "No answer from OKX: fetch failed");
 }
 
+/// As on OKX: a client ID is not reused while its order is pending, and a reduce-only order
+/// never opens or flips a position.
+#[tokio::test]
+async fn refuses_a_pending_client_id_and_reduce_only_orders_with_nothing_to_reduce() {
+    let okx = FakeOkx::new();
+    let client = client(&okx, Venue::OkxDemo);
+    let reduce = |side, sz: &str, id: &str| PlaceOrderBody {
+        reduce_only: Some(true),
+        ..market(side, sz, id)
+    };
+    let error = client
+        .place_order(&reduce(Side::Sell, "1", "nothing-held"))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().starts_with("OKX 51169:"), "{error}");
+    assert!(okx.state().position.is_none());
+
+    okx.state().rest_limit_orders = true;
+    let resting = PlaceOrderBody {
+        ord_type: OrdType::Limit,
+        px: Some("70000".into()),
+        ..market(Side::Buy, "2", "entry")
+    };
+    client.place_order(&resting).await.unwrap();
+    let error = client.place_order(&resting).await.unwrap_err();
+    assert_eq!(error.to_string(), "OKX 51016: Duplicated clOrdId");
+    okx.state().fill_resting();
+    assert_eq!(client.get_positions().await.unwrap()[0]["pos"], "2");
+
+    // A reduce-only order on another pair has nothing to reduce.
+    let mut other_pair = reduce(Side::Sell, "1", "other-pair");
+    other_pair.inst_id = "ETH-USDT-SWAP".into();
+    let error = client.place_order(&other_pair).await.unwrap_err();
+    assert!(error.to_string().starts_with("OKX 51169:"), "{error}");
+    assert_eq!(client.get_positions().await.unwrap()[0]["pos"], "2");
+
+    // A reduce-only order on the same side as the position has nothing to reduce either.
+    let error = client
+        .place_order(&reduce(Side::Buy, "1", "same-side"))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().starts_with("OKX 51169:"), "{error}");
+
+    // One larger than the position closes it and goes no further.
+    client
+        .place_order(&reduce(Side::Sell, "5", "oversized"))
+        .await
+        .unwrap();
+    assert!(client.get_positions().await.unwrap().is_empty());
+    let order = client
+        .get_order("BTC-USDT-SWAP", &to_cl_ord_id("oversized"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(order["accFillSz"], "2");
+
+    // Once its order is final, OKX takes the client ID again, and it executes again.
+    okx.state().rest_limit_orders = false;
+    client
+        .place_order(&market(Side::Buy, "1", "entry"))
+        .await
+        .unwrap();
+    assert_eq!(client.get_positions().await.unwrap()[0]["pos"], "1");
+}
+
 #[tokio::test]
 async fn places_cancels_and_refuses_algos() {
     let okx = FakeOkx::new();

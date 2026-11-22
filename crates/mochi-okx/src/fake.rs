@@ -671,6 +671,26 @@ fn place(state: &mut FakeState, order: Value) -> Result<HttpReply, String> {
             ));
         }
     }
+    // As OKX does, so an engine that resends a client ID or reduces a position it does not hold
+    // fails a fake test instead of building a state real OKX would never reach.
+    // OKX only checks a client ID against pending orders; one that filled or was canceled can
+    // be reused, and then executes again.
+    let cl_ord_text = text(order.get("clOrdId")).unwrap_or_default();
+    let pending = state.orders.get(&cl_ord_text).is_some_and(|existing| {
+        matches!(
+            existing.get("state").and_then(Value::as_str),
+            Some("live" | "partially_filled")
+        )
+    });
+    if !cl_ord_text.is_empty() && pending {
+        return Ok(refused("51016", "Duplicated clOrdId"));
+    }
+    if order.get("reduceOnly") == Some(&json!(true)) && reducible(state, &order).is_zero() {
+        return Ok(refused(
+            "51169",
+            "Order failed because you don't have any positions in this direction for this contract.",
+        ));
+    }
     let mut order = object(&order);
     let ord_id = state.placed.len().to_string();
     order.insert("ordId".into(), json!(ord_id));
@@ -713,12 +733,63 @@ fn place(state: &mut FakeState, order: Value) -> Result<HttpReply, String> {
     ))
 }
 
-/// Fills `order` (its body plus the `ordId` given on arrival) in full at [`PRICE`].
+fn refused(code: &str, message: &str) -> HttpReply {
+    answer(
+        json!([refusal_row(&Refusal::new(code, message), "ordId")]),
+        "1",
+        "",
+    )
+}
+
+/// How much of the held position `order` can reduce: zero when nothing is held on its pair, or
+/// when the position is on the order's side.
+fn reducible(state: &FakeState, order: &Value) -> Dec {
+    let buy = order.get("side") == Some(&json!("buy"));
+    let held = number(
+        state
+            .position
+            .as_ref()
+            .filter(|position| position.get("instId") == order.get("instId"))
+            .and_then(|position| position.get("pos")),
+    );
+    if held.is_negative() == buy {
+        if held.is_negative() {
+            held.neg()
+        } else {
+            held
+        }
+    } else {
+        Dec::from_js_number(0.0)
+    }
+}
+
+/// Fills `order` (its body plus the `ordId` given on arrival) in full at [`PRICE`]. A reduce-only
+/// order fills at most the position it reduces, and is canceled when there is none left.
 fn fill(state: &mut FakeState, order: &Row) {
     let ord_id = order.get("ordId").cloned().unwrap_or(Value::Null);
     let cl_ord_id = order.get("clOrdId").cloned().unwrap_or(Value::Null);
-    let sz = order.get("sz").cloned().unwrap_or(Value::Null);
     let buy = order.get("side") == Some(&json!("buy"));
+    let mut sz = order.get("sz").cloned().unwrap_or(Value::Null);
+    if order.get("reduceOnly") == Some(&json!(true)) {
+        let available = reducible(state, &Value::Object(order.clone()));
+        if available.is_zero() {
+            let mut canceled = Row::new();
+            canceled.insert("ordId".into(), ord_id);
+            canceled.insert("clOrdId".into(), cl_ord_id.clone());
+            canceled.insert("state".into(), json!("canceled"));
+            canceled.insert("accFillSz".into(), json!("0"));
+            canceled.insert("avgPx".into(), json!(""));
+            canceled.insert("fee".into(), json!("0"));
+            canceled.insert("pnl".into(), json!("0"));
+            state
+                .orders
+                .insert(text(Some(&cl_ord_id)).unwrap_or_default(), canceled);
+            return;
+        }
+        if number(Some(&sz)).gt(&available) {
+            sz = json!(available.to_fixed());
+        }
+    }
     let mut filled = Row::new();
     state.trade_seq += 1;
     let trade_id = state.trade_seq.to_string();
