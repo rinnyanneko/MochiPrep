@@ -7,7 +7,6 @@ use mochi_domain::{
     Candle, DataSource, FeedState, FeedStatus, InstrumentSpecification, Quote, Timeframe,
 };
 use mochi_market::okx_public::OkxPublicFeed;
-use mochi_market::tape::Tape;
 
 pub use mochi_market::okx_public::PROVIDER as OKX_PUBLIC;
 
@@ -50,15 +49,16 @@ pub trait LiveFeed: Send + Sync {
     fn list_instruments(&self, _fresh: bool) -> FeedResult<'_, Vec<InstrumentSpecification>> {
         Box::pin(async { Err(CANNOT_LIST.to_string()) })
     }
-    /// Recorded one-minute bars of `symbol` from `start` for `minutes` minutes, for the replay.
-    /// `progress` hears how many minutes have arrived.
-    fn history_tape<'a>(
+    /// Recorded one-minute bars of `symbol` from `start` for `minutes` minutes, oldest first,
+    /// for the replay; a minute without a trade has none. `progress` hears how many minutes
+    /// are done.
+    fn history_bars<'a>(
         &'a self,
         _symbol: &'a str,
         _start: i64,
         _minutes: usize,
         _progress: &'a (dyn Fn(usize) + Send + Sync),
-    ) -> FeedResult<'a, Tape> {
+    ) -> FeedResult<'a, Vec<Candle>> {
         Box::pin(async { Err(NO_HISTORY.to_string()) })
     }
 }
@@ -138,14 +138,14 @@ impl LiveFeed for OkxPublicFeed {
         Box::pin(OkxPublicFeed::list_instruments(self, fresh))
     }
 
-    fn history_tape<'a>(
+    fn history_bars<'a>(
         &'a self,
         symbol: &'a str,
         start: i64,
         minutes: usize,
         progress: &'a (dyn Fn(usize) + Send + Sync),
-    ) -> FeedResult<'a, Tape> {
-        Box::pin(OkxPublicFeed::history_tape(
+    ) -> FeedResult<'a, Vec<Candle>> {
+        Box::pin(OkxPublicFeed::history_bars(
             self, symbol, start, minutes, progress,
         ))
     }

@@ -9,7 +9,7 @@ import { Badge, Card, Segmented, Select, Stat } from '@/components/ui';
 import { api } from '@/lib/api';
 import { isBoolean, isString, oneOf, useRemembered } from '@/lib/remembered';
 import { pct, pnlClass, price } from '@/lib/format';
-import { useApp, useDateTime, useQuery, useSymbols } from '@/store';
+import { useApp, useDateTime, useQuery, useRecordedReplay, useSymbols } from '@/store';
 import { useEffect } from 'react';
 
 export function useCandles(symbol: SymbolId, timeframe: Timeframe, limit = 400) {
@@ -43,11 +43,18 @@ export function MarketsPage() {
   const first = candles?.[Math.max(0, candles.length - Math.round(86_400_000 / { '1m': 60_000, '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000 }[timeframe]))];
   const change = quote && first ? ((Number(quote.last) - first.open) / first.open) * 100 : null;
 
+  const recorded = useRecordedReplay();
   return (
     <>
       <PageTitle
         title="Markets"
-        description={source === 'REPLAY' ? 'Synthetic replay tape. These prices are not real.' : 'USDT perpetuals from the OKX public feed. No API key needed.'}
+        description={
+          source === 'LIVE'
+            ? 'USDT perpetuals from the OKX public feed. No API key needed.'
+            : recorded
+              ? 'Recorded OKX one-minute bars, played back. These prices are past, not live.'
+              : 'Synthetic replay tape. These prices are not real.'
+        }
         action={
           <div className="flex flex-wrap items-center gap-2">
             <Select aria-label="Symbol" className="h-8 w-36 text-xs" value={symbol} onChange={(e) => setSymbol(e.target.value)}>

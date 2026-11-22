@@ -540,20 +540,17 @@ impl OkxPublicFeed {
         Ok(candles)
     }
 
-    /// OKX's one-minute bars of `symbol` from `start` for `minutes` minutes, as a replay tape.
-    /// OKX answers at most [`HISTORY_PAGE`] bars a request, newest first, so this pages back
-    /// from the window's end, pausing between requests to stay inside OKX's rate limit.
-    /// `progress` hears how many of the window's minutes have arrived.
-    ///
-    /// A minute OKX has no bar for (no trade in it) repeats the last close with no volume: the
-    /// price did not move. A window that starts before OKX's first bar for the pair is refused.
-    pub async fn history_tape(
+    /// OKX's closed one-minute bars of `symbol` from `start` for `minutes` minutes, oldest
+    /// first. OKX answers at most [`HISTORY_PAGE`] bars a request, newest first, so this pages
+    /// back from the span's end, pausing between requests to stay inside OKX's rate limit. A
+    /// minute without a trade has no bar. `progress` hears how many of the minutes are done.
+    pub async fn history_bars(
         &self,
         symbol: &str,
         start: i64,
         minutes: usize,
         progress: &(dyn Fn(usize) + Send + Sync),
-    ) -> Result<crate::tape::Tape, String> {
+    ) -> Result<Vec<Candle>, String> {
         let end = start + minutes as i64 * 60_000;
         let mut bars: std::collections::BTreeMap<i64, Candle> = Default::default();
         let mut after = end;
@@ -575,32 +572,11 @@ impl OkxPublicFeed {
                 }
             }
             after = oldest;
-            progress(bars.len().min(minutes));
+            progress((((end - after.max(start)) / 60_000) as usize).min(minutes));
             tokio::time::sleep(HISTORY_PAUSE).await;
         }
-        let Some(first) = bars.get(&start) else {
-            return Err(format!(
-                "OKX has no one-minute history for {symbol} from the replay's first minute"
-            ));
-        };
-        let mut last = first.close;
-        let mut candles = Vec::with_capacity(minutes);
-        for i in 0..minutes {
-            let time = start + i as i64 * 60_000;
-            let candle = bars.remove(&time).unwrap_or(Candle {
-                time,
-                open: last,
-                high: last,
-                low: last,
-                close: last,
-                volume: 0.0,
-                closed: true,
-            });
-            last = candle.close;
-            candles.push(candle);
-        }
         progress(minutes);
-        crate::tape::Tape::from_candles(start, &candles)
+        Ok(bars.into_values().collect())
     }
 
     /// Everything MochiPrep could trade on OKX, cached for 5 minutes. Pass `fresh` when the

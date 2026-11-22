@@ -53,7 +53,7 @@ fn feed(rest: Router) -> (OkxPublicFeed, std::sync::Arc<FakeOkx>) {
 }
 
 #[tokio::test(start_paused = true)]
-async fn pages_back_over_the_window_and_fills_a_minute_without_trades() {
+async fn pages_back_over_the_span_and_leaves_a_minute_without_trades_out() {
     let minutes = 250;
     let (feed, fake) = feed(history(
         START - 10 * MINUTE,
@@ -64,20 +64,19 @@ async fn pages_back_over_the_window_and_fills_a_minute_without_trades() {
     let progress = |n: usize| {
         seen.fetch_max(n, Ordering::SeqCst);
     };
-    let tape = feed
-        .history_tape("BTCUSDT", START, minutes, &progress)
+    let bars = feed
+        .history_bars("BTCUSDT", START, minutes, &progress)
         .await
         .unwrap();
-    assert_eq!(tape.len(), minutes);
-    assert_eq!(tape.start(), START);
-    assert_eq!(tape.close()[0], 100.0);
-    assert_eq!(tape.close()[249], 349.0);
-    // The minute OKX has no bar for repeats the last close, with no volume.
-    assert_eq!(tape.close()[5], tape.close()[4]);
-    assert_eq!(tape.volume()[5], 0.0);
-    assert_eq!(tape.volume()[6], 2.0);
+    // Only the span's own bars, oldest first, and none for the minute without a trade.
+    assert_eq!(bars.len(), minutes - 1);
+    assert_eq!(bars[0].time, START);
+    assert_eq!(bars[0].close, 100.0);
+    assert_eq!(bars.last().unwrap().time, START + 249 * MINUTE);
+    assert!(!bars.iter().any(|b| b.time == START + 5 * MINUTE));
+    assert!(bars.windows(2).all(|w| w[0].time < w[1].time));
     assert_eq!(seen.load(Ordering::SeqCst), minutes);
-    // Three pages of 100 cover 250 minutes, starting from the window's end.
+    // Three pages of 100 cover 250 minutes, starting from the span's end.
     let gets = fake.gets_matching("history-candles");
     assert_eq!(gets.len(), 3);
     assert!(
@@ -91,13 +90,16 @@ async fn pages_back_over_the_window_and_fills_a_minute_without_trades() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_window_before_the_pairs_first_bar_is_refused() {
-    let (feed, _) = feed(history(START + 30 * MINUTE, START + 400 * MINUTE, &[]));
-    let error = feed
-        .history_tape("BTCUSDT", START, 120, &|_| {})
+async fn a_span_before_the_pairs_first_bar_stops_at_its_first_bar() {
+    let (feed, fake) = feed(history(START + 30 * MINUTE, START + 400 * MINUTE, &[]));
+    let bars = feed
+        .history_bars("BTCUSDT", START, 120, &|_| {})
         .await
-        .unwrap_err();
-    assert!(error.contains("no one-minute history"), "{error}");
+        .unwrap();
+    assert_eq!(bars[0].time, START + 30 * MINUTE);
+    assert_eq!(bars.len(), 90);
+    // OKX answering an empty page ends the paging.
+    assert_eq!(fake.gets_matching("history-candles").len(), 2);
 }
 
 #[tokio::test(start_paused = true)]
@@ -110,7 +112,7 @@ async fn an_okx_error_is_reported() {
     );
     let (feed, _) = feed(rest);
     let error = feed
-        .history_tape("BTCUSDT", START, 120, &|_| {})
+        .history_bars("BTCUSDT", START, 120, &|_| {})
         .await
         .unwrap_err();
     assert_eq!(error, "OKX error 50011: Too Many Requests");

@@ -706,6 +706,53 @@ export interface ReplayState {
   loadError?: string;
 }
 
+/** Whole UTC days: `from` included, `to` excluded. */
+export interface DateRange {
+  from: number;
+  to: number;
+}
+
+/** What loading a range of replay dates takes, worked out before anything is fetched. */
+export interface ReplayPlan {
+  range: DateRange;
+  /** The dates plus the warm-up days before them: what is downloaded and held. */
+  span: DateRange;
+  pairs: number;
+  /** Minutes still to download, summed over the pairs. */
+  missingMinutes: number;
+  requests: number;
+  /** A guess from the measured pace at OKX's rate limit. */
+  seconds: number;
+  downloadBytes: number;
+  /** Saved bars in the span that are reused. */
+  savedBytes: number;
+}
+
+export interface SavedReplayRange {
+  start: number;
+  end: number;
+  /** Every built-in pair is saved over the whole stretch. */
+  complete: boolean;
+  bytes: number;
+  /** The loaded replay plays part of it, so it cannot be deleted now. */
+  inUse: boolean;
+}
+
+export interface ReplayDataView {
+  /** False while the replay plays the synthetic tape (offline). */
+  history: boolean;
+  loaded: DateRange | null;
+  chosen: DateRange | null;
+  /** Every minute of `chosen` is saved, so it loads with no download. */
+  chosenReady: boolean;
+  saved: SavedReplayRange[];
+  /** The latest `to` that can be picked: the last UTC midnight. */
+  latest: number;
+  maxDays: number;
+  warmupDays: number;
+  bytesPerBar: number;
+}
+
 export type ServerEvent =
   | { type: 'heartbeat' }
   | { type: 'quote'; quote: Quote }

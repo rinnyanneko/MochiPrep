@@ -350,6 +350,9 @@ export async function attempt<T>(action: () => T | Promise<T>): Promise<T | unde
 }
 
 /** Pairs that exist on the data source in view. */
+/** The replay plays recorded OKX bars; false while it plays the bundled synthetic tape (offline). */
+export const useRecordedReplay = (): boolean => useApp((s) => s.feeds.REPLAY?.provider === 'OKX history replay');
+
 export const useSymbols = (): SymbolId[] => {
   const symbols = useApp((s) => s.symbols);
   const source = useApp((s) => s.source);

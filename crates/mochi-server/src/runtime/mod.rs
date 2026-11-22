@@ -63,7 +63,7 @@ pub use news::{NewsService, OfflineNews};
 use redact::redact_secrets;
 pub use replay_clock::ReplayClock;
 use replay_clock::DEFAULT_SPEED;
-pub use replay_data::NOT_LOADED;
+pub use replay_data::{ReplayDataView, ReplayPlan, ReplayRange, NOT_LOADED};
 
 /// Equity history points on the replay, in tape time (Node's REPLAY_EQUITY_EVERY_MS).
 const REPLAY_EQUITY_EVERY_MS: i64 = 15 * 60_000;
@@ -344,6 +344,8 @@ pub struct Runtime {
     replay_history: bool,
     replay_download: Option<replay_data::Download>,
     replay_error: Option<String>,
+    /// The dates of the loaded recorded replay.
+    replay_window: Option<replay_data::Window>,
     clock: ReplayClock,
     events: EventHub,
     /// What the engine reported during the current piece of work, handled right after it.
@@ -457,6 +459,7 @@ impl Runtime {
             replay_history: false,
             replay_download: None,
             replay_error: None,
+            replay_window: None,
             clock: ReplayClock::new(DEFAULT_SPEED),
             events: EventHub::new(),
             engine_events,

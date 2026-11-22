@@ -87,6 +87,8 @@ pub enum Schema {
     NewsSourceInput,
     NewsSourceToggle,
     ReplayControl,
+    /// `{from, to}` in ms: replay dates to estimate or load, or a span of saved bars to delete.
+    ReplayRange,
     CandleQuery,
     SourceQuery,
     LimitQuery,
@@ -254,6 +256,7 @@ pub fn check(schema: Schema, input: Option<&Value>) -> Result<Value, ApiError> {
         Schema::NewsSourceInput => news_source_input(input),
         Schema::NewsSourceToggle => news_source_toggle(input),
         Schema::ReplayControl => replay_control(input),
+        Schema::ReplayRange => replay_range(input),
         Schema::CandleQuery => candle_query(input),
         Schema::SourceQuery => source_query(input),
         Schema::LimitQuery => limit_query(input),
@@ -408,6 +411,15 @@ fn replay_control(input: Input) -> Checked {
     fields.optional("playing", check_bool);
     fields.optional("speed", |v| check_number(v, &NumberRule::int(1.0, 600.0)));
     fields.optional("steps", |v| check_number(v, &NumberRule::int(1.0, 1440.0)));
+    fields.strict()
+}
+
+fn replay_range(input: Input) -> Checked {
+    let mut fields = Fields::new(input)?;
+    // Milliseconds since 1970, well inside the integers an f64 holds exactly.
+    let time = |v: Input| check_number(v, &NumberRule::int(0.0, 8.64e15));
+    fields.required("from", time);
+    fields.required("to", time);
     fields.strict()
 }
 

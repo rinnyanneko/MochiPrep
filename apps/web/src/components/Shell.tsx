@@ -1,5 +1,6 @@
 import {
   Bot,
+  Database,
   CircleAlert,
   History,
   Info,
@@ -21,6 +22,8 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '@/lib/api';
 
 import { DYOR_NOTICE } from '@/lib/notices';
+import { ReplayDataDialog } from '@/components/ReplayData';
+import type { ReplayDataView } from '@mochiprep/shared';
 import { cn } from '@/lib/utils';
 import { attempt, disconnectBackend, useApp, useDateTime, useSourceSignals, type Page } from '@/store';
 import { Mochi, MOOD_LABEL, type MochiMood } from './Mochi';
@@ -135,7 +138,6 @@ const FEED_TONE: Record<string, Tone> = {
 };
 const FEED_LABEL: Record<string, string> = {
   CONNECTED: 'OKX live',
-  OFFLINE_REPLAY: 'Synthetic replay',
   CONNECTING: 'Connecting',
   DEGRADED: 'OKX degraded',
   DISCONNECTED: 'OKX offline',
@@ -145,20 +147,32 @@ export function FeedBadge() {
   const source = useApp((s) => s.source);
   const feed = useApp((s) => s.feeds[source]);
   if (!feed) return null;
+  // The replay names its own data: recorded OKX history, or the synthetic tape offline.
+  const label = feed.state === 'OFFLINE_REPLAY' ? feed.provider : FEED_LABEL[feed.state];
   return (
     <Badge tone={FEED_TONE[feed.state]} title={feed.detail} data-testid="feed-status">
       <span className="size-1.5 rounded-full bg-current" />
-      {FEED_LABEL[feed.state]}
+      {label}
     </Badge>
   );
 }
 
-/** Asks the backend for the replay's bars the first time the replay is shown, and follows the download. */
+/**
+ * The first time the replay is shown, loads the dates picked last if every minute of them is
+ * saved: that needs no download. Otherwise the owner picks dates first. Follows a download
+ * while it runs.
+ */
 function useReplayData(replay: ReturnType<typeof useApp.getState>['replay']) {
   const missing = replay !== null && !replay.loaded && replay.downloading === undefined && replay.loadError === undefined;
   const downloading = replay?.downloading !== undefined;
   useEffect(() => {
-    if (missing) void attempt(() => api.post('/replay/load')).then(() => useApp.getState().refreshState());
+    if (!missing) return;
+    api.get<ReplayDataView>('/replay/data').then(
+      (view) => {
+        if (view.history && view.chosenReady) void attempt(() => api.post('/replay/load', {})).then(() => useApp.getState().refreshState());
+      },
+      () => {},
+    );
   }, [missing]);
   // The backend announces when a download starts and ends; the share done in between is polled.
   useEffect(() => {
@@ -171,27 +185,32 @@ function useReplayData(replay: ReturnType<typeof useApp.getState>['replay']) {
 function ReplayControls() {
   const dateTime = useDateTime();
   const replay = useApp((s) => s.replay);
+  const [choosing, setChoosing] = useState(false);
   useReplayData(replay);
   if (!replay) return null;
   const send = (body: object) => attempt(() => api.post('/replay', body));
+  const dialog = choosing && <ReplayDataDialog onClose={() => setChoosing(false)} />;
+  if (replay.downloading !== undefined) {
+    return (
+      <div className="min-w-0 text-xs" data-testid="replay-download">
+        <div className="truncate text-[11px] text-ink-2">Downloading OKX history {Math.round(replay.downloading * 100)}%</div>
+        <div className="mt-1 h-1 w-36 overflow-hidden rounded-full bg-surface-3">
+          <div className="h-full rounded-full bg-accent" style={{ width: `${replay.downloading * 100}%` }} />
+        </div>
+      </div>
+    );
+  }
   if (!replay.loaded) {
     return (
       <div className="flex min-w-0 items-center gap-2 text-xs" data-testid="replay-controls">
-        {replay.loadError ? (
+        {replay.loadError && (
           <>
-            <span className="truncate text-down" title={replay.loadError}>{replay.loadError}</span>
-            <Button size="sm" onClick={() => attempt(() => api.post('/replay/load')).then(() => useApp.getState().refreshState())}>Retry</Button>
+            <span className="max-w-64 truncate text-down" title={replay.loadError}>{replay.loadError}</span>
+            <Button size="sm" onClick={() => attempt(() => api.post('/replay/load', {})).then(() => useApp.getState().refreshState())}>Retry</Button>
           </>
-        ) : (
-          <div className="min-w-0" data-testid="replay-download">
-            <div className="truncate text-[11px] text-ink-2">
-              {replay.downloading === undefined ? 'Loading replay data...' : `Downloading OKX history ${Math.round(replay.downloading * 100)}%`}
-            </div>
-            <div className="mt-1 h-1 w-36 overflow-hidden rounded-full bg-surface-3">
-              <div className="h-full rounded-full bg-accent" style={{ width: `${(replay.downloading ?? 0) * 100}%` }} />
-            </div>
-          </div>
         )}
+        <Button size="sm" variant="primary" onClick={() => setChoosing(true)} data-testid="choose-replay-data"><Database /> Choose replay dates</Button>
+        {dialog}
       </div>
     );
   }
@@ -208,12 +227,16 @@ function ReplayControls() {
           <option key={s} value={s}>{s} min/s</option>
         ))}
       </Select>
+      <Button size="icon" variant="ghost" aria-label="Replay data" title="Replay dates and saved data" onClick={() => setChoosing(true)}>
+        <Database />
+      </Button>
       <div className="min-w-0 max-sm:hidden">
         <div className="num truncate text-[11px] text-ink-2" data-testid="replay-time">{dateTime(replay.now)}</div>
         <div className="mt-1 h-1 w-36 overflow-hidden rounded-full bg-surface-3">
           <div className="h-full rounded-full bg-accent" style={{ width: `${replay.progress * 100}%` }} />
         </div>
       </div>
+      {dialog}
     </div>
   );
 }

@@ -10,7 +10,10 @@ pub mod templates;
 mod vault;
 
 pub use paper::SqlitePaperStore;
-pub use replay_bars::{clear_replay_bars, load_replay_bars, save_replay_bars};
+pub use replay_bars::{
+    count_replay_bars, delete_replay_span, load_replay_bars, replay_bar_before, replay_coverage,
+    replay_coverage_of, save_replay_bars, Span,
+};
 pub use settings::{
     delete_instrument, delete_setting, get_setting, has_vault, list_instruments, save_instrument,
     set_setting,
@@ -98,6 +101,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
     (
         "017_replay_history.sql",
         include_str!("../migrations/017_replay_history.sql"),
+    ),
+    (
+        "018_replay_coverage.sql",
+        include_str!("../migrations/018_replay_coverage.sql"),
     ),
 ];
 

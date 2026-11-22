@@ -9,13 +9,13 @@ import { ARENA_VIEWS, arenaView, compareArenaRows, type ArenaView } from '@/lib/
 import { money, pct, pnlClass, signedMoney } from '@/lib/format';
 import { oneOf, useRemembered } from '@/lib/remembered';
 import { cn } from '@/lib/utils';
-import { useApp } from '@/store';
+import { useApp, useRecordedReplay } from '@/store';
 
 const SERIES = ['--series-1', '--series-2', '--series-3', '--series-4', '--series-5', '--series-6'];
 const CHARTED = SERIES.length;
 
 const NOTES: Record<ArenaView, string> = {
-  REPLAY: 'Synthetic replay results. Every agent saw the same tape, so runs are comparable, but they say nothing about real markets.',
+  REPLAY: 'Replay results on recorded OKX bars. Every agent saw the same bars, so runs are comparable, but past results say nothing about what comes next.',
   LIVE: 'Live OKX prices, simulated paper accounts. Agents started at different times are not directly comparable.',
   OKX: "Agents trading on OKX accounts, demo or real money. P&L is the agent's own: deposits and transfers do not count, but manual trades that change its net position do. Agents sharing a pair on one account have no separate P&L.",
 };
@@ -26,6 +26,7 @@ export function ArenaPage() {
   const [view, setView] = useRemembered<ArenaView>('arena.view', globalSource, oneOf(ARENA_VIEWS));
   const rows = arena.filter((r) => arenaView(r) === view);
   const okx = view === 'OKX';
+  const recorded = useRecordedReplay();
 
   // Paper rows chart their account's equity; OKX rows their own P&L, since deposits move equity.
   const charted = rows.filter((r) => (okx ? r.pnlCurve.length > 0 : r.attribution === 'ACCOUNT'));
@@ -65,7 +66,10 @@ export function ArenaPage() {
       <div className="mb-3 flex items-start gap-2 rounded-2xl bg-info-soft px-4 py-2.5 text-xs text-info">
         <Info className="mt-px size-4 shrink-0" />
         <span>
-          {NOTES[view]} Short-term returns do not predict future performance.
+          {view === 'REPLAY' && !recorded
+            ? 'Synthetic replay results. Every agent saw the same tape, so runs are comparable, but they say nothing about real markets.'
+            : NOTES[view]}{' '}
+          Short-term returns do not predict future performance.
           {!okx && capitals.size > 1 && ' Starting capital differs between these agents, so compare returns, not USDT.'}
         </span>
       </div>
