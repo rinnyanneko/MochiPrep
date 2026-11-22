@@ -61,6 +61,26 @@ struct Preset {
     risk: RiskSettings,
 }
 
+/// Preset risk limits. A stop loss is always required: no preset may leave a position unprotected.
+fn limits(
+    max_leverage: f64,
+    max_risk_per_trade_pct: f64,
+    max_daily_loss_pct: f64,
+    max_open_positions: f64,
+    max_quote_age_sec: f64,
+    max_notional: f64,
+) -> RiskSettings {
+    RiskSettings {
+        max_leverage,
+        max_risk_per_trade_pct,
+        max_daily_loss_pct,
+        max_open_positions,
+        require_stop_loss: true,
+        max_quote_age_sec,
+        max_notional,
+    }
+}
+
 /// Every preset suggests rather than trades (SIGNAL), requires a stop loss and keeps leverage
 /// and risk per trade at or below the paper defaults: a preset is a starting point, and the
 /// owner opts into anything riskier by editing a copy. Strategy text names only what the prompt
@@ -80,15 +100,7 @@ fn presets() -> [Preset; 4] {
             timeframe: "1h",
             interval_sec: 3600,
             allow_trailing_stop: false,
-            risk: RiskSettings {
-                max_leverage: 2.0,
-                max_risk_per_trade_pct: 0.25,
-                max_daily_loss_pct: 1.0,
-                max_open_positions: 1.0,
-                require_stop_loss: true,
-                max_quote_age_sec: 30.0,
-                max_notional: 5_000.0,
-            },
+            risk: limits(2.0, 0.25, 1.0, 1.0, 30.0, 5_000.0),
         },
         Preset {
             id: "builtin_balanced",
@@ -101,15 +113,7 @@ fn presets() -> [Preset; 4] {
             timeframe: "15m",
             interval_sec: 900,
             allow_trailing_stop: false,
-            risk: RiskSettings {
-                max_leverage: 3.0,
-                max_risk_per_trade_pct: 0.5,
-                max_daily_loss_pct: 2.0,
-                max_open_positions: 2.0,
-                require_stop_loss: true,
-                max_quote_age_sec: 30.0,
-                max_notional: 20_000.0,
-            },
+            risk: limits(3.0, 0.5, 2.0, 2.0, 30.0, 20_000.0),
         },
         Preset {
             id: "builtin_trend",
@@ -123,15 +127,7 @@ fn presets() -> [Preset; 4] {
             timeframe: "1h",
             interval_sec: 3600,
             allow_trailing_stop: true,
-            risk: RiskSettings {
-                max_leverage: 3.0,
-                max_risk_per_trade_pct: 0.5,
-                max_daily_loss_pct: 2.0,
-                max_open_positions: 2.0,
-                require_stop_loss: true,
-                max_quote_age_sec: 30.0,
-                max_notional: 20_000.0,
-            },
+            risk: limits(3.0, 0.5, 2.0, 2.0, 30.0, 20_000.0),
         },
         Preset {
             id: "builtin_range",
@@ -144,15 +140,7 @@ fn presets() -> [Preset; 4] {
             timeframe: "5m",
             interval_sec: 300,
             allow_trailing_stop: false,
-            risk: RiskSettings {
-                max_leverage: 2.0,
-                max_risk_per_trade_pct: 0.25,
-                max_daily_loss_pct: 1.5,
-                max_open_positions: 1.0,
-                require_stop_loss: true,
-                max_quote_age_sec: 15.0,
-                max_notional: 10_000.0,
-            },
+            risk: limits(2.0, 0.25, 1.5, 1.0, 15.0, 10_000.0),
         },
     ]
 }
