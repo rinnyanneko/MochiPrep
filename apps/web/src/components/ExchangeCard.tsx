@@ -90,7 +90,7 @@ function ConnectDialog({ preset, onClose }: { preset: ExchangeStatus | null; onC
 }
 
 /** `reason` says what is waiting on the arm, such as starting an agent; `onArmed` then does it. */
-export function ArmDialog({ status, onClose, onArmed, reason }: { status: ExchangeStatus; onClose(): void; onArmed?(): void; reason?: string }) {
+export function ArmDialog({ status, onClose, onArmed, reason }: Readonly<{ status: ExchangeStatus; onClose(): void; onArmed?(): void; reason?: string }>) {
   const [phrase, setPhrase] = useState('');
   const arm = async () => {
     const ok = await attempt(() => api.post(`/exchange/okx/${status.accountId}/arm`, { confirmation: phrase }));

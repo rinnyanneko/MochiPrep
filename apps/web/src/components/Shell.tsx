@@ -167,12 +167,12 @@ function useReplayData(replay: ReturnType<typeof useApp.getState>['replay']) {
   const downloading = replay?.downloading !== undefined;
   useEffect(() => {
     if (!missing) return;
-    api.get<ReplayDataView>('/replay/data').then(
-      (view) => {
-        if (view.history && view.chosenReady) void attempt(() => api.post('/replay/load', {})).then(() => useApp.getState().refreshState());
-      },
-      () => {},
-    );
+    void (async () => {
+      const view = await api.get<ReplayDataView>('/replay/data').catch(() => null);
+      if (!view?.history || !view.chosenReady) return;
+      await attempt(() => api.post('/replay/load', {}));
+      await useApp.getState().refreshState();
+    })();
   }, [missing]);
   // The backend announces when a download starts and ends; the share done in between is polled.
   useEffect(() => {

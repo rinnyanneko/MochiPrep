@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { TIMEFRAMES, type Candle, type SymbolId, type Timeframe } from '@mochiprep/shared';
+import { TIMEFRAMES, type Candle, type DataSource, type SymbolId, type Timeframe } from '@mochiprep/shared';
 import { ChartTradeSummary, MarketChart } from '@/components/charts';
 import { NewsPanel } from '@/components/NewsPanel';
 import { AccountPicker, useCurrentAccount } from '@/components/trading';
@@ -26,6 +26,13 @@ export function useCandles(symbol: SymbolId, timeframe: Timeframe, limit = 400) 
   );
 }
 
+/** What the prices on this page are. */
+function marketsNote(source: DataSource, recorded: boolean): string {
+  if (source === 'LIVE') return 'USDT perpetuals from the OKX public feed. No API key needed.';
+  if (recorded) return 'Recorded OKX one-minute bars, played back. These prices are past, not live.';
+  return 'Synthetic replay tape. These prices are not real.';
+}
+
 export function MarketsPage() {
   const dateTime = useDateTime();
   const source = useApp((s) => s.source);
@@ -48,13 +55,7 @@ export function MarketsPage() {
     <>
       <PageTitle
         title="Markets"
-        description={
-          source === 'LIVE'
-            ? 'USDT perpetuals from the OKX public feed. No API key needed.'
-            : recorded
-              ? 'Recorded OKX one-minute bars, played back. These prices are past, not live.'
-              : 'Synthetic replay tape. These prices are not real.'
-        }
+        description={marketsNote(source, recorded)}
         action={
           <div className="flex flex-wrap items-center gap-2">
             <Select aria-label="Symbol" className="h-8 w-36 text-xs" value={symbol} onChange={(e) => setSymbol(e.target.value)}>

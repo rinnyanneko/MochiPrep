@@ -20,6 +20,12 @@ const NOTES: Record<ArenaView, string> = {
   OKX: "Agents trading on OKX accounts, demo or real money. P&L is the agent's own: deposits and transfers do not count, but manual trades that change its net position do. Agents sharing a pair on one account have no separate P&L.",
 };
 
+function chartNote(charted: number, okx: boolean): string {
+  if (charted > CHARTED) return `First ${CHARTED} of ${charted} agents. USDT.`;
+  if (okx) return "Each agent's own P&L since it was made, USDT. A position adds its result when it closes.";
+  return 'Paper accounts, USDT, sampled on the backend.';
+}
+
 export function ArenaPage() {
   const arena = useApp((s) => s.arena);
   const globalSource = useApp((s) => s.source);
@@ -80,13 +86,7 @@ export function ArenaPage() {
           <Card>
             <CardHeader
               title={okx ? 'P&L curves' : 'Equity curves'}
-              description={
-                charted.length > CHARTED
-                  ? `First ${CHARTED} of ${charted.length} agents. USDT.`
-                  : okx
-                    ? "Each agent's own P&L since it was made, USDT. A position adds its result when it closes."
-                    : 'Paper accounts, USDT, sampled on the backend.'
-              }
+              description={chartNote(charted.length, okx)}
             />
             {charted.length === 0 ? (
               <p className="px-6 pb-6 text-[13px] text-ink-3">

@@ -153,9 +153,9 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
   const exchange = useApp((s) => s.exchange.find((e) => e.accountId === agent.accountId));
   const [busy, setBusy] = useState(false);
   // An Auto agent on a real account trades only while it is armed, so starting one arms first.
-  const [pendingArm, setPendingArm] = useState<{ reason: string; then(): void } | null>(null);
+  const [pendingArm, setPendingArm] = useState<{ reason: string; run(): void } | null>(null);
   const needsArm = agent.executionMode === 'AUTO' && account?.venue === 'OKX_LIVE' && exchange?.connected === true && !exchange.armed;
-  const armFirst = (reason: string, then: () => void) => (needsArm ? setPendingArm({ reason, then }) : then());
+  const armFirst = (reason: string, run: () => void) => (needsArm ? setPendingArm({ reason, run }) : run());
   const status = STATUS[agent.status];
   const initial = Number(account?.initialBalance ?? 0);
   const equity = Number(account?.balance.equity ?? 0);
@@ -195,7 +195,7 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
           {account?.name} is not armed. Starting this agent asks you to arm it.
         </p>
       )}
-      {pendingArm && exchange && <ArmDialog status={exchange} reason={pendingArm.reason} onArmed={pendingArm.then} onClose={() => setPendingArm(null)} />}
+      {pendingArm && exchange && <ArmDialog status={exchange} reason={pendingArm.reason} onArmed={pendingArm.run} onClose={() => setPendingArm(null)} />}
       <p className="mt-2 text-[11px] text-ink-3">Last run {dateTime(agent.lastRunAt)}{agent.nextRunAt ? ` · next ${dateTime(agent.nextRunAt)}` : ''}</p>
       <div className="mt-3 flex flex-wrap gap-1.5">
         {agent.running ? (

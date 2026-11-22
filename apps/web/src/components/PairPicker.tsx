@@ -6,12 +6,13 @@ import { cn } from '@/lib/utils';
 export const MAX_AGENT_PAIRS = 10;
 
 /** Toggles pairs on and off, keeping the order they were picked in; the first is the agent's main pair. */
-export function PairPicker({ options, value, onChange }: { options: SymbolId[]; value: SymbolId[]; onChange(next: SymbolId[]): void }) {
+export function PairPicker({ options, value, onChange }: Readonly<{ options: SymbolId[]; value: SymbolId[]; onChange(next: SymbolId[]): void }>) {
   // A saved pair that is not offered here (an added pair while viewing replay) still shows, so it can be removed.
   const shown = [...options, ...value.filter((s) => !options.includes(s))];
   const full = value.length >= MAX_AGENT_PAIRS;
   return (
-    <div role="group" aria-label="Pairs" className="flex flex-wrap gap-1.5" data-testid="pair-picker">
+    <fieldset className="flex flex-wrap gap-1.5" data-testid="pair-picker">
+      <legend className="sr-only">Pairs</legend>
       {shown.map((symbol) => {
         const on = value.includes(symbol);
         return (
@@ -31,6 +32,6 @@ export function PairPicker({ options, value, onChange }: { options: SymbolId[]; 
           </button>
         );
       })}
-    </div>
+    </fieldset>
   );
 }

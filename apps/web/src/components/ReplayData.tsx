@@ -12,6 +12,22 @@ const DAY = 86_400_000;
 const dayText = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const dayMs = (text: string) => Date.parse(`${text}T00:00:00Z`);
 
+/** What loading the picked dates takes, or why it cannot be worked out. */
+function Estimate({ plan, error }: Readonly<{ plan: ReplayPlan | null; error: string | null }>) {
+  if (error) return <span className="text-down">{error}</span>;
+  if (!plan) return <>Working out what this needs...</>;
+  if (plan.missingMinutes === 0) {
+    return <>Everything is saved already ({formatBytes(plan.savedBytes)}): it loads with no download.</>;
+  }
+  return (
+    <>
+      Downloads {Math.round((plan.missingMinutes / 1440 / plan.pairs) * 10) / 10} days for each of {plan.pairs} pairs, in{' '}
+      <strong>{formatDuration(plan.seconds)}</strong> at OKX's rate limit, and takes about <strong>{formatBytes(plan.downloadBytes)}</strong> on disk.
+      {plan.savedBytes > 0 && ` ${formatBytes(plan.savedBytes)} already saved for these dates is reused.`}
+    </>
+  );
+}
+
 /** Saved bars cover `[start, end)`; people read the last day they include. */
 const spanText = (start: number, end: number) => `${dayText(start)} to ${dayText(end - DAY)}`;
 
@@ -19,7 +35,7 @@ const spanText = (start: number, end: number) => `${dayText(start)} to ${dayText
  * Picks the replay's dates, says what loading them takes before anything downloads, and lists
  * the saved bars so the ones no longer needed can be deleted. Overlapping dates reuse saved bars.
  */
-export function ReplayDataDialog({ onClose }: { onClose(): void }) {
+export function ReplayDataDialog({ onClose }: Readonly<{ onClose(): void }>) {
   const [view, setView] = useState<ReplayDataView | null>(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -81,19 +97,7 @@ export function ReplayDataDialog({ onClose }: { onClose(): void }) {
             </Field>
           </div>
           <div className="rounded-xl bg-surface-2 px-3 py-2.5 text-[13px] text-ink-2" data-testid="replay-estimate">
-            {planError ? (
-              <span className="text-down">{planError}</span>
-            ) : !plan ? (
-              'Working out what this needs...'
-            ) : plan.missingMinutes === 0 ? (
-              <>Everything is saved already ({formatBytes(plan.savedBytes)}): it loads with no download.</>
-            ) : (
-              <>
-                Downloads {Math.round(plan.missingMinutes / 1440 / plan.pairs * 10) / 10} days for each of {plan.pairs} pairs, in{' '}
-                <strong>{formatDuration(plan.seconds)}</strong> at OKX's rate limit, and takes about <strong>{formatBytes(plan.downloadBytes)}</strong> on disk.
-                {plan.savedBytes > 0 && ` ${formatBytes(plan.savedBytes)} already saved for these dates is reused.`}
-              </>
-            )}
+            <Estimate plan={plan} error={planError} />
             {view && (
               <span className="mt-1 block text-[11px] text-ink-3">
                 Includes {view.warmupDays} days before the start, so indicators are ready on the first bar. At most {view.maxDays} days; the last day is the day before today (UTC).
@@ -109,7 +113,7 @@ export function ReplayDataDialog({ onClose }: { onClose(): void }) {
 
           <section>
             <h3 className="mb-1.5 text-xs font-semibold text-ink-2">Saved on this computer</h3>
-            {view && view.saved.length === 0 ? (
+            {view?.saved.length === 0 ? (
               <p className="text-[13px] text-ink-3">Nothing yet.</p>
             ) : (
               <ul className="divide-y divide-line rounded-xl border border-line">
