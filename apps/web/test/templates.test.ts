@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_RISK_SETTINGS, type AgentTemplate } from '@mochiprep/shared';
-import { copyName, duplicateTemplate, exportTemplates, importNames, IMPORT_MAX_TEMPLATES, intervalOptions, parseTemplateFile, settingsFromTemplate, templateBody, TEMPLATE_FILE_FORMAT } from '../src/lib/templates';
+import { copyName, duplicateTemplate, exportTemplates, importNames, importReport, IMPORT_MAX_TEMPLATES, intervalOptions, parseTemplateFile, settingsFromTemplate, templateBody, TEMPLATE_FILE_FORMAT } from '../src/lib/templates';
 
 const template: AgentTemplate = {
   id: 'builtin_balanced',
@@ -97,5 +97,19 @@ describe('template export and import', () => {
   it('renames clashing imports', () => {
     const incoming = [templateBody(mine), templateBody(mine), { ...templateBody(mine), name: 'Fresh' }];
     expect(importNames(incoming, [mine]).map((t) => t.name)).toEqual(['Mine (copy)', 'Mine (copy 2)', 'Fresh']);
+  });
+
+  it('compares names as the server saves them, trimmed', () => {
+    const text = JSON.stringify({ format: TEMPLATE_FILE_FORMAT, version: 1, templates: [{ ...templateBody(mine), name: '  Mine  ' }] });
+    expect(importNames(parseTemplateFile(text), [mine]).map((t) => t.name)).toEqual(['Mine (copy)']);
+  });
+
+  it('keeps the failure report short', () => {
+    expect(importReport(['a: bad'])).toBe('Not imported: a: bad');
+    const many = Array.from({ length: 40 }, (_, i) => `t${i}: bad`);
+    const report = importReport(many);
+    expect(report).toContain('t0: bad; t1: bad; t2: bad');
+    expect(report).not.toContain('t3: bad');
+    expect(report).toContain('and 37 more');
   });
 });

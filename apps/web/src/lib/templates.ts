@@ -86,8 +86,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 /**
  * Reads an export document. The checks here only catch a wrong or damaged file early: the file is
  * untrusted, and the backend's strict template schema still validates every field of every template.
- * Unknown keys are dropped, and a missing description becomes empty, so a file from a newer version
- * that adds fields still imports.
+ * Unknown top-level keys are dropped, and a missing description becomes empty, so a file from a
+ * newer version that adds template fields still imports. Risk limits pass through whole: a limit
+ * this version does not know is refused by the strict schema rather than silently dropped.
  */
 export function parseTemplateFile(text: string): AgentTemplateFields[] {
   let data: unknown;
@@ -103,7 +104,8 @@ export function parseTemplateFile(text: string): AgentTemplateFields[] {
   if (data.templates.length > IMPORT_MAX_TEMPLATES) throw new Error(`At most ${IMPORT_MAX_TEMPLATES} templates can be imported at once.`);
   return data.templates.map((item, index) => {
     if (!isRecord(item) || typeof item.name !== 'string' || !isRecord(item.risk)) throw new Error(`Template ${index + 1} is damaged.`);
-    const fields = { ...item, description: typeof item.description === 'string' ? item.description : '' } as unknown as AgentTemplateFields;
+    // Trimmed as the server saves it, so name clashes are found before the copy suffix is chosen.
+    const fields = { ...item, name: item.name.trim(), description: typeof item.description === 'string' ? item.description : '' } as unknown as AgentTemplateFields;
     return templateBody(fields);
   });
 }
@@ -116,4 +118,13 @@ export function importNames(incoming: readonly AgentTemplateFields[], existing: 
     taken.push(name);
     return { ...fields, name };
   });
+}
+
+const REPORT_MAX = 3;
+
+/** The import failure toast: the first few refusals by name, then a count, so a bad file cannot flood the screen. */
+export function importReport(failures: readonly string[]): string {
+  const shown = failures.slice(0, REPORT_MAX).join('; ');
+  const rest = failures.length - REPORT_MAX;
+  return `Not imported: ${shown}${rest > 0 ? `; and ${rest} more` : ''}`;
 }

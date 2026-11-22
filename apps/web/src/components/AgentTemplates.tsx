@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { DEFAULT_RISK_SETTINGS, TIMEFRAMES, type AgentTemplate, type AgentTemplateFields, type DataSource, type RiskSettings, type Timeframe } from '@mochiprep/shared';
 import { Badge, Button, Dialog, Field, Input, Segmented, Select, Textarea } from '@/components/ui';
 import { api } from '@/lib/api';
-import { duplicateTemplate, exportTemplates, importNames, intervalOptions, parseTemplateFile, templateBody, type AgentSettings } from '@/lib/templates';
+import { duplicateTemplate, exportTemplates, importNames, importReport, intervalOptions, parseTemplateFile, templateBody, type AgentSettings } from '@/lib/templates';
 import { attempt, useApp, useQuery } from '@/store';
 
 /**
@@ -149,7 +149,8 @@ function ExportDialog({ text, count, onClose }: { text: string; count: number; o
     link.href = url;
     link.download = 'mochiprep-agent-templates.json';
     link.click();
-    URL.revokeObjectURL(url);
+    // WebKit webviews can cancel a download whose URL is revoked in the same task as the click.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
   const copy = () =>
     attempt(async () => {
@@ -213,8 +214,14 @@ function ImportDialog({ existing, onClose }: { existing: AgentTemplate[]; onClos
     let imported = 0;
     const failures: string[] = [];
     const failed: AgentTemplateFields[] = [];
+    let cancelled = 0;
     // One at a time, so a refused template leaves the others in and the report can name it.
-    for (const fields of parsed) {
+    for (const [index, fields] of parsed.entries()) {
+      // Closing the dialog cancels: the request in flight finishes, but no further one starts.
+      if (!mounted.current) {
+        cancelled = parsed.length - index;
+        break;
+      }
       try {
         await api.post('/agent-templates', fields);
         imported++;
@@ -225,7 +232,8 @@ function ImportDialog({ existing, onClose }: { existing: AgentTemplate[]; onClos
     }
     const toast = useApp.getState().toast;
     if (imported) toast('info', `Imported ${imported} template${imported === 1 ? '' : 's'}`);
-    if (failures.length) toast('error', `Not imported: ${failures.join('; ')}`);
+    if (failures.length) toast('error', importReport(failures));
+    if (cancelled) toast('warn', `Import cancelled: ${cancelled} template${cancelled === 1 ? '' : 's'} not imported`);
     if (!mounted.current) return;
     setBusy(false);
     if (!failed.length) onClose();

@@ -96,3 +96,36 @@ test('a failed template load says so and retries, instead of showing an empty li
   await manager.getByRole('button', { name: 'Retry' }).click();
   await expect(manager.getByRole('alert')).toHaveCount(0);
 });
+
+test('cancelling an import starts no further template saves', async ({ page }) => {
+  let posts = 0;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/api/agent-templates', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    posts++;
+    // Hold the first save so the dialog can be cancelled while it is in flight.
+    if (posts === 1) await held;
+    await route.fallback();
+  });
+  await page.goto('/');
+  await expect(page.getByTestId('replay-time')).toBeVisible();
+  await page.getByRole('button', { name: 'AI Agents' }).click();
+  await page.getByRole('button', { name: 'Templates' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByTestId('template-row').first()).toBeVisible();
+
+  const template = (name: string) => ({ name, description: '', strategy: 'Cancel test', timeframe: '15m', intervalSec: 900, executionMode: 'SIGNAL', risk: { maxLeverage: 2, maxRiskPerTradePct: 0.25, maxDailyLossPct: 1, maxOpenPositions: 1, requireStopLoss: true, maxQuoteAgeSec: 30, maxNotional: 1000 }, useNews: false, allowTrailingStop: false });
+  const file = { format: 'mochiprep.agent-templates', version: 1, templates: [template('Cancel A'), template('Cancel B'), template('Cancel C')] };
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click();
+  await dialog.getByLabel('Template export text').fill(JSON.stringify(file));
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click();
+  await expect.poll(() => posts).toBe(1);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  release();
+
+  await expect(page.getByText('Import cancelled: 2 templates not imported')).toBeVisible();
+  await expect(dialog.getByTestId('template-row').filter({ hasText: 'Cancel A' })).toHaveCount(1);
+  await expect(dialog.getByTestId('template-row').filter({ hasText: /Cancel [BC]/ })).toHaveCount(0);
+  expect(posts).toBe(1);
+});
