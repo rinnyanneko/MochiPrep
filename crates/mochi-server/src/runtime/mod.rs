@@ -24,6 +24,7 @@ pub mod live_feed;
 pub mod news;
 pub mod redact;
 pub mod replay_clock;
+mod replay_data;
 mod scheduling;
 mod vault;
 pub use vault::{UnlockOutcome, VAULT_RESET_PHRASE};
@@ -62,6 +63,7 @@ pub use news::{NewsService, OfflineNews};
 use redact::redact_secrets;
 pub use replay_clock::ReplayClock;
 use replay_clock::DEFAULT_SPEED;
+pub use replay_data::NOT_LOADED;
 
 /// Equity history points on the replay, in tape time (Node's REPLAY_EQUITY_EVERY_MS).
 const REPLAY_EQUITY_EVERY_MS: i64 = 15 * 60_000;
@@ -74,6 +76,8 @@ const COMMAND_QUEUE: usize = 256;
 
 /// The provider name Node's `ReplayMarketData` reports.
 const REPLAY_PROVIDER: &str = "Synthetic replay";
+/// The replay of recorded OKX one-minute bars.
+const HISTORY_PROVIDER: &str = "OKX history replay";
 
 pub type Engine = PaperExecutionEngine<SqlitePaperStore>;
 
@@ -88,6 +92,9 @@ pub struct RuntimeOptions {
     /// The built-in pairs, which are the pairs on the replay tape: `DEFAULT_SYMBOLS`. Tests
     /// that replay recordings from the Node backend pass the three pairs Node shipped.
     pub builtin_symbols: Vec<&'static str>,
+    /// Replay recorded OKX history, downloaded through `live` the first time the replay is used.
+    /// Off, the bundled synthetic tape plays from the start, as tests and offline runs need.
+    pub replay_history: bool,
     pub live: Arc<dyn LiveFeed>,
     /// Quotes the live feed receives, in arrival order. `None` when it sends none.
     pub live_quotes: Option<mpsc::Receiver<Quote>>,
@@ -112,6 +119,7 @@ impl RuntimeOptions {
             db,
             replay_minutes: None,
             builtin_symbols: DEFAULT_SYMBOLS.to_vec(),
+            replay_history: false,
             live: Arc::new(OfflineFeed),
             live_quotes: None,
             live_statuses: None,
@@ -132,6 +140,7 @@ impl RuntimeOptions {
             db,
             replay_minutes: None,
             builtin_symbols: DEFAULT_SYMBOLS.to_vec(),
+            replay_history: true,
             live: Arc::new(feed),
             live_quotes,
             live_statuses,
@@ -196,8 +205,11 @@ impl RuntimeHandle {
             quotes: options.live_quotes,
             statuses: options.live_statuses,
         };
-        let replay =
-            ReplayMarketData::with_symbols(options.replay_minutes, &options.builtin_symbols)?;
+        let replay = if options.replay_history {
+            ReplayMarketData::unloaded(&options.builtin_symbols)
+        } else {
+            ReplayMarketData::with_symbols(options.replay_minutes, &options.builtin_symbols)?
+        };
         let mut runtime = Runtime::open(
             options.db,
             replay,
@@ -207,6 +219,7 @@ impl RuntimeHandle {
             options.kdf,
             options.okx,
         )?;
+        runtime.replay_history = options.replay_history;
         runtime.operation_logs = options.operation_logs.or_else(open_log);
         let events = runtime.events.sender();
         let (commands, inbox) = mpsc::channel(COMMAND_QUEUE);
@@ -327,6 +340,10 @@ pub struct Runtime {
     instruments: Vec<InstrumentSpecification>,
     /// The pairs on the replay tape, which can never be removed.
     builtin: Vec<&'static str>,
+    /// The replay plays recorded OKX history rather than the synthetic tape.
+    replay_history: bool,
+    replay_download: Option<replay_data::Download>,
+    replay_error: Option<String>,
     clock: ReplayClock,
     events: EventHub,
     /// What the engine reported during the current piece of work, handled right after it.
@@ -437,6 +454,9 @@ impl Runtime {
                 .filter_map(|symbol| default_instrument(symbol))
                 .collect(),
             builtin,
+            replay_history: false,
+            replay_download: None,
+            replay_error: None,
             clock: ReplayClock::new(DEFAULT_SPEED),
             events: EventHub::new(),
             engine_events,
@@ -737,6 +757,9 @@ impl Runtime {
                 "{symbol} has no replay data. Use a Live OKX account."
             )));
         }
+        if source == DataSource::Replay {
+            self.assert_replay_loaded()?;
+        }
         Ok(())
     }
 
@@ -765,7 +788,7 @@ impl Runtime {
         let end = replay.end_time();
         let now = replay.now();
         ReplayState {
-            loaded: true,
+            loaded: replay.is_loaded(),
             playing: self.clock.playing(),
             speed: self.clock.speed(),
             now: Some(now),
@@ -774,6 +797,8 @@ impl Runtime {
             at_end: replay.at_end(),
             // Like Math.min(1, Math.max(0, x)), NaN included.
             progress: ((now - start) as f64 / (end - start) as f64).clamp(0.0, 1.0),
+            downloading: self.replay_download.as_ref().map(|d| d.fraction()),
+            load_error: self.replay_error.clone(),
         }
     }
 
@@ -781,7 +806,12 @@ impl Runtime {
     pub fn feeds(&self) -> Vec<FeedStatus> {
         let replay = FeedStatus {
             source: DataSource::Replay,
-            provider: REPLAY_PROVIDER.to_string(),
+            provider: if self.replay_history {
+                HISTORY_PROVIDER
+            } else {
+                REPLAY_PROVIDER
+            }
+            .to_string(),
             state: FeedState::OfflineReplay,
             last_message_at: Some(lock(&self.replay).now()),
             detail: None,
@@ -801,8 +831,12 @@ impl Runtime {
 
     // ---- replay ---------------------------------------------------------------------------
 
-    /// Emits the replay state only when `playing` changes, as Node does.
+    /// Emits the replay state only when `playing` changes, as Node does. A replay without its
+    /// bars cannot play.
     pub fn set_playing(&mut self, playing: bool) {
+        if playing && !self.replay_loaded() {
+            return;
+        }
         if self.clock.set_playing(playing) {
             self.emit(ServerEvent::Replay {
                 state: self.replay_state(),

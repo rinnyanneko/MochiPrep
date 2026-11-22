@@ -153,11 +153,48 @@ export function FeedBadge() {
   );
 }
 
+/** Asks the backend for the replay's bars the first time the replay is shown, and follows the download. */
+function useReplayData(replay: ReturnType<typeof useApp.getState>['replay']) {
+  const missing = replay !== null && !replay.loaded && replay.downloading === undefined && replay.loadError === undefined;
+  const downloading = replay?.downloading !== undefined;
+  useEffect(() => {
+    if (missing) void attempt(() => api.post('/replay/load')).then(() => useApp.getState().refreshState());
+  }, [missing]);
+  // The backend announces when a download starts and ends; the share done in between is polled.
+  useEffect(() => {
+    if (!downloading) return;
+    const timer = setInterval(() => void useApp.getState().refreshState(), 1000);
+    return () => clearInterval(timer);
+  }, [downloading]);
+}
+
 function ReplayControls() {
   const dateTime = useDateTime();
   const replay = useApp((s) => s.replay);
+  useReplayData(replay);
   if (!replay) return null;
   const send = (body: object) => attempt(() => api.post('/replay', body));
+  if (!replay.loaded) {
+    return (
+      <div className="flex min-w-0 items-center gap-2 text-xs" data-testid="replay-controls">
+        {replay.loadError ? (
+          <>
+            <span className="truncate text-down" title={replay.loadError}>{replay.loadError}</span>
+            <Button size="sm" onClick={() => attempt(() => api.post('/replay/load')).then(() => useApp.getState().refreshState())}>Retry</Button>
+          </>
+        ) : (
+          <div className="min-w-0" data-testid="replay-download">
+            <div className="truncate text-[11px] text-ink-2">
+              {replay.downloading === undefined ? 'Loading replay data...' : `Downloading OKX history ${Math.round(replay.downloading * 100)}%`}
+            </div>
+            <div className="mt-1 h-1 w-36 overflow-hidden rounded-full bg-surface-3">
+              <div className="h-full rounded-full bg-accent" style={{ width: `${(replay.downloading ?? 0) * 100}%` }} />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="flex min-w-0 items-center gap-2" data-testid="replay-controls">
       <Button size="icon" variant={replay.playing ? 'secondary' : 'primary'} aria-label={replay.playing ? 'Pause replay' : 'Play replay'} disabled={replay.atEnd} onClick={() => send({ playing: !replay.playing })}>

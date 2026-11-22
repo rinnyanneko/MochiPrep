@@ -37,6 +37,10 @@ use crate::instrument_parse::parse_okx_instruments;
 
 pub const REST_BASE: &str = "https://www.okx.com";
 pub const WS_URL: &str = "wss://ws.okx.com/ws/v5/public";
+/// OKX's most bars for one history-candles request.
+pub const HISTORY_PAGE: usize = 100;
+/// Between history requests: OKX allows 20 per 2 s per address, and the live feed shares it.
+const HISTORY_PAUSE: Duration = Duration::from_millis(150);
 /// The name `/api/state` shows for this feed.
 pub const PROVIDER: &str = "OKX public";
 
@@ -534,6 +538,69 @@ impl OkxPublicFeed {
             .candle_cache
             .insert(key, (Instant::now(), candles.clone()));
         Ok(candles)
+    }
+
+    /// OKX's one-minute bars of `symbol` from `start` for `minutes` minutes, as a replay tape.
+    /// OKX answers at most [`HISTORY_PAGE`] bars a request, newest first, so this pages back
+    /// from the window's end, pausing between requests to stay inside OKX's rate limit.
+    /// `progress` hears how many of the window's minutes have arrived.
+    ///
+    /// A minute OKX has no bar for (no trade in it) repeats the last close with no volume: the
+    /// price did not move. A window that starts before OKX's first bar for the pair is refused.
+    pub async fn history_tape(
+        &self,
+        symbol: &str,
+        start: i64,
+        minutes: usize,
+        progress: &(dyn Fn(usize) + Send + Sync),
+    ) -> Result<crate::tape::Tape, String> {
+        let end = start + minutes as i64 * 60_000;
+        let mut bars: std::collections::BTreeMap<i64, Candle> = Default::default();
+        let mut after = end;
+        while after > start {
+            let path = format!(
+                "/api/v5/market/history-candles?instId={}&bar=1m&limit={HISTORY_PAGE}&after={after}",
+                to_inst_id(symbol)
+            );
+            let page = parse_okx_candles(&get(&self.shared, &path).await?)?;
+            let Some(oldest) = page.first().map(|c| c.time) else {
+                break;
+            };
+            if oldest >= after {
+                return Err("OKX sent history out of order".into());
+            }
+            for candle in page {
+                if candle.time >= start && candle.time < end && candle.closed {
+                    bars.insert(candle.time, candle);
+                }
+            }
+            after = oldest;
+            progress(bars.len().min(minutes));
+            tokio::time::sleep(HISTORY_PAUSE).await;
+        }
+        let Some(first) = bars.get(&start) else {
+            return Err(format!(
+                "OKX has no one-minute history for {symbol} from the replay's first minute"
+            ));
+        };
+        let mut last = first.close;
+        let mut candles = Vec::with_capacity(minutes);
+        for i in 0..minutes {
+            let time = start + i as i64 * 60_000;
+            let candle = bars.remove(&time).unwrap_or(Candle {
+                time,
+                open: last,
+                high: last,
+                low: last,
+                close: last,
+                volume: 0.0,
+                closed: true,
+            });
+            last = candle.close;
+            candles.push(candle);
+        }
+        progress(minutes);
+        crate::tape::Tape::from_candles(start, &candles)
     }
 
     /// Everything MochiPrep could trade on OKX, cached for 5 minutes. Pass `fresh` when the

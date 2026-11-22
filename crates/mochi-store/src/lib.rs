@@ -3,12 +3,14 @@
 
 mod ai;
 mod paper;
+mod replay_bars;
 pub mod rows;
 mod settings;
 pub mod templates;
 mod vault;
 
 pub use paper::SqlitePaperStore;
+pub use replay_bars::{clear_replay_bars, load_replay_bars, save_replay_bars};
 pub use settings::{
     delete_instrument, delete_setting, get_setting, has_vault, list_instruments, save_instrument,
     set_setting,
@@ -92,6 +94,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
     (
         "016_agent_symbols.sql",
         include_str!("../migrations/016_agent_symbols.sql"),
+    ),
+    (
+        "017_replay_history.sql",
+        include_str!("../migrations/017_replay_history.sql"),
     ),
 ];
 

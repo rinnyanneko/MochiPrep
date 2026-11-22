@@ -691,6 +691,7 @@ export const DEFAULT_LIVE_LIMITS: RiskSettings = {
 };
 
 export interface ReplayState {
+  /** The replay's bars are in memory. Recorded OKX history loads the first time the replay is used. */
   loaded: boolean;
   playing: boolean;
   speed: number;
@@ -699,6 +700,10 @@ export interface ReplayState {
   endTime: number | null;
   atEnd: boolean;
   progress: number;
+  /** 0..1 through downloading the replay's bars from OKX; absent unless downloading. */
+  downloading?: number;
+  /** Why the last load failed; absent unless it did. */
+  loadError?: string;
 }
 
 export type ServerEvent =

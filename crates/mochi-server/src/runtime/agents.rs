@@ -62,6 +62,9 @@ impl Runtime {
         let mut a = self.require_agent(id)?;
         self.assert_can_run(&a)?;
         let source = self.require_account(&a.account_id)?.source;
+        if source == DataSource::Replay {
+            self.assert_replay_loaded()?;
+        }
         a.running = true;
         a.status = "WAITING".into();
         a.next_run_at = Some(self.market_now(source));
