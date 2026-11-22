@@ -8,14 +8,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use mochi_core::paper::CloseSelection;
 use mochi_core::paper::{
     CreateAccountArgs, EngineEvent, PaperEngineDeps, PaperExecutionEngine, PaperStore,
     StoreFailure, StoreFailureKind,
 };
 use mochi_domain::registry::Instruments;
 use mochi_domain::{
-    DataSource, EquityPoint, Fill, LedgerEvent, Order, OrderRequest, OrderStatus, PaperAccount,
-    Position, Protection, Quote,
+    DataSource, EquityPoint, ExchangeExecutionCursor, Fill, LedgerEvent, Order, OrderRequest,
+    OrderSide, OrderStatus, PaperAccount, Position, Protection, Quote,
 };
 use mochi_store::{open_database, open_in_memory, SqlitePaperStore};
 use serde_json::json;
@@ -254,6 +255,29 @@ impl PaperStore for AuditedStore {
     fn get_order(&self, id: &str) -> Result<Option<Order>, StoreFailure> {
         self.inner.get_order(id)
     }
+    fn record_close_selection(
+        &self,
+        order_id: &str,
+        selection: &CloseSelection,
+    ) -> Result<(), StoreFailure> {
+        self.write("record_close_selection");
+        self.inner.record_close_selection(order_id, selection)
+    }
+    fn close_selection(&self, order_id: &str) -> Result<Option<CloseSelection>, StoreFailure> {
+        self.inner.close_selection(order_id)
+    }
+    fn link_target_replacement(
+        &self,
+        deferred_order_id: &str,
+        replacement_order_id: &str,
+    ) -> Result<(), StoreFailure> {
+        self.write("link_target_replacement");
+        self.inner
+            .link_target_replacement(deferred_order_id, replacement_order_id)
+    }
+    fn target_replacements(&self, deferred_order_id: &str) -> Result<Vec<Order>, StoreFailure> {
+        self.inner.target_replacements(deferred_order_id)
+    }
     fn get_order_by_client_id(
         &self,
         account_id: &str,
@@ -274,6 +298,36 @@ impl PaperStore for AuditedStore {
     }
     fn list_orders(&self, account_id: &str, limit: usize) -> Result<Vec<Order>, StoreFailure> {
         self.inner.list_orders(account_id, limit)
+    }
+    fn list_canceled_orders_for_recovery(
+        &self,
+        account_id: &str,
+        reason: &str,
+        limit: usize,
+    ) -> Result<Vec<Order>, StoreFailure> {
+        self.inner
+            .list_canceled_orders_for_recovery(account_id, reason, limit)
+    }
+    fn any_canceled_order_for_recovery(
+        &self,
+        account_id: &str,
+        symbol: &str,
+        side: OrderSide,
+        reason: &str,
+        matches: &dyn Fn(&Order) -> bool,
+    ) -> Result<bool, StoreFailure> {
+        self.inner
+            .any_canceled_order_for_recovery(account_id, symbol, side, reason, matches)
+    }
+    fn mark_order_recovery_checked(
+        &self,
+        order_id: &str,
+        reason: &str,
+        checked_at: i64,
+    ) -> Result<(), StoreFailure> {
+        self.write("mark_order_recovery_checked");
+        self.inner
+            .mark_order_recovery_checked(order_id, reason, checked_at)
     }
     fn find_orders_by_exchange_ids(
         &self,
@@ -346,6 +400,55 @@ impl PaperStore for AuditedStore {
         limit: usize,
     ) -> Result<Vec<EquityPoint>, StoreFailure> {
         self.inner.list_equity(account_id, limit)
+    }
+    fn execution_cursor(&self, account_id: &str) -> Result<ExchangeExecutionCursor, StoreFailure> {
+        self.inner.execution_cursor(account_id)
+    }
+    fn save_execution_cursor(
+        &self,
+        account_id: &str,
+        cursor: &ExchangeExecutionCursor,
+    ) -> Result<(), StoreFailure> {
+        self.inner.save_execution_cursor(account_id, cursor)
+    }
+    fn record_exchange_execution(
+        &self,
+        order_id: &str,
+        trade_id: &str,
+        executed_at: i64,
+    ) -> Result<(), StoreFailure> {
+        self.inner
+            .record_exchange_execution(order_id, trade_id, executed_at)
+    }
+
+    fn upsert_position_record(
+        &self,
+        r: &mochi_domain::ExchangePositionRecord,
+    ) -> Result<(), StoreFailure> {
+        self.write("upsert_position_record");
+        self.inner.upsert_position_record(r)
+    }
+    fn list_position_records(
+        &self,
+        account_id: &str,
+        inst_id: &str,
+        since: i64,
+    ) -> Result<Vec<mochi_domain::ExchangePositionRecord>, StoreFailure> {
+        self.inner.list_position_records(account_id, inst_id, since)
+    }
+    fn latest_position_record_at(&self, account_id: &str) -> Result<Option<i64>, StoreFailure> {
+        self.inner.latest_position_record_at(account_id)
+    }
+    fn position_history_backfill(&self, account_id: &str) -> Result<Option<i64>, StoreFailure> {
+        self.inner.position_history_backfill(account_id)
+    }
+    fn set_position_history_backfill(
+        &self,
+        account_id: &str,
+        before: Option<i64>,
+    ) -> Result<(), StoreFailure> {
+        self.write("set_position_history_backfill");
+        self.inner.set_position_history_backfill(account_id, before)
     }
 }
 

@@ -5,6 +5,7 @@ mod ai;
 mod paper;
 pub mod rows;
 mod settings;
+pub mod templates;
 mod vault;
 
 pub use paper::SqlitePaperStore;
@@ -23,6 +24,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The migration files, embedded so the Rust binary needs no files at runtime.
 /// `migration_list_matches_directory` fails if a file is added without being listed here.
+///
+/// The two `009_` files share a number on purpose and must keep their names. A database records
+/// what it applied by file name, and every statement here runs once, so renaming either file makes
+/// a database that already ran it run it again and fail on the table it created. Bump the highest
+/// number for anything new instead. Do not renumber them, and do not use the number as a version.
 pub const MIGRATIONS: &[(&str, &str)] = &[
     ("001_init.sql", include_str!("../migrations/001_init.sql")),
     (
@@ -49,6 +55,38 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
     (
         "008_trailing_stop.sql",
         include_str!("../migrations/008_trailing_stop.sql"),
+    ),
+    (
+        "009_deferred_target_replacements.sql",
+        include_str!("../migrations/009_deferred_target_replacements.sql"),
+    ),
+    (
+        "009_exchange_position_history.sql",
+        include_str!("../migrations/009_exchange_position_history.sql"),
+    ),
+    (
+        "010_exchange_execution_evidence.sql",
+        include_str!("../migrations/010_exchange_execution_evidence.sql"),
+    ),
+    (
+        "011_exchange_order_recovery.sql",
+        include_str!("../migrations/011_exchange_order_recovery.sql"),
+    ),
+    (
+        "012_okx_close_intents.sql",
+        include_str!("../migrations/012_okx_close_intents.sql"),
+    ),
+    (
+        "013_okx_close_quantities.sql",
+        include_str!("../migrations/013_okx_close_quantities.sql"),
+    ),
+    (
+        "014_exchange_order_id_lookup.sql",
+        include_str!("../migrations/014_exchange_order_id_lookup.sql"),
+    ),
+    (
+        "015_agent_templates.sql",
+        include_str!("../migrations/015_agent_templates.sql"),
     ),
 ];
 

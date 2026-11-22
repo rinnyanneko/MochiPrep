@@ -77,6 +77,8 @@ pub enum Schema {
     ProviderKey,
     ProviderTest,
     AgentInput,
+    /// Agent template body, for `POST`/`PUT /api/agent-templates`. No Node counterpart.
+    AgentTemplateInput,
     CreateAccount,
     PlaceOrder,
     ClosePosition,
@@ -102,7 +104,15 @@ pub enum Schema {
 }
 
 // ---- typed results ---------------------------------------------------------------------------
-// What a route gets after validation. `PlaceOrder` parses into `mochi_domain::OrderRequest`.
+// What a route gets after validation.
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaceOrderInput {
+    #[serde(flatten)]
+    pub order: mochi_domain::OrderRequest,
+    pub position_id: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -117,6 +127,7 @@ pub struct CreateAccountInput {
 pub struct ClosePositionInput {
     pub fraction: f64,
     pub client_order_id: String,
+    pub position_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -128,6 +139,8 @@ pub struct ProtectionInput {
     /// Some(None): explicit null, which removes it.
     #[serde(default, deserialize_with = "present")]
     pub trailing_stop: Option<Option<TrailingStopSpec>>,
+    #[serde(default)]
+    pub keep_take_profit: bool,
 }
 
 /// Only called when the key is present, so a present `null` becomes `Some(None)`.
@@ -232,6 +245,7 @@ pub fn check(schema: Schema, input: Option<&Value>) -> Result<Value, ApiError> {
         Schema::ProviderKey => ai::provider_key(input),
         Schema::ProviderTest => ai::provider_test(input),
         Schema::AgentInput => ai::agent_input(input),
+        Schema::AgentTemplateInput => ai::agent_template_input(input),
         Schema::CreateAccount => create_account(input),
         Schema::PlaceOrder => place_order(input),
         Schema::ClosePosition => close_position(input),
@@ -331,6 +345,7 @@ fn place_order(input: Input) -> Checked {
         check_number(v, &NumberRule::int(1.0, 100.0))
     });
     fields.optional("reduceOnly", check_bool);
+    fields.optional("positionId", |v| check_string(v, &CLIENT_ORDER_ID));
     fields.nullish("stopLoss", decimal);
     fields.nullish("takeProfit", decimal);
     fields.nullish("trailingStop", trailing_stop);
@@ -342,6 +357,7 @@ fn protection(input: Input) -> Checked {
     let mut fields = Fields::new(input)?;
     fields.nullable("stopLoss", decimal);
     fields.nullable("takeProfit", decimal);
+    fields.optional("keepTakeProfit", check_bool);
     // `.nullable().optional()` behaves as `.nullish()`.
     fields.nullish("trailingStop", trailing_stop);
     fields.strict()
@@ -358,6 +374,7 @@ fn close_position(input: Input) -> Checked {
     };
     fields.required("fraction", |v| check_number(v, &fraction));
     fields.required("clientOrderId", |v| check_string(v, &CLIENT_ORDER_ID));
+    fields.optional("positionId", |v| check_string(v, &CLIENT_ORDER_ID));
     fields.strict()
 }
 

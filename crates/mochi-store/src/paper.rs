@@ -3,9 +3,10 @@
 
 use std::cell::Cell;
 
-use mochi_core::paper::{PaperStore, StoreFailure, StoreFailureKind};
+use mochi_core::paper::{CloseAmount, CloseSelection, PaperStore, StoreFailure, StoreFailureKind};
 use mochi_domain::{
-    DataSource, EquityPoint, Fill, LedgerEvent, Order, PaperAccount, Position, RiskSettings,
+    DataSource, EquityPoint, ExchangeExecutionCursor, ExchangePositionRecord, Fill, LedgerEvent,
+    Order, OrderSide, PaperAccount, Position, RiskSettings,
 };
 use rusqlite::{params, Connection, Row};
 use serde::de::DeserializeOwned;
@@ -323,6 +324,19 @@ fn to_equity(r: &Row) -> rusqlite::Result<EquityPoint> {
     })
 }
 
+fn to_position_record(r: &Row) -> rusqlite::Result<ExchangePositionRecord> {
+    Ok(ExchangePositionRecord {
+        account_id: r.get("account_id")?,
+        pos_id: r.get("pos_id")?,
+        opened_at: r.get("opened_at")?,
+        inst_id: r.get("inst_id")?,
+        closed_at: r.get("closed_at")?,
+        realized_pnl: r.get("realized_pnl")?,
+        close_type: r.get("close_type")?,
+        opening_side: r.get("opening_side")?,
+    })
+}
+
 fn limit_param(limit: usize) -> i64 {
     i64::try_from(limit).unwrap_or(i64::MAX)
 }
@@ -415,6 +429,9 @@ impl PaperStore for SqlitePaperStore {
             "positions",
             "ledger_events",
             "equity_history",
+            "exchange_position_history",
+            "exchange_history_cursor",
+            "exchange_execution_cursor",
         ] {
             self.run(&format!("DELETE FROM {table} WHERE account_id=?"), [id])?;
         }
@@ -471,16 +488,21 @@ impl PaperStore for SqlitePaperStore {
 
     fn save_order(&self, o: &Order) -> Result<(), StoreFailure> {
         self.run(
-            "UPDATE orders SET quantity=?, status=?, filled_quantity=?, avg_fill_price=?, reserved_margin=?, trailing_extreme=?, reject_reason=?, exchange_order_id=?, updated_at=? WHERE id=?",
+            "UPDATE orders SET type=?, close_position=?, quantity=?, trigger_price=?, status=?, filled_quantity=?, avg_fill_price=?, reserved_margin=?, trailing_activation_price=?, trailing_extreme=?, reject_reason=?, exchange_order_id=?, created_at=?, updated_at=? WHERE id=?",
             params![
+                enum_text(&o.order_type),
+                i64::from(o.close_position),
                 o.quantity,
+                o.trigger_price,
                 enum_text(&o.status),
                 o.filled_quantity,
                 o.avg_fill_price,
                 o.reserved_margin,
+                o.trailing_activation_price,
                 o.trailing_extreme,
                 o.reject_reason,
                 o.exchange_order_id,
+                o.created_at,
                 o.updated_at,
                 o.id,
             ],
@@ -489,6 +511,67 @@ impl PaperStore for SqlitePaperStore {
 
     fn get_order(&self, id: &str) -> Result<Option<Order>, StoreFailure> {
         self.query_one("SELECT * FROM orders WHERE id=?", [id], to_order)
+    }
+
+    fn record_close_selection(
+        &self,
+        order_id: &str,
+        selection: &CloseSelection,
+    ) -> Result<(), StoreFailure> {
+        let (fraction, quantity, price) = match &selection.amount {
+            CloseAmount::Fraction(fraction) => (Some(*fraction), None, None),
+            CloseAmount::Quantity {
+                quantity,
+                limit_price,
+            } => (None, Some(quantity), limit_price.as_ref()),
+        };
+        self.run(
+            "INSERT INTO okx_close_selections (order_id, position_id, fraction, quantity, limit_price)
+             VALUES (?, ?, ?, ?, ?)",
+            params![order_id, selection.position_id, fraction, quantity, price],
+        )
+    }
+
+    fn close_selection(&self, order_id: &str) -> Result<Option<CloseSelection>, StoreFailure> {
+        self.query_one(
+            "SELECT position_id, fraction, quantity, limit_price FROM okx_close_selections WHERE order_id=?",
+            [order_id],
+            |row| {
+                Ok(CloseSelection {
+                    position_id: row.get("position_id")?,
+                    amount: match row.get::<_, Option<f64>>("fraction")? {
+                        Some(fraction) => CloseAmount::Fraction(fraction),
+                        None => CloseAmount::Quantity {
+                            quantity: row.get("quantity")?,
+                            limit_price: row.get("limit_price")?,
+                        },
+                    },
+                })
+            },
+        )
+    }
+
+    fn link_target_replacement(
+        &self,
+        deferred_order_id: &str,
+        replacement_order_id: &str,
+    ) -> Result<(), StoreFailure> {
+        self.run(
+            "INSERT INTO deferred_target_replacements (deferred_order_id, replacement_order_id)
+             VALUES (?, ?)",
+            params![deferred_order_id, replacement_order_id],
+        )
+    }
+
+    fn target_replacements(&self, deferred_order_id: &str) -> Result<Vec<Order>, StoreFailure> {
+        self.query(
+            "SELECT orders.* FROM deferred_target_replacements AS links
+             JOIN orders ON orders.id=links.replacement_order_id
+             WHERE links.deferred_order_id=?
+             ORDER BY orders.created_at, orders.rowid",
+            [deferred_order_id],
+            to_order,
+        )
     }
 
     fn get_order_by_client_id(
@@ -530,6 +613,62 @@ impl PaperStore for SqlitePaperStore {
             "SELECT * FROM orders WHERE account_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
             params![account_id, limit_param(limit)],
             to_order,
+        )
+    }
+
+    fn list_canceled_orders_for_recovery(
+        &self,
+        account_id: &str,
+        reason: &str,
+        limit: usize,
+    ) -> Result<Vec<Order>, StoreFailure> {
+        self.query(
+            "SELECT * FROM orders WHERE account_id=? AND status='CANCELED' AND reject_reason=?
+             ORDER BY COALESCE(exchange_recovery_checked_at, created_at), id LIMIT ?",
+            params![account_id, reason, limit_param(limit)],
+            to_order,
+        )
+    }
+
+    fn any_canceled_order_for_recovery(
+        &self,
+        account_id: &str,
+        symbol: &str,
+        side: OrderSide,
+        reason: &str,
+        matches: &dyn Fn(&Order) -> bool,
+    ) -> Result<bool, StoreFailure> {
+        let mut stmt = self
+            .conn
+            .prepare_cached(
+                "SELECT * FROM orders WHERE account_id=? AND status='CANCELED' AND reject_reason=?
+             AND symbol=? AND side=? AND (exchange_order_id IS NULL OR exchange_order_id='')",
+            )
+            .map_err(failure)?;
+        let orders = stmt
+            .query_map(
+                params![account_id, reason, symbol, enum_text(&side)],
+                to_order,
+            )
+            .map_err(failure)?;
+        for order in orders {
+            if matches(&order.map_err(failure)?) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn mark_order_recovery_checked(
+        &self,
+        order_id: &str,
+        reason: &str,
+        checked_at: i64,
+    ) -> Result<(), StoreFailure> {
+        self.run(
+            "UPDATE orders SET exchange_recovery_checked_at=?
+             WHERE id=? AND status='CANCELED' AND reject_reason=?",
+            params![checked_at, order_id, reason],
         )
     }
 
@@ -729,6 +868,120 @@ impl PaperStore for SqlitePaperStore {
             "SELECT * FROM (SELECT * FROM equity_history WHERE account_id=? ORDER BY ts DESC LIMIT ?) ORDER BY ts",
             params![account_id, limit_param(limit)],
             to_equity,
+        )
+    }
+
+    fn execution_cursor(&self, account_id: &str) -> Result<ExchangeExecutionCursor, StoreFailure> {
+        Ok(self.query(
+            "SELECT completed_bill,scan_head,scan_after FROM exchange_execution_cursor WHERE account_id=?",
+            [account_id],
+            |row| Ok(ExchangeExecutionCursor {
+                completed_bill: row.get(0)?,
+                scan_head: row.get(1)?,
+                scan_after: row.get(2)?,
+            }),
+        )?.into_iter().next().unwrap_or_default())
+    }
+    fn save_execution_cursor(
+        &self,
+        account_id: &str,
+        cursor: &ExchangeExecutionCursor,
+    ) -> Result<(), StoreFailure> {
+        self.run(
+            "INSERT INTO exchange_execution_cursor(account_id,completed_bill,scan_head,scan_after)
+             VALUES (?,?,?,?) ON CONFLICT(account_id) DO UPDATE SET
+             completed_bill=excluded.completed_bill, scan_head=excluded.scan_head,
+             scan_after=excluded.scan_after",
+            params![
+                account_id,
+                cursor.completed_bill,
+                cursor.scan_head,
+                cursor.scan_after
+            ],
+        )
+    }
+
+    fn record_exchange_execution(
+        &self,
+        order_id: &str,
+        trade_id: &str,
+        executed_at: i64,
+    ) -> Result<(), StoreFailure> {
+        self.run(
+            "INSERT OR IGNORE INTO exchange_order_executions (order_id,trade_id,executed_at)
+             VALUES (?,?,?)",
+            params![order_id, trade_id, executed_at],
+        )
+    }
+
+    fn upsert_position_record(&self, r: &ExchangePositionRecord) -> Result<(), StoreFailure> {
+        self.run(
+            "INSERT INTO exchange_position_history
+               (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type,opening_side)
+             VALUES (?,?,?,?,?,?,?,?)
+             ON CONFLICT(account_id,pos_id,opened_at) DO UPDATE SET inst_id=excluded.inst_id,
+               closed_at=excluded.closed_at, realized_pnl=excluded.realized_pnl,
+               close_type=excluded.close_type, opening_side=excluded.opening_side",
+            params![
+                r.account_id,
+                r.pos_id,
+                r.opened_at,
+                r.inst_id,
+                r.closed_at,
+                r.realized_pnl,
+                r.close_type,
+                r.opening_side
+            ],
+        )
+    }
+
+    fn list_position_records(
+        &self,
+        account_id: &str,
+        inst_id: &str,
+        since: i64,
+    ) -> Result<Vec<ExchangePositionRecord>, StoreFailure> {
+        self.query(
+            "SELECT * FROM exchange_position_history WHERE account_id=? AND inst_id=? AND opened_at>=?
+             ORDER BY opened_at, pos_id",
+            params![account_id, inst_id, since],
+            to_position_record,
+        )
+    }
+
+    fn latest_position_record_at(&self, account_id: &str) -> Result<Option<i64>, StoreFailure> {
+        Ok(self
+            .query(
+                "SELECT MAX(closed_at) AS at FROM exchange_position_history WHERE account_id=?",
+                [account_id],
+                |r| r.get::<_, Option<i64>>("at"),
+            )?
+            .into_iter()
+            .next()
+            .flatten())
+    }
+
+    fn position_history_backfill(&self, account_id: &str) -> Result<Option<i64>, StoreFailure> {
+        Ok(self
+            .query(
+                "SELECT backfill_before FROM exchange_history_cursor WHERE account_id=?",
+                [account_id],
+                |r| r.get::<_, Option<i64>>("backfill_before"),
+            )?
+            .into_iter()
+            .next()
+            .flatten())
+    }
+
+    fn set_position_history_backfill(
+        &self,
+        account_id: &str,
+        before: Option<i64>,
+    ) -> Result<(), StoreFailure> {
+        self.run(
+            "INSERT INTO exchange_history_cursor (account_id,backfill_before) VALUES (?,?)
+             ON CONFLICT(account_id) DO UPDATE SET backfill_before=excluded.backfill_before",
+            params![account_id, before],
         )
     }
 }

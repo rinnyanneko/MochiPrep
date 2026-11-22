@@ -3,6 +3,10 @@ use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::path::Path;
 
+/// Migrations the Node backend knew. Its frozen goldens (`schema.json`, `node-created.sqlite`)
+/// stop there; later ones are Rust's own.
+const NODE_MIGRATIONS: usize = 8;
+
 fn golden_path(name: &str) -> String {
     format!("{}/../golden/{name}", env!("CARGO_MANIFEST_DIR"))
 }
@@ -27,7 +31,8 @@ fn migration_names(conn: &Connection) -> Vec<String> {
 
 #[test]
 fn fresh_schema_matches_node() {
-    let conn = open_in_memory().unwrap();
+    let conn = open_in_memory_bare();
+    migrate_with(&conn, &MIGRATIONS[..NODE_MIGRATIONS]).unwrap();
     let mut stmt = conn
         .prepare(
             "SELECT type, name, tbl_name, sql FROM sqlite_master \
@@ -67,7 +72,7 @@ fn migration_list_matches_directory() {
 }
 
 #[test]
-fn opens_node_database_without_reapplying() {
+fn upgrades_node_database_without_reapplying_its_migrations() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("node.sqlite");
     std::fs::copy(golden_path("node-created.sqlite"), &path).unwrap();
@@ -77,8 +82,20 @@ fn opens_node_database_without_reapplying() {
         applied_at(&raw)
     };
     let conn = open_database(&path).unwrap();
-    assert_eq!(applied_at(&conn).len(), 8);
-    assert_eq!(applied_at(&conn), applied_before);
+    // Node's own migrations are kept as they were; only the later ones are applied.
+    let applied = applied_at(&conn);
+    assert_eq!(applied_before.len(), NODE_MIGRATIONS);
+    assert_eq!(applied[..NODE_MIGRATIONS], applied_before[..]);
+    let added: Vec<&str> = applied[NODE_MIGRATIONS..]
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect();
+    let expected: Vec<&str> = MIGRATIONS[NODE_MIGRATIONS..]
+        .iter()
+        .map(|(name, _)| *name)
+        .collect();
+    assert_eq!(added, expected);
+    assert!(table_exists(&conn, "deferred_target_replacements"));
     let name: String = conn
         .query_row(
             "SELECT name FROM accounts WHERE id = 'acct_golden'",
@@ -87,6 +104,8 @@ fn opens_node_database_without_reapplying() {
         )
         .unwrap();
     assert_eq!(name, "Golden");
+    drop(conn);
+    assert_eq!(applied_at(&open_database(&path).unwrap()), applied);
 }
 
 fn applied_at(conn: &Connection) -> Vec<(String, i64)> {
@@ -100,23 +119,65 @@ fn applied_at(conn: &Connection) -> Vec<(String, i64)> {
 #[test]
 fn older_schema_gets_only_the_new_migration() {
     let conn = open_in_memory_bare();
-    migrate_with(&conn, &MIGRATIONS[..7]).unwrap();
+    let replacement_migration = "009_deferred_target_replacements.sql";
+    let older: Vec<_> = MIGRATIONS
+        .iter()
+        .copied()
+        .filter(|(name, _)| *name != replacement_migration)
+        .collect();
+    migrate_with(&conn, &older).unwrap();
     conn.execute_batch(
         "INSERT INTO providers (id, name, kind, default_model, created_at) \
          VALUES ('p1', 'P', 'mock', 'm', 1)",
     )
     .unwrap();
     let before = migration_names(&conn);
-    assert_eq!(before.len(), 7);
+    assert_eq!(before.len(), older.len());
 
     migrate_with(&conn, MIGRATIONS).unwrap();
     let after = migration_names(&conn);
     let added: Vec<&String> = after.iter().filter(|n| !before.contains(n)).collect();
-    assert_eq!(added, vec!["008_trailing_stop.sql"]);
+    assert_eq!(added, vec![replacement_migration]);
     let rows: i64 = conn
         .query_row("SELECT COUNT(*) FROM providers", [], |r| r.get(0))
         .unwrap();
     assert_eq!(rows, 1);
+}
+
+#[test]
+fn close_quantity_upgrade_preserves_fraction_selections() {
+    let conn = open_in_memory_bare();
+    let quantity_migration = MIGRATIONS
+        .iter()
+        .position(|(name, _)| *name == "013_okx_close_quantities.sql")
+        .unwrap();
+    migrate_with(&conn, &MIGRATIONS[..quantity_migration]).unwrap();
+    conn.execute_batch(
+        "INSERT INTO accounts (id,name,source,initial_balance,wallet_balance,used_margin,
+           realized_pnl,fees_paid,funding_paid,config,created_at)
+         VALUES ('a','A','LIVE','0','0','0','0','0','0','{}',1);
+         INSERT INTO orders (id,account_id,client_order_id,symbol,side,type,quantity,leverage,
+            reduce_only,close_position,status,filled_quantity,reserved_margin,created_at,updated_at)
+         VALUES ('o','a','key','BTCUSDT','SELL','MARKET','0.001',1,1,0,'FILLED','0.001','0',1,1);
+         INSERT INTO okx_close_intents (order_id, position_id, fraction)
+         VALUES ('o', 'isolated-long', 0.5);",
+    )
+    .unwrap();
+    migrate_with(&conn, MIGRATIONS).unwrap();
+    let saved = conn
+        .query_row(
+            "SELECT position_id, fraction, quantity FROM okx_close_selections WHERE order_id='o'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, f64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(saved, ("isolated-long".to_owned(), 0.5, None));
 }
 
 /// A connection with no migrations run, unlike `open_in_memory`.
@@ -248,4 +309,65 @@ fn sqlite_gives_wal_and_shm_the_main_file_mode() {
         .unwrap();
     assert_eq!(mode(&sibling(&path, "-wal")), 0o640);
     assert_eq!(mode(&sibling(&path, "-shm")), 0o640);
+}
+
+#[test]
+fn exchange_position_history_keys_a_reused_pos_id_by_its_open_time() {
+    let conn = open_in_memory().unwrap();
+    assert!(table_exists(&conn, "exchange_position_history"));
+    conn.execute_batch(
+        "INSERT INTO accounts (id,name,source,initial_balance,wallet_balance,used_margin,
+           realized_pnl,fees_paid,funding_paid,config,created_at)
+         VALUES ('a','A','LIVE','0','0','0','0','0','0','{}',1);
+         INSERT INTO exchange_position_history
+           (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type)
+         VALUES ('a','p',1,'BTC-USDT-SWAP',2,'1','2'),('a','p',3,'BTC-USDT-SWAP',4,'2','2');",
+    )
+    .unwrap();
+    let duplicate = conn.execute(
+        "INSERT INTO exchange_position_history (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type) VALUES ('a','p',1,'BTC-USDT-SWAP',5,'3','2')",
+        [],
+    );
+    assert!(duplicate.is_err());
+}
+
+#[test]
+fn execution_evidence_upgrade_reopens_completed_position_history_backfill() {
+    let conn = open_in_memory_bare();
+    let evidence = MIGRATIONS
+        .iter()
+        .position(|(name, _)| *name == "010_exchange_execution_evidence.sql")
+        .unwrap();
+    let old = &MIGRATIONS[..evidence];
+    migrate_with(&conn, old).unwrap();
+    conn.execute_batch(
+        "INSERT INTO accounts (id,name,source,initial_balance,wallet_balance,used_margin,
+           realized_pnl,fees_paid,funding_paid,config,created_at)
+         VALUES ('a','A','LIVE','0','0','0','0','0','0','{}',1);
+         INSERT INTO exchange_position_history
+           (account_id,pos_id,opened_at,inst_id,closed_at,realized_pnl,close_type)
+         VALUES ('a','p',1,'BTC-USDT-SWAP',10,'1','2'),('a','p',11,'BTC-USDT-SWAP',20,'2','2');
+         INSERT INTO exchange_history_cursor(account_id,backfill_before) VALUES ('a',NULL);",
+    )
+    .unwrap();
+    migrate_with(&conn, MIGRATIONS).unwrap();
+    let before: Option<i64> = conn
+        .query_row(
+            "SELECT backfill_before FROM exchange_history_cursor WHERE account_id='a'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(before, Some(21));
+    let history: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM exchange_position_history WHERE opening_side IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        history, 2,
+        "keep older records without guessing their direction"
+    );
 }

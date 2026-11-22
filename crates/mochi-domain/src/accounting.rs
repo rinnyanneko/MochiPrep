@@ -237,7 +237,8 @@ pub struct Order {
     pub trigger_price: Option<String>,
     pub leverage: u32,
     pub reduce_only: bool,
-    /// SL/TP orders always close whatever is left of the position when they trigger.
+    /// Marks a protection order. Paper protection covers the remaining position, while
+    /// OKX protection has an explicit quantity.
     pub close_position: bool,
     pub status: OrderStatus,
     pub filled_quantity: String,
@@ -320,6 +321,10 @@ pub struct Position {
 pub struct PositionView {
     #[serde(flatten)]
     pub position: Position,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub margin_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub close_supported: Option<bool>,
     pub mark_price: Option<String>,
     pub unrealized_pnl: String,
     pub stop_loss: Option<String>,
@@ -445,6 +450,34 @@ pub struct LedgerEvent {
     pub position_id: Option<String>,
     pub memo: String,
     pub ts: i64,
+}
+
+/// A resumable scan of execution bills, newest to oldest. The completed head advances only
+/// once a scan reaches the previously completed bills or the end of the exchange's history.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExchangeExecutionCursor {
+    pub completed_bill: Option<String>,
+    pub scan_head: Option<String>,
+    pub scan_after: Option<String>,
+}
+
+/// One closed (or partly closed) position on an exchange account, as the exchange reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExchangePositionRecord {
+    pub account_id: String,
+    pub pos_id: String,
+    pub opened_at: i64,
+    /// The exchange's own instrument id (OKX `instId`).
+    pub inst_id: String,
+    /// When the exchange last updated it: the close, or the latest partial close.
+    pub closed_at: i64,
+    /// PnL net of fees, funding and any liquidation penalty.
+    pub realized_pnl: String,
+    /// The exchange's own code for how it closed (OKX `type`), kept for diagnosis.
+    pub close_type: String,
+    /// BUY or SELL for a confirmed isolated net position.
+    pub opening_side: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

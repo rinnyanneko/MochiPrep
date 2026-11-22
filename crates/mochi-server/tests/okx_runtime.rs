@@ -927,12 +927,28 @@ async fn an_unarmed_auto_agent_run_once_is_refused_by_the_engine_and_can_still_e
     w.arm(&account.id, ARM_PHRASE).await.unwrap();
     w.place(&account.id).await;
     w.rt.call(|r| r.disarm(None)).await.unwrap();
+    {
+        let mut okx = w.okx.state();
+        let position = okx.position.as_mut().unwrap();
+        position.insert("pos".into(), json!("0.4"));
+        let mut cross = position.clone();
+        cross.insert("pos".into(), json!("0.2"));
+        cross.insert("mgnMode".into(), json!("cross"));
+        okx.other_positions.push(cross);
+    }
+    w.rt.sync_exchanges().await.unwrap();
     // An exit needs no arming.
     *w.answer.lock().unwrap() = decision("CLOSE", 74_000.0, None);
     let placed = w.placed();
     let record = w.cycle(&agent, CycleTrigger::RunOnce).await;
     assert_eq!(record["outcome"], "EXECUTED", "{record}");
     assert_eq!(w.placed(), placed + 1);
+    {
+        let okx = w.okx.state();
+        assert_eq!(okx.placed.last().unwrap()["sz"], "0.4");
+        assert_eq!(okx.placed.last().unwrap()["tdMode"], "isolated");
+        assert_eq!(okx.other_positions[0]["pos"], "0.2");
+    }
     w.rt.shutdown().await;
 }
 
@@ -974,6 +990,105 @@ async fn a_suggestion_can_run_unarmed_because_it_places_nothing() {
     let record = w.cycle(&agent, CycleTrigger::RunOnce).await;
     assert_eq!(record["outcome"], "SIGNAL", "{record}");
     assert_eq!(w.placed(), 0);
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_old_close_suggestion_expires_after_the_position_flips() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.place(&account.id).await;
+    *w.answer.lock().unwrap() = decision("CLOSE", 74000.0, None);
+    let agent = w.agent_on(&account.id, "SIGNAL").await;
+    let record = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    assert_eq!(record["outcome"], "SIGNAL", "{record}");
+    {
+        let mut okx = w.okx.state();
+        let position = okx.position.as_mut().unwrap();
+        position.insert("pos".into(), json!("-0.1"));
+        position.insert("tradeId".into(), json!("10"));
+    }
+    w.rt.sync_exchanges().await.unwrap();
+    let placed = w.placed();
+    let done =
+        w.rt.execute_signal(record["id"].as_str().unwrap())
+            .await
+            .unwrap();
+    assert_eq!(done["outcome"], "SIGNAL_EXPIRED", "{done}");
+    assert_eq!(w.placed(), placed);
+    assert_eq!(w.okx.state().position.as_ref().unwrap()["pos"], "-0.1");
+
+    let current = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    assert_eq!(current["outcome"], "SIGNAL", "{current}");
+    let done =
+        w.rt.execute_signal(current["id"].as_str().unwrap())
+            .await
+            .unwrap();
+    assert_eq!(done["outcome"], "EXECUTED", "{done}");
+    assert!(w.okx.state().position.is_none());
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_protect_suggestion_expires_for_a_replacement_with_the_same_stop() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.place(&account.id).await;
+    *w.answer.lock().unwrap() = decision("PROTECT", 74_500.0, None);
+    let agent = w.agent_on(&account.id, "SIGNAL").await;
+    let suggestion = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    assert_eq!(suggestion["outcome"], "SIGNAL", "{suggestion}");
+    assert_eq!(suggestion["protectionBefore"]["stopLoss"], "74000");
+
+    w.okx
+        .state()
+        .position
+        .as_mut()
+        .unwrap()
+        .insert("tradeId".into(), json!("10"));
+    w.rt.sync_exchanges().await.unwrap();
+    let engine = w.rt.execution(&account.id).await.unwrap();
+    let protection = engine
+        .protection_of(account.id.clone(), "BTCUSDT".into())
+        .await
+        .unwrap();
+    assert_eq!(protection.stop_loss.as_deref(), Some("74000"));
+    let placed = w.okx.state().algo_placed.len();
+    let done =
+        w.rt.execute_signal(suggestion["id"].as_str().unwrap())
+            .await
+            .unwrap();
+    assert_eq!(done["outcome"], "SIGNAL_EXPIRED", "{done}");
+    assert_eq!(w.okx.state().algo_placed.len(), placed);
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_close_suggestion_cannot_close_a_remote_replacement_hidden_by_the_cache() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.place(&account.id).await;
+    *w.answer.lock().unwrap() = decision("CLOSE", 74000.0, None);
+    let agent = w.agent_on(&account.id, "SIGNAL").await;
+    let record = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    assert_eq!(record["outcome"], "SIGNAL", "{record}");
+    w.okx
+        .state()
+        .position
+        .as_mut()
+        .unwrap()
+        .insert("tradeId".into(), json!("10"));
+    let placed = w.placed();
+    let done =
+        w.rt.execute_signal(record["id"].as_str().unwrap())
+            .await
+            .unwrap();
+    assert_eq!(done["outcome"], "ORDER_REJECTED", "{done}");
+    assert_eq!(w.placed(), placed);
+    assert!(w.okx.state().position.is_some());
     w.rt.shutdown().await;
 }
 
@@ -1026,6 +1141,129 @@ async fn the_api_refuses_to_accept_while_unarmed_without_using_up_the_suggestion
     let (status, accepted) = w.send("POST", &path, None).await;
     assert_eq!(status, 200);
     assert_eq!(accepted["outcome"], "EXECUTED", "{accepted}");
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn agent_protection_risks_use_the_isolated_position_even_when_cross_is_first() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.place(&account.id).await;
+    let agent = w.agent_on(&account.id, "AUTO").await;
+    {
+        let mut okx = w.okx.state();
+        let isolated = okx.position.as_mut().unwrap();
+        isolated.insert("pos".into(), json!("10"));
+        let mut cross = isolated.clone();
+        cross.insert("pos".into(), json!("0.01"));
+        cross.insert("mgnMode".into(), json!("cross"));
+        okx.other_positions.push(cross);
+    }
+    w.rt.sync_exchanges().await.unwrap();
+    *w.answer.lock().unwrap() = decision("PROTECT", 73_500.0, None);
+    let before = w.okx.state().algo_placed.len();
+    let result = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    assert_eq!(result["outcome"], "RISK_REJECTED", "{result}");
+    assert!(
+        result["risk"]["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| check["id"] == "protect-risk" && check["passed"] == false),
+        "{result}"
+    );
+    assert_eq!(w.okx.state().algo_placed.len(), before);
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn agent_close_risk_records_the_isolated_position_even_when_cross_is_first() {
+    let w = World::new().await;
+    let account = w.connect("OKX_DEMO").await;
+    w.place(&account.id).await;
+    {
+        let mut okx = w.okx.state();
+        let mut cross = okx.position.as_ref().unwrap().clone();
+        cross.insert("pos".into(), json!("0.01"));
+        cross.insert("mgnMode".into(), json!("cross"));
+        okx.other_positions.push(cross);
+    }
+    w.rt.sync_exchanges().await.unwrap();
+    let agent = w.agent_on(&account.id, "AUTO").await;
+    *w.answer.lock().unwrap() = decision("CLOSE", 74_000.0, None);
+
+    let result = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    assert_eq!(result["outcome"], "EXECUTED", "{result}");
+    assert!(w.okx.state().position.is_none());
+    let close_check = result["risk"]["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["id"] == "has-position")
+        .unwrap();
+    assert_eq!(close_check["detail"], "LONG 0.001");
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn agent_protect_can_remove_an_unsent_take_profit_with_an_unchanged_stop() {
+    let w = World::new().await;
+    let account = w.connect("OKX_DEMO").await;
+    w.okx.state().rest_limit_orders = true;
+    let request = serde_json::from_value(json!({
+        "accountId": account.id, "clientOrderId": "agent-remove-unsent-target",
+        "symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "quantity": "0.001",
+        "price": "74500", "leverage": 3, "stopLoss": "74000", "takeProfit": "78000",
+    }))
+    .unwrap();
+    let engine = w.rt.execution(&account.id).await.unwrap();
+    let entry = engine.place_order(request).await.unwrap().order;
+    {
+        let mut okx = w.okx.state();
+        okx.fill_resting();
+        // The entry lookup can report a fill ahead of the position's trade watermark.
+        okx.orders
+            .get_mut(&mochi_okx::to_cl_ord_id(&entry.client_order_id))
+            .unwrap()
+            .insert("tradeId".into(), json!("2"));
+    }
+    w.rt.sync_exchanges().await.unwrap();
+    let target_id = format!("{}:deferred:tp", entry.id);
+    let target_before = target_id.clone();
+    let target =
+        w.rt.call(move |r| {
+            r.engine()
+                .store()
+                .get_order(&target_before)
+                .unwrap()
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(target.status, mochi_domain::OrderStatus::Open);
+    assert!(target.exchange_order_id.is_none());
+    let agent = w.agent_on(&account.id, "AUTO").await;
+    *w.answer.lock().unwrap() = decision("PROTECT", 74_000.0, None);
+
+    let result = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    let target =
+        w.rt.call(move |r| r.engine().store().get_order(&target_id).unwrap().unwrap())
+            .await
+            .unwrap();
+    assert_eq!(
+        target.status,
+        mochi_domain::OrderStatus::Canceled,
+        "{result}"
+    );
+    assert_eq!(target.reject_reason.as_deref(), Some("Removed"));
+    assert_eq!(result["outcome"], "EXECUTED", "{result}");
+    assert_eq!(result["protectionBefore"]["stopLoss"], "74000");
+    assert_eq!(result["protectionBefore"], result["protectionAfter"]);
+    assert_eq!(
+        w.cycle(&agent, CycleTrigger::RunOnce).await["outcome"],
+        "HOLD"
+    );
     w.rt.shutdown().await;
 }
 
@@ -1240,8 +1478,18 @@ async fn a_disarmed_real_account_can_still_exit_while_sync_with_okx_is_lost() {
     assert_eq!(w.statuses().await[0]["armed"], false);
     let placed = w.placed();
     let engine = w.rt.execution(&account.id).await.unwrap();
+    let position_id = engine.positions(account.id.clone()).await.unwrap()[0]
+        .position
+        .id
+        .clone();
     let result = engine
-        .close_position(account.id.clone(), "BTCUSDT".into(), 1.0, "exit-1".into())
+        .close_position(
+            account.id.clone(),
+            "BTCUSDT".into(),
+            1.0,
+            "exit-1".into(),
+            Some(position_id),
+        )
         .await
         .unwrap();
     let result = serde_json::to_value(result).unwrap();
@@ -1929,6 +2177,168 @@ async fn a_connect_out_on_okx_across_a_vault_reset_and_new_password_saves_no_key
     w.rt.shutdown().await;
 }
 
+#[tokio::test]
+async fn manual_reconnect_restores_a_deferred_exit_that_had_not_reached_dispatch() {
+    reconnect_restores_deferred_exit(false).await;
+}
+
+#[tokio::test]
+async fn manual_reconnect_retries_restoring_an_unsent_exit_after_a_store_failure() {
+    reconnect_restores_deferred_exit(true).await;
+}
+
+async fn reconnect_restores_deferred_exit(fail_first: bool) {
+    let w = World::new().await;
+    w.rt.suspend_periodic_okx_sync_for_test().await.unwrap();
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.okx.state().rest_limit_orders = true;
+    let (status, entry) = w
+        .send(
+            "POST",
+            "/api/orders",
+            Some(json!({
+                "accountId": account.id, "clientOrderId": "reconnect-staged-exit",
+                "symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "price": "74500",
+                "quantity": "0.001", "leverage": 3, "stopLoss": "74000", "takeProfit": "78000",
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "{entry}");
+    let id = format!("{}:deferred:tp", entry["order"]["id"].as_str().unwrap());
+    w.okx.state().fill_resting();
+    let early_reads: Vec<_> = (0..3)
+        .map(|_| w.okx.hold_next("GET", "/account/positions"))
+        .collect();
+    let before_dispatch = w.okx.hold_next("GET", "/account/positions");
+    let (old_sync, ()) = tokio::join!(w.rt.sync_exchanges(), async {
+        let timeout = Duration::from_secs(2);
+        for hold in early_reads {
+            tokio::time::timeout(timeout, hold.reached()).await.unwrap();
+            hold.release();
+        }
+        tokio::time::timeout(timeout, before_dispatch.reached())
+            .await
+            .unwrap();
+        let staged_id = id.clone();
+        let reason =
+            w.rt.call(move |r| {
+                r.engine()
+                    .store()
+                    .get_order(&staged_id)
+                    .unwrap()
+                    .unwrap()
+                    .reject_reason
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(reason.contains("submission started"));
+        if fail_first {
+            let trigger = format!(
+                "CREATE TRIGGER refuse_exit_restore BEFORE UPDATE ON orders
+                 WHEN OLD.id = '{id}' BEGIN SELECT RAISE(ABORT, 'exit restore refused'); END"
+            );
+            w.rt.call(move |r| r.connection().execute_batch(&trigger).unwrap())
+                .await
+                .unwrap();
+            // Let the entry's pending invalidation flush before observing this reconnect.
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            let mut events = w.rt.subscribe();
+            let error = w.connect_with("OKX_LIVE", false).await.unwrap_err();
+            assert!(
+                error.message().contains("exit restore refused"),
+                "{error:?}"
+            );
+            assert!(w.okx.state().algo_placed.is_empty());
+            assert_eq!(w.statuses().await[0]["connected"], false);
+            tokio::time::timeout(timeout, async {
+                loop {
+                    if let ServerEvent::Invalidate { topics } = events.recv().await.unwrap() {
+                        if topics.contains(&Topic::Exchange) {
+                            break;
+                        }
+                    }
+                }
+            })
+            .await
+            .expect("reconnect failure should publish the disconnected state");
+            w.rt.call(|r| {
+                r.connection()
+                    .execute_batch("DROP TRIGGER refuse_exit_restore")
+                    .unwrap()
+            })
+            .await
+            .unwrap();
+        }
+        assert_eq!(w.connect("OKX_LIVE").await.id, account.id);
+        assert!(w.okx.state().algo_placed.is_empty());
+        w.rt.sync_exchanges().await.unwrap();
+        assert_eq!(w.okx.state().algo_placed.len(), 1);
+        // The old read now sees a mismatch and attempts to restore its former intent.
+        w.okx
+            .state()
+            .position
+            .as_mut()
+            .unwrap()
+            .insert("tradeId".into(), json!("2"));
+        before_dispatch.release();
+    });
+    old_sync.unwrap();
+    assert_eq!(w.okx.state().algo_placed.len(), 1);
+    let confirmed =
+        w.rt.call(move |r| {
+            r.engine()
+                .store()
+                .get_order(&id)
+                .unwrap()
+                .unwrap()
+                .exchange_order_id
+        })
+        .await
+        .unwrap();
+    assert!(confirmed.is_some());
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn manual_reconnect_waits_until_registration_to_send_deferred_protection() {
+    let w = World::new().await;
+    w.rt.suspend_periodic_okx_sync_for_test().await.unwrap();
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.okx.state().rest_limit_orders = true;
+    let (status, result) = w
+        .send(
+            "POST",
+            "/api/orders",
+            Some(json!({
+                "accountId": account.id, "clientOrderId": "reconnect-deferred",
+                "symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "price": "74500",
+                "quantity": "0.001", "leverage": 3, "stopLoss": "74000", "takeProfit": "78000",
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(result["order"]["status"], "OPEN");
+    w.okx.state().fill_resting();
+    let old_history = w.okx.hold_next("GET", "/trade/fills");
+    let (old_sync, ()) = tokio::join!(w.rt.sync_exchanges(), async {
+        tokio::time::timeout(Duration::from_secs(2), old_history.reached())
+            .await
+            .unwrap();
+        let reconnected = w.connect("OKX_LIVE").await;
+        assert_eq!(reconnected.id, account.id);
+        assert!(w.okx.state().algo_placed.is_empty());
+        old_history.release();
+    });
+    old_sync.unwrap();
+    assert!(w.okx.state().algo_placed.is_empty());
+    w.rt.sync_exchanges().await.unwrap();
+    assert_eq!(w.okx.state().algo_placed.len(), 1);
+    w.rt.shutdown().await;
+}
+
 /// A sync still out on OKX when the owner connects the account anew must not write what it read
 /// over the new session's rows: here its late answer says the entry is still resting, after the
 /// new session has recorded it filled.
@@ -1985,5 +2395,213 @@ async fn a_sync_of_a_replaced_session_never_writes_over_the_new_sessions_orders(
     assert!(toasts(&mut events)
         .iter()
         .all(|(_, message)| !message.contains("lost sync")));
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn reconnect_keeps_reduce_only_exit_available_when_okx_protection_reads_fail() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    let agent = w.agent_on(&account.id, "SIGNAL").await;
+    let id = agent.clone();
+    w.rt.call(move |r| r.start_agent(&id).unwrap())
+        .await
+        .unwrap();
+    assert!(w.agent(&agent).await.running);
+    {
+        let mut okx = w.okx.state();
+        okx.algo_lookup_down = true;
+        okx.position = Some(
+            json!({
+                "instId": "BTC-USDT-SWAP", "pos": "0.1", "avgPx": "75000", "markPx": "75000",
+                "upl": "0", "lever": "3", "liqPx": "50000", "margin": "10", "mgnMode": "isolated",
+                "posSide": "net", "tradeId": "1",
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        );
+    }
+    let again = w.connect("OKX_LIVE").await;
+    assert_eq!(again.id, account.id);
+    let statuses = w.statuses().await;
+    assert_eq!(statuses[0]["connected"], true);
+    assert_eq!(statuses[0]["healthy"], false);
+    assert_eq!(statuses[0]["armed"], false);
+    assert!(!w.agent(&agent).await.running);
+    for action in ["start", "resume"] {
+        let (status, result) = w
+            .send("POST", &format!("/api/agents/{agent}/{action}"), None)
+            .await;
+        assert_eq!(status, 400, "{result}");
+        assert!(!w.agent(&agent).await.running);
+    }
+    w.rt.sync_exchanges().await.unwrap();
+    assert!(!w.agent(&agent).await.running);
+    let (_, positions) = w
+        .send(
+            "GET",
+            &format!("/api/accounts/{}/positions", account.id),
+            None,
+        )
+        .await;
+    assert_eq!(positions[0]["symbol"], "BTCUSDT");
+    assert_eq!(positions[0]["side"], "LONG");
+    assert!(positions[0]["id"].as_str().is_some_and(|id| !id.is_empty()));
+    let placed = w.placed();
+    let (status, result) = w
+        .send(
+            "POST",
+            &format!("/api/positions/{}/BTCUSDT/close", account.id),
+            Some(json!({ "fraction": 1, "clientOrderId": "degraded-close", "positionId": positions[0]["id"] })),
+        )
+        .await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(result["order"]["status"], "FILLED");
+    assert_eq!(result["order"]["reduceOnly"], true);
+    assert_eq!(w.placed(), placed + 1);
+    assert!(w.okx.state().position.is_none());
+    w.okx.state().algo_lookup_down = false;
+    w.rt.sync_exchanges().await.unwrap();
+    let (status, result) = w
+        .send("POST", &format!("/api/agents/{agent}/resume"), None)
+        .await;
+    assert_eq!(status, 200, "{result}");
+    assert!(w.agent(&agent).await.running);
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn reconnect_keeps_an_unanswered_market_target_and_allows_manual_exit() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    let result = w.place(&account.id).await;
+    let mut target: mochi_domain::Order = serde_json::from_value(result["order"].clone()).unwrap();
+    target.id = format!("{}:deferred:tp", target.id);
+    target.client_order_id = target.id.clone();
+    target.side = mochi_domain::OrderSide::Sell;
+    target.reduce_only = true;
+    target.close_position = false;
+    target.order_type = mochi_domain::OrderType::Market;
+    target.trigger_price = Some("78000".into());
+    target.status = mochi_domain::OrderStatus::Open;
+    target.filled_quantity = "0".into();
+    target.avg_fill_price = None;
+    target.exchange_order_id = None;
+    target.reject_reason = Some("Awaiting confirmation: OKX 50004".into());
+    let target_id = target.id.clone();
+    w.rt.call(move |r| r.engine().store().insert_order(&target).unwrap())
+        .await
+        .unwrap();
+    w.okx.state().lookup_error_code = Some("50001".into());
+
+    assert_eq!(w.connect("OKX_LIVE").await.id, account.id);
+    assert_eq!(w.statuses().await[0]["healthy"], false);
+    let (_, positions) = w
+        .send(
+            "GET",
+            &format!("/api/accounts/{}/positions", account.id),
+            None,
+        )
+        .await;
+    assert_eq!(positions[0]["side"], "LONG");
+    let placed = w.placed();
+    let (status, result) = w.send("POST", &format!("/api/positions/{}/BTCUSDT/close", account.id), Some(json!({
+        "fraction": 1, "clientOrderId": "manual-after-unknown-target", "positionId": positions[0]["id"]
+    }))).await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(w.placed(), placed + 1);
+    assert!(w.okx.state().position.is_none());
+    let target =
+        w.rt.call(move |r| r.engine().store().get_order(&target_id).unwrap().unwrap())
+            .await
+            .unwrap();
+    assert_eq!(target.status, mochi_domain::OrderStatus::Open);
+    w.rt.shutdown().await;
+}
+
+/// A reconnect whose new limits cannot be saved changes nothing: the old session stays
+/// connected with its agents and limits, so its positions can still be closed through it.
+#[tokio::test]
+async fn a_reconnect_that_cannot_save_its_limits_keeps_the_current_session() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.place(&account.id).await;
+    let agent = w.agent_on(&account.id, "AUTO").await;
+    let id = agent.clone();
+    w.rt.call(move |r| r.start_agent(&id).unwrap())
+        .await
+        .unwrap();
+    let id = account.id.clone();
+    let limits = move |w: &World| {
+        let id = id.clone();
+        let rt = w.rt.clone();
+        async move {
+            rt.call(move |r| {
+                r.engine()
+                    .store()
+                    .get_account(&id)
+                    .unwrap()
+                    .unwrap()
+                    .live_limits
+                    .unwrap()
+            })
+            .await
+            .unwrap()
+        }
+    };
+    let before = limits(&w).await;
+    let mut input: OkxConnectInput = validate::parse_body(
+        Schema::OkxConnect,
+        &json!({
+            "apiKey": API_KEY, "secretKey": SECRET_KEY, "passphrase": PASSPHRASE,
+            "name": "OKX", "environment": "OKX_LIVE", "remember": false,
+        }),
+    )
+    .unwrap();
+    input.limits.max_quote_age_sec = before.max_quote_age_sec + 1.0;
+    let hold = w.okx.hold_next("GET", "/account/balance");
+    let (again, ()) = tokio::join!(w.rt.connect_okx(input, None), async {
+        tokio::time::timeout(std::time::Duration::from_secs(2), hold.reached())
+            .await
+            .unwrap();
+        w.rt.call(|r| {
+            r.connection()
+                .execute_batch(
+                    "CREATE TRIGGER refuse_profile BEFORE UPDATE OF live_limits ON accounts
+                     BEGIN SELECT RAISE(ABORT, 'profile refused'); END",
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+        hold.release();
+    });
+    assert!(again.is_err());
+    assert_eq!(w.statuses().await[0]["connected"], true);
+    assert_eq!(w.statuses().await[0]["armed"], true);
+    assert_eq!(limits(&w).await, before);
+    assert!(w.agent(&agent).await.running);
+
+    let (_, positions) = w
+        .send(
+            "GET",
+            &format!("/api/accounts/{}/positions", account.id),
+            None,
+        )
+        .await;
+    let placed = w.placed();
+    let (status, result) = w
+        .send(
+            "POST",
+            &format!("/api/positions/{}/BTCUSDT/close", account.id),
+            Some(json!({ "fraction": 1, "clientOrderId": "close-after-failed-reconnect", "positionId": positions[0]["id"] })),
+        )
+        .await;
+    assert_eq!(status, 200, "{result}");
+    assert_eq!(w.placed(), placed + 1);
+    assert!(w.okx.state().position.is_none());
     w.rt.shutdown().await;
 }

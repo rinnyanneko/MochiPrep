@@ -5,7 +5,10 @@
 //! the start of `analyzeAndAct`). On an exchange, cancelling stale entries and the final order
 //! or protection change go out off the actor and come back as completions.
 use super::{
-    agent_execution::{same_protection, settle, settle_acted, target_protection, Acted, Outgoing},
+    agent_execution::{
+        position_binding_field, same_protection, settle, settle_acted, target_protection, Acted,
+        Outgoing, RiskPosition,
+    },
     agents::{CycleReply, CycleTrigger},
     execution::ExecutionTarget,
     Runtime,
@@ -33,6 +36,7 @@ pub(super) struct Cycle {
     generation: u64,
     reply: Option<CycleReply>,
     quote: Option<Quote>,
+    analyzed_position_id: Option<String>,
     stale: bool,
     critical_error: Option<String>,
     secrets: Vec<String>,
@@ -163,6 +167,7 @@ impl Runtime {
             timeframe,
             reply,
             quote: None,
+            analyzed_position_id: None,
             stale: false,
             critical_error: None,
             secrets: self.secrets(),
@@ -413,6 +418,7 @@ impl Runtime {
             .venue_positions(&target, &c.agent.account_id)?
             .into_iter()
             .find(|p| p.position.symbol == c.agent.symbol);
+        c.analyzed_position_id = position.as_ref().map(|p| p.position.id.clone());
         let risk: RiskSettings =
             serde_json::from_str(c.agent.risk.get()).map_err(|e| self.api_error(e))?;
         let quote = c.quote.clone().unwrap();
@@ -485,7 +491,17 @@ impl Runtime {
         } else {
             self.market_quote(c.source, &c.agent.symbol)
         };
-        let risk = self.assess(&c.agent, &a, &d, quote, protection.clone(), &target)?;
+        let (risk, checked) = self.assess(
+            &c.agent,
+            &a,
+            &d,
+            quote,
+            RiskPosition {
+                bound_id: c.analyzed_position_id.as_deref(),
+                protection: protection.as_ref(),
+            },
+            &target,
+        )?;
         c.record["risk"] = json!(risk);
         if c.record["trigger"] == "ANALYZE" {
             settle(
@@ -507,11 +523,32 @@ impl Runtime {
             settle(&mut c.record, "HOLD", None);
             return Ok(None);
         }
+        if let Some(field) = position_binding_field(d.action) {
+            let position_id = c.analyzed_position_id.as_deref();
+            if checked
+                .as_ref()
+                .is_some_and(|checked| Some(checked.position_id.as_str()) != position_id)
+                || self
+                    .position_target(&c.agent, &target, position_id)?
+                    .is_none()
+            {
+                settle(
+                    &mut c.record,
+                    "ORDER_REJECTED",
+                    Some("The position changed since it was analyzed".into()),
+                );
+                return Ok(None);
+            }
+            c.record[field] = json!(position_id);
+        }
         if d.action == AiAction::Protect {
             let p = protection.ok_or_else(|| {
                 ApiError::bad_request("The position changed while it was being checked")
             })?;
-            if same_protection(&target_protection(&d, &p), &p) {
+            // Identical active OKX protection can still hide an unsent leg to remove.
+            if matches!(target, ExecutionTarget::Paper)
+                && same_protection(&target_protection(&d, &p), &p)
+            {
                 settle(
                     &mut c.record,
                     "HOLD",
@@ -552,7 +589,7 @@ impl Runtime {
         let mut a = latest;
         a.status = "EXECUTING".into();
         self.save_agent(&a)?;
-        self.execute_decision(&c.agent, &d, &mut c.record, &target)
+        self.execute_decision(&c.agent, &d, &mut c.record, &target, checked)
     }
     fn cycle_owned(&self, c: &Cycle) -> Result<bool, ApiError> {
         let Some(a) =
@@ -590,6 +627,10 @@ impl Runtime {
                 )?;
             }
             rows::insert_decision(self.connection(), &c.record).map_err(|e| self.api_error(e))?;
+            if let Some(log) = &self.operation_logs {
+                let outcome = c.record["outcome"].as_str().unwrap_or("UNKNOWN");
+                log.record(format_args!("agent cycle -> {outcome}"));
+            }
             // A cycle can finish after a lifecycle action. Keep its decision in History,
             // but leave the newer schedule and failure state alone.
             if self

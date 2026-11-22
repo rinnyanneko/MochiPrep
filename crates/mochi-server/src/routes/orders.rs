@@ -14,26 +14,44 @@
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use axum::routing::{delete, post, put};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use mochi_core::paper::PaperStore;
-use mochi_domain::{OrderRequest, Topic};
+use mochi_domain::Topic;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
 use crate::runtime::ProtectionMeta;
-use crate::validate::{self, ClosePositionInput, ProtectionInput, Schema};
+use crate::validate::{self, ClosePositionInput, PlaceOrderInput, ProtectionInput, Schema};
 use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/orders", post(place))
-        .route("/api/orders/{id}", delete(cancel))
+        .route("/api/orders/{id}", get(read_order).delete(cancel))
         .route("/api/positions/{account_id}/{symbol}/close", post(close))
         .route(
             "/api/positions/{account_id}/{symbol}/protection",
             put(protection),
         )
+}
+
+async fn read_order(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<mochi_domain::Order>, ApiError> {
+    let order = state
+        .runtime
+        .call(move |runtime| {
+            runtime
+                .engine()
+                .store()
+                .get_order(&id)
+                .map_err(|error| runtime.api_error(error))?
+                .ok_or_else(|| ApiError::not_found("Unknown order"))
+        })
+        .await??;
+    Ok(Json(order))
 }
 
 async fn place(
@@ -42,8 +60,8 @@ async fn place(
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
     let body = validate::read_body(&headers, &body)?;
-    let input: OrderRequest = validate::parse_input(Schema::PlaceOrder, body.as_ref())?;
-    let (account_id, symbol) = (input.account_id.clone(), input.symbol.clone());
+    let input: PlaceOrderInput = validate::parse_input(Schema::PlaceOrder, body.as_ref())?;
+    let (account_id, symbol) = (input.order.account_id.clone(), input.order.symbol.clone());
     let target = state
         .runtime
         .call(move |runtime| {
@@ -52,7 +70,11 @@ async fn place(
             runtime.execution(&account)
         })
         .await??;
-    let result = state.runtime.engine_for(target).place_order(input).await?;
+    let engine = state.runtime.engine_for(target);
+    let result = match input.position_id {
+        Some(position_id) => engine.reduce_position(input.order, position_id).await?,
+        None => engine.place_order(input.order).await?,
+    };
     state.runtime.invalidate(TRADED).await?;
     Ok(Json(to_json(result)?))
 }
@@ -112,7 +134,13 @@ async fn close(
     let symbol = validate::parse_symbol(&symbol)?;
     let engine = state.runtime.execution(&account_id).await?;
     let result = engine
-        .close_position(account_id, symbol, input.fraction, input.client_order_id)
+        .close_position(
+            account_id,
+            symbol,
+            input.fraction,
+            input.client_order_id,
+            input.position_id,
+        )
         .await?;
     state.runtime.invalidate(TRADED).await?;
     Ok(Json(to_json(result)?))
@@ -142,6 +170,8 @@ async fn protection(
         agent_id: None,
         decision_id: None,
         keep_trailing,
+        keep_take_profit: input.keep_take_profit,
+        checked: None,
     };
     // A refusal reaches the client as a 400 with its reason.
     let result = match engine

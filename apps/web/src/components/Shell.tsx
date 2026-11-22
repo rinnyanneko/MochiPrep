@@ -22,9 +22,10 @@ import { api } from '@/lib/api';
 
 import { DYOR_NOTICE } from '@/lib/notices';
 import { cn } from '@/lib/utils';
-import { attempt, useApp, useDateTime, useSourceSignals, type Page } from '@/store';
+import { attempt, disconnectBackend, useApp, useDateTime, useSourceSignals, type Page } from '@/store';
 import { Mochi, MOOD_LABEL, type MochiMood } from './Mochi';
 import { Badge, Button, Dialog, Segmented, Select, type Tone } from './ui';
+import { ShutdownButton, UpdateBanner } from './LauncherControls';
 import { UnlockBanner } from './VaultCard';
 
 const NAV: { id: Page; label: string; icon: typeof Bot }[] = [
@@ -180,7 +181,7 @@ function ReplayControls() {
   );
 }
 
-function TopBar() {
+function TopBar({ onStopped }: Readonly<{ onStopped: () => void }>) {
   const source = useApp((s) => s.source);
   const setSource = useApp((s) => s.setSource);
   const theme = useApp((s) => s.theme);
@@ -209,6 +210,7 @@ function TopBar() {
           <Badge tone="accent">{anyExchange ? 'Real orders off' : 'Paper only'}</Badge>
         )}
         {!connected && <Badge tone="down">Backend offline</Badge>}
+        <ShutdownButton onStopped={onStopped} />
         <Button size="icon" variant="ghost" aria-label="Toggle theme" onClick={toggleTheme}>
           {theme === 'dark' ? <Sun /> : <Moon />}
         </Button>
@@ -253,11 +255,19 @@ function Toasts() {
 }
 
 export function Shell({ children }: { children: ReactNode }) {
+  const [closed, setClosed] = useState(false);
+  if (closed) return (
+    <main className="grid h-full place-content-center gap-2 px-5 text-center" role="status">
+      <h1 className="font-display text-2xl font-black">MochiPrep is closed</h1>
+      <p className="text-sm text-ink-2">Start the backend again, then reload this page to reconnect.</p>
+    </main>
+  );
   return (
     <div className="flex h-full max-lg:flex-col">
       <Sidebar />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <TopBar />
+        <UpdateBanner />
+        <TopBar onStopped={() => { disconnectBackend(); setClosed(true); }} />
         <UnlockBanner />
         <DemoBanner />
         <main className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-5">

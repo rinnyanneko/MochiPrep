@@ -8,16 +8,18 @@ pub mod instruments;
 pub mod later;
 pub mod market;
 pub mod news;
+mod operation_logs;
 pub mod orders;
 pub mod providers;
 pub mod replay;
 pub mod state;
 pub mod static_files;
+pub mod templates;
 pub mod vault;
 
 use axum::extract::State;
-use axum::http::HeaderMap;
-use axum::routing::get;
+use axum::http::{HeaderMap, StatusCode};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
@@ -30,13 +32,16 @@ pub fn router() -> Router<AppState> {
         .route("/api/session", get(session))
         .route("/api/health", get(health))
         .route("/api/events", get(events::events))
+        .route("/api/shutdown", post(shutdown))
         .merge(state::router())
         .merge(market::router())
         .merge(news::router())
+        .merge(operation_logs::router())
         .merge(instruments::router())
         .merge(accounts::router())
         .merge(orders::router())
         .merge(agents::router())
+        .merge(templates::router())
         .merge(providers::router())
         .merge(replay::router())
         .merge(vault::router())
@@ -71,4 +76,9 @@ async fn session(
 
 async fn health() -> Json<Value> {
     Json(json!({ "ok": true }))
+}
+
+async fn shutdown(State(state): State<AppState>) -> StatusCode {
+    state.shutdown.notify_one();
+    StatusCode::ACCEPTED
 }

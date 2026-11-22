@@ -16,7 +16,7 @@ fn free_port() -> u16 {
         .port()
 }
 
-fn spawn(port: u16, data: &std::path::Path, parent_mode: bool) -> Child {
+fn backend_command(port: u16, data: &std::path::Path, parent_mode: bool) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_mochi-server"));
     command
         .env("MOCHIPREP_OFFLINE", "1")
@@ -29,16 +29,34 @@ fn spawn(port: u16, data: &std::path::Path, parent_mode: bool) -> Child {
     if parent_mode {
         command.env("MOCHIPREP_PARENT_STDIN", "1");
     }
-    command.spawn().unwrap()
+    command
 }
 
+fn spawn(port: u16, data: &std::path::Path, parent_mode: bool) -> Child {
+    backend_command(port, data, parent_mode).spawn().unwrap()
+}
+
+/// How long a backend gets to print its first line before the test fails instead of hanging.
+const FIRST_LINE_WITHIN: Duration = Duration::from_secs(30);
+
 /// Returns the reader too: dropping it would close the pipe, and the server's next println
-/// (the offline notice) would then panic.
-fn first_line(stdout: ChildStdout) -> (String, BufReader<ChildStdout>) {
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    reader.read_line(&mut line).unwrap();
-    (line, reader)
+/// (the offline notice) would then panic. A backend that prints nothing in time is killed.
+fn first_line(child: &mut Child) -> (String, BufReader<ChildStdout>) {
+    let stdout = child.stdout.take().unwrap();
+    let (sent, received) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        let read = reader.read_line(&mut line).map(|_| (line, reader));
+        let _ = sent.send(read);
+    });
+    match received.recv_timeout(FIRST_LINE_WITHIN) {
+        Ok(read) => read.unwrap(),
+        Err(_) => {
+            let _ = child.kill();
+            panic!("the backend printed nothing within {FIRST_LINE_WITHIN:?}");
+        }
+    }
 }
 
 fn wait_for_exit(child: &mut Child, within: Duration) -> Option<std::process::ExitStatus> {
@@ -53,11 +71,91 @@ fn wait_for_exit(child: &mut Child, within: Duration) -> Option<std::process::Ex
 }
 
 #[test]
+fn failed_runtime_start_leaves_previous_logs_and_archive_slots_intact() {
+    for retention in [0, 2] {
+        assert_logs_survive_failed_start(retention);
+    }
+}
+
+fn assert_logs_survive_failed_start(retention: i32) {
+    let data = tempfile::tempdir().unwrap();
+    let logs = data.path().join("logs");
+    std::fs::create_dir(&logs).unwrap();
+    let prior = logs.join("session-2026-01-01T00-00-00.000Z-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.log");
+    let latest = logs.join("latest.log");
+    std::fs::write(&latest, "previous session\n").unwrap();
+    if retention != 0 {
+        std::fs::copy(&latest, &prior).unwrap();
+    }
+    let db_path = data.path().join("mochiprep.db");
+    let db = mochi_store::open_database(&db_path).unwrap();
+    mochi_store::set_setting(&db, mochi_server::operation_log::SETTING, &retention).unwrap();
+    mochi_store::set_setting(&db, "replay.cursor", &"bad cursor").unwrap();
+    drop(db);
+
+    let mut child = backend_command(free_port(), data.path(), false)
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let status = wait_for_exit(&mut child, Duration::from_secs(10));
+    if status.is_none() {
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+    assert!(!status
+        .expect("invalid replay cursor prevents startup")
+        .success());
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert!(
+        stderr.contains("Cannot start:") && stderr.contains("invalid type: string"),
+        "{stderr}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&latest).unwrap(),
+        "previous session\n"
+    );
+    let archives = || {
+        std::fs::read_dir(&logs)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name.to_string_lossy().starts_with("session-"))
+            .count()
+    };
+    assert_eq!(archives(), usize::from(retention != 0));
+    if retention != 0 {
+        let db = mochi_store::open_database(&db_path).unwrap();
+        mochi_store::set_setting(&db, "replay.cursor", &0_i64).unwrap();
+        drop(db);
+        let mut next = spawn(free_port(), data.path(), true);
+        let (line, _stdout) = first_line(&mut next);
+        drop(next.stdin.take());
+        let status = wait_for_exit(&mut next, Duration::from_secs(10));
+        if status.is_none() {
+            next.kill().unwrap();
+            next.wait().unwrap();
+        }
+        assert!(line.starts_with(READY_PREFIX), "{line}");
+        assert!(status.expect("successful startup shuts down").success());
+        assert_eq!(archives(), 2);
+        assert_eq!(
+            std::fs::read_to_string(prior).unwrap(),
+            "previous session\n"
+        );
+    }
+}
+
+#[test]
 fn prints_the_ready_line_with_the_bound_port() {
     let data = tempfile::tempdir().unwrap();
     let port = free_port();
     let mut child = spawn(port, data.path(), false);
-    let (line, _stdout) = first_line(child.stdout.take().unwrap());
+    let (line, _stdout) = first_line(&mut child);
     child.kill().unwrap();
     child.wait().unwrap();
     let rest = line
@@ -74,7 +172,7 @@ fn exits_cleanly_when_stdin_closes_in_parent_mode() {
     let data = tempfile::tempdir().unwrap();
     let port = free_port();
     let mut child = spawn(port, data.path(), true);
-    let (line, _stdout) = first_line(child.stdout.take().unwrap());
+    let (line, _stdout) = first_line(&mut child);
     assert!(line.starts_with(READY_PREFIX), "line was {line:?}");
     drop(child.stdin.take());
     let status = wait_for_exit(&mut child, Duration::from_secs(10));
@@ -86,11 +184,48 @@ fn exits_cleanly_when_stdin_closes_in_parent_mode() {
 }
 
 #[test]
+fn browser_shutdown_exits_and_finishes_the_operation_log() {
+    let data = tempfile::tempdir().unwrap();
+    let port = free_port();
+    let mut child = spawn(port, data.path(), true);
+    let (line, _stdout) = first_line(&mut child);
+    assert!(line.starts_with(READY_PREFIX), "{line}");
+    let request = |method: &str, path: &str, headers: &str| {
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(stream, "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n{headers}\r\n").unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    };
+    let session = request("GET", "/api/session", "");
+    assert!(session.starts_with("HTTP/1.1 200"), "{session}");
+    let body: serde_json::Value =
+        serde_json::from_str(session.split_once("\r\n\r\n").unwrap().1).unwrap();
+    let token = body["token"].as_str().unwrap();
+    let headers = format!("Authorization: Bearer {token}\r\nContent-Length: 0\r\n");
+    let result = request("POST", "/api/shutdown", &headers);
+    assert!(result.starts_with("HTTP/1.1 202"), "{result}");
+    let status = wait_for_exit(&mut child, Duration::from_secs(10));
+    if status.is_none() {
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+    assert!(status
+        .expect("browser shutdown exits with stdin still open")
+        .success());
+    let log = std::fs::read_to_string(data.path().join("logs/latest.log")).unwrap();
+    assert!(log.contains("backend started") && log.contains("backend stopped"));
+}
+
+#[test]
 fn ignores_stdin_without_parent_mode() {
     let data = tempfile::tempdir().unwrap();
     let port = free_port();
     let mut child = spawn(port, data.path(), false);
-    let (line, _stdout) = first_line(child.stdout.take().unwrap());
+    let (line, _stdout) = first_line(&mut child);
     assert!(line.starts_with(READY_PREFIX), "line was {line:?}");
     drop(child.stdin.take());
     std::thread::sleep(Duration::from_secs(1));

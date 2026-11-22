@@ -12,7 +12,9 @@ use std::borrow::Cow;
 
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, ETAG, IF_NONE_MATCH};
+use axum::http::header::{
+    CACHE_CONTROL, CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE, ETAG, IF_NONE_MATCH,
+};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use rust_embed::{EmbeddedFile, RustEmbed};
@@ -38,6 +40,9 @@ pub fn web_dist(path: &str) -> Option<EmbeddedFile> {
 
 /// `send`'s default: cache, but revalidate on every use.
 const CACHE: &str = "public, max-age=0";
+/// No other page may frame the interface (`frame-ancestors`): a framing page could steer clicks on
+/// its order buttons. The interface itself loads no frames either (`frame-src`).
+const CSP: &str = "frame-ancestors 'none'; frame-src 'none'";
 
 /// Every path no route claims ends here: a file of the build, or the JSON 404.
 pub async fn serve(State(state): State<AppState>, request: Request) -> Response {
@@ -66,7 +71,11 @@ pub async fn serve(State(state): State<AppState>, request: Request) -> Response 
     if revalidated {
         return (
             StatusCode::NOT_MODIFIED,
-            [(ETAG, etag), (CACHE_CONTROL, CACHE.to_string())],
+            [
+                (ETAG, etag),
+                (CACHE_CONTROL, CACHE.to_string()),
+                (CONTENT_SECURITY_POLICY, CSP.into()),
+            ],
         )
             .into_response();
     }
@@ -85,6 +94,7 @@ pub async fn serve(State(state): State<AppState>, request: Request) -> Response 
     (
         [
             (CONTENT_TYPE, content_type),
+            (CONTENT_SECURITY_POLICY, CSP.into()),
             (CACHE_CONTROL, CACHE.to_string()),
             (ETAG, etag),
             (CONTENT_LENGTH, length.to_string()),

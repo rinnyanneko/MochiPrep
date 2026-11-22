@@ -8,12 +8,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
-use mochi_core::paper::{DailyRisk, ProtectionResult};
+use mochi_core::paper::{DailyRisk, PaperStore, ProtectionResult};
 use mochi_domain::{
     AccountBalance, AccountVenue, Order, OrderRequest, OrderResult, PaperAccount, PositionView,
-    Protection,
+    Protection, Topic,
 };
-use mochi_okx::engine::{EngineError, OkxEngine, OkxEngineDeps, Rows, StoreAccess, StoreWork};
+use mochi_okx::engine::{
+    EngineError, OkxEngine, OkxEngineDeps, Rows, StoreAccess, StoreWork, UnsentOrder,
+};
 use mochi_okx::{Clock, Credentials, NetTransport, OkxClient, Transport, Venue};
 use tokio::sync::{broadcast, mpsc};
 use zeroize::Zeroizing;
@@ -30,6 +32,8 @@ pub struct ProtectionMeta {
     /// Keep the trailing stop in force and ignore the one in the change. The engine reads it in
     /// the same serialized step as the change, so a concurrent trailing edit is never undone.
     pub keep_trailing: bool,
+    pub keep_take_profit: bool,
+    pub checked: Option<mochi_okx::engine::CheckedProtection>,
 }
 
 /// A refused protection change. `after` is Node's `ProtectionChangeError.after`: set when the
@@ -50,6 +54,20 @@ impl ProtectionFailure {
 /// refusal is a 400 with its reason, secrets removed.
 pub trait ExecutionEngine: Send + Sync {
     fn place_order(&self, request: OrderRequest) -> BoxFuture<'_, Result<OrderResult, ApiError>>;
+    fn reduce_position(
+        &self,
+        _request: OrderRequest,
+        _position_id: String,
+    ) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
+        Box::pin(async { Err(ApiError::bad_request("An OKX position is required")) })
+    }
+    fn close_agent_position(
+        &self,
+        _request: OrderRequest,
+        _position_id: String,
+    ) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
+        Box::pin(async { Err(ApiError::bad_request("An OKX position is required")) })
+    }
     fn cancel_order(&self, order_id: String) -> BoxFuture<'_, Result<(), ApiError>>;
     /// Closes `fraction` (0 < fraction <= 1) of the position, reduce-only, even when disarmed.
     fn close_position(
@@ -58,6 +76,7 @@ pub trait ExecutionEngine: Send + Sync {
         symbol: String,
         fraction: f64,
         client_order_id: String,
+        position_id: Option<String>,
     ) -> BoxFuture<'_, Result<OrderResult, ApiError>>;
     fn positions(&self, account_id: String) -> BoxFuture<'_, Result<Vec<PositionView>, ApiError>>;
     fn open_orders(&self, account_id: String) -> BoxFuture<'_, Result<Vec<Order>, ApiError>>;
@@ -164,11 +183,10 @@ impl SessionLink {
 }
 
 impl ExchangeSession {
-    /// The engine reads arming through this flag. Node's engine reads the account's current
-    /// session, so an engine whose session was replaced or removed is never armed; clearing the
-    /// flag keeps that for anything still holding the old engine.
-    pub(super) fn retire(&self) {
+    fn retire(self) -> Vec<UnsentOrder> {
+        let unsent = self.engine.retire();
         self.armed.store(false, Ordering::SeqCst);
+        unsent
     }
 }
 
@@ -228,6 +246,73 @@ impl Runtime {
 
     pub(super) fn exchange_session(&self, account_id: &str) -> Option<&ExchangeSession> {
         self.exchanges.get(account_id)
+    }
+
+    /// Keep the unsent orders until finalization succeeds, without keeping the old session alive.
+    pub(super) fn retire_exchange_session(&mut self, account_id: &str) -> Result<(), EngineError> {
+        if let Some(session) = self.exchanges.remove(account_id) {
+            let unsent = session.retire();
+            if !unsent.is_empty() {
+                self.retired_unsent_orders
+                    .entry(account_id.to_owned())
+                    .or_default()
+                    .extend(unsent);
+            }
+        }
+        self.restore_retired_order(account_id)
+    }
+
+    /// An orderly shutdown loses every in-memory proof of non-dispatch, so the sessions
+    /// are retired and those proofs written one last time. A proof that still cannot be
+    /// saved is reported; its order stays lookup-only after the restart.
+    pub(super) fn drain_unsent_orders_for_shutdown(&mut self) {
+        let accounts: Vec<String> = self
+            .exchanges
+            .keys()
+            .chain(self.retired_unsent_orders.keys())
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        for account_id in accounts {
+            if let Err(error) = self.retire_exchange_session(&account_id) {
+                tracing::warn!(
+                    account = %account_id,
+                    error = %self.redact(&error.to_string()),
+                    "could not record unsent OKX orders before shutdown"
+                );
+            }
+        }
+    }
+
+    pub(super) fn restore_retired_order(&mut self, account_id: &str) -> Result<(), EngineError> {
+        let Some(mut orders) = self.retired_unsent_orders.remove(account_id) else {
+            return Ok(());
+        };
+        let count = orders.len();
+        let mut failure = None;
+        {
+            let rows = Rows {
+                store: self.engine().store(),
+                instruments: self.instruments(),
+            };
+            let now = (self.okx.now)();
+            orders.retain(|order| match order.finalize(&rows, account_id, now) {
+                Ok(_) => false,
+                Err(error) => {
+                    failure.get_or_insert(error);
+                    true
+                }
+            });
+        }
+        if orders.len() < count {
+            self.invalidate(&[Topic::Orders]);
+        }
+        if !orders.is_empty() {
+            self.retired_unsent_orders
+                .insert(account_id.to_owned(), orders);
+        }
+        failure.map_or(Ok(()), Err)
     }
 
     /// Whether the session `link` belongs to may still write to the store (see [`SessionLink`]).
@@ -389,10 +474,39 @@ impl ExecutionEngine for PaperExecution {
         symbol: String,
         fraction: f64,
         client_order_id: String,
+        position_id: Option<String>,
     ) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
         Box::pin(async move {
             self.runtime
                 .call(move |r| {
+                    if let Some(id) = position_id {
+                        let store = r.engine().store();
+                        if let Some(order) = store
+                            .get_order_by_client_id(&account_id, &client_order_id)
+                            .map_err(|e| r.api_error(e))?
+                        {
+                            let fills = store
+                                .list_fills_by_order(&order.id)
+                                .map_err(|e| r.api_error(e))?;
+                            return Ok(OrderResult {
+                                order,
+                                fills,
+                                duplicate: true,
+                            });
+                        }
+                        let positions = r
+                            .engine()
+                            .position_views(&account_id)
+                            .map_err(|e| r.api_error(e))?;
+                        if !positions
+                            .iter()
+                            .any(|p| p.position.id == id && p.position.symbol == symbol)
+                        {
+                            return Err(ApiError::conflict(
+                                "The selected position has changed. Refresh and try again.",
+                            ));
+                        }
+                    }
                     r.engine_mut()
                         .close_position(&account_id, &symbol, fraction, &client_order_id)
                         .map_err(|e| r.api_error(e))
@@ -462,12 +576,17 @@ impl ExecutionEngine for PaperExecution {
             let result = self
                 .runtime
                 .call(move |r| {
-                    if meta.keep_trailing {
-                        protection.trailing_stop = r
+                    if meta.keep_trailing || meta.keep_take_profit {
+                        let current = r
                             .engine()
                             .protection_of(&account_id, &symbol)
-                            .map_err(|e| r.api_error(e))?
-                            .trailing_stop;
+                            .map_err(|e| r.api_error(e))?;
+                        if meta.keep_trailing {
+                            protection.trailing_stop = current.trailing_stop;
+                        }
+                        if meta.keep_take_profit {
+                            protection.take_profit = current.take_profit;
+                        }
                     }
                     r.engine_mut()
                         .set_protection(&account_id, &symbol, &protection)
@@ -505,8 +624,10 @@ impl OkxExecution {
     /// A thrown engine error, as Node's handler answers it: 400, secrets removed on the task,
     /// the exchange keys included.
     async fn refused(&self, error: EngineError) -> ApiError {
+        let not_dispatched = matches!(error, EngineError::RefusedBeforeDispatch(_));
         let text = error.to_string();
         match self.runtime.call(move |r| r.api_error(text)).await {
+            Ok(error) if not_dispatched => ApiError::not_dispatched(error.message()),
             Ok(error) | Err(error) => error,
         }
     }
@@ -524,6 +645,28 @@ impl ExecutionEngine for OkxExecution {
         Box::pin(async move { self.answer(self.engine.place_order(request).await).await })
     }
 
+    fn reduce_position(
+        &self,
+        request: OrderRequest,
+        position_id: String,
+    ) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
+        Box::pin(async move {
+            self.answer(self.engine.reduce_position(request, position_id).await)
+                .await
+        })
+    }
+
+    fn close_agent_position(
+        &self,
+        request: OrderRequest,
+        position_id: String,
+    ) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
+        Box::pin(async move {
+            self.answer(self.engine.close_agent_position(request, position_id).await)
+                .await
+        })
+    }
+
     fn cancel_order(&self, order_id: String) -> BoxFuture<'_, Result<(), ApiError>> {
         Box::pin(async move { self.answer(self.engine.cancel_order(&order_id).await).await })
     }
@@ -534,11 +677,20 @@ impl ExecutionEngine for OkxExecution {
         symbol: String,
         fraction: f64,
         client_order_id: String,
+        position_id: Option<String>,
     ) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
         Box::pin(async move {
+            let position_id = position_id
+                .ok_or_else(|| ApiError::bad_request("Select an OKX position to close."))?;
             let result = self
                 .engine
-                .close_position(&account_id, &symbol, fraction, &client_order_id)
+                .close_selected_position(
+                    &account_id,
+                    &symbol,
+                    fraction,
+                    &client_order_id,
+                    Some(&position_id),
+                )
                 .await;
             self.answer(result).await
         })
@@ -573,20 +725,26 @@ impl ExecutionEngine for OkxExecution {
         Box::pin(async move {
             let result = self
                 .engine
-                .set_protection_with(
+                .set_protection_order(
                     &account_id,
                     &symbol,
                     protection,
-                    meta.keep_trailing,
-                    meta.agent_id,
-                    meta.decision_id,
+                    mochi_okx::engine::ProtectionOrderOptions {
+                        retain: mochi_okx::engine::ProtectionRetention {
+                            trailing_stop: meta.keep_trailing,
+                            take_profit: meta.keep_take_profit,
+                        },
+                        agent_id: meta.agent_id,
+                        decision_id: meta.decision_id,
+                        checked: meta.checked,
+                    },
                 )
                 .await;
             match result {
                 Ok(result) => Ok(result),
                 Err(error) => {
                     let after = match &error {
-                        EngineError::ProtectionChange { after, .. } => Some((**after).clone()),
+                        EngineError::ProtectionChange { after, .. } => after.as_deref().cloned(),
                         _ => None,
                     };
                     Err(ProtectionFailure {
@@ -611,6 +769,16 @@ impl ExecutionEngine for OkxExecution {
 /// no way to a session that skipped the connect checks.
 #[cfg(feature = "test-seams")]
 impl RuntimeHandle {
+    /// Keeps automatic exchange syncs from consuming the reads a test has staged.
+    #[doc(hidden)]
+    pub async fn suspend_periodic_okx_sync_for_test(&self) -> Result<(), ApiError> {
+        self.call(|r| {
+            r.last_exchange_sync_at =
+                Some(tokio::time::Instant::now() + std::time::Duration::from_secs(3600));
+        })
+        .await
+    }
+
     /// Builds an OKX session for an existing exchange account and runs its first full sync, with
     /// none of the connect checks.
     #[doc(hidden)]
@@ -626,6 +794,8 @@ impl RuntimeHandle {
                 let account = r.require_account(&id)?;
                 let venue = okx_venue(account.venue)
                     .ok_or_else(|| ApiError::bad_request("Not an exchange account"))?;
+                r.restore_retired_order(&id)
+                    .map_err(|error| r.api_error(error))?;
                 Ok((venue, r.okx.clone(), r.live(), r.session_seq))
             })
             .await??;
@@ -646,7 +816,7 @@ impl RuntimeHandle {
             flag.clone(),
             link.clone(),
         );
-        if let Err(error) = engine.sync().await {
+        if let Err(error) = engine.sync_before_registration().await {
             let text = error.to_string();
             return Err(self.call(move |r| r.api_error(text)).await?);
         }
@@ -660,12 +830,13 @@ impl RuntimeHandle {
                 link: link.clone(),
             };
             r.bump_session(&id);
+            r.retire_exchange_session(&id)
+                .map_err(|error| r.api_error(error))?;
             link.registered.store(true, Ordering::SeqCst);
-            if let Some(old) = r.exchanges.insert(id, session) {
-                old.retire();
-            }
+            r.exchanges.insert(id, session);
+            Ok(())
         })
-        .await
+        .await?
     }
 
     /// Arms or disarms a session without the phrase.
@@ -688,8 +859,12 @@ impl RuntimeHandle {
             .call(move |r| r.exchange_session(&id).map(|s| s.engine.clone()))
             .await?
             .ok_or_else(|| ApiError::bad_request("Connect this account first"))?;
+        // The history pass too, awaited here so a test sees what it read.
         match engine.sync().await {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                let _ = engine.sync_position_history().await;
+                Ok(())
+            }
             Err(error) => {
                 let text = error.to_string();
                 Err(self.call(move |r| r.api_error(text)).await?)

@@ -1,3 +1,15 @@
+/** A failed API answer. `code` is set only for failures the UI must tell apart. */
+export class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+    this.name = 'ApiRequestError';
+  }
+}
+
+/** The server refused an order before anything reached OKX. */
+export const isNotDispatched = (error: unknown): boolean =>
+  error instanceof ApiRequestError && error.status === 409 && error.code === 'NOT_DISPATCHED';
+
 let token: string | null = null;
 
 async function session(): Promise<string> {
@@ -30,8 +42,10 @@ async function request<T>(method: string, path: string, body?: unknown, retried 
     token = null;
     return request(method, path, body, true);
   }
-  const json = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(json.error ?? `Request failed (${response.status})`);
+  const json = (await response.json().catch(() => ({}))) as T & { error?: string; code?: unknown };
+  if (!response.ok) {
+    throw new ApiRequestError(json.error ?? `Request failed (${response.status})`, response.status, typeof json.code === 'string' ? json.code : undefined);
+  }
   return json;
 }
 

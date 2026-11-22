@@ -1,4 +1,5 @@
 //! The `{ "error": string }` body every failure carries, as Node's `setErrorHandler` sends it.
+//! A failure the web UI must tell apart also carries a machine-readable `code`.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -8,6 +9,7 @@ use axum::Json;
 pub struct ApiError {
     status: StatusCode,
     message: String,
+    code: Option<&'static str>,
 }
 
 impl ApiError {
@@ -15,7 +17,23 @@ impl ApiError {
         Self {
             status,
             message: message.into(),
+            code: None,
         }
+    }
+
+    /// An order that never reached OKX, so the client may correct and resubmit it
+    /// under a new key instead of resolving the old one by lookup.
+    pub const NOT_DISPATCHED: &str = "NOT_DISPATCHED";
+
+    pub fn not_dispatched(message: impl Into<String>) -> Self {
+        Self {
+            code: Some(Self::NOT_DISPATCHED),
+            ..Self::conflict(message)
+        }
+    }
+
+    pub fn code(&self) -> Option<&'static str> {
+        self.code
     }
 
     /// Node's default: any plain `throw new Error(..)` is a 400.
@@ -61,10 +79,10 @@ impl IntoResponse for ApiError {
         if self.status.is_server_error() {
             tracing::error!(status = self.status.as_u16(), message = %self.message);
         }
-        (
-            self.status,
-            Json(serde_json::json!({ "error": self.message })),
-        )
-            .into_response()
+        let body = match self.code {
+            Some(code) => serde_json::json!({ "error": self.message, "code": code }),
+            None => serde_json::json!({ "error": self.message }),
+        };
+        (self.status, Json(body)).into_response()
     }
 }

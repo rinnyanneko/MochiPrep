@@ -3,7 +3,10 @@
 //! wraps even its single-row writes in one, so a store can rely on every write being in a
 //! transaction. The methods mirror `packages/core/src/paper/store.ts` one for one.
 
-use mochi_domain::{DataSource, EquityPoint, Fill, LedgerEvent, Order, PaperAccount, Position};
+use mochi_domain::{
+    DataSource, EquityPoint, ExchangeExecutionCursor, ExchangePositionRecord, Fill, LedgerEvent,
+    Order, OrderSide, PaperAccount, Position,
+};
 
 /// A storage error. The engine's reaction is the same whatever the cause (roll back and report),
 /// but its owner may retry when another connection held the database, so that kind is kept.
@@ -38,6 +41,22 @@ impl StoreFailure {
     }
 }
 
+/// The caller's selection for an OKX close, before exchange lot-size rounding.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CloseSelection {
+    pub position_id: Option<String>,
+    pub amount: CloseAmount,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum CloseAmount {
+    Fraction(f64),
+    Quantity {
+        quantity: String,
+        limit_price: Option<String>,
+    },
+}
+
 pub trait PaperStore {
     /// Runs `f` atomically; an `Err` rolls back everything `f` wrote. Nested calls use a
     /// savepoint, so only the inner work is undone when the inner call fails.
@@ -57,6 +76,18 @@ pub trait PaperStore {
     fn insert_order(&self, order: &Order) -> Result<(), StoreFailure>;
     fn save_order(&self, order: &Order) -> Result<(), StoreFailure>;
     fn get_order(&self, id: &str) -> Result<Option<Order>, StoreFailure>;
+    fn record_close_selection(
+        &self,
+        order_id: &str,
+        selection: &CloseSelection,
+    ) -> Result<(), StoreFailure>;
+    fn close_selection(&self, order_id: &str) -> Result<Option<CloseSelection>, StoreFailure>;
+    fn link_target_replacement(
+        &self,
+        deferred_order_id: &str,
+        replacement_order_id: &str,
+    ) -> Result<(), StoreFailure>;
+    fn target_replacements(&self, deferred_order_id: &str) -> Result<Vec<Order>, StoreFailure>;
     fn get_order_by_client_id(
         &self,
         account_id: &str,
@@ -69,6 +100,28 @@ pub trait PaperStore {
         symbol: &str,
     ) -> Result<Vec<Order>, StoreFailure>;
     fn list_orders(&self, account_id: &str, limit: usize) -> Result<Vec<Order>, StoreFailure>;
+    /// Canceled orders still eligible for exchange lookup, least recently checked first.
+    fn list_canceled_orders_for_recovery(
+        &self,
+        account_id: &str,
+        reason: &str,
+        limit: usize,
+    ) -> Result<Vec<Order>, StoreFailure>;
+    /// Tests unresolved recovery candidates for exact account, symbol and side.
+    fn any_canceled_order_for_recovery(
+        &self,
+        account_id: &str,
+        symbol: &str,
+        side: OrderSide,
+        reason: &str,
+        matches: &dyn Fn(&Order) -> bool,
+    ) -> Result<bool, StoreFailure>;
+    fn mark_order_recovery_checked(
+        &self,
+        order_id: &str,
+        reason: &str,
+        checked_at: i64,
+    ) -> Result<(), StoreFailure>;
     /// The account's orders carrying any of these exchange order ids, however old.
     fn find_orders_by_exchange_ids(
         &self,
@@ -112,4 +165,35 @@ pub trait PaperStore {
     /// The latest `limit` points, oldest first.
     fn list_equity(&self, account_id: &str, limit: usize)
         -> Result<Vec<EquityPoint>, StoreFailure>;
+
+    /// Inserts the record, or replaces the one with its account, posId and open time.
+    fn execution_cursor(&self, account_id: &str) -> Result<ExchangeExecutionCursor, StoreFailure>;
+    fn save_execution_cursor(
+        &self,
+        account_id: &str,
+        cursor: &ExchangeExecutionCursor,
+    ) -> Result<(), StoreFailure>;
+    fn record_exchange_execution(
+        &self,
+        order_id: &str,
+        trade_id: &str,
+        executed_at: i64,
+    ) -> Result<(), StoreFailure>;
+    fn upsert_position_record(&self, record: &ExchangePositionRecord) -> Result<(), StoreFailure>;
+    /// Every record on `inst_id` opened at or after `since`, oldest first.
+    fn list_position_records(
+        &self,
+        account_id: &str,
+        inst_id: &str,
+        since: i64,
+    ) -> Result<Vec<ExchangePositionRecord>, StoreFailure>;
+    /// The newest close time recorded for the account.
+    fn latest_position_record_at(&self, account_id: &str) -> Result<Option<i64>, StoreFailure>;
+    /// The uTime older history is still to be read before, `None` when nothing is left.
+    fn position_history_backfill(&self, account_id: &str) -> Result<Option<i64>, StoreFailure>;
+    fn set_position_history_backfill(
+        &self,
+        account_id: &str,
+        before: Option<i64>,
+    ) -> Result<(), StoreFailure>;
 }

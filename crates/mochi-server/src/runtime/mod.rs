@@ -99,6 +99,7 @@ pub struct RuntimeOptions {
     pub kdf: KdfParams,
     /// How OKX private trading is reached.
     pub okx: OkxOptions,
+    pub operation_logs: Option<Arc<crate::operation_log::OperationLog>>,
 }
 
 impl RuntimeOptions {
@@ -115,6 +116,7 @@ impl RuntimeOptions {
             provider_factory: None,
             kdf: DEFAULT_KDF,
             okx: OkxOptions::default(),
+            operation_logs: None,
         }
     }
 
@@ -133,6 +135,7 @@ impl RuntimeOptions {
             provider_factory: None,
             kdf: DEFAULT_KDF,
             okx: OkxOptions::default(),
+            operation_logs: None,
         }
     }
 }
@@ -176,6 +179,14 @@ pub struct RuntimeHandle {
 impl RuntimeHandle {
     /// Builds the runtime and spawns its task. Must be called inside a tokio runtime.
     pub fn start(options: RuntimeOptions) -> Result<Self, StartError> {
+        Self::start_with_operation_log(options, || None)
+    }
+
+    /// Publishes the log files after fallible runtime initialization and before processing events.
+    pub fn start_with_operation_log(
+        options: RuntimeOptions,
+        open_log: impl FnOnce() -> Option<Arc<crate::operation_log::OperationLog>>,
+    ) -> Result<Self, StartError> {
         let live = LiveChannels {
             quotes: options.live_quotes,
             statuses: options.live_statuses,
@@ -189,6 +200,7 @@ impl RuntimeHandle {
             options.kdf,
             options.okx,
         )?;
+        runtime.operation_logs = options.operation_logs.or_else(open_log);
         let events = runtime.events.sender();
         let (commands, inbox) = mpsc::channel(COMMAND_QUEUE);
         let handle = RuntimeHandle { commands, events };
@@ -291,6 +303,7 @@ fn stopped() -> ApiError {
 /// Everything the runtime task owns. Only reachable through [`RuntimeHandle::call`].
 pub struct Runtime {
     engine: Engine,
+    operation_logs: Option<Arc<crate::operation_log::OperationLog>>,
     agents: agents::Agents,
     replay_batch: Option<scheduling::ReplayBatch>,
     replay_queue: std::collections::VecDeque<scheduling::ReplayRequest>,
@@ -317,6 +330,8 @@ pub struct Runtime {
     vault: vault::VaultState,
     /// Connected exchange accounts by account id. Memory only: a restart forgets them.
     exchanges: std::collections::HashMap<String, execution::ExchangeSession>,
+    /// Proof of non-dispatch from retired sessions whose finalization has yet to commit.
+    retired_unsent_orders: std::collections::HashMap<String, Vec<mochi_okx::engine::UnsentOrder>>,
     /// Counts changes to exchange sessions and saved keys: every registered session, disconnect
     /// and forgotten key. A connect notes it when it starts and is refused if its account changed
     /// after that, so a connect or unlock reconnect still out on OKX never undoes a disconnect,
@@ -396,6 +411,7 @@ impl Runtime {
 
         let mut runtime = Runtime {
             engine,
+            operation_logs: None,
             agents: agents::Agents {
                 factory: provider_factory,
                 ..Default::default()
@@ -417,6 +433,7 @@ impl Runtime {
             stopping: None,
             vault: vault::VaultState::new(kdf),
             exchanges: Default::default(),
+            retired_unsent_orders: Default::default(),
             session_seq: 0,
             session_changed_at: Default::default(),
             pause_owed: Default::default(),
@@ -665,6 +682,16 @@ impl Runtime {
         })
     }
 
+    /// What each open OKX position has made, as of the last sync, or `None` while the account has
+    /// no session.
+    pub fn exchange_open_results(
+        &self,
+        account_id: &str,
+    ) -> Option<Vec<mochi_okx::engine::OpenPositionResult>> {
+        self.exchange_session(account_id)
+            .map(|session| session.engine.open_results())
+    }
+
     /// `{ ...account, balance }`, in Node's key order.
     pub fn account_view(&self, id: &str) -> Result<serde_json::Value, ApiError> {
         let account = self.require_account(id)?;
@@ -872,6 +899,20 @@ impl Runtime {
     fn handle_engine_events(&mut self) {
         let events = std::mem::take(&mut *lock(&self.engine_events));
         for event in events {
+            if let Some(log) = &self.operation_logs {
+                match &event {
+                    EngineEvent::Fill { .. } => log.record(format_args!("paper fill")),
+                    EngineEvent::Liquidation { .. } => {
+                        log.record(format_args!("paper liquidation"))
+                    }
+                    EngineEvent::Funding { .. } => {
+                        log.record(format_args!("paper funding applied"))
+                    }
+                    EngineEvent::Order { order } => {
+                        log.record(format_args!("paper order -> {:?}", order.status))
+                    }
+                }
+            }
             self.invalidate(&[
                 Topic::Accounts,
                 Topic::Orders,
@@ -996,6 +1037,7 @@ async fn run(mut runtime: Runtime, mut inbox: mpsc::Receiver<Command>, mut live:
             // runtime closes the database before `shutdown` returns.
             runtime.set_playing(false);
             runtime.live.stop();
+            runtime.drain_unsent_orders_for_shutdown();
             // Mark shutdown before dropping pending reply senders.
             inbox.close();
             drop(runtime);

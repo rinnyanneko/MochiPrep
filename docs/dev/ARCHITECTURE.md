@@ -12,7 +12,7 @@ The backend is Rust, in the `crates/` workspace. `mochi-server` is a single bina
 - `mochi-market` exposes the OKX public feed, the deterministic replay tape and feed, and news.
 - `mochi-ai` adapts model APIs, builds prompts and indicators, and redacts secrets.
 - `mochi-okx` holds the signed OKX client and `OkxEngine`, with an in-process fake OKX behind the `fake` feature. See [Trading on OKX](../OKX_TRADING.md).
-- `mochi-store` is SQLite persistence and its migrations (`crates/mochi-store/migrations/`); `mochi-vault` is the master-password crypto.
+- `mochi-store` is SQLite persistence and its migrations (`crates/mochi-store/migrations/`); `mochi-vault` is the master-password crypto. Agent templates (`mochi-store/src/templates.rs`, routes in `mochi-server/src/routes/templates.rs`) keep user templates in `agent_templates`; the built-in presets are defined in code, and deleting one writes its id to `agent_template_hidden`. A template is only data the web app copies into the new-agent form, so it never bypasses `POST /api/agents` validation or the risk engine.
 - `mochi-server` composes them behind axum routes and the `Runtime` actor. Its agent cycle parses model output strictly, evaluates risk, and is the only layer that turns a decision into an order.
 - `mochi-launcher-core` and `mochi-launcher` are the desktop launcher. See [the launcher guide](LAUNCHER.md).
 - `apps/web` is the React client and must not receive API keys.

@@ -13,6 +13,10 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::ids::{iso_string, sign, to_inst_id};
 
+/// The most records one `account/positions-history` page holds (OKX's maximum).
+pub const POSITIONS_HISTORY_PAGE: usize = 100;
+pub(crate) const EXECUTION_HISTORY_PAGE: usize = 100;
+
 pub const OKX_LIVE: &str = "https://www.okx.com";
 pub const OKX_DEMO: &str = "https://openapi.okx.com";
 pub const TIMEOUT_MS: u64 = 8_000;
@@ -137,6 +141,8 @@ pub enum OrdType {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachAlgoOrd {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sz: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attach_algo_cl_ord_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -399,6 +405,8 @@ impl fmt::Debug for OkxClient {
     }
 }
 
+pub(crate) const RECENT_FILLS_LIMIT: usize = 100;
+
 impl OkxClient {
     pub fn new(credentials: Credentials, venue: Venue, transport: Arc<dyn Transport>) -> Self {
         OkxClient {
@@ -511,11 +519,51 @@ impl OkxClient {
         }))
     }
 
+    /// Recent executions on the instrument, including manual trades and liquidation/ADL fills.
+    pub(crate) async fn recent_fills(&self, inst_id: &str) -> Result<Vec<Row>, OkxError> {
+        rows(
+            self.request(
+                "GET",
+                &format!(
+                    "/api/v5/trade/fills?instType=SWAP&instId={inst_id}&limit={RECENT_FILLS_LIMIT}"
+                ),
+                None,
+            )
+            .await?,
+        )
+    }
+
     pub async fn get_positions(&self) -> Result<Vec<Row>, OkxError> {
         let data = self
             .request("GET", "/api/v5/account/positions?instType=SWAP", None)
             .await?;
         rows(data)
+    }
+
+    /// Closed and partly closed SWAP positions, newest update first, a page of
+    /// [`POSITIONS_HISTORY_PAGE`] at most. `after` asks for those last updated before it (ms).
+    pub async fn get_positions_history(&self, after: Option<i64>) -> Result<Vec<Row>, OkxError> {
+        let mut path = format!(
+            "/api/v5/account/positions-history?instType=SWAP&limit={POSITIONS_HISTORY_PAGE}"
+        );
+        if let Some(after) = after {
+            path.push_str(&format!("&after={after}"));
+        }
+        let data = self.request("GET", &path, None).await?;
+        rows(data)
+    }
+
+    /// Individual executions from OKX's three-month SWAP history, paged by bill ID.
+    pub(crate) async fn get_execution_history(
+        &self,
+        after: Option<u64>,
+    ) -> Result<Vec<Row>, OkxError> {
+        let mut path =
+            format!("/api/v5/trade/fills-history?instType=SWAP&limit={EXECUTION_HISTORY_PAGE}");
+        if let Some(after) = after {
+            path.push_str(&format!("&after={after}"));
+        }
+        rows(self.request("GET", &path, None).await?)
     }
 
     pub async fn set_leverage(&self, inst_id: &str, lever: u32) -> Result<(), OkxError> {
@@ -538,10 +586,10 @@ impl OkxClient {
             OkxError::Unknown("OKX acknowledged the order without a result row".into())
         })?;
         if row.get("sCode") != Some(&json!("0")) {
-            return Err(OkxError::Rejection {
-                code: nullish_text(row.get("sCode")).unwrap_or_else(|| "order".into()),
-                message: nullish_text(row.get("sMsg")).unwrap_or_else(|| "Order refused".into()),
-            });
+            return Err(exchange_error(
+                nullish_text(row.get("sCode")).unwrap_or_else(|| "order".into()),
+                nullish_text(row.get("sMsg")).unwrap_or_else(|| "Order refused".into()),
+            ));
         }
         Ok(nullish_text(row.get("ordId")).unwrap_or_default())
     }
@@ -564,11 +612,10 @@ impl OkxClient {
             OkxError::Unknown("OKX acknowledged the algo order without a result row".into())
         })?;
         if row.get("sCode") != Some(&json!("0")) {
-            return Err(OkxError::Rejection {
-                code: nullish_text(row.get("sCode")).unwrap_or_else(|| "algo".into()),
-                message: nullish_text(row.get("sMsg"))
-                    .unwrap_or_else(|| "Algo order refused".into()),
-            });
+            return Err(exchange_error(
+                nullish_text(row.get("sCode")).unwrap_or_else(|| "algo".into()),
+                nullish_text(row.get("sMsg")).unwrap_or_else(|| "Algo order refused".into()),
+            ));
         }
         Ok(nullish_text(row.get("algoId")).unwrap_or_default())
     }
@@ -673,14 +720,27 @@ fn read_answer(reply: HttpReply) -> Result<Vec<Value>, OkxError> {
         .and_then(Value::as_array)
         .and_then(|data| data.first());
     let row_field = |key: &str| row.and_then(|row| truthy_text(row.get(key)));
-    Err(OkxError::Rejection {
-        code: row_field("sCode")
+    let code = if json.get("code") == Some(&json!("50004")) {
+        "50004".into()
+    } else {
+        row_field("sCode")
             .or_else(|| truthy_text(json.get("code")))
-            .unwrap_or_else(|| status.to_string()),
-        message: row_field("sMsg")
+            .unwrap_or_else(|| status.to_string())
+    };
+    Err(exchange_error(
+        code,
+        row_field("sMsg")
             .or_else(|| truthy_text(json.get("msg")))
             .unwrap_or_else(|| "Request refused".into()),
-    })
+    ))
+}
+
+fn exchange_error(code: String, message: String) -> OkxError {
+    if code == "50004" {
+        OkxError::Unknown(format!("OKX {code}: {message}"))
+    } else {
+        OkxError::Rejection { code, message }
+    }
 }
 
 /// A JS value as `String(value)`, when it is one OKX could send as a field.

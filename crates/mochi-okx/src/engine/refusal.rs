@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use mochi_core::paper::validate_trailing;
 use mochi_decimal::Dec;
 use mochi_domain::jsnum::{js_number_string, js_to_fixed};
-use mochi_domain::{Order, OrderSide, OrderStatus, OrderType, PositionSide, PositionView};
+use mochi_domain::{Order, OrderSide, OrderStatus, OrderType, PositionSide};
 
 use super::{day_start_equity, dec, is_leg, side_text, EngineError, OkxEngine, Prepared};
 use crate::ids::to_inst_id;
@@ -15,15 +15,14 @@ impl OkxEngine {
     pub(super) fn pre_trade_refusal(
         &self,
         order: &Order,
-        position: Option<&PositionView>,
+        position: Option<PositionSide>,
         prepared: &Prepared,
     ) -> Result<Option<String>, EngineError> {
         // An exit only needs a position to reduce: no arming, sync, quote or limit checks, so a
         // disarmed or unhealthy account can always get out.
         if order.reduce_only {
-            let same_side = position.is_some_and(|p| {
-                (p.position.side == PositionSide::Long) == (order.side == OrderSide::Buy)
-            });
+            let same_side = position
+                .is_some_and(|side| (side == PositionSide::Long) == (order.side == OrderSide::Buy));
             if position.is_none() || same_side {
                 return Ok(Some("REDUCE_ONLY_NO_POSITION: nothing to reduce".into()));
             }
@@ -31,9 +30,7 @@ impl OkxEngine {
         }
         let limits = &prepared.limits;
         if !(self.deps.is_armed)() {
-            return Ok(Some(
-                "NOT_ARMED: real-money orders are switched off for this account".into(),
-            ));
+            return Ok(Some(EngineError::OpeningDisarmed.to_string()));
         }
         let (healthy, balance, sync_error, held_symbols) = {
             let healthy = self.healthy();
@@ -75,17 +72,16 @@ impl OkxEngine {
         if let Some(position) = position {
             return Ok(Some(format!(
                 "LIMIT_EXISTING_POSITION: already {} {}",
-                side_text(position.position.side),
+                side_text(position),
                 order.symbol
             )));
         }
         // The previous position's algos would otherwise count as the new one's protection, or
         // close it.
         let leftover = self.state().leftovers.contains(&to_inst_id(&order.symbol))
-            || prepared
-                .open_orders
-                .iter()
-                .any(|o| o.symbol == order.symbol && is_leg(o));
+            || prepared.open_orders.iter().any(|o| {
+                o.symbol == order.symbol && is_leg(o) && !super::protection::is_deferred(o)
+            });
         if leftover {
             return Ok(Some(
                 "PROTECTION_PENDING: protection from the previous position is still being cleaned up"
@@ -137,6 +133,23 @@ impl OkxEngine {
             if wrong {
                 return Ok(Some(format!(
                     "LIMIT_STOP_INVALID: stop {stop} is on the wrong side of {}",
+                    reference.to_fixed()
+                )));
+            }
+        }
+        if let Some(target) = order
+            .attached_take_profit
+            .as_deref()
+            .filter(|p| !p.is_empty())
+        {
+            let value = dec(target)?;
+            let wrong = match order.side {
+                OrderSide::Buy => value.lte(&reference),
+                OrderSide::Sell => value.gte(&reference),
+            };
+            if !value.gt(&super::zero()) || wrong {
+                return Ok(Some(format!(
+                    "LIMIT_TARGET_INVALID: take profit {target} is on the wrong side of {}",
                     reference.to_fixed()
                 )));
             }

@@ -46,6 +46,9 @@ struct Saved {
 async fn sync_all(runtime: WeakRuntimeHandle, sessions: Vec<(String, Arc<OkxEngine>)>) {
     for (id, engine) in sessions {
         let result = engine.sync().await.map_err(|error| error.to_string());
+        if result.is_ok() {
+            engine.spawn_position_history();
+        }
         let Some(handle) = runtime.upgrade() else {
             return;
         };
@@ -58,7 +61,7 @@ async fn sync_all(runtime: WeakRuntimeHandle, sessions: Vec<(String, Arc<OkxEngi
 impl RuntimeHandle {
     /// One sync pass now, as the live tick runs it every 5 s.
     pub async fn sync_exchanges(&self) -> Result<(), ApiError> {
-        let sessions = self.call(|r| r.session_engines()).await?;
+        let sessions = self.call(|r| r.prepare_exchange_sync()).await?;
         sync_all(self.downgrade(), sessions).await;
         Ok(())
     }
@@ -228,7 +231,7 @@ impl Runtime {
             .is_none_or(|at| now - at >= EXCHANGE_SYNC);
         if due {
             self.last_exchange_sync_at = Some(now);
-            let sessions = self.session_engines();
+            let sessions = self.prepare_exchange_sync();
             if let (false, Some(runtime)) = (sessions.is_empty(), self.handle.clone()) {
                 self.live_ticking = true;
                 self.tasks.push(Box::pin(async move {

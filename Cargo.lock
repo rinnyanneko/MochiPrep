@@ -2498,7 +2498,7 @@ dependencies = [
 
 [[package]]
 name = "mochi-ai"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "indexmap 2.14.2",
@@ -2513,7 +2513,7 @@ dependencies = [
 
 [[package]]
 name = "mochi-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mochi-decimal",
  "mochi-domain",
@@ -2524,7 +2524,7 @@ dependencies = [
 
 [[package]]
 name = "mochi-decimal"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "num-bigint",
  "num-traits",
@@ -2535,7 +2535,7 @@ dependencies = [
 
 [[package]]
 name = "mochi-domain"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2543,7 +2543,7 @@ dependencies = [
 
 [[package]]
 name = "mochi-launcher"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mochi-launcher-core",
  "serde",
@@ -2562,7 +2562,7 @@ dependencies = [
 
 [[package]]
 name = "mochi-launcher-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -2576,7 +2576,7 @@ dependencies = [
 
 [[package]]
 name = "mochi-market"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "futures-util",
@@ -2598,7 +2598,7 @@ dependencies = [
 
 [[package]]
 name = "mochi-okx"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "hmac",
@@ -2623,7 +2623,7 @@ dependencies = [
 
 [[package]]
 name = "mochi-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "futures-util",
@@ -2660,7 +2660,7 @@ dependencies = [
 
 [[package]]
 name = "mochi-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mochi-ai",
  "mochi-core",
@@ -2675,7 +2675,7 @@ dependencies = [
 
 [[package]]
 name = "mochi-vault"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",

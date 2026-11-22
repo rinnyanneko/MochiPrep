@@ -179,6 +179,8 @@ export interface OrderRequest {
   price?: string | null;
   leverage: number;
   reduceOnly?: boolean;
+  /** Required for a new OKX reduce-only order. Identifies the selected isolated position. */
+  positionId?: string;
   stopLoss?: string | null;
   takeProfit?: string | null;
   trailingStop?: TrailingStopSpec | null;
@@ -200,7 +202,7 @@ export interface Order {
   triggerPrice: string | null;
   leverage: number;
   reduceOnly: boolean;
-  /** SL/TP orders always close whatever is left of the position when they trigger. */
+  /** Marks protection. Paper protection covers the remaining position, while OKX protection has an explicit quantity. */
   closePosition: boolean;
   status: OrderStatus;
   filledQuantity: string;
@@ -271,6 +273,8 @@ export interface Position {
 }
 
 export interface PositionView extends Position {
+  marginMode?: string;
+  closeSupported?: boolean;
   markPrice: string | null;
   unrealizedPnl: string;
   stopLoss: string | null;
@@ -462,6 +466,32 @@ export interface Agent {
   createdAt: number;
 }
 
+/** The agent form settings a template saves. Provider, model, symbol and account belong to the agent. */
+export interface AgentTemplateFields {
+  name: string;
+  description: string;
+  strategy: string;
+  timeframe: Timeframe;
+  intervalSec: number;
+  executionMode: ExecutionMode;
+  risk: RiskSettings;
+  useNews: boolean;
+  allowTrailingStop: boolean;
+}
+
+/**
+ * A saved set of agent form settings. Applying one only pre-fills the new-agent form: the agent
+ * is still validated on creation, and every order still passes the risk engine.
+ * Built-ins are read-only (duplicate to edit); deleting one hides it until restored.
+ */
+export interface AgentTemplate extends AgentTemplateFields {
+  id: string;
+  builtIn: boolean;
+  /** Null for built-ins, which are defined by the app rather than saved. */
+  createdAt: number | null;
+  updatedAt: number | null;
+}
+
 export type ProviderKind = 'MOCK' | 'OPENAI_COMPATIBLE' | 'OPENAI' | 'ANTHROPIC' | 'GEMINI' | 'DEEPSEEK' | 'OPENCODE';
 
 export interface ProviderConfig {
@@ -561,6 +591,13 @@ export interface DecisionRecord {
   isMock: boolean;
 }
 
+/**
+ * Whose result an arena row shows. ACCOUNT: a paper account's whole equity. AGENT: on an exchange
+ * account, positions on the agent's pair that it traded since it was created (OKX history plus the open one). SHARED: another
+ * agent on the same exchange account trades that pair, and one-way mode nets their positions.
+ */
+export type ArenaAttribution = 'ACCOUNT' | 'AGENT' | 'SHARED';
+
 export interface ArenaRow {
   agentId: string;
   agentName: string;
@@ -573,10 +610,15 @@ export interface ArenaRow {
   symbol: SymbolId;
   status: AgentStatus;
   initialBalance: string;
+  /** The account's equity. On an exchange account it includes deposits and other agents' trading. */
   equity: string;
-  returnPct: number;
-  realizedPnl: string;
-  maxDrawdownPct: number;
+  attribution: ArenaAttribution;
+  /** The agent's profit in USDT; null when another agent trades the same pair on its exchange account. */
+  pnl: string | null;
+  /** Null on exchange accounts, whose balance moves with deposits, and for a zero starting balance. */
+  returnPct: number | null;
+  realizedPnl: string | null;
+  maxDrawdownPct: number | null;
   winRatePct: number | null;
   tradeCount: number;
   decisionCount: number;
@@ -634,7 +676,7 @@ export type ServerEvent =
   | { type: 'invalidate'; topics: Topic[] }
   | { type: 'toast'; level: 'info' | 'warn' | 'error'; message: string };
 
-export type Topic = 'accounts' | 'orders' | 'positions' | 'agents' | 'decisions' | 'providers' | 'arena' | 'exchange' | 'instruments' | 'news' | 'vault';
+export type Topic = 'accounts' | 'orders' | 'positions' | 'agents' | 'decisions' | 'providers' | 'arena' | 'exchange' | 'instruments' | 'news' | 'vault' | 'templates';
 
 /** OFF: no master password, AI keys are stored unencrypted. LOCKED: secrets are sealed and not yet loaded. */
 export type VaultStatus = 'OFF' | 'LOCKED' | 'UNLOCKED';

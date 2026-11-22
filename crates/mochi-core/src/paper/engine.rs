@@ -353,6 +353,7 @@ impl<S: PaperStore> PaperExecutionEngine<S> {
             before,
             after,
             pending: false,
+            retired_deferred: false,
         })
     }
 

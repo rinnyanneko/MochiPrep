@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DecisionRecord, Fill, Order, PositionView } from '@mochiprep/shared';
-import { barTimeOf, buildMarkers, buildPriceLines, buildSignalLines, fillsByBar, openPnl, summarize } from '../src/lib/trade-overlay';
+import { barTimeOf, buildMarkers, buildPriceLines, buildSignalLines, fillsByBar, isLiquidationLine, openPnl, summarize } from '../src/lib/trade-overlay';
 
 const MIN15 = 900_000;
 const fill = (overrides: Partial<Fill>): Fill => ({
@@ -9,7 +9,7 @@ const fill = (overrides: Partial<Fill>): Fill => ({
 });
 const position = (overrides: Partial<PositionView> = {}) =>
   ({
-    symbol: 'BTCUSDT', side: 'LONG', quantity: '2', entryPrice: '100', margin: '50', liquidationPrice: '76',
+    id: 'p1', symbol: 'BTCUSDT', side: 'LONG', quantity: '2', entryPrice: '100', margin: '50', liquidationPrice: '76',
     stopLoss: '90', takeProfit: '120', ...overrides,
   }) as PositionView;
 const limit = (overrides: Partial<Order> = {}) =>
@@ -84,16 +84,30 @@ describe('openPnl', () => {
 describe('buildPriceLines', () => {
   it('draws entry with live PnL, TP, SL and liquidation', () => {
     expect(buildPriceLines([position()], [], 'BTCUSDT', 110)).toEqual([
-      { id: 'entry', price: 100, label: 'LONG 2  +20.00 (+40.00%)', tone: 'rise' },
-      { id: 'tp', price: 120, label: 'TP', tone: 'rise' },
-      { id: 'sl', price: 90, label: 'SL', tone: 'fall' },
-      { id: 'liq', price: 76, label: 'Liq', tone: 'warn' },
+      { id: 'entry:p1', price: 100, label: 'LONG 2', tone: 'rise', pnl: { text: '+20.00 (+40.00%)', tone: 'rise' } },
+      { id: 'tp:p1', price: 120, label: 'TP', tone: 'rise' },
+      { id: 'sl:p1', price: 90, label: 'SL', tone: 'fall' },
+      { id: 'liq:p1', price: 76, label: 'Liq', tone: 'warn' },
     ]);
   });
 
-  it('turns the entry line red on a loss', () => {
-    const [entry] = buildPriceLines([position()], [], 'BTCUSDT', 90);
-    expect(entry).toMatchObject({ label: 'LONG 2  −20.00 (−40.00%)', tone: 'fall' });
+  it('colors the entry line by direction and only the PnL by result', () => {
+    const [long] = buildPriceLines([position()], [], 'BTCUSDT', 90);
+    expect(long).toMatchObject({ tone: 'rise', pnl: { text: '−20.00 (−40.00%)', tone: 'fall' } });
+    const [short] = buildPriceLines([position({ side: 'SHORT' })], [], 'BTCUSDT', 90);
+    expect(short).toMatchObject({ label: 'SHORT 2', tone: 'fall', pnl: { text: '+20.00 (+40.00%)', tone: 'rise' } });
+  });
+
+  it('draws an active trailing stop at its trigger', () => {
+    const trailing = { kind: 'RATIO', callback: '0.01', activationPrice: null, extreme: '112', triggerPrice: '110.88' } as const;
+    const lines = buildPriceLines([position({ trailingStop: trailing })], [], 'BTCUSDT', 111);
+    expect(lines).toContainEqual({ id: 'trail:p1', price: 110.88, label: 'Trailing SL', tone: 'fall' });
+  });
+
+  it('draws a trailing stop that waits for its activation price there', () => {
+    const waiting = { kind: 'RATIO', callback: '0.01', activationPrice: '115', extreme: null, triggerPrice: null } as const;
+    const lines = buildPriceLines([position({ trailingStop: waiting })], [], 'BTCUSDT', 111);
+    expect(lines).toContainEqual({ id: 'trail:p1', price: 115, label: 'Trailing SL activates', tone: 'info' });
   });
 
   it('keeps the same line id as PnL moves, so the line updates in place', () => {
@@ -103,16 +117,29 @@ describe('buildPriceLines', () => {
 
   it('leaves out protection that does not exist', () => {
     const lines = buildPriceLines([position({ stopLoss: null, takeProfit: null, liquidationPrice: '0' })], [], 'BTCUSDT', 110);
-    expect(lines.map((l) => l.id)).toEqual(['entry']);
+    expect(lines.map((l) => l.id)).toEqual(['entry:p1']);
   });
 
   it('shows no PnL before a quote arrives', () => {
-    expect(buildPriceLines([position()], [], 'BTCUSDT', null)[0]).toMatchObject({ label: 'LONG 2', tone: 'neutral' });
+    const [entry] = buildPriceLines([position()], [], 'BTCUSDT', null);
+    expect(entry).toEqual({ id: 'entry:p1', price: 100, label: 'LONG 2', tone: 'rise' });
   });
 
   it('draws resting limits, but not filled orders or other pairs', () => {
     const lines = buildPriceLines([], [limit(), limit({ id: 'o2', status: 'FILLED' }), limit({ id: 'o3', symbol: 'ETHUSDT' }), limit({ id: 'o4', type: 'STOP_MARKET' })], 'BTCUSDT', 100);
     expect(lines).toEqual([{ id: 'limit:o1', price: 95, label: 'Limit buy 1', tone: 'info' }]);
+  });
+
+  it('gives each position on the same pair its own line ids, so neither replaces the other', () => {
+    const lines = buildPriceLines([position(), position({ id: 'p2', side: 'SHORT', entryPrice: '105', liquidationPrice: '130' })], [], 'BTCUSDT', 110);
+    const ids = lines.map((l) => l.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(lines.filter((l) => l.id.startsWith('entry:')).map((l) => l.price)).toEqual([100, 105]);
+  });
+
+  it('marks every liquidation line, and only those, as left out of autoscale', () => {
+    const lines = buildPriceLines([position(), position({ id: 'p2', liquidationPrice: '60' })], [limit()], 'BTCUSDT', 110);
+    expect(lines.filter(isLiquidationLine).map((l) => l.price)).toEqual([76, 60]);
   });
 
   it('ignores positions on other pairs', () => {

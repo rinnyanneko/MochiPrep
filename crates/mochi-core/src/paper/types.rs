@@ -48,6 +48,9 @@ pub struct ProtectionResult {
     /// An exchange did not answer a placement; it is resolved by lookup, never resent. A paper
     /// change is applied in one transaction, so here it is always false.
     pub pending: bool,
+    /// Retiring an unsent exchange order can leave the active protection snapshots equal.
+    #[serde(skip)]
+    pub retired_deferred: bool,
 }
 
 /// A failure the caller sees. `Invalid` is what TypeScript throws as a plain `Error`, with the

@@ -140,19 +140,12 @@ async fn fills_a_market_order_with_its_attached_algos() {
     let client = client(&okx, Venue::OkxDemo);
     client.set_leverage("BTC-USDT-SWAP", 3).await.unwrap();
     let mut body = market(Side::Buy, "10", "entry");
-    body.attach_algo_ords = Some(vec![
-        AttachAlgoOrd {
-            attach_algo_cl_ord_id: Some(to_algo_cl_ord_id("ord_1:sl")),
-            sl_trigger_px: Some("74000".into()),
-            sl_ord_px: Some("-1".into()),
-            ..AttachAlgoOrd::default()
-        },
-        AttachAlgoOrd {
-            attach_algo_cl_ord_id: Some(to_algo_cl_ord_id("ord_1:trail")),
-            callback_ratio: Some("0.02".into()),
-            ..AttachAlgoOrd::default()
-        },
-    ]);
+    body.attach_algo_ords = Some(vec![AttachAlgoOrd {
+        attach_algo_cl_ord_id: Some(to_algo_cl_ord_id("ord_1:sl")),
+        sl_trigger_px: Some("74000".into()),
+        sl_ord_px: Some("-1".into()),
+        ..AttachAlgoOrd::default()
+    }]);
     assert_eq!(client.place_order(&body).await.unwrap(), "1");
     let order = client
         .get_order("BTC-USDT-SWAP", &to_cl_ord_id("entry"))
@@ -161,8 +154,8 @@ async fn fills_a_market_order_with_its_attached_algos() {
         .unwrap();
     assert_eq!(
         Value::Object(order),
-        json!({ "ordId": "1", "clOrdId": to_cl_ord_id("entry"), "state": "filled", "accFillSz": "10",
-                "avgPx": "75000", "fee": "-0.05", "pnl": "0" })
+        json!({ "ordId": "1", "clOrdId": to_cl_ord_id("entry"), "state": "filled", "fillSz": "10", "accFillSz": "10",
+                "avgPx": "75000", "fee": "-0.05", "pnl": "0", "fillTime": "1800000000000", "tradeId": "1" })
     );
     let positions = client.get_positions().await.unwrap();
     assert_eq!(positions[0]["pos"], "10");
@@ -174,14 +167,13 @@ async fn fills_a_market_order_with_its_attached_algos() {
     assert_eq!(
         Value::Object(stops[0].clone()),
         json!({ "algoId": "A1", "algoClOrdId": to_algo_cl_ord_id("ord_1:sl"), "instId": "BTC-USDT-SWAP",
-                "state": "live", "side": "sell", "sz": "10", "slTriggerPx": "74000", "ordType": "conditional" })
+                "state": "live", "side": "sell", "sz": "10", "slTriggerPx": "74000", "slOrdPx": "-1", "ordType": "conditional" })
     );
     let trails = client
         .get_pending_algos(PendingAlgoType::MoveOrderStop)
         .await
         .unwrap();
-    assert_eq!(trails[0]["moveTriggerPx"], "74250");
-    assert_eq!(trails[0]["callbackRatio"], "0.02");
+    assert!(trails.is_empty());
 
     // Closing leaves the attached algos live: the engine's cleanup is what is tested.
     client
@@ -256,6 +248,71 @@ async fn loses_or_drops_orders_and_refuses_on_request() {
     assert_eq!(error.to_string(), "No answer from OKX: fetch failed");
 }
 
+/// As on OKX: a client ID is not reused while its order is pending, and a reduce-only order
+/// never opens or flips a position.
+#[tokio::test]
+async fn refuses_a_pending_client_id_and_reduce_only_orders_with_nothing_to_reduce() {
+    let okx = FakeOkx::new();
+    let client = client(&okx, Venue::OkxDemo);
+    let reduce = |side, sz: &str, id: &str| PlaceOrderBody {
+        reduce_only: Some(true),
+        ..market(side, sz, id)
+    };
+    let error = client
+        .place_order(&reduce(Side::Sell, "1", "nothing-held"))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().starts_with("OKX 51169:"), "{error}");
+    assert!(okx.state().position.is_none());
+
+    okx.state().rest_limit_orders = true;
+    let resting = PlaceOrderBody {
+        ord_type: OrdType::Limit,
+        px: Some("70000".into()),
+        ..market(Side::Buy, "2", "entry")
+    };
+    client.place_order(&resting).await.unwrap();
+    let error = client.place_order(&resting).await.unwrap_err();
+    assert_eq!(error.to_string(), "OKX 51016: Duplicated clOrdId");
+    okx.state().fill_resting();
+    assert_eq!(client.get_positions().await.unwrap()[0]["pos"], "2");
+
+    // A reduce-only order on another pair has nothing to reduce.
+    let mut other_pair = reduce(Side::Sell, "1", "other-pair");
+    other_pair.inst_id = "ETH-USDT-SWAP".into();
+    let error = client.place_order(&other_pair).await.unwrap_err();
+    assert!(error.to_string().starts_with("OKX 51169:"), "{error}");
+    assert_eq!(client.get_positions().await.unwrap()[0]["pos"], "2");
+
+    // A reduce-only order on the same side as the position has nothing to reduce either.
+    let error = client
+        .place_order(&reduce(Side::Buy, "1", "same-side"))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().starts_with("OKX 51169:"), "{error}");
+
+    // One larger than the position closes it and goes no further.
+    client
+        .place_order(&reduce(Side::Sell, "5", "oversized"))
+        .await
+        .unwrap();
+    assert!(client.get_positions().await.unwrap().is_empty());
+    let order = client
+        .get_order("BTC-USDT-SWAP", &to_cl_ord_id("oversized"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(order["accFillSz"], "2");
+
+    // Once its order is final, OKX takes the client ID again, and it executes again.
+    okx.state().rest_limit_orders = false;
+    client
+        .place_order(&market(Side::Buy, "1", "entry"))
+        .await
+        .unwrap();
+    assert_eq!(client.get_positions().await.unwrap()[0]["pos"], "1");
+}
+
 #[tokio::test]
 async fn places_cancels_and_refuses_algos() {
     let okx = FakeOkx::new();
@@ -268,7 +325,8 @@ async fn places_cancels_and_refuses_algos() {
         .unwrap();
     assert_eq!(found["algoId"], algo_id.as_str());
     assert_eq!(found["ordType"], "conditional");
-    assert!(!found.contains_key("tdMode") && !found.contains_key("slOrdPx"));
+    assert!(!found.contains_key("tdMode"));
+    assert_eq!(found["slOrdPx"], "-1");
 
     okx.state().cancel_fails = true;
     let cancel = [CancelAlgo {
@@ -341,4 +399,30 @@ async fn answers_unhandled_paths_with_404() {
         error.to_string(),
         "OKX 404: Unhandled /api/v5/trade/cancel-order"
     );
+}
+
+#[tokio::test]
+async fn rejects_attached_fixed_and_trailing_stops_without_filling() {
+    let okx = FakeOkx::new();
+    let mut body = market(Side::Buy, "1", "mixed-stops");
+    body.attach_algo_ords = Some(vec![
+        AttachAlgoOrd {
+            sl_trigger_px: Some("74000".into()),
+            sl_ord_px: Some("-1".into()),
+            ..Default::default()
+        },
+        AttachAlgoOrd {
+            callback_ratio: Some("0.015".into()),
+            active_px: Some("76000".into()),
+            ..Default::default()
+        },
+    ]);
+    let error = client(&okx, Venue::OkxDemo)
+        .place_order(&body)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("54091"));
+    assert!(okx.state().position.is_none());
+    assert!(okx.state().orders.is_empty());
+    assert!(okx.state().algos.is_empty());
 }

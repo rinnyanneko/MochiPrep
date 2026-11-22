@@ -20,7 +20,9 @@ import type {
   VaultStatus,
 } from '@mochiprep/shared';
 import { api, forgetToken, getToken } from './lib/api';
-import { formatDateTime, parseColorFlip, parseTimeZone, type TimeZonePref } from './lib/display';
+import { formatDateTime, parseTimeZone, type TimeZonePref } from './lib/display';
+
+import { applyDirectionColors, parseDirectionColors, type DirectionColors } from './lib/direction-colors';
 
 export type Page = 'dashboard' | 'markets' | 'agents' | 'paper' | 'arena' | 'history' | 'settings';
 export type AccountView = PaperAccount & { balance: AccountBalance };
@@ -42,6 +44,7 @@ interface State {
   agents: Agent[];
   providers: ProviderView[];
   decisions: DecisionRecord[];
+  historyDecisionId: string | null;
   arena: ArenaRow[];
   exchange: ExchangeStatus[];
   /** Suggestions waiting for the user. */
@@ -54,18 +57,17 @@ interface State {
   accountId: string | null;
   theme: 'dark' | 'light';
   timeZone: TimeZonePref;
-  /** Red for up and green for down, as many Asian markets show it. */
-  flipColors: boolean;
+  directionColors: DirectionColors;
   toasts: Toast[];
   lastFillAt: number;
   lastAlertAt: number;
 
-  setPage(page: Page): void;
+  setPage(page: Page, historyDecisionId?: string): void;
   setSource(source: DataSource): void;
   setAccountId(id: string | null): void;
   toggleTheme(): void;
   setTimeZone(zone: TimeZonePref): void;
-  setFlipColors(flip: boolean): void;
+  setDirectionColors(colors: DirectionColors): void;
   toast(level: Toast['level'], message: string): void;
   dismissToast(id: number): void;
   refreshState(): Promise<void>;
@@ -89,11 +91,6 @@ const remember = (key: string, value: string) => {
   }
 };
 
-const applyColors = (flip: boolean) => {
-  if (flip) document.documentElement.dataset.colors = 'flip';
-  else delete document.documentElement.dataset.colors;
-};
-
 /** Formats a timestamp in the chosen zone, and re-renders the caller when the choice changes. Every time shown goes through it. */
 export function useDateTime() {
   const zone = useApp((s) => s.timeZone);
@@ -101,7 +98,7 @@ export function useDateTime() {
 }
 
 let toastId = 0;
-const ALL_TOPICS: Topic[] = ['accounts', 'orders', 'positions', 'agents', 'decisions', 'providers', 'arena', 'exchange', 'instruments', 'vault'];
+const ALL_TOPICS: Topic[] = ['accounts', 'orders', 'positions', 'agents', 'decisions', 'providers', 'arena', 'exchange', 'instruments', 'vault', 'templates'];
 
 export const useApp = create<State>((set, get) => ({
   connected: false,
@@ -114,24 +111,25 @@ export const useApp = create<State>((set, get) => ({
   agents: [],
   providers: [],
   decisions: [],
+  historyDecisionId: null,
   arena: [],
   exchange: [],
   signals: [],
   symbols: [...DEFAULT_SYMBOLS],
-  versions: { accounts: 0, orders: 0, positions: 0, agents: 0, decisions: 0, providers: 0, arena: 0, exchange: 0, instruments: 0, news: 0, vault: 0 },
+  versions: { accounts: 0, orders: 0, positions: 0, agents: 0, decisions: 0, providers: 0, arena: 0, exchange: 0, instruments: 0, news: 0, vault: 0, templates: 0 },
   page: (location.hash.slice(1) as Page) || 'dashboard',
   source: remembered('mochi.source', 'REPLAY') as DataSource,
   accountId: null,
   theme: remembered('mochi.theme', 'dark') as 'dark' | 'light',
   timeZone: parseTimeZone(recall('mochi.timeZone')),
-  flipColors: parseColorFlip(recall('mochi.flipColors')),
+  directionColors: parseDirectionColors(recall('mochi.directionColors'), recall('mochi.flipColors')),
   toasts: [],
   lastFillAt: 0,
   lastAlertAt: 0,
 
-  setPage(page) {
+  setPage(page, historyDecisionId) {
     location.hash = page;
-    set({ page });
+    set({ page, historyDecisionId: page === 'history' ? historyDecisionId ?? null : null });
   },
   setSource(source) {
     remember('mochi.source', source);
@@ -147,16 +145,18 @@ export const useApp = create<State>((set, get) => ({
     const theme = get().theme === 'dark' ? 'light' : 'dark';
     remember('mochi.theme', theme);
     document.documentElement.dataset.theme = theme;
+    applyDirectionColors(get().directionColors, theme);
     set({ theme });
   },
   setTimeZone(timeZone) {
     remember('mochi.timeZone', timeZone);
     set({ timeZone });
   },
-  setFlipColors(flipColors) {
-    remember('mochi.flipColors', flipColors ? '1' : '0');
-    applyColors(flipColors);
-    set({ flipColors });
+  setDirectionColors(colors) {
+    const directionColors = parseDirectionColors(JSON.stringify(colors), null);
+    remember('mochi.directionColors', JSON.stringify(directionColors));
+    applyDirectionColors(directionColors, get().theme);
+    set({ directionColors });
   },
   toast(level, message) {
     const id = ++toastId;
@@ -248,13 +248,25 @@ function onEvent(event: ServerEvent) {
 }
 
 let source: EventSource | null = null;
+let intentionallyDisconnected = false;
+
+export function disconnectBackend() {
+  intentionallyDisconnected = true;
+  source?.close();
+  source = null;
+  forgetToken();
+  useApp.setState({ connected: false });
+}
 let lastEventAt = Date.now();
 const STREAM_SILENCE_MS = 40_000;
 
 async function openStream() {
+  if (intentionallyDisconnected) return;
   source?.close();
   try {
-    source = new EventSource(`/api/events?token=${await getToken()}`);
+    const token = await getToken();
+    if (intentionallyDisconnected) return;
+    source = new EventSource(`/api/events?token=${token}`);
   } catch {
     reconnectStream();
     return;
@@ -274,6 +286,7 @@ async function openStream() {
 }
 
 function reconnectStream() {
+  if (intentionallyDisconnected) return;
   useApp.setState({ connected: false });
   source?.close();
   forgetToken();
@@ -282,7 +295,7 @@ function reconnectStream() {
 
 async function boot() {
   document.documentElement.dataset.theme = useApp.getState().theme;
-  applyColors(useApp.getState().flipColors);
+  applyDirectionColors(useApp.getState().directionColors, useApp.getState().theme);
   useApp.getState().setSource(useApp.getState().source);
   await openStream();
   // A proxy can keep a dead stream looking open, so silence counts as a disconnect.
@@ -294,7 +307,9 @@ async function boot() {
   }, 5000);
   // Live marks move without engine events, so open PnL is re-read on a timer.
   setInterval(() => {
-    if (useApp.getState().source === 'LIVE' && !document.hidden) void useApp.getState().refresh(['accounts', 'positions']);
+    if (!intentionallyDisconnected && useApp.getState().source === 'LIVE' && !document.hidden) {
+      void useApp.getState().refresh(['accounts', 'positions']);
+    }
   }, 3000);
 }
 
@@ -328,7 +343,7 @@ export function useQuery<T>(fetcher: () => Promise<T>, deps: unknown[], topics: 
 }
 
 /** Runs an action, turns failure into a toast, and reports whether it succeeded. */
-export async function attempt<T>(action: () => Promise<T>): Promise<T | undefined> {
+export async function attempt<T>(action: () => T | Promise<T>): Promise<T | undefined> {
   try {
     return await action();
   } catch (error) {

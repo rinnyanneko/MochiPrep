@@ -1,12 +1,14 @@
-import { Pause, Pencil, Play, Plus, ScanSearch, Square, StepForward, Trash2 } from 'lucide-react';
+import { LayoutTemplate, Pause, Pencil, Play, Plus, ScanSearch, Square, StepForward, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { DEFAULT_RISK_SETTINGS, TIMEFRAMES, type ExecutionMode, type Agent, type AgentStatus, type DecisionRecord, type RiskSettings, type SymbolId, type Timeframe } from '@mochiprep/shared';
+import { DEFAULT_RISK_SETTINGS, type Agent, type AgentStatus, type DecisionRecord, type SymbolId } from '@mochiprep/shared';
+import { AgentSettingsFields, TemplatesDialog, useAgentTemplates } from '@/components/AgentTemplates';
 import { Mochi, type MochiMood } from '@/components/Mochi';
 import { PageTitle } from '@/components/Shell';
 import { DecisionDetail, DecisionList, VenueBadge } from '@/components/trading';
-import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Segmented, Select, Textarea, type Tone } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Select, type Tone } from '@/components/ui';
 import { api } from '@/lib/api';
 import { money, pct, pnlClass } from '@/lib/format';
+import { settingsFromTemplate, type AgentSettings } from '@/lib/templates';
 import { cn } from '@/lib/utils';
 import { attempt, useApp, useDateTime, useQuery, useSourceAccounts, useSymbols, type AccountView } from '@/store';
 
@@ -20,27 +22,12 @@ const STATUS: Record<AgentStatus, { tone: Tone; mood: MochiMood; label: string }
 };
 
 const MOCK_MODELS = ['mock-momentum-v1', 'mock-reversion-v1', 'mock-reckless-v1'];
-const INTERVALS = [
-  { value: 30, label: 'Every 30 seconds (demo pace)' },
-  { value: 60, label: 'Every minute' },
-  { value: 300, label: 'Every 5 minutes' },
-  { value: 900, label: 'Every 15 minutes (default)' },
-  { value: 3600, label: 'Every hour' },
-];
-
-type Form = {
+type Form = AgentSettings & {
   name: string;
   providerId: string;
   model: string;
   symbol: SymbolId;
-  timeframe: Timeframe;
-  strategy: string;
   accountId: string;
-  risk: RiskSettings;
-  intervalSec: number;
-  executionMode: ExecutionMode;
-  useNews: boolean;
-  allowTrailingStop: boolean;
 };
 
 function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void }) {
@@ -65,7 +52,17 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
     },
   );
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
-  const setRisk = (patch: Partial<RiskSettings>) => setForm((f) => ({ ...f, risk: { ...f.risk, ...patch } }));
+  const { templates: loadedTemplates, error: templatesError, reload: reloadTemplates } = useAgentTemplates();
+  const templates = loadedTemplates ?? [];
+  const [templateId, setTemplateId] = useState('');
+  // Only copies values into the form: the agent is still validated on save and every order still
+  // meets the risk engine, so a template can never loosen a limit on its own.
+  const applyTemplate = (id: string) => {
+    setTemplateId(id);
+    const template = templates.find((t) => t.id === id);
+    // News is live-only, as for a blank form: the replay tape is synthetic.
+    if (template) set({ ...settingsFromTemplate(template), useNews: template.useNews && source === 'LIVE' });
+  };
   const provider = providers.find((p) => p.id === form.providerId);
   const selectedAccount = accounts.find((a) => a.id === form.accountId);
 
@@ -86,15 +83,25 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
     }
   };
 
-  const number = (label: string, key: keyof RiskSettings, hint?: string) => (
-    <Field label={label} hint={hint}>
-      <Input type="number" step="any" min={0} value={form.risk[key] as number} onChange={(e) => setRisk({ [key]: Number(e.target.value) })} />
-    </Field>
-  );
-
   return (
     <Dialog open onOpenChange={onClose} title={agent ? `Edit ${agent.name}` : 'New AI agent'} description="Changes apply from the next cycle." wide>
       <div className="grid gap-3 sm:grid-cols-2">
+        {!agent && (
+          <div className="sm:col-span-2">
+            <Field label="Start from template" hint="Fills in the settings below; you can still change any of them.">
+              <Select value={templateId} onChange={(e) => applyTemplate(e.target.value)}>
+                <option value="">No template</option>
+                {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.builtIn ? ' (built-in)' : ''}</option>)}
+              </Select>
+            </Field>
+            {templatesError && (
+              <p className="mt-1 flex items-center gap-2 text-[11px] text-down" role="alert">
+                Templates could not be loaded: {templatesError}
+                <Button size="sm" onClick={reloadTemplates}>Retry</Button>
+              </p>
+            )}
+          </div>
+        )}
         <Field label="Name"><Input value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="Careful Kinako" /></Field>
         <Field label="AI provider">
           <Select value={form.providerId} onChange={(e) => {
@@ -122,62 +129,10 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
         <Field label="Symbol" hint={source === 'REPLAY' ? 'Added pairs need Live OKX: the replay tape has only these.' : 'Add more pairs in Settings.'}>
           <Select value={form.symbol} onChange={(e) => set({ symbol: e.target.value as SymbolId })}>{symbols.map((s) => <option key={s}>{s}</option>)}</Select>
         </Field>
-        <Field label="Timeframe">
-          <Select value={form.timeframe} onChange={(e) => set({ timeframe: e.target.value as Timeframe })}>{TIMEFRAMES.map((t) => <option key={t}>{t}</option>)}</Select>
-        </Field>
-        <Field label="Schedule" className="sm:col-span-2" hint={source === 'REPLAY' ? 'Replay agents run on tape time, not wall time.' : undefined}>
-          <Select value={form.intervalSec} onChange={(e) => set({ intervalSec: Number(e.target.value) })}>
-            {INTERVALS.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
-          </Select>
-        </Field>
-        <div className="sm:col-span-2">
-          <span className="mb-1 block text-xs font-semibold text-ink-2">When the AI finds a trade</span>
-          <Segmented
-            label="Execution mode"
-            value={form.executionMode}
-            onChange={(executionMode) => set({ executionMode })}
-            options={[
-              { value: 'SIGNAL', label: 'Suggest to me' },
-              { value: 'AUTO', label: 'Trade automatically' },
-            ]}
-          />
-          <span className="mt-1 block text-[11px] text-ink-3">
-            {form.executionMode === 'SIGNAL' ? 'You see the entry, stop and target, and decide. Nothing is ordered until you accept.' : 'Approved orders are placed immediately, with no confirmation.'}
-          </span>
-        </div>
-        <label className="flex items-start gap-2 text-xs text-ink-2 sm:col-span-2">
-          <input type="checkbox" className="mt-0.5 accent-[var(--accent)]" disabled={source === 'REPLAY'} checked={form.useNews && source === 'LIVE'} onChange={(e) => set({ useNews: e.target.checked })} />
-          <span>
-            Read recent news headlines{' '}
-            <span className="block text-[11px] text-ink-3">
-              {source === 'REPLAY' ? 'Live OKX only: real headlines would not match the synthetic tape.' : 'Headlines are unverified third-party text. They can be wrong or written to mislead an AI. Sources are in Settings.'}
-            </span>
-          </span>
-        </label>
-        <Field label="Strategy instructions" className="sm:col-span-2" hint="Sent to the model as style guidance. It cannot override the risk engine.">
-          <Textarea value={form.strategy} onChange={(e) => set({ strategy: e.target.value })} placeholder="Trade pullbacks in the direction of the 1h trend..." />
-        </Field>
       </div>
-      <h3 className="mt-4 mb-2 font-display text-sm font-extrabold">Risk limits</h3>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {number('Max leverage (x)', 'maxLeverage')}
-        {number('Risk per trade (%)', 'maxRiskPerTradePct')}
-        {number('Max daily loss (%)', 'maxDailyLossPct')}
-        {number('Max open positions', 'maxOpenPositions')}
-        {number('Max quote age (s)', 'maxQuoteAgeSec')}
-        {number('Max notional (USDT)', 'maxNotional')}
+      <div className="mt-3">
+        <AgentSettingsFields value={form} onChange={set} source={source} />
       </div>
-      <label className="mt-3 flex items-center gap-2 text-xs text-ink-2">
-        <input type="checkbox" checked={form.risk.requireStopLoss} onChange={(e) => setRisk({ requireStopLoss: e.target.checked })} className="accent-[var(--accent)]" />{' '}
-        Require a stop loss on new positions
-      </label>
-      <label className="mt-2 flex items-start gap-2 text-xs text-ink-2">
-        <input type="checkbox" checked={form.allowTrailingStop} onChange={(e) => set({ allowTrailingStop: e.target.checked })} className="mt-0.5 accent-[var(--accent)]" />
-        <span>
-          Allow trailing stops{' '}
-          <span className="block text-[11px] text-ink-3">Off: this agent cannot set, change or remove trailing stops.</span>
-        </span>
-      </label>
       {selectedAccount?.venue === 'OKX_LIVE' && form.executionMode === 'AUTO' && (
         <p className="mt-3 rounded-xl bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">
           This agent will place real orders on its own while running. The account's limits in Settings cap everything above.
@@ -265,6 +220,7 @@ export function AgentsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Agent | 'new' | null>(null);
   const [decisionId, setDecisionId] = useState<string | null>(null);
+  const [managingTemplates, setManagingTemplates] = useState(false);
 
   const selected = agents.find((a) => a.id === selectedId) ?? agents[0];
   const { data: decisions } = useQuery(
@@ -279,7 +235,12 @@ export function AgentsPage() {
       <PageTitle
         title="AI Agents"
         description={`Agents on ${source === 'REPLAY' ? 'the replay tape' : 'live OKX data'}. They run in the backend and stop when it stops.`}
-        action={<Button variant="primary" onClick={() => setEditing('new')}><Plus /> New agent</Button>}
+        action={
+          <span className="flex gap-2">
+            <Button onClick={() => setManagingTemplates(true)}><LayoutTemplate /> Templates</Button>
+            <Button variant="primary" onClick={() => setEditing('new')}><Plus /> New agent</Button>
+          </span>
+        }
       />
       {agents.length === 0 ? (
         <Card className="px-6 py-10 text-center text-[13px] text-ink-3">No agents on this data source yet.</Card>
@@ -302,6 +263,7 @@ export function AgentsPage() {
           </Card>
         </div>
       )}
+      {managingTemplates && <TemplatesDialog onClose={() => setManagingTemplates(false)} />}
       {editing && <AgentDialog agent={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
     </>
   );
