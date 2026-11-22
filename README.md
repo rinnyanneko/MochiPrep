@@ -69,7 +69,9 @@ The data folder for a source build is `.mochiprep/` in the repository. For devel
 
 ## Getting started
 
-Press **Try Demo Mode** on the Dashboard. No API key and no internet connection are needed. Each mock agent starts with 10,000 virtual USDT. Press play in the top bar to run the replay. Demo Mode uses a bundled, seeded price tape and mock agents, so each run repeats the same way. Its trades, PnL and leaderboard results are simulations, not forecasts.
+Add an AI provider and its key in **Settings**, then create an agent in **AI Agents** on a paper account. Pick **Replay** in the top bar to trade recorded market data, or **Live OKX** for live prices.
+
+The replay plays recorded OKX one-minute bars of the built-in pairs: 18 days ending at a UTC midnight, the first 4 of them as history for the indicators. The first time you open the replay, MochiPrep downloads those bars from OKX, which takes a few minutes, and keeps them in its database; later starts read them from there. Every agent on the replay sees the same bars, so runs are comparable. Replay trades, PnL and leaderboard results are simulations on past data, not forecasts. Without a network connection (`MOCHIPREP_OFFLINE=1`), the replay plays a bundled synthetic tape instead.
 
 ## AI providers
 
@@ -88,6 +90,8 @@ By default, AI keys are saved **unencrypted** in a local database, so they survi
 Model output is checked strictly, and it must pass the risk checks before any order is placed. Keys are never shown in the browser or written to logs.
 
 ## Agents: suggest or trade automatically
+
+An agent trades one pair or several, up to ten. With several, one AI call each cycle sees every pair's market data and decides each of them; every pair's decision then goes through the risk checks on its own, one after another, and gets its own record in the history.
 
 Each agent has one of two modes:
 
@@ -120,6 +124,10 @@ On **Markets** and **Trading**, charts show the selected account's trades: `B` a
 ## Trading pairs
 
 Ten pairs are built in: BTC, ETH, BNB, XRP, SOL, TRX, HYPE, ZEC, DOGE and LINK, the largest coins by market cap that OKX lists as USDT perpetuals (stablecoins left out, as of 2026-11-22). To trade another coin, add it in **Settings > Trading pairs**. Any live USDT crypto perpetual listed on OKX can be added, and its contract specifications are read from OKX. Added pairs work on Live OKX accounts only, because the replay includes just the built-in pairs.
+
+## Trading Arena
+
+The arena ranks agents side by side, in three views: **Historical replay**, **Live paper** (live prices, paper accounts) and **OKX** (Demo Trading and real accounts). Paper agents chart their account's equity. OKX agents chart their own P&L since they were made instead, since deposits and transfers move an exchange account's equity. An OKX agent that shares a pair with another agent on the same account has no P&L of its own.
 
 ## News
 

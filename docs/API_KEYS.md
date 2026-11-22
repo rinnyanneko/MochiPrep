@@ -1,6 +1,6 @@
 # How to get API keys
 
-This guide walks you through the keys MochiPrep can use. Demo Mode needs no key at all. Get keys only when you want a real AI model or want to connect OKX.
+This guide walks you through the keys MochiPrep can use. Paper trading without an agent needs no key at all. Get an AI key to run agents, and an OKX key to connect OKX.
 
 > **DYOR: do your own research.** MochiPrep is not financial advice. AI output can be wrong, and you are responsible for your own trades.
 

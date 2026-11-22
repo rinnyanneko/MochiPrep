@@ -13,7 +13,7 @@ The backend is Rust. Node is only for the web UI and the scripts.
 - `crates/mochi-core`: perp math, fill model, risk engine, paper engine, ledger audit.
 - `crates/mochi-store`: SQLite store and migrations (`crates/mochi-store/migrations/`).
 - `crates/mochi-vault`: master-password crypto.
-- `crates/mochi-market`: OKX public feed, deterministic replay tape, news.
+- `crates/mochi-market`: OKX public feed, the replay (recorded OKX history, or the deterministic synthetic tape for tests and offline runs), news.
 - `crates/mochi-ai`: mock and remote providers, prompts, indicators, secret redaction.
 - `crates/mochi-okx`: signed OKX client and `OkxEngine`, plus a fake OKX for tests behind the `fake` feature. Real money: see docs/OKX_TRADING.md.
 - `crates/mochi-server`: HTTP routes (axum), SSE `/api/events`, the `Runtime` actor, agent cycle, embedded web UI.
@@ -38,9 +38,11 @@ Needs Node >= 22.13 and a Rust toolchain. Workspace packages export TypeScript s
 
 ## Notes
 
-- `mochi-server` serves the Node-era API contract: auth, SSE, paper trading, replay, market data, instruments, news, AI providers, agents, suggestions, demo mode, the master-password vault and OKX trading. It embeds `apps/web/dist`, so `pnpm build` first if you run it by hand.
+- `mochi-server` serves the Node-era API contract: auth, SSE, paper trading, replay, market data, instruments, news, AI providers, agents, suggestions, the master-password vault and OKX trading. Demo mode and the mock AI were removed; `MockProvider` stays in `mochi-ai` as test support only. It embeds `apps/web/dist`, so `pnpm build` first if you run it by hand.
 - OKX has only been run against the in-process fake OKX, never OKX Demo or a real account. The UNCONFIRMED list in `docs/OKX_TRADING.md` is the owner's recommended check before trusting real money (the owner decided on 2026-11-16 that it is not a release condition).
-- `MOCHIPREP_OFFLINE=1`: no OKX public feed and no news fetching (the replay still runs). The e2e config sets it.
+- `MOCHIPREP_OFFLINE=1`: no OKX public feed and no news fetching. The replay still runs, on the synthetic tape. The e2e config sets it, and its agents call the fake model in `e2e/fake-ai.mjs`.
+- Online, the replay downloads recorded OKX one-minute bars the first time it is used (`crates/mochi-server/src/runtime/replay_data.rs`) and keeps them in the `replay_bars` table.
+- An agent trades up to ten pairs (`symbols`). With more than one, one model call answers `{"decisions": [...]}`, parsed by `parse_decisions`; each pair keeps its own record, risk check and execution.
 - Releases: a `vX.Y.Z` tag matching `[workspace.package].version` runs `.github/workflows/release.yml`, which creates a DRAFT release, uploads every leg's bundles to it by id, then writes `latest.json` once with `scripts/updater-manifest.mjs`; the owner publishes. Builds are not OS code-signed; updater artifacts are signed.
 - Performance statistics (`performance.rs`), fractions and times use `f64` or integers by design; money never does.
 - The vault format stays byte-compatible with the golden fixtures in `crates/golden`. Migrations live in `crates/mochi-store/migrations/`.
