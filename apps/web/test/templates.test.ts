@@ -81,6 +81,9 @@ describe('template export and import', () => {
     expect(() => parseTemplateFile(JSON.stringify({ format: TEMPLATE_FILE_FORMAT, version: 1, templates: [{ name: 1 }] }))).toThrow('Template 1 is damaged');
     const many = Array.from({ length: IMPORT_MAX_TEMPLATES + 1 }, () => templateBody(mine));
     expect(() => parseTemplateFile(JSON.stringify({ format: TEMPLATE_FILE_FORMAT, version: 1, templates: many }))).toThrow('At most');
+    // Export refuses the same count, so anything it produces imports.
+    expect(() => exportTemplates(many)).toThrow('At most');
+    expect(parseTemplateFile(exportTemplates(many.slice(1)))).toHaveLength(IMPORT_MAX_TEMPLATES);
   });
 
   it('drops unknown keys so the strict schema sees only template fields', () => {

@@ -65,9 +65,8 @@ export function duplicateTemplate(template: AgentTemplate, all: readonly AgentTe
 /** Identifies an exported template file, so an unrelated JSON file is refused with a clear message. */
 export const TEMPLATE_FILE_FORMAT = 'mochiprep.agent-templates';
 export const TEMPLATE_FILE_VERSION = 1;
-/** Keeps a pasted or picked file from flooding the backend with requests. */
-export const IMPORT_MAX_TEMPLATES = 100;
-export const IMPORT_MAX_BYTES = 1_000_000;
+/** Keeps a pasted or picked file from flooding the backend with requests. Export refuses more, so every export imports. */
+export const IMPORT_MAX_TEMPLATES = 1000;
 
 export interface TemplateFile {
   format: typeof TEMPLATE_FILE_FORMAT;
@@ -76,7 +75,8 @@ export interface TemplateFile {
 }
 
 /** The export document: only the saved settings, never ids, timestamps or the built-in flag. */
-export function exportTemplates(templates: readonly AgentTemplate[]): string {
+export function exportTemplates(templates: readonly AgentTemplateFields[]): string {
+  if (templates.length > IMPORT_MAX_TEMPLATES) throw new Error(`At most ${IMPORT_MAX_TEMPLATES} templates can be exported at once.`);
   const file: TemplateFile = { format: TEMPLATE_FILE_FORMAT, version: TEMPLATE_FILE_VERSION, templates: templates.map(templateBody) };
   return `${JSON.stringify(file, null, 2)}\n`;
 }
@@ -90,7 +90,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
  * that adds fields still imports.
  */
 export function parseTemplateFile(text: string): AgentTemplateFields[] {
-  if (text.length > IMPORT_MAX_BYTES) throw new Error('This file is too large to be a template export.');
   let data: unknown;
   try {
     data = JSON.parse(text);

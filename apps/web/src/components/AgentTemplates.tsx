@@ -184,10 +184,13 @@ function ImportDialog({ existing, onClose }: { existing: AgentTemplate[]; onClos
       mounted.current = false;
     };
   }, []);
+  // A slow read of an earlier pick must not replace the text of a later one.
+  const selection = useRef(0);
   const pick = async (file: File | undefined) => {
+    const mine = ++selection.current;
     if (!file) return;
     const content = await attempt(() => file.text());
-    if (content !== undefined) setText(content);
+    if (content !== undefined && mine === selection.current) setText(content);
   };
   const run = async () => {
     if (busy) return;
@@ -196,6 +199,7 @@ function ImportDialog({ existing, onClose }: { existing: AgentTemplate[]; onClos
     setBusy(true);
     let imported = 0;
     const failures: string[] = [];
+    const failed: AgentTemplateFields[] = [];
     // One at a time, so a refused template leaves the others in and the report can name it.
     for (const fields of parsed) {
       try {
@@ -203,6 +207,7 @@ function ImportDialog({ existing, onClose }: { existing: AgentTemplate[]; onClos
         imported++;
       } catch (error) {
         failures.push(`${fields.name || 'Unnamed'}: ${(error as Error).message}`);
+        failed.push(fields);
       }
     }
     const toast = useApp.getState().toast;
@@ -210,7 +215,9 @@ function ImportDialog({ existing, onClose }: { existing: AgentTemplate[]; onClos
     if (failures.length) toast('error', `Not imported: ${failures.join('; ')}`);
     if (!mounted.current) return;
     setBusy(false);
-    if (!failures.length) onClose();
+    if (!failed.length) onClose();
+    // Only the refused templates stay, so a corrected retry does not import the others twice.
+    else setText(exportTemplates(failed));
   };
   return (
     <Dialog open onOpenChange={onClose} title="Import templates" description="Pick an exported .json file or paste its text. Names that already exist get a copy suffix." wide>
@@ -239,7 +246,8 @@ export function TemplatesDialog({ onClose }: { onClose(): void }) {
   const templates = loaded ?? [];
   const [editing, setEditing] = useState<Editing>(null);
   const [panel, setPanel] = useState<Panel>(null);
-  const exportList = (list: AgentTemplate[]) => setPanel({ kind: 'export', text: exportTemplates(list), count: list.length });
+  const exportList = (list: AgentTemplate[]) =>
+    void attempt(async () => setPanel({ kind: 'export', text: exportTemplates(list), count: list.length }));
   const mine = templates.filter((t) => !t.builtIn);
 
   if (editing) return <TemplateEditor id={editing.id} initial={editing.initial} onClose={() => setEditing(null)} />;
