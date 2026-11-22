@@ -656,6 +656,46 @@ async fn a_failed_fill_write_leaves_the_order_open_for_the_next_sync() {
     assert_eq!(legs(&h), 1);
 }
 
+/// OKX reporting a fill without a usable average price leaves the order OPEN: a FILLED order
+/// with no fill row would never be synced again, and would be missing from the ledger for good.
+#[tokio::test]
+async fn a_fill_without_a_price_leaves_the_order_open_until_okx_reports_one() {
+    let h = connect_default().await;
+    h.arm();
+    h.okx.state().rest_limit_orders = true;
+    let placed = h
+        .engine
+        .place_order(resting_entry("BTCUSDT"))
+        .await
+        .unwrap()
+        .order;
+    assert_eq!(placed.status, OrderStatus::Open);
+    let report = |h: &Harness, average: &str| {
+        let mut state = h.okx.state();
+        let remote = state.orders.values_mut().next().unwrap();
+        remote.insert("state".into(), json!("filled"));
+        remote.insert("accFillSz".into(), json!("1"));
+        remote.insert("avgPx".into(), json!(average));
+    };
+    for missing in ["", "0"] {
+        report(&h, missing);
+        assert!(h.engine.sync().await.is_err());
+        let row = h.store(|s| s.get_order(&placed.id).unwrap().unwrap());
+        assert_eq!(row.status, OrderStatus::Open, "avgPx {missing:?}");
+        assert!(h
+            .store(|s| s.list_fills_by_order(&placed.id).unwrap())
+            .is_empty());
+    }
+
+    report(&h, "74000");
+    h.engine.sync().await.unwrap();
+    let row = h.store(|s| s.get_order(&placed.id).unwrap().unwrap());
+    assert_eq!(row.status, OrderStatus::Filled);
+    let fills = h.store(|s| s.list_fills_by_order(&placed.id).unwrap());
+    assert_eq!(fills.len(), 1);
+    assert_eq!(fills[0].price, "74000");
+}
+
 // ---- added pairs ------------------------------------------------------------------------------
 
 #[tokio::test]

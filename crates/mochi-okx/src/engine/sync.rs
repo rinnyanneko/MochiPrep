@@ -247,11 +247,13 @@ impl OkxEngine {
         };
         let attached =
             row.status != OrderStatus::Open && filled.gt(&super::zero()) && !row.reduce_only;
-        // As in Node, the order is saved even when its fill then cannot be built.
-        let (fill, unbuilt) = match fill_of(&row, &remote, &filled, at) {
-            Some(Ok(fill)) => (Some(fill), None),
-            Some(Err(error)) => (None, Some(error)),
-            None => (None, None),
+        // A final status is only saved with its fill: only OPEN orders are synced, so a filled
+        // order without its fill row would drop out of the ledger, History and Arena for good.
+        // The order stays as it was and is looked up again on the next sync.
+        let fill = match fill_of(&row, &remote, &filled, at) {
+            Some(Ok(fill)) => Some(fill),
+            Some(Err(error)) => return Err(error),
+            None => None,
         };
         // One transaction: a final status saved without its fill or protection rows would never
         // be looked at again, since only OPEN orders are synced.
@@ -303,7 +305,7 @@ impl OkxEngine {
                     Ok(())
                 })?;
                 if current.as_ref() == Some(&observed) {
-                    unbuilt.map_or(Ok(Some(row)), Err)
+                    Ok(Some(row))
                 } else {
                     Ok(current)
                 }
@@ -589,8 +591,10 @@ fn build_fill(
     at: i64,
 ) -> Result<Fill, EngineError> {
     let ord_id = nullish_text(remote.get("ordId")).unwrap_or_else(|| "undefined".into());
-    // Node binds `remote.avgPx` as is; SQLite cannot store an absent price.
-    let price = nullish_text(remote.get("avgPx"))
+    // OKX sends an empty avgPx until something fills; a fill must never get an invented or
+    // empty price.
+    let price = truthy_text(remote.get("avgPx"))
+        .filter(|price| dec(price).is_ok_and(|price| price.gt(&super::zero())))
         .ok_or_else(|| EngineError::Message("OKX reported a fill without a price".into()))?;
     let fee = dec_or_zero(remote.get("fee"))?;
     let fee = if fee.is_negative() { fee.neg() } else { fee };
