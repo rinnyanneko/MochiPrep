@@ -184,7 +184,8 @@ export function PositionsTable({ positions, actions = true, editable = true, acc
         empty={positions.length === 0 && 'No open positions.'}
       >
         {positions.map((p) => (
-          <tr key={p.id} data-testid="position-row">
+          // The Dashboard lists every account's positions together, and an id is only unique in its account.
+          <tr key={`${p.accountId}:${p.id}`} data-testid="position-row">
             {accountNames && <td className="text-ink-2">{accountNames.get(p.accountId)}</td>}
             <td className="font-semibold">{p.symbol}</td>
             <td>{sideBadge(p.side)}{p.marginMode && <span className="ml-1 text-xs capitalize text-ink-3">{p.marginMode}</span>}</td>
