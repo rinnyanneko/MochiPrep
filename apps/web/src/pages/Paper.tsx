@@ -65,7 +65,7 @@ function ResetAccount({ account }: { account: AccountView }) {
 
 // The API's decimal rule needs a digit before the point, so `.5` is sent as `0.5`.
 // The engine's ORDER_UNCONFIRMED reason (crates/mochi-okx/src/engine/mod.rs): OKX had no
-// record of the order yet, so the server keeps looking it up.
+// record of the order yet, so the server keeps looking it up. A Rust test checks the two match.
 const UNCONFIRMED_EXPIRY = 'OKX has no record of this order yet; check its outcome in OKX';
 
 // An order OKX acknowledged can also expire this way, so its exchange ID is not checked.
@@ -185,7 +185,9 @@ function persistPendingReduction(key: string, pending: PendingReduction, clear =
 
 function reductionSummary(request: Readonly<OrderRequest>): [string, string][] {
   const currency = INSTRUMENTS[request.symbol]?.baseCurrency;
+  // A pending reduction is offered on any pair's ticket, so name its pair.
   const summary: [string, string][] = [
+    ['Symbol', request.symbol],
     ['Type', `${request.type} · reduce only`],
     ['Quantity', currency ? `${request.quantity} ${currency}` : request.quantity],
     ['Position', `${request.side === 'SELL' ? 'LONG' : 'SHORT'} · Isolated`],
@@ -296,6 +298,7 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
         },
         retry: false,
         summary: [
+          ['Symbol', symbol],
           ['Type', `${type}${reduceOnly ? ' · reduce only' : ''}`],
           ['Quantity', `${displayedQuantity} ${instrument.baseCurrency}`],
           ...(boundReduction && selected ? [['Position', `${selected.side} · Isolated`] as [string, string]] : []),

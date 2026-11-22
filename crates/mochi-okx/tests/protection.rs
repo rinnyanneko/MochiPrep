@@ -4924,6 +4924,73 @@ async fn a_held_rejection_survives_a_candidate_expiring_the_unsent_order() {
     );
 }
 
+/// A submission retired before dispatch was never sent, even if a connection candidate that
+/// cannot see that proof has already expired it as unconfirmed.
+#[tokio::test]
+async fn a_retired_submission_is_rejected_even_after_a_candidate_expired_it() {
+    let h = Harness::with_position().await;
+    let mut request = order();
+    request.client_order_id = "retired-then-expired".into();
+    request.side = OrderSide::Sell;
+    request.reduce_only = Some(true);
+    request.stop_loss = None;
+    let placed = h.okx.state().placed.len();
+    let position_id = h.engine.positions()[0].position.id.clone();
+    let first_read = h.okx.hold_next("GET", "/account/positions");
+    let final_read = h.okx.hold_next("GET", "/account/positions");
+    let (result, finalized) = tokio::join!(h.engine.reduce_position(request, position_id), async {
+        let timeout = std::time::Duration::from_secs(2);
+        tokio::time::timeout(timeout, first_read.reached())
+            .await
+            .unwrap();
+        first_read.release();
+        // The order row is written and staged, and the final position check is out.
+        tokio::time::timeout(timeout, final_read.reached())
+            .await
+            .unwrap();
+        let id = h
+            .store(|s| s.get_order_by_client_id(ACCOUNT, "retired-then-expired"))
+            .unwrap()
+            .unwrap()
+            .id;
+        h.advance(60_000);
+        let candidate = restart(&h);
+        candidate.sync_before_registration().await.unwrap();
+        let expired = h.order_row(&id);
+        assert_eq!(expired.status, OrderStatus::Canceled);
+        assert_eq!(
+            expired.reject_reason.as_deref(),
+            Some("OKX has no record of this order yet; check its outcome in OKX")
+        );
+
+        let retired = h.engine.retire();
+        assert_eq!(retired.len(), 1);
+        let finalized = {
+            let local = h.store.inner.lock().unwrap();
+            retired[0]
+                .finalize(
+                    &Rows {
+                        store: &local.0,
+                        instruments: &local.1,
+                    },
+                    ACCOUNT,
+                    START,
+                )
+                .unwrap()
+                .unwrap()
+        };
+        final_read.release();
+        finalized
+    });
+    assert!(result.is_err());
+    assert_eq!(finalized.status, OrderStatus::Rejected);
+    assert_eq!(
+        finalized.reject_reason.as_deref(),
+        Some(EngineError::SessionRetired.to_string().as_str())
+    );
+    assert_eq!(h.okx.state().placed.len(), placed, "nothing was sent");
+}
+
 #[tokio::test]
 async fn a_replaced_stop_is_reopened_only_while_okx_still_lists_it_live() {
     for gone_before_lookup in [false, true] {

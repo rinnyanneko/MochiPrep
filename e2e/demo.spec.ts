@@ -355,6 +355,8 @@ test('OKX market and limit reductions send the selected isolated position', asyn
       const reopenedDialog = page.getByRole('dialog');
       await reopenedDialog.getByLabel('Pending reduction').selectOption(body.clientOrderId);
       await expect(reopenedDialog.getByText(limit, { exact: true })).toBeVisible();
+      // The ticket offers it on any pair, so the dialog names the pair it reduces.
+      await expect(reopenedDialog.getByText('BTCUSDT', { exact: true })).toBeVisible();
       const readback = page.waitForRequest((req) => req.method() === 'GET' && req.url().endsWith('/api/orders/pending-okx-reduction'));
       await reopenedDialog.getByRole('button', { name: 'Check order status' }).click();
       await readback;

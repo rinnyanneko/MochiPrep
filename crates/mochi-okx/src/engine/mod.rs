@@ -483,21 +483,21 @@ impl UnsentOrder {
         {
             return false;
         }
+        // A connection candidate cannot see this proof, so its readback may already have
+        // expired the never-sent order. The proof is the accurate record.
+        let expired_unsent = order.status == OrderStatus::Canceled
+            && matches!(
+                order.reject_reason.as_deref(),
+                Some(ORDER_NOT_ARRIVED | ORDER_UNCONFIRMED)
+            );
         match self {
-            Self::Submission(_) if order.status == OrderStatus::Open => {
+            Self::Submission(_) if order.status == OrderStatus::Open || expired_unsent => {
                 order.status = OrderStatus::Rejected;
                 order.reject_reason = Some(EngineError::SessionRetired.to_string());
                 order.updated_at = now;
             }
-            // A connection candidate cannot see this proof, so its readback may already
-            // have expired the never-sent order. The refusal is the accurate record.
             Self::Rejection { reason, .. }
-                if order.status == OrderStatus::Open
-                    || (order.status == OrderStatus::Canceled
-                        && matches!(
-                            order.reject_reason.as_deref(),
-                            Some(ORDER_NOT_ARRIVED | ORDER_UNCONFIRMED)
-                        )) =>
+                if order.status == OrderStatus::Open || expired_unsent =>
             {
                 order.status = OrderStatus::Rejected;
                 order.reject_reason = Some(reason.clone());
@@ -1839,5 +1839,22 @@ fn to_body(order: &Order, inst_id: &str, cl_ord_id: &str, sz: String) -> PlaceOr
         px: if limit { order.price.clone() } else { None },
         reduce_only: order.reduce_only.then_some(true),
         attach_algo_ords: (!algo.is_empty()).then_some(algo),
+    }
+}
+
+#[cfg(test)]
+mod web_contract {
+    /// The web app matches this reason as text to keep a reduction's retry key, so a reworded
+    /// reason would silently drop that key. The two must change together.
+    #[test]
+    fn the_web_app_names_the_unconfirmed_reason_exactly() {
+        let page = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/web/src/pages/Paper.tsx");
+        let page = std::fs::read_to_string(page).unwrap();
+        let expected = format!("const UNCONFIRMED_EXPIRY = '{}';", super::ORDER_UNCONFIRMED);
+        assert!(
+            page.contains(&expected),
+            "Paper.tsx must declare {expected}"
+        );
     }
 }
