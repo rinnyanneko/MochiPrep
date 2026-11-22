@@ -63,7 +63,7 @@ export function UpdateBanner() {
   );
 }
 
-export function ShutdownButton({ onStopped }: { onStopped: () => void }) {
+export function ShutdownButton({ onStopped }: Readonly<{ onStopped: () => void }>) {
   const connected = useApp((s) => s.connected);
   const [confirm, setConfirm] = useState(false);
   const [stopping, setStopping] = useState(false);

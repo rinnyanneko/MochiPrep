@@ -126,5 +126,6 @@ const REPORT_MAX = 3;
 export function importReport(failures: readonly string[]): string {
   const shown = failures.slice(0, REPORT_MAX).join('; ');
   const rest = failures.length - REPORT_MAX;
-  return `Not imported: ${shown}${rest > 0 ? `; and ${rest} more` : ''}`;
+  const more = rest > 0 ? `; and ${rest} more` : '';
+  return `Not imported: ${shown}${more}`;
 }

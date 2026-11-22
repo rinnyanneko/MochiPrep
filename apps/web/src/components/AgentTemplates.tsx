@@ -19,7 +19,7 @@ export function useAgentTemplates() {
  * The agent settings shared by the agent form and the template editor. `source` is the data
  * source of the agent being edited; a template has none, since it can be used on either.
  */
-export function AgentSettingsFields<T extends AgentSettings>({ value, onChange, source }: { value: T; onChange(patch: Partial<AgentSettings>): void; source?: DataSource }) {
+export function AgentSettingsFields<T extends AgentSettings>({ value, onChange, source }: Readonly<{ value: T; onChange(patch: Partial<AgentSettings>): void; source?: DataSource }>) {
   const setRisk = (patch: Partial<RiskSettings>) => onChange({ risk: { ...value.risk, ...patch } });
   const number = (label: string, key: keyof RiskSettings) => (
     <Field label={label}>
@@ -105,7 +105,7 @@ const BLANK: AgentTemplateFields = {
 };
 
 /** Creates a template (no `id`) or saves changes to a user template. */
-function TemplateEditor({ id, initial, onClose }: { id?: string; initial: AgentTemplateFields; onClose(): void }) {
+function TemplateEditor({ id, initial, onClose }: Readonly<{ id?: string; initial: AgentTemplateFields; onClose(): void }>) {
   const [form, setForm] = useState<AgentTemplateFields>(initial);
   const set = (patch: Partial<AgentTemplateFields>) => setForm((f) => ({ ...f, ...patch }));
   const [saving, setSaving] = useState(false);
@@ -142,7 +142,7 @@ function TemplateEditor({ id, initial, onClose }: { id?: string; initial: AgentT
 }
 
 /** Shows an export document to download or copy: file downloads do not work in every desktop webview. */
-function ExportDialog({ text, count, onClose }: { text: string; count: number; onClose(): void }) {
+function ExportDialog({ text, count, onClose }: Readonly<{ text: string; count: number; onClose(): void }>) {
   const download = () => {
     const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
     const link = document.createElement('a');
@@ -175,7 +175,7 @@ function ExportDialog({ text, count, onClose }: { text: string; count: number; o
  * template route, so the backend validates every field. An imported template is still only a
  * form pre-fill, but its strategy text is sent to the model, so the dialog asks for a review.
  */
-function ImportDialog({ existing, onClose }: { existing: AgentTemplate[]; onClose(): void }) {
+function ImportDialog({ existing, onClose }: Readonly<{ existing: AgentTemplate[]; onClose(): void }>) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
@@ -208,7 +208,7 @@ function ImportDialog({ existing, onClose }: { existing: AgentTemplate[]; onClos
   };
   const run = async () => {
     if (busy || loading) return;
-    const parsed = await attempt(async () => importNames(parseTemplateFile(text), existing));
+    const parsed = await attempt(() => importNames(parseTemplateFile(text), existing));
     if (!parsed) return;
     setBusy(true);
     let imported = 0;
@@ -262,13 +262,13 @@ type Editing = { id?: string; initial: AgentTemplateFields } | null;
 type Panel = { kind: 'export'; text: string; count: number } | { kind: 'import' } | null;
 
 /** Lists every template with create, edit, duplicate, delete, export, import and restore-built-ins. */
-export function TemplatesDialog({ onClose }: { onClose(): void }) {
+export function TemplatesDialog({ onClose }: Readonly<{ onClose(): void }>) {
   const { templates: loaded, error, reload } = useAgentTemplates();
   const templates = loaded ?? [];
   const [editing, setEditing] = useState<Editing>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const exportList = (list: AgentTemplate[]) =>
-    void attempt(async () => setPanel({ kind: 'export', text: exportTemplates(list), count: list.length }));
+    void attempt(() => setPanel({ kind: 'export', text: exportTemplates(list), count: list.length }));
   const mine = templates.filter((t) => !t.builtIn);
 
   if (editing) return <TemplateEditor id={editing.id} initial={editing.initial} onClose={() => setEditing(null)} />;

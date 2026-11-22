@@ -83,9 +83,10 @@ const MAX_DECIMAL_LENGTH = 40;
 
 function matchesStep(value: string, step: string): boolean {
   if (value.length > MAX_DECIMAL_LENGTH) return false;
-  if (!/^\d*\.?\d+$/.test(value)) return false;
+  if (!/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(value)) return false;
   // The instrument registry keeps the exchange's tick string, which may include an exponent.
-  const parsedStep = /^\+?(\d*\.?\d*)(?:e([+-]?\d+))?$/i.exec(step);
+  // Each part of the pattern has one way to match, so a long step string cannot backtrack.
+  const parsedStep = /^\+?(\d+(?:\.\d*)?|\.\d+)(?:e([+-]?\d+))?$/i.exec(step);
   const stepExponent = Number(parsedStep?.[2] ?? 0);
   if (!parsedStep || Math.abs(stepExponent) > 100_000) return false;
   const [whole = '', fraction = ''] = value.split('.');
@@ -183,6 +184,11 @@ function persistPendingReduction(key: string, pending: PendingReduction, clear =
   return persisted;
 }
 
+/** The side of an order that reduces a position on `side`. */
+function exitSide(side: PositionView['side']): 'BUY' | 'SELL' {
+  return side === 'LONG' ? 'SELL' : 'BUY';
+}
+
 function reductionSummary(request: Readonly<OrderRequest>): [string, string][] {
   const currency = INSTRUMENTS[request.symbol]?.baseCurrency;
   // A pending reduction is offered on any pair's ticket, so name its pair.
@@ -196,7 +202,7 @@ function reductionSummary(request: Readonly<OrderRequest>): [string, string][] {
   return summary;
 }
 
-function OrderTicket({ account, symbol, positions }: { account: AccountView; symbol: SymbolId; positions: PositionView[] }) {
+function OrderTicket({ account, symbol, positions }: Readonly<{ account: AccountView; symbol: SymbolId; positions: PositionView[] }>) {
   const quote = useApp((s) => s.quotes[account.source][symbol]);
   const [side, setSide] = useRemembered<'BUY' | 'SELL'>(`ticket.${account.id}.side`, 'BUY', oneOf(['BUY', 'SELL'] as const));
   const [type, setType] = useRemembered<'MARKET' | 'LIMIT'>(`ticket.${account.id}.type`, 'MARKET', oneOf(['MARKET', 'LIMIT'] as const));
@@ -240,14 +246,15 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
   const reductionLimit = boundReduction && type === 'LIMIT';
   const reducible = positions.filter((position) => position.accountId === account.id && position.symbol === symbol && position.closeSupported === true);
   const selected = reducible.find((position) => position.id === positionId);
-  const orderSide = boundReduction && selected ? (selected.side === 'LONG' ? 'SELL' : 'BUY') : side;
+  const orderSide = boundReduction && selected ? exitSide(selected.side) : side;
   const changeReduceOnly = (enabled: boolean) => {
     setReduceOnly(enabled);
     if (enabled && exchange) setPositionId(reducible.length === 1 ? reducible[0]!.id : '');
   };
   const instrument = INSTRUMENTS[symbol]!;
   const limitPrice = reductionLimit ? normalizeDecimal(limit) : limit;
-  const reference = type === 'LIMIT' ? Number(limitPrice) : Number(orderSide === 'BUY' ? quote?.ask : quote?.bid);
+  const quoted = orderSide === 'BUY' ? quote?.ask : quote?.bid;
+  const reference = type === 'LIMIT' ? Number(limitPrice) : Number(quoted);
   const step = Number(instrument.quantityStep);
   const rawQty = mode === 'QTY' ? Number(amount) : (Number(amount) * leverage) / (reference || Infinity);
   const quantity = boundReduction ? Number(reduceQuantity) : Number((Math.floor(rawQty / step + 1e-9) * step).toFixed(8));
@@ -269,6 +276,22 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
   const canConfirm = confirmation !== null && !submitting && (confirmation.retry || (
     valid && confirmation.request.symbol === symbol && (!boundReduction || confirmation.request.positionId === selected?.id)
   ));
+
+  const reviewLabel = () => {
+    if (confirmation?.retry) return 'Review pending reduction';
+    if (boundReduction) return 'Review reduction';
+    return side === 'BUY' ? 'Review long' : 'Review short';
+  };
+  const confirmationKind = () => {
+    if (confirmation?.request.positionId) return 'reduction';
+    return confirmation?.request.side === 'BUY' ? 'long' : 'short';
+  };
+  const submitLabel = () => {
+    if (submitting) return 'Submitting…';
+    if (confirmation?.lookupId) return 'Check order status';
+    if (confirmation?.retry) return 'Retry reduction';
+    return account.venue === 'OKX_LIVE' ? 'Place real order' : 'Place order';
+  };
 
   const refreshPendingReductions = () => {
     const pending = exchange ? readPendingReductions(pendingKey, account.id) : [];
@@ -453,12 +476,12 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
         <div className="flex justify-between"><span className="text-ink-3">Available</span><span className="num">{money(account.balance.availableBalance)}</span></div>
       </div>
       <Button className="w-full" size="lg" variant={(confirmation?.request.side ?? orderSide) === 'BUY' ? 'long' : 'short'} disabled={!confirmation?.retry && !valid} onClick={review}>
-        {confirmation?.retry ? 'Review pending reduction' : boundReduction ? 'Review reduction' : `Review ${side === 'BUY' ? 'long' : 'short'}`}
+        {reviewLabel()}
       </Button>
       <Dialog
         open={dialogOpen}
         onOpenChange={(open) => !open && closeDialog()}
-        title={`${confirmation?.retry ? 'Pending' : 'Confirm'} ${confirmation?.request.positionId ? 'reduction' : confirmation?.request.side === 'BUY' ? 'long' : 'short'} ${confirmation?.request.symbol ?? symbol}`}
+        title={`${confirmation?.retry ? 'Pending' : 'Confirm'} ${confirmationKind()} ${confirmation?.request.symbol ?? symbol}`}
         description={account.venue === 'PAPER' ? 'Simulated order. Estimates only: the engine fills against the live quote, with spread and slippage.' : 'Sent to OKX. Estimates only: the exchange decides the fill.'}
       >
         {account.venue === 'OKX_LIVE' && (
@@ -500,7 +523,7 @@ function OrderTicket({ account, symbol, positions }: { account: AccountView; sym
             ? <Button disabled={submitting} onClick={discardRetry}>Discard retry</Button>
             : <Button disabled={submitting} onClick={closeDialog}>Cancel</Button>}
           <Button variant={confirmation?.request.side === 'BUY' ? 'long' : 'short'} disabled={!canConfirm} onClick={submit}>
-            {submitting ? 'Submitting…' : confirmation?.lookupId ? 'Check order status' : confirmation?.retry ? 'Retry reduction' : account.venue === 'OKX_LIVE' ? 'Place real order' : 'Place order'}
+            {submitLabel()}
           </Button>
         </div>
       </Dialog>

@@ -222,7 +222,13 @@ export function PositionsTable({ positions, actions = true, editable = true, acc
 const ORDER_LABEL: Record<Order['type'], string> = { MARKET: 'Market', LIMIT: 'Limit', STOP_MARKET: 'Stop loss', TAKE_PROFIT_MARKET: 'Take profit', TRAILING_STOP_MARKET: 'Trailing stop' };
 const ORDER_TONE: Record<Order['status'], Tone> = { OPEN: 'info', FILLED: 'up', CANCELED: 'neutral', REJECTED: 'down' };
 
-export function OrdersTable({ orders, cancellable, exchange, emptyText }: { orders: Order[]; cancellable?: boolean; exchange: boolean; emptyText: string }) {
+/** Exchange orders show the size OKX was sent; a paper close sizes itself from the position. */
+function orderSize(order: Order, exchange: boolean): string {
+  if (exchange) return order.quantity;
+  return order.closePosition ? 'Position' : qty(order.quantity);
+}
+
+export function OrdersTable({ orders, cancellable, exchange, emptyText }: Readonly<{ orders: Order[]; cancellable?: boolean; exchange: boolean; emptyText: string }>) {
   const dateTime = useDateTime();
   return (
     <Table head={['Time', 'Symbol', 'Side', 'Type', 'Size', 'Price', 'Status', 'Order', ...(cancellable ? [''] : [])]} empty={orders.length === 0 && emptyText}>
@@ -232,7 +238,7 @@ export function OrdersTable({ orders, cancellable, exchange, emptyText }: { orde
           <td className="font-semibold">{o.symbol}</td>
           <td className="font-semibold">{orderSide(o.side)}</td>
           <td>{ORDER_LABEL[o.type]}{o.reduceOnly ? <span className="text-ink-3"> · reduce</span> : ''}</td>
-          <td className="num">{exchange ? o.quantity : o.closePosition ? 'Position' : qty(o.quantity)}</td>
+          <td className="num">{orderSize(o, exchange)}</td>
           <td className="num">{price(o.avgFillPrice ?? o.price ?? o.triggerPrice, o.symbol)}</td>
           <td title={o.rejectReason ?? undefined}>
             <Badge tone={ORDER_TONE[o.status]}>{o.status}</Badge>

@@ -343,7 +343,7 @@ export function useQuery<T>(fetcher: () => Promise<T>, deps: unknown[], topics: 
 }
 
 /** Runs an action, turns failure into a toast, and reports whether it succeeded. */
-export async function attempt<T>(action: () => Promise<T>): Promise<T | undefined> {
+export async function attempt<T>(action: () => T | Promise<T>): Promise<T | undefined> {
   try {
     return await action();
   } catch (error) {

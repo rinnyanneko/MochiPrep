@@ -181,7 +181,7 @@ function ReplayControls() {
   );
 }
 
-function TopBar({ onStopped }: { onStopped: () => void }) {
+function TopBar({ onStopped }: Readonly<{ onStopped: () => void }>) {
   const source = useApp((s) => s.source);
   const setSource = useApp((s) => s.setSource);
   const theme = useApp((s) => s.theme);

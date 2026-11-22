@@ -23,7 +23,7 @@ impl ApiError {
 
     /// An order that never reached OKX, so the client may correct and resubmit it
     /// under a new key instead of resolving the old one by lookup.
-    pub const NOT_DISPATCHED: &'static str = "NOT_DISPATCHED";
+    pub const NOT_DISPATCHED: &str = "NOT_DISPATCHED";
 
     pub fn not_dispatched(message: impl Into<String>) -> Self {
         Self {
