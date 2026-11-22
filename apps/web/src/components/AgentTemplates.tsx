@@ -186,14 +186,27 @@ function ImportDialog({ existing, onClose }: { existing: AgentTemplate[]; onClos
   }, []);
   // A slow read of an earlier pick must not replace the text of a later one.
   const selection = useRef(0);
+  const [loading, setLoading] = useState(false);
   const pick = async (file: File | undefined) => {
     const mine = ++selection.current;
-    if (!file) return;
+    if (!file) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     const content = await attempt(() => file.text());
-    if (content !== undefined && mine === selection.current) setText(content);
+    if (mine !== selection.current || !mounted.current) return;
+    setLoading(false);
+    if (content !== undefined) setText(content);
+  };
+  // Typing supersedes any file still being read.
+  const edit = (value: string) => {
+    selection.current++;
+    setLoading(false);
+    setText(value);
   };
   const run = async () => {
-    if (busy) return;
+    if (busy || loading) return;
     const parsed = await attempt(async () => importNames(parseTemplateFile(text), existing));
     if (!parsed) return;
     setBusy(true);
@@ -223,15 +236,15 @@ function ImportDialog({ existing, onClose }: { existing: AgentTemplate[]; onClos
     <Dialog open onOpenChange={onClose} title="Import templates" description="Pick an exported .json file or paste its text. Names that already exist get a copy suffix." wide>
       <label className="mb-2 flex items-center gap-2 text-xs text-ink-2">
         <span className="font-semibold">File</span>
-        <input type="file" accept="application/json,.json" aria-label="Template file" onChange={(e) => void pick(e.target.files?.[0])} className="text-xs" />
+        <input type="file" accept="application/json,.json" aria-label="Template file" disabled={busy} onChange={(e) => void pick(e.target.files?.[0])} className="text-xs" />
       </label>
-      <Textarea aria-label="Template export text" value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste an exported template file here" className="h-48 font-mono text-[11px]" />
+      <Textarea aria-label="Template export text" value={text} readOnly={busy} onChange={(e) => edit(e.target.value)} placeholder="Paste an exported template file here" className="h-48 font-mono text-[11px]" />
       <p className="mt-2 rounded-xl bg-warn-soft px-3 py-2 text-xs text-warn">
         Only import files you trust, and review each template before using it. Strategy text is sent to the AI model, and an imported template may use Trade automatically. Every order is still limited by the risk checks.
       </p>
       <div className="mt-4 flex justify-end gap-2">
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="primary" disabled={busy || !text.trim()} onClick={run}><FileUp /> Import</Button>
+        <Button variant="primary" disabled={busy || loading || !text.trim()} onClick={run}><FileUp /> Import</Button>
       </div>
     </Dialog>
   );
