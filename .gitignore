@@ -16,3 +16,5 @@ playwright-report/
 .idea/
 target/
 crates/mochi-launcher/binaries/
+.codewhale
+.worktrees/
