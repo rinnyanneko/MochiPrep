@@ -76,24 +76,31 @@ export function openPnl(position: PositionView, mark: number) {
   return { pnl, roePct: margin > 0 ? (pnl / margin) * 100 : null };
 }
 
+/** Liquidation is usually too far away to keep in the chart's autoscale range. */
+export function isLiquidationLine(line: PriceLineSpec) {
+  return line.id.startsWith('liq:');
+}
+
 export function buildPriceLines(positions: PositionView[], orders: Order[], symbol: SymbolId, mark: number | null): PriceLineSpec[] {
   const lines: PriceLineSpec[] = [];
   for (const position of positions) {
     if (position.symbol !== symbol) continue;
     const size = `${position.side} ${qty(position.quantity)}`;
+    // Isolated OKX positions can share a pair, and the chart keys its lines by id.
+    const id = (kind: string) => `${kind}:${position.id}`;
     if (mark === null) {
-      lines.push({ id: 'entry', price: Number(position.entryPrice), label: size, tone: position.side === 'LONG' ? 'rise' : 'fall' });
+      lines.push({ id: id('entry'), price: Number(position.entryPrice), label: size, tone: position.side === 'LONG' ? 'rise' : 'fall' });
     } else {
       const { pnl, roePct } = openPnl(position, mark);
       const roe = roePct === null ? '' : ` (${roePct > 0 ? '+' : roePct < 0 ? '−' : ''}${Math.abs(roePct).toFixed(2)}%)`;
-      lines.push({ id: 'entry', price: Number(position.entryPrice), label: size, tone: position.side === 'LONG' ? 'rise' : 'fall', pnl: { text: `${signedMoney(pnl)}${roe}`, tone: pnl >= 0 ? 'rise' : 'fall' } });
+      lines.push({ id: id('entry'), price: Number(position.entryPrice), label: size, tone: position.side === 'LONG' ? 'rise' : 'fall', pnl: { text: `${signedMoney(pnl)}${roe}`, tone: pnl >= 0 ? 'rise' : 'fall' } });
     }
-    if (position.takeProfit) lines.push({ id: 'tp', price: Number(position.takeProfit), label: 'TP', tone: 'rise' });
-    if (position.stopLoss) lines.push({ id: 'sl', price: Number(position.stopLoss), label: 'SL', tone: 'fall' });
+    if (position.takeProfit) lines.push({ id: id('tp'), price: Number(position.takeProfit), label: 'TP', tone: 'rise' });
+    if (position.stopLoss) lines.push({ id: id('sl'), price: Number(position.stopLoss), label: 'SL', tone: 'fall' });
     const trail = position.trailingStop;
-    if (trail?.triggerPrice) lines.push({ id: 'trail', price: Number(trail.triggerPrice), label: 'Trailing SL', tone: 'fall' });
-    else if (trail?.activationPrice) lines.push({ id: 'trail', price: Number(trail.activationPrice), label: 'Trailing SL activates', tone: 'info' });
-    if (Number(position.liquidationPrice) > 0) lines.push({ id: 'liq', price: Number(position.liquidationPrice), label: 'Liq', tone: 'warn' });
+    if (trail?.triggerPrice) lines.push({ id: id('trail'), price: Number(trail.triggerPrice), label: 'Trailing SL', tone: 'fall' });
+    else if (trail?.activationPrice) lines.push({ id: id('trail'), price: Number(trail.activationPrice), label: 'Trailing SL activates', tone: 'info' });
+    if (Number(position.liquidationPrice) > 0) lines.push({ id: id('liq'), price: Number(position.liquidationPrice), label: 'Liq', tone: 'warn' });
   }
   for (const order of orders) {
     if (order.symbol !== symbol || order.status !== 'OPEN' || order.type !== 'LIMIT' || !order.price) continue;

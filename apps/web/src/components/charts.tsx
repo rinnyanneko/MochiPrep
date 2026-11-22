@@ -20,7 +20,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ema, macd, rsi, TIMEFRAME_MS, type Candle, type Fill, type Quote, type Series, type SymbolId, type Timeframe } from '@mochiprep/shared';
 import { chartTickLabel, formatDateTime, type TickKind, type TimeZonePref } from '@/lib/display';
 import { money, pnlClass, price as formatPrice, priceDigits, qty, signedMoney } from '@/lib/format';
-import type { ChartTone, PriceLineSpec, TradeMarker, TradeSummary } from '@/lib/trade-overlay';
+import { isLiquidationLine, type ChartTone, type PriceLineSpec, type TradeMarker, type TradeSummary } from '@/lib/trade-overlay';
 import { cn } from '@/lib/utils';
 import { useApp } from '@/store';
 import { ChartRole } from './chart-pool';
@@ -130,7 +130,7 @@ function buildMarketChart(element: HTMLDivElement, showIndicators: boolean): Mar
     // Keeps TP, SL and limits on screen. Liquidation is usually too far away to include.
     autoscaleInfoProvider: (base: () => AutoscaleInfo | null) => {
       const info = base();
-      const prices = slot.lines.filter((line) => line.id !== 'liq').map((line) => line.price);
+      const prices = slot.lines.filter((line) => !isLiquidationLine(line)).map((line) => line.price);
       if (!info?.priceRange || prices.length === 0) return info;
       return {
         ...info,
