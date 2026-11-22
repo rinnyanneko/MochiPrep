@@ -52,7 +52,8 @@ test('the release PKGBUILD pins the tagged version and verifies its release sour
     'source=("https://github.com/example/MochiPrep/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")',
   ));
   assert.ok(recipe.split(/\r?\n/).includes(`sha256sums=('${checksum}')`));
-  assert.equal(execFileSync('tar', ['-xOzf', archive, 'MochiPrep-2.3.4/README.md'], { encoding: 'utf8' })
+  // A relative name, run from `out`: GNU tar (Git for Windows) reads `C:\...` as a remote host.
+  assert.equal(execFileSync('tar', ['-xOzf', 'mochiprep-2.3.4.tar.gz', 'MochiPrep-2.3.4/README.md'], { cwd: out, encoding: 'utf8' })
     .replace(/\r\n/g, '\n'), 'Tracked release content\n');
 
   const retry = run('v2.3.4');
