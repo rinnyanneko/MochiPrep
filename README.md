@@ -71,7 +71,7 @@ The data folder for a source build is `.mochiprep/` in the repository. For devel
 
 Add an AI provider and its key in **Settings**, then create an agent in **AI Agents** on a paper account. Pick **Replay** in the top bar to trade recorded market data, or **Live OKX** for live prices.
 
-The replay plays recorded OKX one-minute bars of the built-in pairs: 18 days ending at a UTC midnight, the first 4 of them as history for the indicators. The first time you open the replay, MochiPrep downloads those bars from OKX, which takes a few minutes, and keeps them in its database; later starts read them from there. Every agent on the replay sees the same bars, so runs are comparable. Replay trades, PnL and leaderboard results are simulations on past data, not forecasts. Without a network connection (`MOCHIPREP_OFFLINE=1`), the replay plays a bundled synthetic tape instead.
+The replay plays recorded OKX one-minute bars of the built-in pairs: 18 days ending at a UTC midnight, the first 4 of them as history for the indicators. The first time you open the replay, MochiPrep downloads those bars from OKX, which takes about ten minutes, and keeps them in its database; later starts read them from there. Every agent on the replay sees the same bars, so runs are comparable. Replay trades, PnL and leaderboard results are simulations on past data, not forecasts. Without a network connection (`MOCHIPREP_OFFLINE=1`), the replay plays a bundled synthetic tape instead.
 
 ## AI providers
 
