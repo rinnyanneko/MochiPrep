@@ -89,14 +89,19 @@ function ConnectDialog({ preset, onClose }: { preset: ExchangeStatus | null; onC
   );
 }
 
-function ArmDialog({ status, onClose }: { status: ExchangeStatus; onClose(): void }) {
+/** `reason` says what is waiting on the arm, such as starting an agent; `onArmed` then does it. */
+export function ArmDialog({ status, onClose, onArmed, reason }: { status: ExchangeStatus; onClose(): void; onArmed?(): void; reason?: string }) {
   const [phrase, setPhrase] = useState('');
   const arm = async () => {
     const ok = await attempt(() => api.post(`/exchange/okx/${status.accountId}/arm`, { confirmation: phrase }));
-    if (ok) onClose();
+    if (ok) {
+      onClose();
+      onArmed?.();
+    }
   };
   return (
     <Dialog open onOpenChange={onClose} title={`Arm ${status.name}?`} description="Arming allows real orders from you and from running agents. It ends at Stop All, Disarm, or a backend restart, even when the key is saved.">
+      {reason && <p className="mb-3 text-[13px] text-ink-2" data-testid="arm-reason">{reason}</p>}
       <ul className="mb-3 space-y-1 text-[13px] text-ink-2">
         <li>Up to {status.limits.maxNotional} USDT per order, {status.limits.maxLeverage}x leverage</li>
         <li>Up to {status.limits.maxOpenPositions} positions, new orders stop after a {status.limits.maxDailyLossPct}% daily loss</li>

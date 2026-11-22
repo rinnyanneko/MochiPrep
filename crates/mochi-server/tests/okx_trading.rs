@@ -1478,3 +1478,79 @@ async fn arena_counts_a_position_opened_by_a_partially_filled_limit_order() {
 async fn arena_counts_a_position_closed_before_late_confirmation() {
     exchange_arena_recovers_execution("filled", true).await;
 }
+
+fn okx_agent(id: &str, execution_mode: &str) -> rows::Agent {
+    rows::Agent {
+        id: id.into(),
+        name: id.into(),
+        provider_id: "remote".into(),
+        model: "m".into(),
+        symbol: "BTCUSDT".into(),
+        timeframe: "15m".into(),
+        strategy: String::new(),
+        account_id: ACCOUNT.into(),
+        risk: serde_json::value::to_raw_value(&default_risk_settings()).unwrap(),
+        interval_sec: 900,
+        execution_mode: execution_mode.into(),
+        use_news: false,
+        allow_trailing_stop: false,
+        status: "WAITING".into(),
+        running: true,
+        next_run_at: Some(START + 900_000),
+        last_run_at: None,
+        status_detail: None,
+        consecutive_errors: 0,
+        is_demo: false,
+        created_at: 1,
+    }
+}
+
+#[tokio::test]
+async fn disarming_pauses_auto_agents_and_keeps_suggest_agents_running() {
+    let w = world(true).await;
+    w.state
+        .runtime
+        .call(|r| {
+            rows::insert_provider(
+                r.connection(),
+                &serde_json::from_value(json!({
+                    "id": "remote", "name": "r", "kind": "OPENAI", "baseUrl": null,
+                    "defaultModel": "m", "inputPricePerMTok": null, "outputPricePerMTok": null,
+                    "createdAt": 1,
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            rows::insert_agent(r.connection(), &okx_agent("auto", "AUTO")).unwrap();
+            rows::insert_agent(r.connection(), &okx_agent("suggest", "SIGNAL")).unwrap();
+        })
+        .await
+        .unwrap();
+
+    let path = format!("/api/exchange/okx/{ACCOUNT}/disarm");
+    assert_eq!(send(&w.state, "POST", &path, None).await.0, 200);
+    let agents = w
+        .state
+        .runtime
+        .call(|r| rows::list_agents(r.connection()).unwrap())
+        .await
+        .unwrap();
+    let auto = agents.iter().find(|a| a.id == "auto").unwrap();
+    assert!(!auto.running);
+    assert_eq!(auto.status, "PAUSED");
+    assert_eq!(
+        auto.status_detail.as_deref(),
+        Some("OKX is not armed. Arm it to resume.")
+    );
+    let suggest = agents.iter().find(|a| a.id == "suggest").unwrap();
+    assert!(suggest.running);
+
+    // Resuming needs arming again.
+    let (status, refused) = send(&w.state, "POST", "/api/agents/auto/resume", None).await;
+    assert_eq!(status, 400);
+    assert_eq!(
+        refused["error"],
+        "OKX is not armed. Arm it in Settings first."
+    );
+    w.state.runtime.shutdown().await;
+}

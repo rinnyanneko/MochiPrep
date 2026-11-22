@@ -524,6 +524,33 @@ impl Runtime {
         self.invalidate(&[Topic::Exchange]);
     }
 
+    /// After a disarm: an Auto agent on a disarmed real account would keep paying for AI calls
+    /// whose orders are all refused, so it pauses and says why. Suggest agents place nothing and
+    /// keep running.
+    pub fn pause_disarmed_auto_agents(&mut self, account: &str) -> Result<(), ApiError> {
+        if self.is_armed(account) {
+            return Ok(());
+        }
+        let Some(real) = self
+            .engine()
+            .store()
+            .get_account(account)
+            .map_err(|e| self.api_error(e))?
+            .filter(|a| a.venue == AccountVenue::OkxLive)
+        else {
+            return Ok(());
+        };
+        let detail = format!("{} is not armed. Arm it to resume.", real.name);
+        let mut first_error = None;
+        for a in rows::list_agents(self.connection()).map_err(|e| self.api_error(e))? {
+            if a.account_id == account && a.running && a.execution_mode == "AUTO" {
+                if let Err(error) = self.pause_agent(&a.id, Some(detail.clone())) {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
     pub(super) fn is_armed(&self, account_id: &str) -> bool {
         self.exchanges
             .get(account_id)

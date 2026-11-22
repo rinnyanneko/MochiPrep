@@ -2,6 +2,7 @@ import { LayoutTemplate, Pause, Pencil, Play, Plus, ScanSearch, Square, StepForw
 import { useState } from 'react';
 import { DEFAULT_RISK_SETTINGS, type Agent, type AgentStatus, type DecisionRecord, type SymbolId } from '@mochiprep/shared';
 import { AgentSettingsFields, TemplatesDialog, useAgentTemplates } from '@/components/AgentTemplates';
+import { ArmDialog } from '@/components/ExchangeCard';
 import { Mochi, type MochiMood } from '@/components/Mochi';
 import { PageTitle } from '@/components/Shell';
 import { DecisionDetail, DecisionList, VenueBadge } from '@/components/trading';
@@ -150,7 +151,12 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
   const dateTime = useDateTime();
   const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
   const provider = useApp((s) => s.providers.find((p) => p.id === agent.providerId));
+  const exchange = useApp((s) => s.exchange.find((e) => e.accountId === agent.accountId));
   const [busy, setBusy] = useState(false);
+  // An Auto agent on a real account trades only while it is armed, so starting one arms first.
+  const [pendingArm, setPendingArm] = useState<{ reason: string; then(): void } | null>(null);
+  const needsArm = agent.executionMode === 'AUTO' && account?.venue === 'OKX_LIVE' && exchange?.connected === true && !exchange.armed;
+  const armFirst = (reason: string, then: () => void) => (needsArm ? setPendingArm({ reason, then }) : then());
   const status = STATUS[agent.status];
   const initial = Number(account?.initialBalance ?? 0);
   const equity = Number(account?.balance.equity ?? 0);
@@ -185,6 +191,12 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
         </span>
       </button>
       {agent.statusDetail && <p className="mt-2 rounded-lg bg-warn-soft px-2.5 py-1.5 text-xs text-warn">{agent.statusDetail}</p>}
+      {needsArm && !agent.statusDetail && (
+        <p className="mt-2 rounded-lg bg-down-soft px-2.5 py-1.5 text-xs font-semibold text-down" data-testid="agent-needs-arm">
+          {account?.name} is not armed. Starting this agent asks you to arm it.
+        </p>
+      )}
+      {pendingArm && exchange && <ArmDialog status={exchange} reason={pendingArm.reason} onArmed={pendingArm.then} onClose={() => setPendingArm(null)} />}
       <p className="mt-2 text-[11px] text-ink-3">Last run {dateTime(agent.lastRunAt)}{agent.nextRunAt ? ` · next ${dateTime(agent.nextRunAt)}` : ''}</p>
       <div className="mt-3 flex flex-wrap gap-1.5">
         {agent.running ? (
@@ -194,14 +206,14 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
           </>
         ) : agent.status === 'PAUSED' ? (
           <>
-            <Button size="sm" variant="primary" onClick={() => act('resume')}><Play /> Resume</Button>
+            <Button size="sm" variant="primary" onClick={() => armFirst(`${agent.name} resumes once the account is armed.`, () => void act('resume'))}><Play /> Resume</Button>
             <Button size="sm" onClick={() => act('stop')}><Square /> Stop</Button>
           </>
         ) : (
-          <Button size="sm" variant="primary" onClick={() => act('start')}><Play /> Start</Button>
+          <Button size="sm" variant="primary" onClick={() => armFirst(`${agent.name} starts once the account is armed.`, () => void act('start'))}><Play /> Start</Button>
         )}
         <Button size="sm" disabled={busy} onClick={() => cycle('analyze')} title="Ask the model and show the result without trading"><ScanSearch /> Analyze now</Button>
-        <Button size="sm" disabled={busy} onClick={() => cycle('run')} title={agent.executionMode === 'AUTO' ? 'One full cycle, placing an order if approved' : 'One full cycle, suggesting a trade if approved'}><StepForward /> Run one cycle</Button>
+        <Button size="sm" disabled={busy} onClick={() => armFirst(`${agent.name} runs one cycle once the account is armed.`, () => void cycle('run'))} title={agent.executionMode === 'AUTO' ? 'One full cycle, placing an order if approved' : 'One full cycle, suggesting a trade if approved'}><StepForward /> Run one cycle</Button>
         <span className="ml-auto flex gap-1">
           <Button size="icon" variant="ghost" aria-label={`Edit ${agent.name}`} onClick={onEdit}><Pencil /></Button>
           <Button size="icon" variant="ghost" aria-label={`Delete ${agent.name}`} disabled={agent.running} onClick={() => attempt(() => api.del(`/agents/${agent.id}`))}><Trash2 /></Button>
