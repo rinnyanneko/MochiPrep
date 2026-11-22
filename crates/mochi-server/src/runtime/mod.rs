@@ -602,7 +602,10 @@ impl Runtime {
             )));
         }
         let agents = rows::list_agents(self.connection()).map_err(|e| self.api_error(e))?;
-        if agents.iter().any(|agent| agent.symbol == symbol) {
+        if agents
+            .iter()
+            .any(|agent| agent.symbols.iter().any(|s| s == symbol))
+        {
             return Err(ApiError::bad_request("Agents still use this pair"));
         }
         let store = self.engine.store();

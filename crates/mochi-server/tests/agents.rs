@@ -78,7 +78,7 @@ async fn setup_with(
  let a=r.engine_mut().create_account(CreateAccountArgs{name:"agent".into(),source,initial_balance:None,is_demo:None,config:None}).unwrap();
  rows::insert_provider(r.connection(),&serde_json::from_value(json!({"id":"provider","name":"test","kind":"OPENAI","baseUrl":null,"defaultModel":"test","inputPricePerMTok":1,"outputPricePerMTok":2,"createdAt":1})).unwrap()).unwrap();
  r.set_key("provider","custom-secret-agent-key").unwrap();
- rows::insert_agent(r.connection(),&rows::Agent{id:"agent".into(),name:"agent".into(),provider_id:"provider".into(),model:"test".into(),symbol:"BTCUSDT".into(),timeframe:"15m".into(),strategy:"test".into(),account_id:a.id.clone(),risk:serde_json::value::to_raw_value(&default_risk_settings()).unwrap(),interval_sec:900,execution_mode:mode,use_news:false,allow_trailing_stop:false,status:"IDLE".into(),running:false,next_run_at:None,last_run_at:None,status_detail:None,consecutive_errors:0,is_demo:false,created_at:1}).unwrap();a.id
+ rows::insert_agent(r.connection(),&rows::Agent{id:"agent".into(),name:"agent".into(),provider_id:"provider".into(),model:"test".into(),symbol:"BTCUSDT".into(),symbols:vec!["BTCUSDT".into()],timeframe:"15m".into(),strategy:"test".into(),account_id:a.id.clone(),risk:serde_json::value::to_raw_value(&default_risk_settings()).unwrap(),interval_sec:900,execution_mode:mode,use_news:false,allow_trailing_stop:false,status:"IDLE".into(),running:false,next_run_at:None,last_run_at:None,status_detail:None,consecutive_errors:0,is_demo:false,created_at:1}).unwrap();a.id
  }).await.unwrap();
     (rt, model, account)
 }

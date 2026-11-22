@@ -92,7 +92,7 @@ impl Test {
                 Some(json!({"name":"User account","source":"REPLAY"})),
             )
             .await;
-        let input = json!({"name":"Agent","providerId":provider,"model":"m","symbol":"BTCUSDT","timeframe":"15m","strategy":"","accountId":account["id"],"risk":default_risk_settings(),"intervalSec":900});
+        let input = json!({"name":"Agent","providerId":provider,"model":"m","symbols":["BTCUSDT"],"timeframe":"15m","strategy":"","accountId":account["id"],"risk":default_risk_settings(),"intervalSec":900});
         let agent = self.ok("POST", "/api/agents", Some(input.clone())).await;
         assert_eq!(agent["executionMode"], "SIGNAL");
         (agent["id"].as_str().unwrap().into(), input)
@@ -380,7 +380,7 @@ async fn agent_refs_busy_crud_lifecycle_and_signal_statuses() {
         json!({"error":"Unknown AI provider"})
     );
     wrong = input.clone();
-    wrong["symbol"] = json!("ADAUSDT");
+    wrong["symbols"] = json!(["ADAUSDT"]);
     assert!(t.send("POST", "/api/agents", Some(wrong)).await.1["error"]
         .as_str()
         .unwrap()
@@ -513,5 +513,155 @@ async fn all_new_writes_parse_malformed_bodies_before_missing_ids_and_redact_sch
     let error = t.send("POST", "/api/providers", Some(provider)).await;
     assert_eq!(error.0, 400);
     assert!(!error.1.to_string().contains("gateway-secret"));
+    t.close().await;
+}
+
+fn decision(symbol: &str, action: &str, stop: Option<f64>) -> Value {
+    json!({"symbol":symbol,"action":action,"orderType":"MARKET","entryPrice":null,
+           "stopLoss":stop,"takeProfit":null,"reason":"test","confidence":0.8,"expiresAt":null})
+}
+
+/// An Auto agent on a fresh replay account that trades `symbols`.
+async fn multi_agent(t: &Test, symbols: &[&str]) -> String {
+    let provider = t.provider().await;
+    let account = t
+        .ok(
+            "POST",
+            "/api/accounts",
+            Some(json!({"name":"Pairs","source":"REPLAY"})),
+        )
+        .await;
+    let input = json!({"name":"Pairs","providerId":provider,"model":"m","symbols":symbols,
+        "timeframe":"15m","strategy":"","accountId":account["id"],
+        "risk":default_risk_settings(),"intervalSec":900,"executionMode":"AUTO"});
+    let agent = t.ok("POST", "/api/agents", Some(input)).await;
+    assert_eq!(agent["symbols"], json!(symbols));
+    assert_eq!(agent["symbol"], symbols[0]);
+    agent["id"].as_str().unwrap().into()
+}
+
+#[tokio::test]
+async fn one_model_call_decides_every_pair_and_each_pair_trades_on_its_own() {
+    let t = Test::new().await;
+    let id = multi_agent(&t, &["BTCUSDT", "ETHUSDT"]).await;
+    *t.gateway.text.lock().unwrap() = json!({"decisions":[
+        decision("ETHUSDT", "LONG", Some(3000.0)),
+        decision("BTCUSDT", "HOLD", None),
+    ]})
+    .to_string();
+    let first = t.ok("POST", &format!("/api/agents/{id}/run"), None).await;
+    assert_eq!(first["symbol"], "BTCUSDT");
+
+    // One request for both pairs, in the multi-pair format.
+    let requests = t.gateway.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    let prompt = requests[0].to_string();
+    assert!(prompt.contains("decisions"), "{prompt}");
+    assert!(prompt.contains("BTCUSDT") && prompt.contains("ETHUSDT"));
+
+    let decisions = t
+        .ok("GET", &format!("/api/decisions?agentId={id}"), None)
+        .await;
+    let by_symbol = |symbol: &str| {
+        decisions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["symbol"] == symbol)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(decisions.as_array().unwrap().len(), 2);
+    assert_eq!(by_symbol("BTCUSDT")["outcome"], "HOLD");
+    let eth = by_symbol("ETHUSDT");
+    assert_eq!(eth["outcome"], "EXECUTED", "{eth}");
+    assert_eq!(eth["decision"]["symbol"], "ETHUSDT");
+    t.close().await;
+}
+
+#[tokio::test]
+async fn a_pair_the_model_leaves_out_fails_alone() {
+    let t = Test::new().await;
+    let id = multi_agent(&t, &["BTCUSDT", "ETHUSDT"]).await;
+    *t.gateway.text.lock().unwrap() = json!({"decisions":[
+        decision("BTCUSDT", "HOLD", None),
+        decision("SOLUSDT", "LONG", Some(100.0)),
+    ]})
+    .to_string();
+    t.ok("POST", &format!("/api/agents/{id}/run"), None).await;
+    let decisions = t
+        .ok("GET", &format!("/api/decisions?agentId={id}"), None)
+        .await;
+    let outcomes: Vec<(String, String)> = decisions
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| {
+            (
+                d["symbol"].as_str().unwrap().into(),
+                d["outcome"].as_str().unwrap().into(),
+            )
+        })
+        .collect();
+    assert!(
+        outcomes.contains(&("BTCUSDT".into(), "HOLD".into())),
+        "{outcomes:?}"
+    );
+    assert!(outcomes.contains(&("ETHUSDT".into(), "INVALID_OUTPUT".into())));
+    // A decision for a pair the agent does not trade is never used.
+    assert!(!outcomes.iter().any(|(s, _)| s == "SOLUSDT"));
+    let agent = t.ok("GET", "/api/agents", None).await[0].clone();
+    assert_ne!(
+        agent["status"], "ERROR",
+        "one pair failing is not a failed cycle"
+    );
+    assert_eq!(agent["consecutiveErrors"], 0);
+
+    // An answer that is not the decisions object fails every pair.
+    *t.gateway.text.lock().unwrap() = decision("BTCUSDT", "HOLD", None).to_string();
+    t.ok("POST", &format!("/api/agents/{id}/run"), None).await;
+    let agent = t.ok("GET", "/api/agents", None).await[0].clone();
+    assert_eq!(agent["status"], "ERROR");
+    assert_eq!(agent["consecutiveErrors"], 1);
+    t.close().await;
+}
+
+#[tokio::test]
+async fn an_agent_takes_one_to_ten_distinct_pairs() {
+    let t = Test::new().await;
+    let provider = t.provider().await;
+    let account = t
+        .ok(
+            "POST",
+            "/api/accounts",
+            Some(json!({"name":"A","source":"REPLAY"})),
+        )
+        .await;
+    let input = |symbols: Value| {
+        json!({"name":"A","providerId":provider,"model":"m","symbols":symbols,"timeframe":"15m",
+            "strategy":"","accountId":account["id"],"intervalSec":900})
+    };
+    for (symbols, error) in [
+        (json!([]), "symbols: choose at least one pair"),
+        (
+            json!(["BTCUSDT", "BTCUSDT"]),
+            "symbols.1: each pair can be chosen once",
+        ),
+        (json!(["btc"]), "symbols.0: expected a pair like DOGEUSDT"),
+    ] {
+        assert_eq!(
+            t.send("POST", "/api/agents", Some(input(symbols))).await,
+            (400, json!({ "error": error }))
+        );
+    }
+    let eleven: Vec<String> = (0..11).map(|i| format!("P{i}USDT")).collect();
+    assert_eq!(
+        t.send("POST", "/api/agents", Some(input(json!(eleven))))
+            .await,
+        (
+            400,
+            json!({"error":"symbols: an agent trades at most 10 pairs"})
+        )
+    );
     t.close().await;
 }

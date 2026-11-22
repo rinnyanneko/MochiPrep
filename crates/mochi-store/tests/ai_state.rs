@@ -137,6 +137,10 @@ fn sql_snapshot(conn: &rusqlite::Connection) -> Value {
             .query_map([], |row| {
                 let mut object = serde_json::Map::new();
                 for (index, name) in names.iter().enumerate() {
+                    // Added after the Node recording: every agent's list of pairs.
+                    if table == "agents" && name == "symbols" {
+                        continue;
+                    }
                     use rusqlite::types::ValueRef;
                     let value = match row.get_ref(index)? {
                         ValueRef::Null => Value::Null,
@@ -156,6 +160,21 @@ fn sql_snapshot(conn: &rusqlite::Connection) -> Value {
     }
     Value::Object(out)
 }
+/// An agent as the Node recording saw it: without the list of pairs added since.
+fn without_symbols(mut value: Value) -> Value {
+    match &mut value {
+        Value::Array(agents) => {
+            for agent in agents {
+                agent.as_object_mut().unwrap().remove("symbols");
+            }
+        }
+        Value::Object(agent) => {
+            agent.remove("symbols");
+        }
+        _ => {}
+    }
+    value
+}
 fn decoded_bodies(values: Vec<Box<serde_json::value::RawValue>>) -> Value {
     json!(values
         .into_iter()
@@ -173,7 +192,7 @@ fn ai_sql_writes_and_reads_match_node() {
         fixture["reads"]["providers"]
     );
     assert_eq!(
-        json!(rows::list_agents(&conn).unwrap()),
+        without_symbols(json!(rows::list_agents(&conn).unwrap())),
         fixture["reads"]["agents"]
     );
     assert_eq!(
@@ -201,7 +220,7 @@ fn ai_sql_writes_and_reads_match_node() {
         fixture["savedReads"]["provider"]
     );
     assert_eq!(
-        json!(rows::get_agent(&conn, "agent").unwrap()),
+        without_symbols(json!(rows::get_agent(&conn, "agent").unwrap())),
         fixture["savedReads"]["agent"]
     );
     assert_eq!(

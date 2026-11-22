@@ -283,7 +283,7 @@ impl World {
         let input: AgentInput = validate::parse_body(
             Schema::AgentInput,
             &json!({
-                "name": "auto", "providerId": "remote", "model": "m", "symbol": "BTCUSDT",
+                "name": "auto", "providerId": "remote", "model": "m", "symbols": ["BTCUSDT"],
                 "timeframe": "15m", "strategy": "", "accountId": account_id,
                 "risk": default_risk_settings(), "intervalSec": 60, "executionMode": mode,
             }),

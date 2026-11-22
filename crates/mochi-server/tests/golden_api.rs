@@ -189,9 +189,15 @@ fn request(state: &AppState, normaliser: &Normaliser, step: &Value) -> Request<B
 }
 
 /// The response without the keys Rust added after the switch-over, which the recorded Node
-/// session cannot hold: the arena's `attribution` and `pnl`, so OKX rows can leave deposits out.
+/// session cannot hold: an agent's `symbols`, and the arena's `attribution` and `pnl`, so OKX
+/// rows can leave deposits out.
 /// Every other byte must still match.
 fn without_post_node_fields(path: &str, text: String) -> String {
+    // Every agent's list of pairs, which follows its first pair.
+    let pairs = regex::Regex::new(r#","symbols":\[[^\]]*\]"#).unwrap();
+    if path.starts_with("/api/agents") {
+        return pairs.replace_all(&text, "").into_owned();
+    }
     if path != "/api/arena" {
         return text;
     }

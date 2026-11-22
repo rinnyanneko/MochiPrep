@@ -468,7 +468,10 @@ export interface Agent {
   name: string;
   providerId: string;
   model: string;
+  /** The first of `symbols`. */
   symbol: SymbolId;
+  /** Every pair the agent trades, in the order picked. One model call decides them all. */
+  symbols: SymbolId[];
   timeframe: Timeframe;
   strategy: string;
   accountId: string;

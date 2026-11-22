@@ -15,16 +15,17 @@ pub fn get_agent(conn: &Connection, id: &str) -> Result<Option<Agent>, StoreErro
 }
 pub fn insert_agent(conn: &Connection, a: &Agent) -> Result<(), StoreError> {
     conn.execute(
-        "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,risk,
-            interval_sec,execution_mode,use_news,allow_trailing_stop,status,running,next_run_at,
-            last_run_at,status_detail,consecutive_errors,is_demo,created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO agents (id,name,provider_id,model,symbol,symbols,timeframe,strategy,account_id,
+            risk,interval_sec,execution_mode,use_news,allow_trailing_stop,status,running,
+            next_run_at,last_run_at,status_detail,consecutive_errors,is_demo,created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         params![
             a.id,
             a.name,
             a.provider_id,
             a.model,
             a.symbol,
+            symbols_json(a)?,
             a.timeframe,
             a.strategy,
             a.account_id,
@@ -48,7 +49,7 @@ pub fn insert_agent(conn: &Connection, a: &Agent) -> Result<(), StoreError> {
 /// Creation time and demo ownership are immutable, matching Node's UPDATE.
 pub fn save_agent(conn: &Connection, a: &Agent) -> Result<(), StoreError> {
     conn.execute(
-        "UPDATE agents SET name=?,provider_id=?,model=?,symbol=?,timeframe=?,strategy=?,
+        "UPDATE agents SET name=?,provider_id=?,model=?,symbol=?,symbols=?,timeframe=?,strategy=?,
             account_id=?,risk=?,interval_sec=?,execution_mode=?,use_news=?,allow_trailing_stop=?,
             status=?,running=?,next_run_at=?,last_run_at=?,status_detail=?,consecutive_errors=?
          WHERE id=?",
@@ -57,6 +58,7 @@ pub fn save_agent(conn: &Connection, a: &Agent) -> Result<(), StoreError> {
             a.provider_id,
             a.model,
             a.symbol,
+            symbols_json(a)?,
             a.timeframe,
             a.strategy,
             a.account_id,
@@ -75,6 +77,15 @@ pub fn save_agent(conn: &Connection, a: &Agent) -> Result<(), StoreError> {
         ],
     )?;
     Ok(())
+}
+/// The stored pair list. An agent built with an empty list (only `symbol` set) trades that one.
+fn symbols_json(a: &Agent) -> Result<String, StoreError> {
+    let symbols = if a.symbols.is_empty() {
+        std::slice::from_ref(&a.symbol)
+    } else {
+        a.symbols.as_slice()
+    };
+    Ok(serde_json::to_string(symbols)?)
 }
 pub fn delete_agent(conn: &Connection, id: &str) -> Result<(), StoreError> {
     grouped_delete(conn, |conn| {

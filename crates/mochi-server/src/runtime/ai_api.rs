@@ -11,7 +11,7 @@ impl Runtime {
         &self,
         provider: &str,
         account: &str,
-        symbol: &str,
+        symbols: &[String],
     ) -> Result<(), ApiError> {
         if rows::get_provider(self.connection(), provider)
             .map_err(|e| self.api_error(e))?
@@ -25,16 +25,21 @@ impl Runtime {
             .get_account(account)
             .map_err(|e| self.api_error(e))?
             .ok_or_else(|| ApiError::bad_request("Unknown paper account"))?;
-        self.assert_tradable(symbol, account.source)
+        for symbol in symbols {
+            self.assert_tradable(symbol, account.source)?;
+        }
+        Ok(())
     }
     pub fn create_agent(&mut self, input: AgentInput) -> Result<rows::Agent, ApiError> {
-        self.assert_agent_refs(&input.provider_id, &input.account_id, &input.symbol)?;
+        let symbols = input.pairs();
+        self.assert_agent_refs(&input.provider_id, &input.account_id, &symbols)?;
         let agent = rows::Agent {
             id: format!("agent_{}", uuid::Uuid::new_v4()),
             name: input.name,
             provider_id: input.provider_id,
             model: input.model,
-            symbol: input.symbol,
+            symbol: symbols[0].clone(),
+            symbols,
             timeframe: serde_json::to_value(input.timeframe)
                 .expect("timeframe")
                 .as_str()
@@ -61,7 +66,7 @@ impl Runtime {
         Ok(agent)
     }
     pub fn update_agent(&mut self, id: &str, input: AgentInput) -> Result<rows::Agent, ApiError> {
-        self.assert_agent_refs(&input.provider_id, &input.account_id, &input.symbol)?;
+        self.assert_agent_refs(&input.provider_id, &input.account_id, &input.pairs())?;
         let mut agent = self.api_agent(id)?;
         self.assert_agent_editable(id)?;
         if agent.running && agent.account_id != input.account_id {
@@ -157,10 +162,12 @@ impl Runtime {
     }
 }
 fn apply_input(agent: &mut rows::Agent, input: AgentInput) -> Result<(), ApiError> {
+    let symbols = input.pairs();
     agent.name = input.name;
     agent.provider_id = input.provider_id;
     agent.model = input.model;
-    agent.symbol = input.symbol;
+    agent.symbol = symbols[0].clone();
+    agent.symbols = symbols;
     agent.timeframe = serde_json::to_value(input.timeframe)
         .expect("timeframe")
         .as_str()

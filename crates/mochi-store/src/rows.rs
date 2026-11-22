@@ -28,7 +28,11 @@ pub struct Agent {
     pub name: String,
     pub provider_id: String,
     pub model: String,
+    /// The first of `symbols`, kept for readers that know one pair per agent.
     pub symbol: String,
+    /// Every pair the agent trades, `symbol` first. Empty means just `symbol`.
+    #[serde(default)]
+    pub symbols: Vec<String>,
     pub timeframe: String,
     pub strategy: String,
     pub account_id: String,
@@ -79,12 +83,22 @@ pub(crate) fn agent_from_row(row: &Row<'_>) -> rusqlite::Result<Agent> {
     let risk = RawValue::from_string(row.get("risk")?).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
     })?;
+    let symbol: String = row.get("symbol")?;
+    let mut symbols: Vec<String> = serde_json::from_str(&row.get::<_, String>("symbols")?)
+        .map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
+        })?;
+    // A row written before agents had several pairs, or by a test that sets only `symbol`.
+    if symbols.is_empty() {
+        symbols.push(symbol.clone());
+    }
     Ok(Agent {
         id: row.get("id")?,
         name: row.get("name")?,
         provider_id: row.get("provider_id")?,
         model: row.get("model")?,
-        symbol: row.get("symbol")?,
+        symbol,
+        symbols,
         timeframe: row.get("timeframe")?,
         strategy: row.get("strategy")?,
         account_id: row.get("account_id")?,

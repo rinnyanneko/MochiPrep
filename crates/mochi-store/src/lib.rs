@@ -89,6 +89,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "015_agent_templates.sql",
         include_str!("../migrations/015_agent_templates.sql"),
     ),
+    (
+        "016_agent_symbols.sql",
+        include_str!("../migrations/016_agent_symbols.sql"),
+    ),
 ];
 
 #[derive(Debug, thiserror::Error)]

@@ -637,15 +637,23 @@ impl Runtime {
     /// trusted except the idea itself: the risk engine runs again on current prices and balances.
     pub(super) fn begin_signal(&mut self, id: &str) -> Result<SignalStep, ApiError> {
         let mut r = self.pending_signal(id)?;
-        let a = self.require_agent(r["agentId"].as_str().unwrap_or_default())?;
+        let mut a = self.require_agent(r["agentId"].as_str().unwrap_or_default())?;
         if self.is_agent_busy(&a.id) {
             return Err(ApiError::bad_request(
                 "This agent is busy. Try again in a moment.",
             ));
         }
         let account = self.require_account(&a.account_id)?;
+        // A suggestion is for one of the agent's pairs; everything below trades that pair.
+        let pair = r["symbol"].as_str().unwrap_or_default().to_string();
+        let traded = a.symbols.contains(&pair);
+        if traded {
+            a.symbol = pair;
+        }
         let expired = if r["accountId"] != account.id || r["source"] != json!(account.source) {
             Some("Account or market source changed since this suggestion")
+        } else if !traded {
+            Some("The agent no longer trades this pair")
         } else {
             (r["signalExpiresAt"].as_i64().unwrap_or(0) <= self.market_now(account.source))
                 .then_some("Expired before it was acted on")
