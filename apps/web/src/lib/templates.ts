@@ -4,7 +4,7 @@ import type { AgentTemplate, AgentTemplateFields } from '@mochiprep/shared';
 export type AgentSettings = Omit<AgentTemplateFields, 'name' | 'description'>;
 
 export const INTERVALS = [
-  { value: 30, label: 'Every 30 seconds (demo pace)' },
+  { value: 30, label: 'Every 30 seconds' },
   { value: 60, label: 'Every minute' },
   { value: 300, label: 'Every 5 minutes' },
   { value: 900, label: 'Every 15 minutes (default)' },

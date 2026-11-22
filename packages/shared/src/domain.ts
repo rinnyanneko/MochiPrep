@@ -516,6 +516,7 @@ export interface AgentTemplate extends AgentTemplateFields {
   updatedAt: number | null;
 }
 
+/** MOCK only appears on a provider row left from before the mock AI was removed; it cannot run. */
 export type ProviderKind = 'MOCK' | 'OPENAI_COMPATIBLE' | 'OPENAI' | 'ANTHROPIC' | 'GEMINI' | 'DEEPSEEK' | 'OPENCODE';
 
 export interface ProviderConfig {

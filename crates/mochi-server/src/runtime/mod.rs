@@ -25,7 +25,6 @@ pub mod news;
 pub mod redact;
 pub mod replay_clock;
 mod scheduling;
-pub use scheduling::DemoAction;
 mod vault;
 pub use vault::{UnlockOutcome, VAULT_RESET_PHRASE};
 
@@ -151,13 +150,14 @@ pub enum StartError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Replay(#[from] TapeTooShort),
+    #[error("Cannot remove the old demo data: {0}")]
+    LegacyDemo(String),
 }
 
 /// The `/api/state` body, keys in Node's order.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StateBody {
-    pub demo_active: bool,
     pub vault: VaultStatus,
     pub replay: ReplayState,
     pub feeds: Vec<FeedStatus>,
@@ -315,7 +315,6 @@ pub struct Runtime {
     replay_batch: Option<scheduling::ReplayBatch>,
     replay_queue: std::collections::VecDeque<scheduling::ReplayRequest>,
     replay_idle: Vec<oneshot::Sender<()>>,
-    replay_idle_work: Vec<Command>,
     signal_raised: bool,
     /// Shared with the engine's quote and clock callbacks, which cannot borrow the runtime.
     /// Only the runtime task locks it, so it is never contended.
@@ -429,7 +428,6 @@ impl Runtime {
             replay_batch: None,
             replay_queue: Default::default(),
             replay_idle: Vec::new(),
-            replay_idle_work: Vec::new(),
             signal_raised: false,
             replay,
             live,
@@ -458,8 +456,12 @@ impl Runtime {
             live_ticking: false,
         };
 
-        // The mock provider the demo needs, if this database does not have it yet.
-        rows::seed_mock_provider(runtime.connection(), unix_ms())?;
+        // Demo mode and the mock AI were removed: a database that used them loses the demo
+        // data, and the mock provider row unless an agent of the user's still points at it.
+        runtime
+            .remove_legacy_demo()
+            .map_err(|e| StartError::LegacyDemo(e.message().to_string()))?;
+        rows::remove_unused_mock_provider(runtime.connection())?;
         for spec in list_instruments(runtime.connection())? {
             runtime.live.track(&spec.symbol);
             runtime.register_instrument(spec);
@@ -786,11 +788,7 @@ impl Runtime {
 
     /// Assemble state from the actor-owned database and feeds without inventing missing data.
     pub fn state(&self) -> Result<StateBody, ApiError> {
-        let demo = get_setting::<serde_json::Value>(self.connection(), "demo.active")
-            .map_err(|e| self.api_error(e))?;
         Ok(StateBody {
-            // Node's `=== true`: any other stored value is not active.
-            demo_active: demo == Some(serde_json::Value::Bool(true)),
             vault: self.vault_status()?,
             replay: self.replay_state(),
             feeds: self.feeds(),

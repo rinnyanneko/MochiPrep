@@ -15,47 +15,7 @@ pub(super) struct ReplayBatch {
     quotes: Vec<Quote>,
     waiting: bool,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum DemoAction {
-    Start,
-    Reset,
-    Exit,
-}
-
 impl RuntimeHandle {
-    /// Change demo ownership inside the actor's idle transition, without handing an idle
-    /// acknowledgement back to a route that could race a newly queued batch.
-    pub async fn change_demo(&self, action: DemoAction) -> Result<(), ApiError> {
-        let (reply, done) = oneshot::channel();
-        self.call(move |r| {
-            if action == DemoAction::Start {
-                if r.is_demo_active()? {
-                    let _ = reply.send(Ok(()));
-                    return Ok::<(), ApiError>(());
-                }
-            } else {
-                r.set_playing(false);
-            }
-            r.replay_idle_work.push(Box::new(move |r| {
-                let result = if action == DemoAction::Start {
-                    r.start_demo()
-                } else {
-                    // Playing may have been requested again while the earlier batches drained.
-                    r.set_playing(false);
-                    r.clear_demo().and_then(|()| match action {
-                        DemoAction::Reset => r.start_demo(),
-                        _ => Ok(()),
-                    })
-                };
-                let _ = reply
-                    .send(result.map_err(|e| ApiError::new(e.status(), r.redact(e.message()))));
-            }));
-            Ok(())
-        })
-        .await??;
-        done.await.map_err(|_| self.reply_error())?
-    }
-
     /// An observational barrier only; ownership mutations must run inside the idle transition.
     pub async fn wait_replay_idle(&self) -> Result<(), ApiError> {
         let (reply, done) = oneshot::channel();
@@ -100,9 +60,6 @@ impl Runtime {
                 let Some(request) = self.replay_queue.pop_front() else {
                     if self.replay_busy() {
                         return;
-                    }
-                    for work in std::mem::take(&mut self.replay_idle_work) {
-                        work(self);
                     }
                     for done in self.replay_idle.drain(..) {
                         let _ = done.send(());

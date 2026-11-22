@@ -199,6 +199,19 @@ fn without_post_node_fields(path: &str, text: String) -> String {
     added.replace_all(&text, "").into_owned()
 }
 
+/// The recorded answer without what Rust removed after the switch-over: demo mode's
+/// `demoActive` flag, and the mock AI provider every Node database seeded.
+fn without_removed_node_fields(path: &str, text: &str) -> String {
+    match path {
+        "/api/state" => text.replacen(r#""demoActive":false,"#, "", 1),
+        "/api/providers" => {
+            let mock = regex::Regex::new(r#",?\{"id":"mock",[^{}]*\}"#).unwrap();
+            mock.replace(text, "").replacen("[,", "[", 1)
+        }
+        _ => text.to_string(),
+    }
+}
+
 #[tokio::test]
 async fn the_recorded_node_session_replays_byte_for_byte() {
     let fixture = fixture();
@@ -220,7 +233,11 @@ async fn the_recorded_node_session_replays_byte_for_byte() {
             (status, text.as_str()),
             (
                 step["status"].as_u64().unwrap() as u16,
-                step["response"].as_str().unwrap()
+                without_removed_node_fields(
+                    step["path"].as_str().unwrap(),
+                    step["response"].as_str().unwrap()
+                )
+                .as_str()
             ),
             "{context}"
         );
@@ -260,6 +277,8 @@ fn short_tape_state() -> AppState {
 }
 
 /// Runs one statement on the runtime's database, with `?1` bound to `account_id`.
+const PROVIDER: &str = "INSERT OR IGNORE INTO providers (id,name,kind,base_url,default_model,input_price,output_price,extra_headers,created_at) VALUES ('p','Gateway','OPENAI_COMPATIBLE',NULL,'m',NULL,NULL,'{}',1)";
+
 async fn sql(state: &AppState, statement: &'static str, account_id: &str) {
     let account_id = account_id.to_string();
     state
@@ -298,12 +317,17 @@ fn not_connected() -> (u16, Value) {
 async fn an_account_that_agents_use_cannot_be_deleted() {
     let state = short_tape_state();
     let id = new_account(&state).await;
-    // The runtime seeded the 'mock' provider when it started.
+    // Inserting an agent needs a provider; it never runs here.
+    state
+        .runtime
+        .call(|r| r.connection().execute(PROVIDER, []).unwrap())
+        .await
+        .unwrap();
     sql(
         &state,
         "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,risk,
          interval_sec,status,running,created_at)
-         VALUES ('agent_1','A','mock','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,1)",
+         VALUES ('agent_1','A','p','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,1)",
         &id,
     )
     .await;

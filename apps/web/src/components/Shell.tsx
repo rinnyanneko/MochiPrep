@@ -219,18 +219,6 @@ function TopBar({ onStopped }: Readonly<{ onStopped: () => void }>) {
   );
 }
 
-function DemoBanner() {
-  const demoActive = useApp((s) => s.demoActive);
-  const source = useApp((s) => s.source);
-  if (!demoActive || source !== 'REPLAY') return null;
-  return (
-    <div className="flex items-center gap-2 bg-info-soft px-4 py-1.5 text-xs font-medium text-info" data-testid="demo-banner">
-      <Info className="size-3.5 shrink-0" />
-      Demo Mode: market data is synthetic and AI decisions come from a deterministic mock. No real market or model is involved.
-    </div>
-  );
-}
-
 function Toasts() {
   const toasts = useApp((s) => s.toasts);
   const dismiss = useApp((s) => s.dismissToast);
@@ -269,7 +257,6 @@ export function Shell({ children }: { children: ReactNode }) {
         <UpdateBanner />
         <TopBar onStopped={() => { disconnectBackend(); setClosed(true); }} />
         <UnlockBanner />
-        <DemoBanner />
         <main className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-5">
           <div className="mx-auto max-w-[1400px]">{children}</div>
         </main>

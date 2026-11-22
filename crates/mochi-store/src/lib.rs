@@ -10,7 +10,8 @@ mod vault;
 
 pub use paper::SqlitePaperStore;
 pub use settings::{
-    delete_instrument, get_setting, has_vault, list_instruments, save_instrument, set_setting,
+    delete_instrument, delete_setting, get_setting, has_vault, list_instruments, save_instrument,
+    set_setting,
 };
 pub use vault::{
     delete_sealed_exchange_credentials, delete_vault, list_sealed_exchange_credentials,

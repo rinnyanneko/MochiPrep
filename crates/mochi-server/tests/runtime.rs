@@ -13,7 +13,7 @@ use mochi_domain::{
 };
 use mochi_market::tape::WARMUP_MINUTES;
 use mochi_server::runtime::{LiveFeed, ReplayClock, RuntimeHandle, RuntimeOptions};
-use mochi_store::{get_setting, open_database, open_in_memory, save_instrument, set_setting};
+use mochi_store::{get_setting, open_database, open_in_memory, save_instrument};
 use serde_json::json;
 use tokio::sync::broadcast;
 use tokio::time::{sleep, timeout, Instant};
@@ -400,16 +400,12 @@ async fn instruments_rows_register_in_engine_registry() {
 }
 
 #[tokio::test]
-async fn state_reports_demo_vault_feeds_and_replay() {
+async fn state_reports_vault_feeds_and_replay() {
     let db = open_in_memory().unwrap();
     let rt = start(db, None);
     let state = serde_json::to_value(rt.state().await.unwrap()).unwrap();
     let keys: Vec<&String> = state.as_object().unwrap().keys().collect();
-    assert_eq!(
-        keys,
-        ["demoActive", "vault", "replay", "feeds", "instruments"]
-    );
-    assert_eq!(state["demoActive"], json!(false));
+    assert_eq!(keys, ["vault", "replay", "feeds", "instruments"]);
     assert_eq!(state["vault"], json!("OFF"));
     assert_eq!(state["replay"]["loaded"], json!(true));
     assert_eq!(state["replay"]["playing"], json!(false));
@@ -427,7 +423,6 @@ async fn state_reports_demo_vault_feeds_and_replay() {
     );
 
     rt.call(|rt| {
-        set_setting(rt.connection(), "demo.active", &true).unwrap();
         rt.connection()
             .execute(
                 "INSERT INTO vault_keys (id,kind,params,created_at) VALUES ('password','password','{}',1)",
@@ -438,7 +433,6 @@ async fn state_reports_demo_vault_feeds_and_replay() {
     .await
     .unwrap();
     let state = rt.state().await.unwrap();
-    assert!(state.demo_active);
     assert_eq!(state.vault, VaultStatus::Locked);
     rt.shutdown().await;
 }

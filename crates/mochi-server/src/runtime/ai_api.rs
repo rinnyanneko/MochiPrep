@@ -1,9 +1,9 @@
-//! API-owned agent configuration and demo ownership. Analysis stays in the runner.
-use super::{lock, unix_ms, Runtime};
+//! API-owned agent configuration, and the removal of old demo data. Analysis stays in the runner.
+use super::{unix_ms, Runtime};
 use crate::{error::ApiError, validate::AgentInput};
-use mochi_core::paper::{CreateAccountArgs, PaperStore};
-use mochi_domain::{default_risk_settings, DataSource, ServerEvent, Timeframe, Topic};
-use mochi_store::{get_setting, rows, set_setting};
+use mochi_core::paper::PaperStore;
+use mochi_domain::Topic;
+use mochi_store::{delete_setting, rows};
 use serde_json::{value::to_raw_value, Value};
 
 impl Runtime {
@@ -27,11 +27,7 @@ impl Runtime {
             .ok_or_else(|| ApiError::bad_request("Unknown paper account"))?;
         self.assert_tradable(symbol, account.source)
     }
-    pub fn create_agent(
-        &mut self,
-        input: AgentInput,
-        is_demo: bool,
-    ) -> Result<rows::Agent, ApiError> {
+    pub fn create_agent(&mut self, input: AgentInput) -> Result<rows::Agent, ApiError> {
         self.assert_agent_refs(&input.provider_id, &input.account_id, &input.symbol)?;
         let agent = rows::Agent {
             id: format!("agent_{}", uuid::Uuid::new_v4()),
@@ -57,7 +53,7 @@ impl Runtime {
             last_run_at: None,
             status_detail: None,
             consecutive_errors: 0,
-            is_demo,
+            is_demo: false,
             created_at: unix_ms(),
         };
         rows::insert_agent(self.connection(), &agent).map_err(|e| self.api_error(e))?;
@@ -116,90 +112,13 @@ impl Runtime {
         }
         Ok(signal)
     }
-    pub(super) fn is_demo_active(&self) -> Result<bool, ApiError> {
-        Ok(
-            get_setting::<Value>(self.connection(), "demo.active")
-                .map_err(|e| self.api_error(e))?
-                == Some(Value::Bool(true)),
-        )
-    }
-
-    pub(super) fn start_demo(&mut self) -> Result<(), ApiError> {
-        if self.is_demo_active()? {
+    /// Deletes what the removed demo mode created: its agents, its accounts with their orders and
+    /// ledger, and its setting. Runs at start; a database that never used the demo is unchanged.
+    pub(super) fn remove_legacy_demo(&mut self) -> Result<(), ApiError> {
+        // Asked in SQL, so a database without demo data is never parsed row by row here.
+        if !rows::has_legacy_demo(self.connection()).map_err(|e| self.api_error(e))? {
             return Ok(());
         }
-        {
-            let mut replay = lock(&self.replay);
-            replay.seek(0);
-            set_setting(self.connection(), "replay.cursor", &replay.position())
-                .map_err(|e| self.api_error(e))?;
-            self.last_replay_equity_at = replay.now();
-        }
-        for (name, model, strategy, label) in [
-            (
-                "Momentum Mochi",
-                "mock-momentum-v1",
-                "Follow the trend: EMA20/EMA50 with MACD confirmation.",
-                "Momentum",
-            ),
-            (
-                "Reversion Daifuku",
-                "mock-reversion-v1",
-                "Fade RSI extremes and exit at the midline.",
-                "Reversion",
-            ),
-            (
-                "Reckless Rice Cake",
-                "mock-reckless-v1",
-                "Misbehaves on purpose to show the risk engine at work.",
-                "Reckless",
-            ),
-        ] {
-            let account = self
-                .engine_mut()
-                .create_account(CreateAccountArgs {
-                    name: format!("{label} account"),
-                    source: DataSource::Replay,
-                    initial_balance: None,
-                    is_demo: Some(true),
-                    config: None,
-                })
-                .map_err(|e| self.api_error(e))?;
-            self.create_agent(
-                AgentInput {
-                    name: name.into(),
-                    provider_id: rows::MOCK_PROVIDER_ID.into(),
-                    model: model.into(),
-                    symbol: "BTCUSDT".into(),
-                    timeframe: Timeframe::M15,
-                    strategy: strategy.into(),
-                    account_id: account.id,
-                    risk: default_risk_settings(),
-                    interval_sec: 900,
-                    execution_mode: "AUTO".into(),
-                    use_news: false,
-                    allow_trailing_stop: false,
-                },
-                true,
-            )?;
-        }
-        self.engine_mut()
-            .create_account(CreateAccountArgs {
-                name: "Demo terminal".into(),
-                source: DataSource::Replay,
-                initial_balance: None,
-                is_demo: Some(true),
-                config: None,
-            })
-            .map_err(|e| self.api_error(e))?;
-        set_setting(self.connection(), "demo.active", &true).map_err(|e| self.api_error(e))?;
-        self.invalidate_demo();
-        self.emit(ServerEvent::Replay {
-            state: self.replay_state(),
-        });
-        Ok(())
-    }
-    pub fn clear_demo(&mut self) -> Result<(), ApiError> {
         self.engine()
             .store()
             .transaction(|| -> Result<(), mochi_core::paper::StoreFailure> {
@@ -225,7 +144,7 @@ impl Runtime {
                             .delete_account_data(&account.id, false)?;
                     }
                 }
-                set_setting(self.connection(), "demo.active", &false).map_err(|e| {
+                delete_setting(self.connection(), "demo.active").map_err(|e| {
                     mochi_core::paper::StoreFailure::new(
                         mochi_core::paper::StoreFailureKind::Other,
                         e.to_string(),
@@ -234,18 +153,7 @@ impl Runtime {
                 Ok(())
             })
             .map_err(|e| self.api_error(e))?;
-        self.invalidate_demo();
         Ok(())
-    }
-    fn invalidate_demo(&mut self) {
-        self.invalidate(&[
-            Topic::Accounts,
-            Topic::Agents,
-            Topic::Arena,
-            Topic::Decisions,
-            Topic::Orders,
-            Topic::Positions,
-        ]);
     }
 }
 fn apply_input(agent: &mut rows::Agent, input: AgentInput) -> Result<(), ApiError> {

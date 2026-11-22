@@ -91,6 +91,11 @@ async fn get(state: &AppState, path: &str) -> Value {
 }
 
 /// Runs SQL on the runtime's database.
+/// A provider for agents that never run: inserting an agent needs one.
+const PROVIDER: &str = "INSERT OR IGNORE INTO providers (id,name,kind,base_url,default_model,input_price,output_price,extra_headers,created_at) VALUES ('p','Gateway','OPENAI_COMPATIBLE',NULL,'m',NULL,NULL,'{}',1)";
+/// The row the removed mock AI provider had in every database.
+const LEGACY_MOCK: &str = "INSERT INTO providers (id,name,kind,base_url,default_model,input_price,output_price,extra_headers,created_at) VALUES ('mock','Mock AI (offline demo)','MOCK',NULL,'mock-momentum-v1',NULL,NULL,'{}',0)";
+
 async fn sql(state: &AppState, statements: impl Into<String>) {
     let statements = statements.into();
     state
@@ -146,13 +151,8 @@ async fn later_reads_on_an_empty_database() {
         assert_eq!(get(&state, path).await, json!([]), "{path}");
     }
     assert_eq!(get(&state, "/api/vault").await, json!({ "status": "OFF" }));
-    let providers = get(&state, "/api/providers").await;
-    assert_eq!(providers[0]["id"], "mock");
-    assert_eq!(providers[0]["name"], "Mock AI (offline demo)");
-    assert_eq!(providers[0]["kind"], "MOCK");
-    assert_eq!(providers[0]["defaultModel"], "mock-momentum-v1");
-    assert_eq!(providers[0]["hasKey"], true);
-    assert_eq!(providers[0]["requiresKey"], false);
+    // The mock AI was removed, so nothing is seeded.
+    assert_eq!(get(&state, "/api/providers").await, json!([]));
     state.runtime.shutdown().await;
 }
 
@@ -200,8 +200,7 @@ async fn a_locked_vault_hides_plaintext_keys_and_saved_okx_keys_show() {
         json!({ "status": "LOCKED" })
     );
     let providers = get(&state, "/api/providers").await;
-    // Node holds no keys in memory while locked, so only the mock provider has one.
-    // Oldest first: it was created at 2 ms, the mock provider when the runtime started.
+    // Node holds no keys in memory while locked.
     let gateway = &providers[0];
     assert_eq!(gateway["id"], "prov_a");
     assert_eq!(gateway["hasKey"], false);
@@ -261,12 +260,13 @@ async fn arena_return_is_null_for_a_zero_balance() {
     state
         .runtime
         .call(move |runtime| {
+            runtime.connection().execute(PROVIDER, []).unwrap();
             runtime
                 .connection()
                 .execute(
                     "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,
                      account_id,risk,interval_sec,status,running,created_at)
-                     VALUES ('agent_z','Z','mock','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,1)",
+                     VALUES ('agent_z','Z','p','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,1)",
                     [&id],
                 )
                 .unwrap()
@@ -276,8 +276,8 @@ async fn arena_return_is_null_for_a_zero_balance() {
     let arena = get(&state, "/api/arena").await;
     // decimal.js: 0 / 0 is NaN, which JSON.stringify writes as null.
     assert_eq!(arena[0]["returnPct"], Value::Null);
-    assert_eq!(arena[0]["isMock"], true);
-    assert_eq!(arena[0]["providerName"], "Mock AI (offline demo)");
+    assert_eq!(arena[0]["isMock"], false);
+    assert_eq!(arena[0]["providerName"], "Gateway");
     assert_eq!(arena[0]["estimatedAiCost"], Value::Null);
     // Opening the account recorded its first equity point.
     assert_eq!(arena[0]["curve"][0]["equity"], json!(0));
@@ -310,11 +310,12 @@ async fn exchange_arena_fixture() -> AppState {
         &state,
         "INSERT INTO equity_history (account_id,ts,equity,wallet,unrealized) VALUES
            ('acct_x',10,'0.0000000006','0.0000000006','0'),('acct_x',20,'50','50','0');
+         INSERT OR IGNORE INTO providers (id,name,kind,base_url,default_model,input_price,output_price,extra_headers,created_at) VALUES ('p','Gateway','OPENAI_COMPATIBLE',NULL,'m',NULL,NULL,'{}',1);
          INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,risk,
            interval_sec,status,running,created_at) VALUES
-           ('agent_a','A','mock','m','BTCUSDT','15m','','acct_x','{}',900,'IDLE',0,5),
-           ('agent_b','B','mock','m','BTCUSDT','15m','','acct_x','{}',900,'IDLE',0,5),
-           ('agent_c','C','mock','m','ETHUSDT','15m','','acct_x','{}',900,'IDLE',0,5);
+           ('agent_a','A','p','m','BTCUSDT','15m','','acct_x','{}',900,'IDLE',0,5),
+           ('agent_b','B','p','m','BTCUSDT','15m','','acct_x','{}',900,'IDLE',0,5),
+           ('agent_c','C','p','m','ETHUSDT','15m','','acct_x','{}',900,'IDLE',0,5);
          INSERT INTO orders (id,account_id,client_order_id,symbol,side,type,quantity,leverage,
            reduce_only,close_position,status,filled_quantity,reserved_margin,agent_id,
            created_at,updated_at) VALUES
@@ -454,9 +455,10 @@ async fn arena_paper_rows_keep_account_returns() {
     sql(
         &state,
         format!(
-            "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,
+            "{PROVIDER};
+             INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,
                risk,interval_sec,status,running,created_at)
-             VALUES ('agent_p','P','mock','m','BTCUSDT','15m','','{id}','{{}}',900,'IDLE',0,1)"
+             VALUES ('agent_p','P','p','m','BTCUSDT','15m','','{id}','{{}}',900,'IDLE',0,1)"
         ),
     )
     .await;
@@ -470,7 +472,7 @@ async fn arena_paper_rows_keep_account_returns() {
 }
 
 #[tokio::test]
-async fn a_restart_pauses_busy_agents_and_seeds_the_mock_provider_once() {
+async fn a_restart_pauses_busy_agents_and_keeps_a_mock_provider_they_use() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("mochiprep.db");
     let state = state_on(mochi_store::open_database(&path).unwrap());
@@ -489,6 +491,8 @@ async fn a_restart_pauses_busy_agents_and_seeds_the_mock_provider_once() {
                 account_id,risk,interval_sec,status,running,next_run_at,status_detail,created_at)
                 VALUES (?1,?1,'mock','m','BTCUSDT','15m','',?2,'{}',900,?3,?4,5,'before',?5)";
             let conn = runtime.connection();
+            // A database from before the mock AI was removed, whose agents still use it.
+            conn.execute(LEGACY_MOCK, []).unwrap();
             for (n, (agent, status, running)) in [
                 ("running", "WAITING", 1),
                 ("analyzing", "ANALYZING", 0),
@@ -567,8 +571,65 @@ async fn a_restart_pauses_busy_agents_and_seeds_the_mock_provider_once() {
             ),
         ]
     );
+    // Agents still point at the mock provider, so it stays, renamed so the user sees why.
     let providers = get(&state, "/api/providers").await;
     assert_eq!(providers.as_array().unwrap().len(), 1, "{providers}");
+    assert_eq!(providers[0]["name"], "Mock AI (removed)");
+    state.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_old_demo_data_and_an_unused_mock_provider_go_at_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mochiprep.db");
+    let state = state_on(mochi_store::open_database(&path).unwrap());
+    let (_, kept) = send(
+        &state,
+        "POST",
+        "/api/accounts",
+        Some(r#"{"name":"Mine","source":"REPLAY"}"#),
+    )
+    .await;
+    let (_, demo) = send(
+        &state,
+        "POST",
+        "/api/accounts",
+        Some(r#"{"name":"Demo terminal","source":"REPLAY"}"#),
+    )
+    .await;
+    let demo_id = demo["id"].as_str().unwrap().to_string();
+    sql(
+        &state,
+        format!(
+            "{LEGACY_MOCK};
+             UPDATE accounts SET is_demo=1 WHERE id='{demo_id}';
+             INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,
+               risk,interval_sec,status,running,is_demo,created_at)
+             VALUES ('agent_demo','Momentum Mochi','mock','mock-momentum-v1','BTCUSDT','15m','',
+               '{demo_id}','{{}}',900,'IDLE',0,1,1);
+             INSERT INTO settings (key,value) VALUES ('demo.active','true');"
+        ),
+    )
+    .await;
+    state.runtime.shutdown().await;
+
+    let state = state_on(mochi_store::open_database(&path).unwrap());
+    let accounts = get(&state, "/api/accounts").await;
+    let ids: Vec<&str> = accounts
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [kept["id"].as_str().unwrap()]);
+    assert_eq!(get(&state, "/api/agents").await, json!([]));
+    assert_eq!(get(&state, "/api/providers").await, json!([]));
+    let setting = state
+        .runtime
+        .call(|r| mochi_store::get_setting::<Value>(r.connection(), "demo.active").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(setting, None);
     state.runtime.shutdown().await;
 }
 

@@ -1225,11 +1225,12 @@ async fn the_arena_reads_an_okx_agents_result_from_okx_history_and_its_open_posi
         async move {
             runtime
                 .call(move |r| {
+                    r.connection().execute(PROVIDER, []).unwrap();
                     r.connection()
                         .execute(
                             "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,
                                account_id,risk,interval_sec,status,running,created_at)
-                             VALUES ('agent_x','X','mock','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,?2)
+                             VALUES ('agent_x','X','p','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,?2)
                              ON CONFLICT(id) DO UPDATE SET created_at=excluded.created_at",
                             rusqlite::params![ACCOUNT, at],
                         )
@@ -1358,10 +1359,11 @@ async fn exchange_arena_recovers_execution(remote_state: &str, position_closed: 
         .runtime
         .call(move |r| {
             let conn = r.connection();
+            conn.execute(PROVIDER, []).unwrap();
             conn.execute(
                 "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,
                    account_id,risk,interval_sec,status,running,created_at)
-                 VALUES ('agent_x','X','mock','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,?2)",
+                 VALUES ('agent_x','X','p','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,?2)",
                 rusqlite::params![ACCOUNT, START],
             )
             .unwrap();
@@ -1478,6 +1480,9 @@ async fn arena_counts_a_position_opened_by_a_partially_filled_limit_order() {
 async fn arena_counts_a_position_closed_before_late_confirmation() {
     exchange_arena_recovers_execution("filled", true).await;
 }
+
+/// A provider for agents that never run: inserting an agent needs one.
+const PROVIDER: &str = "INSERT OR IGNORE INTO providers (id,name,kind,base_url,default_model,input_price,output_price,extra_headers,created_at) VALUES ('p','Gateway','OPENAI_COMPATIBLE',NULL,'m',NULL,NULL,'{}',1)";
 
 fn okx_agent(id: &str, execution_mode: &str) -> rows::Agent {
     rows::Agent {

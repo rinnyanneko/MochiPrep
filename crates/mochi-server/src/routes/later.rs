@@ -155,6 +155,7 @@ fn arena_rows(runtime: &Runtime) -> Result<Vec<ArenaRow>, ApiError> {
             account_id: account.id,
             source: account.source,
             venue: account.venue,
+            // Only an agent left on the removed mock AI's provider row: it cannot run any more.
             is_mock: provider.is_some_and(|p| p.kind == "MOCK"),
             provider_name: provider
                 .map_or_else(|| "Removed provider".to_string(), |p| p.name.clone()),

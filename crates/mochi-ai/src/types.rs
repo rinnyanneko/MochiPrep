@@ -8,6 +8,7 @@ use std::{future::Future, pin::Pin};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ProviderKind {
+    /// Only read back from databases made before the mock AI was removed; never runs.
     Mock,
     OpenaiCompatible,
     Openai,

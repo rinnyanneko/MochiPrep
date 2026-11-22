@@ -17,7 +17,7 @@ use crate::{agent_parse::parse_decision, error::ApiError};
 use futures_util::FutureExt;
 use mochi_ai::{
     build_system_prompt, build_user_prompt, indicator_snapshot, redact_secrets, AiRequest,
-    AiResponse, MarketContext, ProviderError, ProviderKind,
+    AiResponse, MarketContext, ProviderError,
 };
 use mochi_core::paper::PaperStore;
 use mochi_domain::{
@@ -351,7 +351,8 @@ impl Runtime {
         };
         c.secrets.extend(self.secrets());
         c.record["providerKind"] = json!(config.kind);
-        c.record["isMock"] = json!(config.kind == ProviderKind::Mock);
+        // The mock AI was removed, so a new record never comes from it. Old ones keep their flag.
+        c.record["isMock"] = json!(false);
         self.agents.pending.push(Box::pin(async move {
             let request = AiRequest {
                 model: c.agent.model.clone(),
@@ -746,9 +747,6 @@ fn estimate_cost(
     input: Option<f64>,
     output: Option<f64>,
 ) -> Option<String> {
-    if c.kind == ProviderKind::Mock {
-        return Some("0".into());
-    }
     Some(mochi_domain::jsnum::js_to_fixed(
         (input? * c.input_price_per_m_tok? + output? * c.output_price_per_m_tok?) / 1_000_000.,
         6,

@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use crate::StoreError;
 
-/// The built-in provider every database has (`MOCK_PROVIDER_ID`).
+/// The id the removed mock AI provider had in every database.
 pub const MOCK_PROVIDER_ID: &str = "mock";
 
 /// An agent as `toAgent` maps its row, keys in that order. `risk` is the stored JSON as written:
@@ -303,34 +303,29 @@ pub fn has_sealed_exchange_credentials(
         .is_some())
 }
 
-/// Node's `seedMockProvider`: the offline demo provider, added once if it is missing.
-pub fn seed_mock_provider(conn: &Connection, created_at: i64) -> Result<(), StoreError> {
-    let exists = conn
-        .query_row(
-            "SELECT 1 FROM providers WHERE id=?",
-            [MOCK_PROVIDER_ID],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some();
-    if exists {
-        return Ok(());
-    }
+/// Whether the removed demo mode left anything behind: its setting, or rows it marked.
+pub fn has_legacy_demo(conn: &Connection) -> Result<bool, StoreError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM settings WHERE key='demo.active')
+             OR EXISTS(SELECT 1 FROM agents WHERE is_demo=1)
+             OR EXISTS(SELECT 1 FROM accounts WHERE is_demo=1)",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+/// The mock AI is gone. Its row, which every database used to have, is deleted unless one of the
+/// user's agents still points at it; then it stays, renamed, so the agent shows what to replace.
+/// Such an agent cannot run: the runtime refuses the MOCK kind.
+pub fn remove_unused_mock_provider(conn: &Connection) -> Result<(), StoreError> {
     conn.execute(
-        "INSERT INTO providers (id,name,kind,base_url,default_model,input_price,output_price,extra_headers,created_at)
-         VALUES (?,?,?,?,?,?,?,?,?)",
-        rusqlite::params![
-            MOCK_PROVIDER_ID,
-            "Mock AI (offline demo)",
-            "MOCK",
-            None::<String>,
-            // MOCK_MODELS.momentum in packages/ai-providers/src/mock.ts.
-            "mock-momentum-v1",
-            None::<f64>,
-            None::<f64>,
-            "{}",
-            created_at
-        ],
+        "DELETE FROM providers WHERE kind='MOCK'
+         AND NOT EXISTS (SELECT 1 FROM agents WHERE agents.provider_id=providers.id)",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE providers SET name='Mock AI (removed)' WHERE kind='MOCK'",
+        [],
     )?;
     Ok(())
 }

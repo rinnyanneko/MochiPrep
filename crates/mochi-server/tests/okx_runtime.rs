@@ -290,7 +290,7 @@ impl World {
         )
         .unwrap();
         self.rt
-            .call(move |r| r.create_agent(input, false).unwrap().id)
+            .call(move |r| r.create_agent(input).unwrap().id)
             .await
             .unwrap()
     }

@@ -22,7 +22,6 @@ const STATUS: Record<AgentStatus, { tone: Tone; mood: MochiMood; label: string }
   ERROR: { tone: 'down', mood: 'confused', label: 'Error' },
 };
 
-const MOCK_MODELS = ['mock-momentum-v1', 'mock-reversion-v1', 'mock-reckless-v1'];
 type Form = AgentSettings & {
   name: string;
   providerId: string;
@@ -109,17 +108,11 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
             const next = providers.find((p) => p.id === e.target.value);
             set({ providerId: e.target.value, model: next?.defaultModel ?? '' });
           }}>
-            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}{p.requiresKey && !p.hasKey ? ' (key needed)' : ''}</option>)}
+            {providers.map((p) => <option key={p.id} value={p.id} disabled={p.kind === 'MOCK'}>{p.name}{p.requiresKey && !p.hasKey ? ' (key needed)' : ''}</option>)}
           </Select>
         </Field>
         <Field label="Model">
-          {provider?.kind === 'MOCK' ? (
-            <Select value={form.model} onChange={(e) => set({ model: e.target.value })}>
-              {MOCK_MODELS.map((m) => <option key={m}>{m}</option>)}
-            </Select>
-          ) : (
-            <Input value={form.model} onChange={(e) => set({ model: e.target.value })} />
-          )}
+          <Input value={form.model} onChange={(e) => set({ model: e.target.value })} />
         </Field>
         <Field label="Paper account">
           <Select value={form.accountId} onChange={(e) => set({ accountId: e.target.value })}>

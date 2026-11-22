@@ -3,8 +3,7 @@ use super::{Runtime, RuntimeHandle};
 use crate::error::ApiError;
 use futures_util::{future::BoxFuture, stream::FuturesUnordered};
 use mochi_ai::{
-    AiProvider, MockProvider, ProviderConfig, ProviderError, ProviderErrorCode, ProviderKind,
-    RemoteProvider,
+    AiProvider, ProviderConfig, ProviderError, ProviderErrorCode, ProviderKind, RemoteProvider,
 };
 use mochi_domain::{DataSource, Topic, VaultStatus};
 use mochi_store::rows;
@@ -191,7 +190,13 @@ impl Runtime {
             .get(&c.id)
             .map(String::as_str)
             .unwrap_or("");
-        if c.kind != ProviderKind::Mock && key.is_empty() {
+        if c.kind == ProviderKind::Mock {
+            return Err(ProviderError::new(
+                ProviderErrorCode::BadResponse,
+                "Mock AI was removed. Pick another AI provider for this agent.",
+            ));
+        }
+        if key.is_empty() {
             return Err(ProviderError::new(
                 ProviderErrorCode::NoKey,
                 if self
@@ -208,15 +213,10 @@ impl Runtime {
                 },
             ));
         }
-        let provider: Arc<dyn AiProvider> = if c.kind == ProviderKind::Mock {
-            Arc::new(MockProvider)
-        } else {
-            match &self.agents.factory {
-                Some(f) => f(c, key)?,
-                None => Arc::new(RemoteProvider::new(c.clone(), key.into())?),
-            }
-        };
-        Ok(provider)
+        Ok(match &self.agents.factory {
+            Some(f) => f(c, key)?,
+            None => Arc::new(RemoteProvider::new(c.clone(), key.into())?),
+        })
     }
     pub(super) fn market_now(&self, source: DataSource) -> i64 {
         match source {
