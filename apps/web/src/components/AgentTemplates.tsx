@@ -300,7 +300,8 @@ export function TemplatesDialog({ onClose }: { onClose(): void }) {
       </ul>
       <div className="mt-4 flex flex-wrap justify-end gap-2">
         <Button onClick={() => attempt(() => api.post('/agent-templates/restore-builtins'))} title="Show the built-in templates you deleted again"><RotateCcw /> Restore built-ins</Button>
-        <Button onClick={() => setPanel({ kind: 'import' })}><FileUp /> Import</Button>
+        {/* Needs the loaded list to rename imports that clash with existing names. */}
+        <Button disabled={!loaded} onClick={() => setPanel({ kind: 'import' })}><FileUp /> Import</Button>
         <Button disabled={mine.length === 0} onClick={() => exportList(mine)} title="Export every template you created"><FileDown /> Export mine</Button>
         <Button variant="primary" onClick={() => setEditing({ initial: BLANK })}><Plus /> New template</Button>
       </div>
