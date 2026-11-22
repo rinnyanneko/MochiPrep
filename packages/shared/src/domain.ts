@@ -636,6 +636,8 @@ export interface ArenaRow {
   providerName: string;
   model: string;
   symbol: SymbolId;
+  /** Every pair the agent trades; `symbol` is the first. */
+  symbols: SymbolId[];
   status: AgentStatus;
   initialBalance: string;
   /** The account's equity. On an exchange account it includes deposits and other agents' trading. */
@@ -651,7 +653,10 @@ export interface ArenaRow {
   tradeCount: number;
   decisionCount: number;
   estimatedAiCost: string | null;
+  /** A paper account's equity over time. Empty on exchange rows. */
   curve: { ts: number; equity: number }[];
+  /** An exchange agent's own P&L over time, from 0 when it was made. Empty on paper and shared rows. */
+  pnlCurve: { ts: number; pnl: number }[];
 }
 
 export interface ExchangeStatus {

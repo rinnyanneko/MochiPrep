@@ -1288,6 +1288,44 @@ async fn the_arena_reads_an_okx_agents_result_from_okx_history_and_its_open_posi
     assert_eq!(row["pnl"], "2.85");
     assert_eq!(row["tradeCount"], 1);
     assert_eq!(row["winRatePct"], json!(0));
+    // The P&L curve starts at 0 when the agent was made and ends at its whole P&L.
+    let curve = row["pnlCurve"].as_array().unwrap();
+    assert_eq!(curve[0], json!({ "ts": START + 500, "pnl": 0 }));
+    assert_eq!(curve.last().unwrap()["pnl"], json!(2.85));
+    assert!(curve
+        .windows(2)
+        .all(|w| w[0]["ts"].as_i64() <= w[1]["ts"].as_i64()));
+
+    // Another agent whose pairs include BTCUSDT shares the net position, so neither owns it.
+    w.state
+        .runtime
+        .call(|r| {
+            r.connection()
+                .execute(
+                    "INSERT INTO agents (id,name,provider_id,model,symbol,symbols,timeframe,
+                       strategy,account_id,risk,interval_sec,status,running,created_at)
+                     VALUES ('agent_y','Y','p','m','ETHUSDT','[\"ETHUSDT\",\"BTCUSDT\"]','15m',
+                       '',?1,'{}',900,'IDLE',0,?2)",
+                    rusqlite::params![ACCOUNT, START + 500],
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    let (_, arena) = send(&w.state, "GET", "/api/arena", None).await;
+    for row in arena.as_array().unwrap() {
+        assert_eq!(row["attribution"], "SHARED", "{row}");
+        assert_eq!(row["pnlCurve"], json!([]));
+    }
+    w.state
+        .runtime
+        .call(|r| {
+            r.connection()
+                .execute("DELETE FROM agents WHERE id='agent_y'", [])
+                .unwrap()
+        })
+        .await
+        .unwrap();
 
     // Created after the position opened: that position is not its own either.
     set_created(START + 2_000).await;

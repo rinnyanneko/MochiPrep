@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compareArenaRows } from '../src/lib/arena';
+import { arenaView, compareArenaRows } from '../src/lib/arena';
 
 const row = (name: string, returnPct: number | null, pnl: string | null) => ({ name, returnPct, pnl });
 
@@ -62,5 +62,14 @@ describe('compareArenaRows', () => {
     const rows = [first, second, row('third', null, null), row('fourth', null, null)];
     expect([...rows].sort(compareArenaRows)).toEqual(rows);
     expect(compareArenaRows(first, second)).toBe(0);
+  });
+});
+
+describe('arenaView', () => {
+  it('puts every exchange row under OKX and paper rows under their market', () => {
+    expect(arenaView({ source: 'LIVE', venue: 'OKX_LIVE' })).toBe('OKX');
+    expect(arenaView({ source: 'LIVE', venue: 'OKX_DEMO' })).toBe('OKX');
+    expect(arenaView({ source: 'LIVE', venue: 'PAPER' })).toBe('LIVE');
+    expect(arenaView({ source: 'REPLAY', venue: 'PAPER' })).toBe('REPLAY');
   });
 });

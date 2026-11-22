@@ -189,8 +189,8 @@ fn request(state: &AppState, normaliser: &Normaliser, step: &Value) -> Request<B
 }
 
 /// The response without the keys Rust added after the switch-over, which the recorded Node
-/// session cannot hold: an agent's `symbols`, and the arena's `attribution` and `pnl`, so OKX
-/// rows can leave deposits out.
+/// session cannot hold: an agent's `symbols`, and the arena's `attribution`, `pnl` and
+/// `pnlCurve`, so OKX rows can leave deposits out.
 /// Every other byte must still match.
 fn without_post_node_fields(path: &str, text: String) -> String {
     // Every agent's list of pairs, which follows its first pair.
@@ -202,7 +202,10 @@ fn without_post_node_fields(path: &str, text: String) -> String {
         return text;
     }
     let added = regex::Regex::new(r#""attribution":"[A-Z]+","pnl":(?:null|"[^"]*"),"#).unwrap();
-    added.replace_all(&text, "").into_owned()
+    let text = added.replace_all(&text, "");
+    let text = pairs.replace_all(&text, "");
+    // A paper row's empty P&L curve: only exchange rows have one.
+    text.replace(r#","pnlCurve":[]"#, "")
 }
 
 /// The recorded answer without what Rust removed after the switch-over: demo mode's
