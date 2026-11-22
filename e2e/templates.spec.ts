@@ -40,10 +40,23 @@ test('a duplicated template pre-fills a new agent, which keeps its own limits', 
   await expect(card).toBeVisible();
   await expect(card.getByTestId('agent-mode')).toHaveText('Suggest');
 
-  // Deleting the template leaves the agent as it was.
+  // Export it, delete it, and import it back from the exported text.
   await page.getByRole('button', { name: 'Templates' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Export E2E careful' }).click();
+  const exported = await page.getByRole('dialog').getByLabel('Template export').inputValue();
+  expect(JSON.parse(exported)).toMatchObject({ format: 'mochiprep.agent-templates', templates: [{ name: 'E2E careful' }] });
+  await page.getByRole('dialog').getByRole('button', { name: 'Back' }).click();
+
+  // Deleting the template leaves the agent as it was.
+  const rows = page.getByRole('dialog').getByTestId('template-row').filter({ hasText: 'E2E careful' });
   await page.getByRole('dialog').getByRole('button', { name: 'Delete E2E careful' }).click();
-  await expect(page.getByRole('dialog').getByTestId('template-row').filter({ hasText: 'E2E careful' })).toHaveCount(0);
+  await expect(rows).toHaveCount(0);
+
+  await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click();
+  await page.getByRole('dialog').getByLabel('Template export text').fill(exported);
+  await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click();
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText('max 2x');
   await page.keyboard.press('Escape');
   await card.getByRole('button', { name: 'Edit Template Tofu' }).click();
   const saved = page.getByRole('dialog');

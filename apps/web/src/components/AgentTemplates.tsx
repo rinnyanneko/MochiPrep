@@ -1,10 +1,10 @@
-import { Copy, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { ClipboardCopy, Copy, Download, FileDown, FileUp, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { DEFAULT_RISK_SETTINGS, TIMEFRAMES, type AgentTemplate, type AgentTemplateFields, type DataSource, type RiskSettings, type Timeframe } from '@mochiprep/shared';
 import { Badge, Button, Dialog, Field, Input, Segmented, Select, Textarea } from '@/components/ui';
 import { api } from '@/lib/api';
-import { duplicateTemplate, intervalOptions, templateBody, type AgentSettings } from '@/lib/templates';
-import { attempt, useQuery } from '@/store';
+import { duplicateTemplate, exportTemplates, importNames, intervalOptions, parseTemplateFile, templateBody, type AgentSettings } from '@/lib/templates';
+import { attempt, useApp, useQuery } from '@/store';
 
 /**
  * Every template, refetched whenever the backend reports a change. `templates` is null until the
@@ -141,15 +141,110 @@ function TemplateEditor({ id, initial, onClose }: { id?: string; initial: AgentT
   );
 }
 
-type Editing = { id?: string; initial: AgentTemplateFields } | null;
+/** Shows an export document to download or copy: file downloads do not work in every desktop webview. */
+function ExportDialog({ text, count, onClose }: { text: string; count: number; onClose(): void }) {
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'mochiprep-agent-templates.json';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const copy = () =>
+    attempt(async () => {
+      await navigator.clipboard.writeText(text);
+      useApp.getState().toast('info', 'Copied the template export');
+    });
+  const plural = count === 1 ? '' : 's';
+  return (
+    <Dialog open onOpenChange={onClose} title="Export templates" description={`${count} template${plural}. Import this on another MochiPrep. It holds no keys or account details.`} wide>
+      <Textarea readOnly aria-label="Template export" value={text} className="h-64 font-mono text-[11px]" />
+      <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <Button onClick={onClose}>Back</Button>
+        <Button onClick={copy}><ClipboardCopy /> Copy</Button>
+        <Button variant="primary" onClick={download}><Download /> Download .json</Button>
+      </div>
+    </Dialog>
+  );
+}
 
-/** Lists every template with create, edit, duplicate, delete and restore-built-ins. */
+/**
+ * Reads an export from a file or pasted text and creates each template through the normal
+ * template route, so the backend validates every field. An imported template is still only a
+ * form pre-fill, but its strategy text is sent to the model, so the dialog asks for a review.
+ */
+function ImportDialog({ existing, onClose }: { existing: AgentTemplate[]; onClose(): void }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const pick = async (file: File | undefined) => {
+    if (!file) return;
+    const content = await attempt(() => file.text());
+    if (content !== undefined) setText(content);
+  };
+  const run = async () => {
+    if (busy) return;
+    const parsed = await attempt(async () => importNames(parseTemplateFile(text), existing));
+    if (!parsed) return;
+    setBusy(true);
+    let imported = 0;
+    const failures: string[] = [];
+    // One at a time, so a refused template leaves the others in and the report can name it.
+    for (const fields of parsed) {
+      try {
+        await api.post('/agent-templates', fields);
+        imported++;
+      } catch (error) {
+        failures.push(`${fields.name || 'Unnamed'}: ${(error as Error).message}`);
+      }
+    }
+    const toast = useApp.getState().toast;
+    if (imported) toast('info', `Imported ${imported} template${imported === 1 ? '' : 's'}`);
+    if (failures.length) toast('error', `Not imported: ${failures.join('; ')}`);
+    if (!mounted.current) return;
+    setBusy(false);
+    if (!failures.length) onClose();
+  };
+  return (
+    <Dialog open onOpenChange={onClose} title="Import templates" description="Pick an exported .json file or paste its text. Names that already exist get a copy suffix." wide>
+      <label className="mb-2 flex items-center gap-2 text-xs text-ink-2">
+        <span className="font-semibold">File</span>
+        <input type="file" accept="application/json,.json" aria-label="Template file" onChange={(e) => void pick(e.target.files?.[0])} className="text-xs" />
+      </label>
+      <Textarea aria-label="Template export text" value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste an exported template file here" className="h-48 font-mono text-[11px]" />
+      <p className="mt-2 rounded-xl bg-warn-soft px-3 py-2 text-xs text-warn">
+        Only import files you trust, and review each template before using it. Strategy text is sent to the AI model, and an imported template may use Trade automatically. Every order is still limited by the risk checks.
+      </p>
+      <div className="mt-4 flex justify-end gap-2">
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="primary" disabled={busy || !text.trim()} onClick={run}><FileUp /> Import</Button>
+      </div>
+    </Dialog>
+  );
+}
+
+type Editing = { id?: string; initial: AgentTemplateFields } | null;
+type Panel = { kind: 'export'; text: string; count: number } | { kind: 'import' } | null;
+
+/** Lists every template with create, edit, duplicate, delete, export, import and restore-built-ins. */
 export function TemplatesDialog({ onClose }: { onClose(): void }) {
   const { templates: loaded, error, reload } = useAgentTemplates();
   const templates = loaded ?? [];
   const [editing, setEditing] = useState<Editing>(null);
+  const [panel, setPanel] = useState<Panel>(null);
+  const exportList = (list: AgentTemplate[]) => setPanel({ kind: 'export', text: exportTemplates(list), count: list.length });
+  const mine = templates.filter((t) => !t.builtIn);
 
   if (editing) return <TemplateEditor id={editing.id} initial={editing.initial} onClose={() => setEditing(null)} />;
+  if (panel?.kind === 'export') return <ExportDialog text={panel.text} count={panel.count} onClose={() => setPanel(null)} />;
+  if (panel?.kind === 'import') return <ImportDialog existing={templates} onClose={() => setPanel(null)} />;
 
   return (
     <Dialog open onOpenChange={onClose} title="Agent templates" description="Pick one when creating an agent to pre-fill its settings. Built-ins are read-only: duplicate one to change it." wide>
@@ -168,6 +263,7 @@ export function TemplatesDialog({ onClose }: { onClose(): void }) {
             <span className="flex gap-1">
               {!t.builtIn && <Button size="icon" variant="ghost" aria-label={`Edit ${t.name}`} onClick={() => setEditing({ id: t.id, initial: templateBody(t) })}><Pencil /></Button>}
               <Button size="icon" variant="ghost" aria-label={`Duplicate ${t.name}`} onClick={() => setEditing({ initial: duplicateTemplate(t, templates) })}><Copy /></Button>
+              <Button size="icon" variant="ghost" aria-label={`Export ${t.name}`} onClick={() => exportList([t])}><FileDown /></Button>
               <Button size="icon" variant="ghost" aria-label={`Delete ${t.name}`} onClick={() => attempt(() => api.del(`/agent-templates/${t.id}`))}><Trash2 /></Button>
             </span>
           </li>
@@ -183,6 +279,8 @@ export function TemplatesDialog({ onClose }: { onClose(): void }) {
       </ul>
       <div className="mt-4 flex flex-wrap justify-end gap-2">
         <Button onClick={() => attempt(() => api.post('/agent-templates/restore-builtins'))} title="Show the built-in templates you deleted again"><RotateCcw /> Restore built-ins</Button>
+        <Button onClick={() => setPanel({ kind: 'import' })}><FileUp /> Import</Button>
+        <Button disabled={mine.length === 0} onClick={() => exportList(mine)} title="Export every template you created"><FileDown /> Export mine</Button>
         <Button variant="primary" onClick={() => setEditing({ initial: BLANK })}><Plus /> New template</Button>
       </div>
     </Dialog>

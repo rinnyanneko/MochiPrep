@@ -106,6 +106,8 @@ Open **AI Agents > Templates** to manage them:
 - **Duplicate** copies any template, including a built-in one, so you can change it.
 - **Edit** changes your own templates. Built-in templates cannot be edited, so updates to MochiPrep can improve them. Duplicate one to change it.
 - **Delete** removes your own template. Deleting a built-in only hides it, and **Restore built-ins** brings back every hidden one.
+- **Export** (on a row) or **Export mine** (all your own templates) shows a `.json` file you can download or copy. It holds only template settings, never keys or account details.
+- **Import** reads an exported file, either picked from disk or pasted as text, and adds its templates as your own. A name that already exists gets a copy suffix. Each imported template is checked like one you create by hand, and the file is refused if it is not a MochiPrep template export. Only import files you trust, and review the templates before using them: strategy text is sent to the AI model, and an imported template may use Trade automatically.
 
 Changing or deleting a template does not change agents already created from it.
 
