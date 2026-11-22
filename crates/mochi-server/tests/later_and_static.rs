@@ -612,6 +612,9 @@ async fn index_and_assets_are_served_with_cache_headers() {
         let headers = response.headers().clone();
         assert_eq!(headers["cache-control"], "public, max-age=0", "{path}");
         assert_eq!(headers["content-type"], content_type, "{path}");
+        // No other page may frame the interface and steer clicks on its order buttons.
+        let csp = "frame-ancestors 'none'; frame-src 'none'";
+        assert_eq!(headers["content-security-policy"], csp, "{path}");
         let etag = headers["etag"].to_str().unwrap().to_string();
         assert!(
             etag.starts_with('"') && etag.ends_with('"') && etag.len() == 66,
@@ -627,6 +630,7 @@ async fn index_and_assets_are_served_with_cache_headers() {
         let response = respond(&state, request).await;
         assert_eq!(response.status(), StatusCode::NOT_MODIFIED, "{path}");
         assert_eq!(response.headers()["etag"], etag.as_str());
+        assert_eq!(response.headers()["content-security-policy"], csp);
         assert!(body_bytes(response).await.is_empty());
     }
 
