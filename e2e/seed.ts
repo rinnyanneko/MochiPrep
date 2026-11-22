@@ -22,6 +22,37 @@ async function api(request: APIRequestContext) {
   return call;
 }
 
+/** Stops every agent, so nothing trades into the next test sharing this backend. */
+export async function stopAll(request: APIRequestContext) {
+  const call = await api(request);
+  await call('POST', '/agents/stop-all');
+}
+
+/**
+ * A fresh account with one Auto agent on it, named `name`. For a test that needs an agent whose
+ * account no other test has traded on.
+ */
+export async function freshAgent(request: APIRequestContext, name: string, model: string) {
+  const call = await api(request);
+  const providers = await call<{ id: string; name: string }[]>('GET', '/providers');
+  const provider = providers.find((p) => p.name === 'E2E model')!;
+  const account = await call<{ id: string }>('POST', '/accounts', { name: `${name} account`, source: 'REPLAY', initialBalance: '10000' });
+  await call('POST', '/agents', {
+    name,
+    providerId: provider.id,
+    model,
+    symbols: ['BTCUSDT'],
+    timeframe: '15m',
+    strategy: '',
+    accountId: account.id,
+    intervalSec: 900,
+    executionMode: 'AUTO',
+  });
+}
+
+/** The sidebar's Trading button, whose name gains a count while suggestions wait. */
+export const TRADING_NAV = /^Trading( \d+)?$/;
+
 /**
  * Creates the specs' world once per backend: an AI provider pointing at the fake model, three
  * Auto agents on 10,000 USDT replay accounts, and a terminal account for manual trades. The

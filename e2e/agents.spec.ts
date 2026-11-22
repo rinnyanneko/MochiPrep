@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { seed, TERMINAL } from './seed';
+import { freshAgent, seed, stopAll, TERMINAL, TRADING_NAV } from './seed';
+
+// Every test leaves nothing running for the next one, which shares this backend.
+test.afterEach(async ({ request }) => stopAll(request));
 
 const usdt = (text: string | null) => Number((text ?? '').replace(/[^\d.-]/g, ''));
 
@@ -46,7 +49,7 @@ test('market data to agent decision to risk to paper order to position to PnL in
   await expect(page.getByTestId('risk-checks')).toContainText('Risk engine: rejected');
   await expect(page.getByTestId('ledger-audit')).toHaveText('Ledger balances match');
 
-  await page.getByRole('button', { name: 'Trading', exact: true }).click();
+  await page.getByRole('button', { name: TRADING_NAV }).click();
   await expect(page.getByRole('heading', { name: 'Paper Trading' })).toBeVisible();
   await page.getByLabel('Paper account').selectOption({ label: 'Reckless account' });
   await expect(page.getByTestId('chart-trade-summary')).toContainText(/[1-9]\d* fills?/);
@@ -82,12 +85,15 @@ test('market data to agent decision to risk to paper order to position to PnL in
 
 test('an agent in suggestion mode waits for the user, then the suggestion becomes a position', async ({ page, request }) => {
   await seed(request);
+  // Its own account: one another test has traded on could hold a position, and the model would
+  // then suggest closing it rather than opening one.
+  await freshAgent(request, 'Patient Mochi', 'momentum');
   await page.goto('/');
   await expect(page.getByTestId('total-equity')).toBeVisible();
 
   await page.getByRole('button', { name: 'AI Agents' }).click();
-  const card = page.getByTestId('agent-card').filter({ hasText: 'Reckless Rice Cake' });
-  await card.getByRole('button', { name: 'Edit Reckless Rice Cake' }).click();
+  const card = page.getByTestId('agent-card').filter({ hasText: 'Patient Mochi' });
+  await card.getByRole('button', { name: 'Edit Patient Mochi' }).click();
   await page.getByRole('button', { name: 'Suggest to me' }).click();
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(card.getByTestId('agent-mode')).toHaveText('Suggest');
@@ -105,19 +111,16 @@ test('an agent in suggestion mode waits for the user, then the suggestion become
 
   await row.getByRole('button', { name: 'Place order' }).click();
   await expect(page.getByTestId('signals-card')).toBeHidden();
+  await page.getByRole('button', { name: TRADING_NAV }).click();
+  await page.getByLabel('Paper account').selectOption({ label: 'Patient Mochi account' });
   await expect(page.getByTestId('position-row')).toHaveCount(1);
-
-  // Leave nothing running for the specs that share this backend.
-  await page.getByRole('button', { name: /^Stop all agents/ }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Stop all' }).click();
-  await expect(page.getByRole('button', { name: /^Stop all agents/ })).toBeDisabled();
 });
 
 test('a 1% trailing stop set in the protection dialog shows its trigger price in the position row', async ({ page, request }) => {
   await seed(request);
   await page.goto('/');
   await expect(page.getByTestId('total-equity')).toBeVisible();
-  await page.getByRole('button', { name: 'Trading', exact: true }).click();
+  await page.getByRole('button', { name: TRADING_NAV }).click();
   await page.getByLabel('Paper account').selectOption({ label: TERMINAL });
   await page.getByRole('button', { name: 'Review long' }).click();
   await page.getByRole('button', { name: 'Place order' }).click();
@@ -180,7 +183,7 @@ test('separate OKX take profits show the size of each order', async ({ page, req
   }));
   await page.goto('/');
   await expect(page.getByTestId('total-equity')).toBeVisible();
-  await page.getByRole('button', { name: 'Trading', exact: true }).click();
+  await page.getByRole('button', { name: TRADING_NAV }).click();
   await page.getByLabel('Paper account').selectOption({ label: `${TERMINAL} (OKX demo)` });
   await expect(page.getByRole('heading', { name: 'OKX Trading' })).toBeVisible();
   await page.getByRole('tab', { name: 'Pending orders (3)' }).click();
@@ -245,7 +248,7 @@ test('OKX market and limit reductions send the selected isolated position', asyn
   await context.route('**/api/orders/pending-okx-reduction', (route) => route.fulfill({ json: orderReadback }));
   await page.goto('/');
   await expect(page.getByTestId('total-equity')).toBeVisible();
-  await page.getByRole('button', { name: 'Trading', exact: true }).click();
+  await page.getByRole('button', { name: TRADING_NAV }).click();
   await page.getByLabel('Paper account').selectOption({ label: `${TERMINAL} (OKX demo)` });
   await expect(page.getByTestId('position-row')).toHaveCount(2);
   await page.getByRole('checkbox', { name: 'Reduce only' }).check();
