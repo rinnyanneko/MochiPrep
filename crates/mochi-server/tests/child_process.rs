@@ -36,13 +36,27 @@ fn spawn(port: u16, data: &std::path::Path, parent_mode: bool) -> Child {
     backend_command(port, data, parent_mode).spawn().unwrap()
 }
 
+/// How long a backend gets to print its first line before the test fails instead of hanging.
+const FIRST_LINE_WITHIN: Duration = Duration::from_secs(30);
+
 /// Returns the reader too: dropping it would close the pipe, and the server's next println
-/// (the offline notice) would then panic.
-fn first_line(stdout: ChildStdout) -> (String, BufReader<ChildStdout>) {
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    reader.read_line(&mut line).unwrap();
-    (line, reader)
+/// (the offline notice) would then panic. A backend that prints nothing in time is killed.
+fn first_line(child: &mut Child) -> (String, BufReader<ChildStdout>) {
+    let stdout = child.stdout.take().unwrap();
+    let (sent, received) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        let read = reader.read_line(&mut line).map(|_| (line, reader));
+        let _ = sent.send(read);
+    });
+    match received.recv_timeout(FIRST_LINE_WITHIN) {
+        Ok(read) => read.unwrap(),
+        Err(_) => {
+            let _ = child.kill();
+            panic!("the backend printed nothing within {FIRST_LINE_WITHIN:?}");
+        }
+    }
 }
 
 fn wait_for_exit(child: &mut Child, within: Duration) -> Option<std::process::ExitStatus> {
@@ -119,7 +133,7 @@ fn assert_logs_survive_failed_start(retention: i32) {
         mochi_store::set_setting(&db, "replay.cursor", &0_i64).unwrap();
         drop(db);
         let mut next = spawn(free_port(), data.path(), true);
-        let (line, _stdout) = first_line(next.stdout.take().unwrap());
+        let (line, _stdout) = first_line(&mut next);
         drop(next.stdin.take());
         let status = wait_for_exit(&mut next, Duration::from_secs(10));
         if status.is_none() {
@@ -141,7 +155,7 @@ fn prints_the_ready_line_with_the_bound_port() {
     let data = tempfile::tempdir().unwrap();
     let port = free_port();
     let mut child = spawn(port, data.path(), false);
-    let (line, _stdout) = first_line(child.stdout.take().unwrap());
+    let (line, _stdout) = first_line(&mut child);
     child.kill().unwrap();
     child.wait().unwrap();
     let rest = line
@@ -158,7 +172,7 @@ fn exits_cleanly_when_stdin_closes_in_parent_mode() {
     let data = tempfile::tempdir().unwrap();
     let port = free_port();
     let mut child = spawn(port, data.path(), true);
-    let (line, _stdout) = first_line(child.stdout.take().unwrap());
+    let (line, _stdout) = first_line(&mut child);
     assert!(line.starts_with(READY_PREFIX), "line was {line:?}");
     drop(child.stdin.take());
     let status = wait_for_exit(&mut child, Duration::from_secs(10));
@@ -174,7 +188,7 @@ fn browser_shutdown_exits_and_finishes_the_operation_log() {
     let data = tempfile::tempdir().unwrap();
     let port = free_port();
     let mut child = spawn(port, data.path(), true);
-    let (line, _stdout) = first_line(child.stdout.take().unwrap());
+    let (line, _stdout) = first_line(&mut child);
     assert!(line.starts_with(READY_PREFIX), "{line}");
     let request = |method: &str, path: &str, headers: &str| {
         let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
@@ -211,7 +225,7 @@ fn ignores_stdin_without_parent_mode() {
     let data = tempfile::tempdir().unwrap();
     let port = free_port();
     let mut child = spawn(port, data.path(), false);
-    let (line, _stdout) = first_line(child.stdout.take().unwrap());
+    let (line, _stdout) = first_line(&mut child);
     assert!(line.starts_with(READY_PREFIX), "line was {line:?}");
     drop(child.stdin.take());
     std::thread::sleep(Duration::from_secs(1));
