@@ -24,6 +24,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The migration files, embedded so the Rust binary needs no files at runtime.
 /// `migration_list_matches_directory` fails if a file is added without being listed here.
+///
+/// The two `009_` files share a number on purpose and must keep their names. A database records
+/// what it applied by file name, and every statement here runs once, so renaming either file makes
+/// a database that already ran it run it again and fail on the table it created. Bump the highest
+/// number for anything new instead. Do not renumber them, and do not use the number as a version.
 pub const MIGRATIONS: &[(&str, &str)] = &[
     ("001_init.sql", include_str!("../migrations/001_init.sql")),
     (
