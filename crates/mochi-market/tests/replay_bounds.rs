@@ -17,7 +17,7 @@ fn replay_needs_more_minutes_than_the_warmup() {
     let mut short = ReplayMarketData::new(Some(WARMUP_MINUTES + 2)).unwrap();
     assert_eq!(short.position(), WARMUP_MINUTES);
     assert!(!short.at_end());
-    assert_eq!(short.step().len(), 3);
+    assert_eq!(short.step().len(), mochi_domain::DEFAULT_SYMBOLS.len());
     assert!(short.at_end());
     assert!(short.step().is_empty());
 
@@ -37,4 +37,18 @@ fn tape_columns_share_one_length() {
     ] {
         assert_eq!(column.len(), tape.len());
     }
+}
+
+#[test]
+fn a_replay_of_some_pairs_steps_only_those() {
+    let pairs = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+    let mut replay = ReplayMarketData::with_symbols(Some(WARMUP_MINUTES + 2), &pairs).unwrap();
+    assert_eq!(replay.symbols(), pairs);
+    let symbols: Vec<_> = replay
+        .step()
+        .into_iter()
+        .map(|quote| quote.symbol)
+        .collect();
+    assert_eq!(symbols, pairs);
+    assert!(replay.get_quote("BNBUSDT").is_none());
 }

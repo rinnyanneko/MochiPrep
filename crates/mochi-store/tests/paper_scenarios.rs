@@ -124,7 +124,8 @@ impl Harness {
         let (q, c, e) = (quotes.clone(), clock.clone(), events.clone());
         let engine = PaperExecutionEngine::new(PaperEngineDeps {
             store: SqlitePaperStore::new(open_in_memory().unwrap()),
-            instruments: Instruments::with_defaults(),
+            // The three pairs Node shipped: the scenarios use DOGEUSDT as an unknown pair.
+            instruments: Instruments::with_builtin(&["BTCUSDT", "ETHUSDT", "SOLUSDT"]),
             get_quote: Box::new(move |source, symbol| {
                 q.lock().unwrap().get(&source_key(source, symbol)).cloned()
             }),

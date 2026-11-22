@@ -119,7 +119,7 @@ On **Markets** and **Trading**, charts show the selected account's trades: `B` a
 
 ## Trading pairs
 
-BTC, ETH and SOL are built in. To trade another coin, add it in **Settings > Trading pairs**. Any live USDT crypto perpetual listed on OKX can be added, and its contract specifications are read from OKX. Added pairs work on Live OKX accounts only, because the replay includes just the three built-in pairs.
+Ten pairs are built in: BTC, ETH, BNB, XRP, SOL, TRX, HYPE, ZEC, DOGE and LINK, the largest coins by market cap that OKX lists as USDT perpetuals (stablecoins left out, as of 2026-11-22). To trade another coin, add it in **Settings > Trading pairs**. Any live USDT crypto perpetual listed on OKX can be added, and its contract specifications are read from OKX. Added pairs work on Live OKX accounts only, because the replay includes just the built-in pairs.
 
 ## News
 

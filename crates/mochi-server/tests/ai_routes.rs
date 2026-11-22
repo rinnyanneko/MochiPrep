@@ -438,7 +438,7 @@ async fn agent_refs_busy_crud_lifecycle_and_signal_statuses() {
         json!({"error":"Unknown AI provider"})
     );
     wrong = input.clone();
-    wrong["symbol"] = json!("DOGEUSDT");
+    wrong["symbol"] = json!("ADAUSDT");
     assert!(t.send("POST", "/api/agents", Some(wrong)).await.1["error"]
         .as_str()
         .unwrap()

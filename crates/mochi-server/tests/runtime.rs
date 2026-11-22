@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use mochi_core::paper::CreateAccountArgs;
 use mochi_domain::{
     default_instrument, DataSource, FeedState, FeedStatus, OrderRequest, Quote, ServerEvent,
-    ToastLevel, Topic, VaultStatus,
+    ToastLevel, Topic, VaultStatus, DEFAULT_SYMBOLS,
 };
 use mochi_market::tape::WARMUP_MINUTES;
 use mochi_server::runtime::{LiveFeed, ReplayClock, RuntimeHandle, RuntimeOptions};
@@ -76,8 +76,9 @@ async fn replay_batch_steps_floor_of_credit() {
     // Each batch emits the last step's quotes once, one per default symbol, then the state.
     let sent = drain(&mut events);
     assert!(matches!(&sent[0], ServerEvent::Replay { state } if state.playing));
-    let batch: Vec<&ServerEvent> = sent[1..5].iter().collect();
-    for (event, symbol) in batch.iter().zip(["BTCUSDT", "ETHUSDT", "SOLUSDT"]) {
+    let pairs = DEFAULT_SYMBOLS.len();
+    let batch: Vec<&ServerEvent> = sent[1..pairs + 2].iter().collect();
+    for (event, symbol) in batch.iter().zip(DEFAULT_SYMBOLS) {
         match event {
             ServerEvent::Quote { quote } => {
                 assert_eq!(quote.symbol, symbol);
@@ -87,13 +88,13 @@ async fn replay_batch_steps_floor_of_credit() {
         }
     }
     assert!(
-        matches!(batch[3], ServerEvent::Replay { state } if state.now == Some(begin_now + 2 * MINUTE))
+        matches!(batch[pairs], ServerEvent::Replay { state } if state.now == Some(begin_now + 2 * MINUTE))
     );
     let quotes = sent
         .iter()
         .filter(|event| matches!(event, ServerEvent::Quote { .. }))
         .count();
-    assert_eq!(quotes, 6, "two batches of three quotes");
+    assert_eq!(quotes, 2 * pairs, "two batches of one quote per pair");
 
     // Speed 5 earns half a step per tick, so a step lands on every second tick.
     rt.set_speed(5).await.unwrap();
@@ -362,36 +363,38 @@ impl LiveFeed for RecordingFeed {
     }
 }
 
-fn doge() -> mochi_domain::InstrumentSpecification {
-    let mut doge = default_instrument("SOLUSDT").unwrap();
-    doge.symbol = "DOGEUSDT".into();
-    doge.base_currency = "DOGE".into();
-    doge
+fn ada() -> mochi_domain::InstrumentSpecification {
+    let mut ada = default_instrument("SOLUSDT").unwrap();
+    ada.symbol = "ADAUSDT".into();
+    ada.base_currency = "ADA".into();
+    ada
 }
 
 #[tokio::test]
 async fn instruments_rows_register_in_engine_registry() {
     let db = open_in_memory().unwrap();
-    save_instrument(&db, &doge()).unwrap();
+    save_instrument(&db, &ada()).unwrap();
     let feed = Arc::new(RecordingFeed::default());
     let mut options = RuntimeOptions::new(db);
     options.live = feed.clone();
     let rt = RuntimeHandle::start(options).unwrap();
 
-    assert_eq!(*feed.tracked.lock().unwrap(), vec!["DOGEUSDT".to_string()]);
+    assert_eq!(*feed.tracked.lock().unwrap(), vec!["ADAUSDT".to_string()]);
     let in_engine = rt
-        .call(|rt| rt.engine().instruments().get("DOGEUSDT").cloned())
+        .call(|rt| rt.engine().instruments().get("ADAUSDT").cloned())
         .await
         .unwrap();
-    assert_eq!(in_engine, Some(doge()));
+    assert_eq!(in_engine, Some(ada()));
 
     // `/api/state` lists the built-ins first, then added pairs, like Node's INSTRUMENTS object.
     let state = serde_json::to_value(rt.state().await.unwrap()).unwrap();
     let symbols: Vec<&String> = state["instruments"].as_object().unwrap().keys().collect();
-    assert_eq!(symbols, ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT"]);
+    let mut expected: Vec<&str> = DEFAULT_SYMBOLS.to_vec();
+    expected.push("ADAUSDT");
+    assert_eq!(symbols, expected);
     assert_eq!(
-        state["instruments"]["DOGEUSDT"]["baseCurrency"],
-        json!("DOGE")
+        state["instruments"]["ADAUSDT"]["baseCurrency"],
+        json!("ADA")
     );
     rt.shutdown().await;
 }

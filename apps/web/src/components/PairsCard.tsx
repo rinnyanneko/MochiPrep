@@ -5,7 +5,7 @@ import { api } from '@/lib/api';
 import { attempt, useApp, useQuery } from '@/store';
 import { Badge, Button, Card, CardHeader, Input } from './ui';
 
-/** Accepts doge, DOGE, DOGEUSDT or DOGE-USDT-SWAP. */
+/** Accepts ada, ADA, ADAUSDT or ADA-USDT-SWAP. */
 const normalize = (text: string) => {
   const base = text.trim().toUpperCase().replace(/-USDT(-SWAP)?$/, '').replace(/USDT$/, '');
   return `${base}USDT`;
@@ -54,7 +54,7 @@ export function PairsCard() {
           void add();
         }}
       >
-        <Input aria-label="Pair to add" list="okx-pairs" value={text} onChange={(e) => setText(e.target.value)} placeholder="DOGE" />
+        <Input aria-label="Pair to add" list="okx-pairs" value={text} onChange={(e) => setText(e.target.value)} placeholder="ADA" />
         <datalist id="okx-pairs">
           {available?.map((spec) => <option key={spec.symbol} value={spec.symbol} />)}
         </datalist>

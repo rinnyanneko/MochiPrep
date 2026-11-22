@@ -35,6 +35,44 @@ fn seed_for(symbol: &str) -> Option<Seed> {
             price: 150.0,
             volume: 6_400.0,
         }),
+        // Added after the TypeScript port, so no golden fixture covers them. Seeds continue the
+        // ASCII pattern above ("p002".."p008"); prices and volumes are round figures of the
+        // right size, chosen so each pair trades a few hundred thousand USDT a minute.
+        "BNBUSDT" => Some(Seed {
+            seed: 0x70303032,
+            price: 600.0,
+            volume: 800.0,
+        }),
+        "XRPUSDT" => Some(Seed {
+            seed: 0x70303033,
+            price: 2.5,
+            volume: 200_000.0,
+        }),
+        "TRXUSDT" => Some(Seed {
+            seed: 0x70303034,
+            price: 0.3,
+            volume: 1_000_000.0,
+        }),
+        "HYPEUSDT" => Some(Seed {
+            seed: 0x70303035,
+            price: 40.0,
+            volume: 8_000.0,
+        }),
+        "ZECUSDT" => Some(Seed {
+            seed: 0x70303036,
+            price: 300.0,
+            volume: 1_000.0,
+        }),
+        "DOGEUSDT" => Some(Seed {
+            seed: 0x70303037,
+            price: 0.2,
+            volume: 2_000_000.0,
+        }),
+        "LINKUSDT" => Some(Seed {
+            seed: 0x70303038,
+            price: 15.0,
+            volume: 20_000.0,
+        }),
         _ => None,
     }
 }

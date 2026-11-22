@@ -26,17 +26,34 @@ export interface InstrumentSpecification {
   venueLotSize: string;
 }
 
-/** Always available, and the only pairs on the replay tape. */
-export const DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'] as const;
+/**
+ * Always available, and the only pairs on the replay tape: the ten largest coins by market cap
+ * that OKX lists as USDT perpetuals, stablecoins left out (2026-11-22). Mirrors the Rust list.
+ */
+export const DEFAULT_SYMBOLS = [
+  'BTCUSDT',
+  'ETHUSDT',
+  'BNBUSDT',
+  'XRPUSDT',
+  'SOLUSDT',
+  'TRXUSDT',
+  'HYPEUSDT',
+  'ZECUSDT',
+  'DOGEUSDT',
+  'LINKUSDT',
+] as const;
 export type DefaultSymbol = (typeof DEFAULT_SYMBOLS)[number];
 /** A registered instrument symbol, such as DOGEUSDT. Users can add pairs, so this is open. */
 export type SymbolId = string;
 
+/** quantityStep is OKX's ctVal x lotSz. */
 const perp = (
   base: string,
   quantityStep: string,
   priceTick: string,
+  maxLeverage: number,
   venueContractValue: string,
+  venueLotSize: string,
 ): InstrumentSpecification => ({
   symbol: `${base}USDT`,
   marketType: 'CRYPTO_PERP',
@@ -47,18 +64,25 @@ const perp = (
   quantityStep,
   minQuantity: quantityStep,
   priceTick,
-  maxLeverage: 100,
+  maxLeverage,
   maintenanceMarginRate: '0.005',
   fundingIntervalHours: 8,
   venueContractValue,
-  venueLotSize: '0.01',
+  venueLotSize,
 });
 
-/** Steps mirror OKX USDT swaps (ctVal x lotSz): 0.01 x 0.01 BTC, 0.1 x 0.01 ETH, 1 x 0.01 SOL. */
+/** Copied from OKX's public SWAP instrument list on 2026-11-22 (ctVal, lotSz, tickSz, lever). */
 export const INSTRUMENTS: Record<SymbolId, InstrumentSpecification> = {
-  BTCUSDT: perp('BTC', '0.0001', '0.1', '0.01'),
-  ETHUSDT: perp('ETH', '0.001', '0.01', '0.1'),
-  SOLUSDT: perp('SOL', '0.01', '0.01', '1'),
+  BTCUSDT: perp('BTC', '0.0001', '0.1', 100, '0.01', '0.01'),
+  ETHUSDT: perp('ETH', '0.001', '0.01', 100, '0.1', '0.01'),
+  BNBUSDT: perp('BNB', '0.01', '0.01', 50, '0.01', '1'),
+  XRPUSDT: perp('XRP', '1', '0.0001', 100, '100', '0.01'),
+  SOLUSDT: perp('SOL', '0.01', '0.01', 100, '1', '0.01'),
+  TRXUSDT: perp('TRX', '10', '0.00001', 50, '1000', '0.01'),
+  HYPEUSDT: perp('HYPE', '0.1', '0.001', 50, '0.1', '1'),
+  ZECUSDT: perp('ZEC', '0.01', '0.01', 75, '0.01', '1'),
+  DOGEUSDT: perp('DOGE', '10', '0.00001', 50, '1000', '0.01'),
+  LINKUSDT: perp('LINK', '0.1', '0.001', 50, '1', '0.1'),
 };
 
 export const isDefaultSymbol = (symbol: SymbolId) => (DEFAULT_SYMBOLS as readonly string[]).includes(symbol);

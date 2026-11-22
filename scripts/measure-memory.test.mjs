@@ -24,9 +24,10 @@ test('parseWorkingSet reads the PowerShell integer', () => {
 test('gateFailures', () => {
   const win = { target: 'win32-x64', metric: 'workingSet' };
   assert.deepEqual(gateFailures({ ...win, mib: 18.4, liveFeed: 'connected' }), []);
-  const over = gateFailures({ ...win, mib: 21, liveFeed: 'connected' });
+  assert.deepEqual(gateFailures({ ...win, mib: 30.2, liveFeed: 'connected' }), []);
+  const over = gateFailures({ ...win, mib: 33, liveFeed: 'connected' });
   assert.equal(over.length, 1);
-  assert.match(over[0], /20 MiB/);
+  assert.match(over[0], /32 MiB/);
   const feed = gateFailures({ ...win, mib: 18.4, liveFeed: 'degraded' });
   assert.equal(feed.length, 1);
   assert.match(feed[0], /degraded/);

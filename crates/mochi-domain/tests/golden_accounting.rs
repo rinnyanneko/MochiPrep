@@ -99,15 +99,15 @@ fn registry_has_defaults_and_registers() {
         instruments.get("BTCUSDT"),
         default_instrument("BTCUSDT").as_ref()
     );
-    assert!(instruments.get("DOGEUSDT").is_none());
+    assert!(instruments.get("ADAUSDT").is_none());
 
-    let mut doge = default_instrument("SOLUSDT").unwrap();
-    doge.symbol = "DOGEUSDT".to_string();
-    instruments.register(doge.clone());
-    assert_eq!(instruments.get("DOGEUSDT"), Some(&doge));
+    let mut ada = default_instrument("SOLUSDT").unwrap();
+    ada.symbol = "ADAUSDT".to_string();
+    instruments.register(ada.clone());
+    assert_eq!(instruments.get("ADAUSDT"), Some(&ada));
 
-    instruments.unregister("DOGEUSDT");
-    assert!(instruments.get("DOGEUSDT").is_none());
+    instruments.unregister("ADAUSDT");
+    assert!(instruments.get("ADAUSDT").is_none());
 
     // Default symbols are always available, so unregistering one is a no-op.
     instruments.unregister("BTCUSDT");

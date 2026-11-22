@@ -19,7 +19,7 @@ const LOG_SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
 
 /// Tokio worker threads. The work is I/O-bound, the ledger and SQLite run in one runtime task, and
 /// the vault KDF uses the separate blocking pool, so two workers are enough; each extra worker
-/// costs resident memory and the spec gate is 20 MiB.
+/// costs resident memory and the memory gate is 32 MiB.
 const WORKER_THREADS: usize = 2;
 
 fn main() -> ExitCode {

@@ -86,7 +86,7 @@ struct FakeFeed {
 
 impl FakeFeed {
     fn list() -> Vec<InstrumentSpecification> {
-        vec![spec("DOGEUSDT", "DOGE"), spec("PEPEUSDT", "PEPE")]
+        vec![spec("ADAUSDT", "ADA"), spec("PEPEUSDT", "PEPE")]
     }
 }
 
@@ -140,7 +140,7 @@ async fn instrument_add_and_remove_texts() {
         .iter()
         .map(|s| s["symbol"].as_str().unwrap())
         .collect();
-    assert_eq!(symbols, ["DOGEUSDT", "PEPEUSDT"]);
+    assert_eq!(symbols, ["ADAUSDT", "PEPEUSDT"]);
     assert!(
         !feed.listed.lock().unwrap()[0].0,
         "the list may come from cache"
@@ -156,24 +156,24 @@ async fn instrument_add_and_remove_texts() {
         error(400, "FAKEUSDT is not a live USDT crypto perpetual on OKX")
     );
     assert_eq!(
-        send(&state, "POST", "/api/instruments", add("doge")).await,
+        send(&state, "POST", "/api/instruments", add("ada")).await,
         error(400, "symbol: expected a pair like DOGEUSDT")
     );
-    let (status, added) = send(&state, "POST", "/api/instruments", add("DOGEUSDT")).await;
+    let (status, added) = send(&state, "POST", "/api/instruments", add("ADAUSDT")).await;
     assert_eq!(status, 200);
-    assert_eq!(
-        added,
-        serde_json::to_value(spec("DOGEUSDT", "DOGE")).unwrap()
-    );
+    assert_eq!(added, serde_json::to_value(spec("ADAUSDT", "ADA")).unwrap());
     // Looked up fresh, never from cache: the spec decides real order sizes.
     assert!(feed.listed.lock().unwrap().last().unwrap().0);
-    assert_eq!(*feed.tracked.lock().unwrap(), ["DOGEUSDT"]);
+    assert_eq!(*feed.tracked.lock().unwrap(), ["ADAUSDT"]);
     assert_eq!(
-        send(&state, "POST", "/api/instruments", add("DOGEUSDT")).await,
-        error(400, "DOGEUSDT is already added")
+        send(&state, "POST", "/api/instruments", add("ADAUSDT")).await,
+        error(400, "ADAUSDT is already added")
     );
     let (_, list) = send(&state, "GET", "/api/instruments", None).await;
-    assert_eq!(list.as_array().unwrap().len(), 4);
+    assert_eq!(
+        list.as_array().unwrap().len(),
+        mochi_domain::DEFAULT_SYMBOLS.len() + 1
+    );
     let (_, available) = send(&state, "GET", "/api/instruments/available", None).await;
     assert_eq!(available.as_array().unwrap().len(), 1);
     let saved = state
@@ -181,7 +181,7 @@ async fn instrument_add_and_remove_texts() {
         .call(|rt| mochi_store::list_instruments(rt.connection()).unwrap())
         .await
         .unwrap();
-    assert_eq!(saved, [spec("DOGEUSDT", "DOGE")]);
+    assert_eq!(saved, [spec("ADAUSDT", "ADA")]);
     loop {
         if let ServerEvent::Invalidate { topics } = events.recv().await.unwrap() {
             assert_eq!(topics, [Topic::Instruments]);
@@ -196,11 +196,11 @@ async fn instrument_add_and_remove_texts() {
         error(400, "BTCUSDT is built in")
     );
     assert_eq!(
-        send(&state, "DELETE", &remove("XRPUSDT"), None).await,
-        error(400, "XRPUSDT is not an added pair")
+        send(&state, "DELETE", &remove("AVAXUSDT"), None).await,
+        error(400, "AVAXUSDT is not an added pair")
     );
     assert_eq!(
-        send(&state, "DELETE", &remove("doge"), None).await,
+        send(&state, "DELETE", &remove("ada"), None).await,
         error(400, "input: expected a pair like DOGEUSDT")
     );
 
@@ -208,14 +208,14 @@ async fn instrument_add_and_remove_texts() {
         &state,
         "POST",
         "/api/accounts",
-        Some(json!({ "name": "Doge desk", "source": "LIVE", "initialBalance": "1000" })),
+        Some(json!({ "name": "Ada desk", "source": "LIVE", "initialBalance": "1000" })),
     )
     .await;
     let account_id = account["id"].as_str().unwrap().to_string();
     let agent = format!(
         "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,risk,
          interval_sec,status,running,created_at)
-         VALUES ('agent_1','A','mock','m','DOGEUSDT','15m','','{account_id}','{{}}',900,'IDLE',0,1)"
+         VALUES ('agent_1','A','mock','m','ADAUSDT','15m','','{account_id}','{{}}',900,'IDLE',0,1)"
     );
     let run = |statement: String| {
         state
@@ -224,14 +224,14 @@ async fn instrument_add_and_remove_texts() {
     };
     run(agent).await.unwrap();
     assert_eq!(
-        send(&state, "DELETE", &remove("DOGEUSDT"), None).await,
+        send(&state, "DELETE", &remove("ADAUSDT"), None).await,
         error(400, "Agents still use this pair")
     );
     run("DELETE FROM agents".into()).await.unwrap();
 
     let order = |client: &str, kind: &str, price: Value| {
         json!({
-            "accountId": account_id, "clientOrderId": client, "symbol": "DOGEUSDT", "side": "BUY",
+            "accountId": account_id, "clientOrderId": client, "symbol": "ADAUSDT", "side": "BUY",
             "type": kind, "quantity": "100", "price": price, "leverage": 2,
         })
     };
@@ -244,13 +244,13 @@ async fn instrument_add_and_remove_texts() {
     .await;
     assert_eq!(status, 200, "{placed}");
     assert_eq!(
-        send(&state, "DELETE", &remove("DOGEUSDT"), None).await,
-        error(400, "Doge desk has an open DOGEUSDT position")
+        send(&state, "DELETE", &remove("ADAUSDT"), None).await,
+        error(400, "Ada desk has an open ADAUSDT position")
     );
     let (status, _) = send(
         &state,
         "POST",
-        &format!("/api/positions/{account_id}/DOGEUSDT/close"),
+        &format!("/api/positions/{account_id}/ADAUSDT/close"),
         Some(json!({ "fraction": 1, "clientOrderId": "c1" })),
     )
     .await;
@@ -264,20 +264,23 @@ async fn instrument_add_and_remove_texts() {
     .await;
     assert_eq!(status, 200, "{placed}");
     assert_eq!(
-        send(&state, "DELETE", &remove("DOGEUSDT"), None).await,
-        error(400, "Doge desk has open DOGEUSDT orders")
+        send(&state, "DELETE", &remove("ADAUSDT"), None).await,
+        error(400, "Ada desk has open ADAUSDT orders")
     );
     let order_id = placed["order"]["id"].as_str().unwrap().to_string();
     let (status, _) = send(&state, "DELETE", &format!("/api/orders/{order_id}"), None).await;
     assert_eq!(status, 200);
 
     assert_eq!(
-        send(&state, "DELETE", &remove("DOGEUSDT"), None).await,
+        send(&state, "DELETE", &remove("ADAUSDT"), None).await,
         (200, json!({ "ok": true }))
     );
     assert!(feed.tracked.lock().unwrap().is_empty());
     let (_, list) = send(&state, "GET", "/api/instruments", None).await;
-    assert_eq!(list.as_array().unwrap().len(), 3);
+    assert_eq!(
+        list.as_array().unwrap().len(),
+        mochi_domain::DEFAULT_SYMBOLS.len()
+    );
     let saved = state
         .runtime
         .call(|rt| mochi_store::list_instruments(rt.connection()).unwrap())
@@ -286,7 +289,7 @@ async fn instrument_add_and_remove_texts() {
     assert!(saved.is_empty());
     let in_engine = state
         .runtime
-        .call(|rt| rt.engine().instruments().get("DOGEUSDT").is_some())
+        .call(|rt| rt.engine().instruments().get("ADAUSDT").is_some())
         .await
         .unwrap();
     assert!(!in_engine);
@@ -317,7 +320,7 @@ async fn the_offline_feed_says_so() {
             &state,
             "POST",
             "/api/instruments",
-            Some(json!({ "symbol": "DOGEUSDT" }))
+            Some(json!({ "symbol": "ADAUSDT" }))
         )
         .await,
         error(400, offline)

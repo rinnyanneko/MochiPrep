@@ -149,8 +149,8 @@ fn insert_seed(db: &rusqlite::Connection, seed: &Value) {
     }
 }
 
-/// The runtime Node's script ran against: a fresh database with the fixture's added pairs and
-/// seeded rows, the same tape length, and no live feed. Starting it seeds the mock provider and
+/// The runtime Node's script ran against: Node's three built-in pairs, a fresh database with the
+/// fixture's added pairs and seeded rows, the same tape length, and no live feed. Starting it seeds the mock provider and
 /// pauses the seeded agent, as Node's constructor did.
 fn state(fixture: &Value) -> AppState {
     let db = mochi_store::open_in_memory().unwrap();
@@ -161,6 +161,8 @@ fn state(fixture: &Value) -> AppState {
     insert_seed(&db, &fixture["seed"]);
     let mut options = RuntimeOptions::new(db);
     options.replay_minutes = Some(fixture["replayMinutes"].as_u64().unwrap() as usize);
+    // The session adds DOGEUSDT and asks for XRPUSDT as pairs outside the built-in ones.
+    options.builtin_symbols = vec!["BTCUSDT", "ETHUSDT", "SOLUSDT"];
     AppState::new(Arc::new(config()), RuntimeHandle::start(options).unwrap())
 }
 

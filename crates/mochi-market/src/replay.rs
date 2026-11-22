@@ -19,7 +19,8 @@ pub struct TapeTooShort(pub usize);
 /// calls finish, and two runs of the same tape see identical quotes. One quote per 1m bar,
 /// taken at the close: wicks are never treated as tradable prices.
 pub struct ReplayMarketData {
-    /// One tape per default symbol, in `DEFAULT_SYMBOLS` order. Custom pairs only exist on live data.
+    /// One tape per built-in pair, `DEFAULT_SYMBOLS` order unless the caller chose others.
+    /// Custom pairs only exist on live data.
     tapes: Vec<(&'static str, Tape)>,
     cursor: usize,
 }
@@ -28,11 +29,21 @@ impl ReplayMarketData {
     /// TypeScript accepts any length and then reads past the end of a short tape; here a tape
     /// with no bar after the warmup is refused.
     pub fn new(minutes: Option<usize>) -> Result<Self, TapeTooShort> {
+        Self::with_symbols(minutes, &DEFAULT_SYMBOLS)
+    }
+
+    /// A tape of only some default pairs, in the given order. Tests that replay recordings
+    /// from the Node backend, which shipped three pairs, use this to see the tape Node had.
+    pub fn with_symbols(
+        minutes: Option<usize>,
+        symbols: &[&'static str],
+    ) -> Result<Self, TapeTooShort> {
         let minutes = minutes.unwrap_or(TAPE_MINUTES);
         if minutes <= WARMUP_MINUTES {
             return Err(TapeTooShort(minutes));
         }
-        let tapes = DEFAULT_SYMBOLS
+        assert!(!symbols.is_empty(), "a replay needs at least one pair");
+        let tapes = symbols
             .iter()
             .map(|&symbol| {
                 let tape = generate_tape(symbol, minutes).expect("every default symbol has a tape");
@@ -43,6 +54,11 @@ impl ReplayMarketData {
             tapes,
             cursor: WARMUP_MINUTES,
         })
+    }
+
+    /// The pairs on this tape, which are the built-in ones.
+    pub fn symbols(&self) -> Vec<&'static str> {
+        self.tapes.iter().map(|(symbol, _)| *symbol).collect()
     }
 
     /// All default tapes share one clock, so the first one answers time questions.
@@ -97,9 +113,9 @@ impl ReplayMarketData {
             return Vec::new();
         }
         self.cursor += 1;
-        DEFAULT_SYMBOLS
+        self.tapes
             .iter()
-            .map(|symbol| self.get_quote(symbol).unwrap())
+            .map(|(symbol, _)| self.get_quote(symbol).unwrap())
             .collect()
     }
 

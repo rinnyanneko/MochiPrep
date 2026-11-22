@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-/// Always available, and the only pairs on the replay tape.
-pub const DEFAULT_SYMBOLS: [&str; 3] = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+/// Always available, and the only pairs on the replay tape: the ten largest coins by market cap
+/// that OKX lists as USDT perpetuals, stablecoins left out (2026-11-22), in that order.
+pub const DEFAULT_SYMBOLS: [&str; 10] = [
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT", "TRXUSDT", "HYPEUSDT", "ZECUSDT",
+    "DOGEUSDT", "LINKUSDT",
+];
 
 /// Decimal fields stay strings, as in the TypeScript contract, so no precision is lost in transit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,11 +30,14 @@ pub struct InstrumentSpecification {
     pub venue_lot_size: String,
 }
 
+/// `quantity_step` is OKX's ctVal x lotSz, the same product `parse_okx_instrument` computes.
 fn perp(
     base: &str,
     quantity_step: &str,
     price_tick: &str,
+    max_leverage: u32,
     venue_contract_value: &str,
+    venue_lot_size: &str,
 ) -> InstrumentSpecification {
     InstrumentSpecification {
         symbol: format!("{base}USDT"),
@@ -42,21 +49,28 @@ fn perp(
         quantity_step: quantity_step.to_string(),
         min_quantity: quantity_step.to_string(),
         price_tick: price_tick.to_string(),
-        max_leverage: 100,
+        max_leverage,
         maintenance_margin_rate: "0.005".to_string(),
         funding_interval_hours: 8,
         venue_contract_value: venue_contract_value.to_string(),
-        venue_lot_size: "0.01".to_string(),
+        venue_lot_size: venue_lot_size.to_string(),
     }
 }
 
-/// Steps mirror OKX USDT swaps (ctVal x lotSz): 0.01 x 0.01 BTC, 0.1 x 0.01 ETH, 1 x 0.01 SOL.
-/// The order matches `DEFAULT_SYMBOLS`.
+/// Copied from OKX's public SWAP instrument list on 2026-11-22 (ctVal, lotSz, tickSz, lever).
+/// A live feed replaces them with fresh OKX specs. The order matches `DEFAULT_SYMBOLS`.
 pub fn default_instruments() -> Vec<InstrumentSpecification> {
     vec![
-        perp("BTC", "0.0001", "0.1", "0.01"),
-        perp("ETH", "0.001", "0.01", "0.1"),
-        perp("SOL", "0.01", "0.01", "1"),
+        perp("BTC", "0.0001", "0.1", 100, "0.01", "0.01"),
+        perp("ETH", "0.001", "0.01", 100, "0.1", "0.01"),
+        perp("BNB", "0.01", "0.01", 50, "0.01", "1"),
+        perp("XRP", "1", "0.0001", 100, "100", "0.01"),
+        perp("SOL", "0.01", "0.01", 100, "1", "0.01"),
+        perp("TRX", "10", "0.00001", 50, "1000", "0.01"),
+        perp("HYPE", "0.1", "0.001", 50, "0.1", "1"),
+        perp("ZEC", "0.01", "0.01", 75, "0.01", "1"),
+        perp("DOGE", "10", "0.00001", 50, "1000", "0.01"),
+        perp("LINK", "0.1", "0.001", 50, "1", "0.1"),
     ]
 }
 

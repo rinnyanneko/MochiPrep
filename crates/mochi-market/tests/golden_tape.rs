@@ -2,6 +2,9 @@ use mochi_domain::DEFAULT_SYMBOLS;
 use mochi_market::tape::{generate_tape, TAPE_MINUTES};
 use sha2::{Digest, Sha256};
 
+/// The pairs the Node backend generated `tape.json` for. Later built-in pairs have no fixture.
+const NODE_SYMBOLS: [&str; 3] = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+
 fn golden(name: &str) -> serde_json::Value {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../golden/");
     serde_json::from_str(&std::fs::read_to_string(format!("{path}{name}")).unwrap()).unwrap()
@@ -10,7 +13,7 @@ fn golden(name: &str) -> serde_json::Value {
 #[test]
 fn head_matches_typescript() {
     let golden = golden("tape.json");
-    for symbol in DEFAULT_SYMBOLS {
+    for symbol in NODE_SYMBOLS {
         let tape = generate_tape(symbol, TAPE_MINUTES).unwrap();
         let expected = golden["head"][symbol].as_array().unwrap();
         assert_eq!(expected.len(), 64);
@@ -37,7 +40,7 @@ fn head_matches_typescript() {
 #[test]
 fn full_tape_hash_matches_typescript() {
     let mut hash = Sha256::new();
-    for symbol in DEFAULT_SYMBOLS {
+    for symbol in NODE_SYMBOLS {
         let tape = generate_tape(symbol, TAPE_MINUTES).unwrap();
         for column in [
             tape.open(),
@@ -56,6 +59,17 @@ fn full_tape_hash_matches_typescript() {
 }
 
 #[test]
+fn every_default_symbol_has_a_tape_of_positive_prices() {
+    for symbol in DEFAULT_SYMBOLS {
+        let tape = generate_tape(symbol, TAPE_MINUTES).unwrap();
+        assert_eq!(tape.len(), TAPE_MINUTES, "{symbol}");
+        for (i, &low) in tape.low().iter().enumerate() {
+            assert!(low > 0.0, "{symbol} low {low} at {i}");
+        }
+    }
+}
+
+#[test]
 fn unknown_symbol_has_no_tape() {
-    assert!(generate_tape("DOGEUSDT", 10).is_none());
+    assert!(generate_tape("ADAUSDT", 10).is_none());
 }

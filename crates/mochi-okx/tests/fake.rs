@@ -18,7 +18,7 @@ fn client(okx: &Arc<FakeOkx>, venue: Venue) -> OkxClient {
 /// What the runtime asks on connect: the account configuration and each pair's contract spec.
 async fn connect(client: &OkxClient) {
     client.get_config().await.unwrap();
-    for symbol in ["BTCUSDT", "ETHUSDT", "SOLUSDT"] {
+    for symbol in mochi_domain::DEFAULT_SYMBOLS {
         client.get_contract_value(symbol).await.unwrap();
     }
     client.get_usdt_balance().await.unwrap();
@@ -117,7 +117,7 @@ async fn answers_config_specs_and_balance_from_the_knobs() {
     );
     let btc = client.get_contract_value("BTCUSDT").await.unwrap();
     assert_eq!((btc.ct_val.as_str(), btc.lot_sz.as_str()), ("0.01", "0.01"));
-    let unknown = client.get_contract_value("XRPUSDT").await.unwrap();
+    let unknown = client.get_contract_value("ADAUSDT").await.unwrap();
     assert_eq!(unknown.ct_val, "");
     okx.state().ct_val_override = Some("0.001".into());
     assert_eq!(
