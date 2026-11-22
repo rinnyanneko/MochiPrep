@@ -23,6 +23,7 @@ Changing the port starts those saved preferences fresh, because they belong to t
 - On first start with an empty data folder, MochiPrep offers once to import an existing data folder, such as one from an earlier version. The original folder is not changed.
 - The backend uses port 8787 by default. You can change it in **Settings** (1024 to 65535). If the port is busy, the tray shows `Error: port <p> is in use`. MochiPrep does not pick another port by itself.
 - Closing the interface window does not stop the backend. Agents keep running in the tray.
+- Left-click the tray icon to open the interface, or to bring it to the front. Right-click it for the menu. On Linux, any click opens the menu, which has **Open interface**.
 - **Quit** and **Restart** ask `Stop MochiPrep's backend?` first if an agent is running, a real account is armed, or the backend's state cannot be read.
 - **Disarm all** is always safe and is available while a real account is armed.
 - On macOS there is no Dock icon. Quit is only in the tray menu, and it asks first.
