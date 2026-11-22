@@ -246,16 +246,23 @@ pub(super) fn agent_input(input: Input) -> Checked {
     f.required("model", |v| check_string(v, &StringRule::trimmed(120)));
     f.required("symbol", |v| check_string(v, &SYMBOL));
     f.required("timeframe", |v| check_enum(v, TIMEFRAMES));
-    f.required("strategy", |v| {
-        check_string(
-            v,
-            &StringRule {
-                max: Some(8000),
-                ..StringRule::PLAIN
-            },
-        )
-    });
+    f.required("strategy", strategy);
     f.required("accountId", nonempty);
+    agent_settings(&mut f);
+    f.strict()
+}
+fn strategy(v: Input) -> Checked {
+    check_string(
+        v,
+        &StringRule {
+            max: Some(8000),
+            ..StringRule::PLAIN
+        },
+    )
+}
+/// The schedule, execution and risk fields an agent and a template share, with the same bounds
+/// and defaults, so a template can never hold a value the agent form would refuse.
+fn agent_settings(f: &mut Fields<'_>) {
     f.defaulted(
         "risk",
         serde_json::to_value(default_risk_settings()).expect("finite default risk"),
@@ -269,6 +276,25 @@ pub(super) fn agent_input(input: Input) -> Checked {
     });
     f.defaulted("useNews", json!(false), check_bool);
     f.defaulted("allowTrailingStop", json!(false), check_bool);
+}
+/// The agent form fields a template saves: no provider, model, symbol or account, which belong
+/// to the agent being created. The same bounds as [`agent_input`], since a template only
+/// pre-fills that form.
+pub(super) fn agent_template_input(input: Input) -> Checked {
+    let mut f = Fields::new(input)?;
+    f.required("name", |v| check_string(v, &StringRule::trimmed(60)));
+    f.defaulted("description", json!(""), |v| {
+        check_string(
+            v,
+            &StringRule {
+                min: None,
+                ..StringRule::trimmed(300)
+            },
+        )
+    });
+    f.required("strategy", strategy);
+    f.required("timeframe", |v| check_enum(v, TIMEFRAMES));
+    agent_settings(&mut f);
     f.strict()
 }
 fn ai_trailing(input: Input) -> Checked {

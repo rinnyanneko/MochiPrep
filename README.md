@@ -94,6 +94,23 @@ Each agent has one of two modes:
 - **Suggest to me** (the default for new agents). The agent shows its entry, stop and target on the chart and in a list. Nothing is ordered until you accept. Accepting runs the risk checks again and resizes the order at current prices. Suggestions expire after one agent interval.
 - **Trade automatically.** The agent places approved orders without asking you first.
 
+## Agent templates
+
+A template is a saved set of agent settings: strategy instructions, timeframe, schedule, execution mode, news, trailing stops and risk limits. When you create an agent, pick one under **Start from template** to fill in the form, then change anything you like before saving. The template only fills in the form. The agent's limits are checked when it is created, and every order still goes through the risk checks. Provider, model, pair and account are chosen per agent, so templates do not store them.
+
+MochiPrep includes four built-in templates: **Conservative**, **Balanced**, **Trend following** and **Range reversion**. They are starting points, not proven strategies. All of them use Suggest mode, require a stop loss, and keep leverage and risk per trade at or below the defaults.
+
+Open **AI Agents > Templates** to manage them:
+
+- **New template** creates your own from scratch.
+- **Duplicate** copies any template, including a built-in one, so you can change it.
+- **Edit** changes your own templates. Built-in templates cannot be edited, so updates to MochiPrep can improve them. Duplicate one to change it.
+- **Delete** removes your own template. Deleting a built-in only hides it, and **Restore built-ins** brings back every hidden one.
+- **Export** (on a row) or **Export mine** (all your own templates) shows a `.json` file you can download or copy. It holds only template settings, never keys or account details.
+- **Import** reads an exported file, either picked from disk or pasted as text, and adds its templates as your own. A name that already exists gets a copy suffix. Each imported template is checked like one you create by hand, and the file is refused if it is not a MochiPrep template export. Only import files you trust, and review the templates before using them: strategy text is sent to the AI model, and an imported template may use Trade automatically.
+
+Changing or deleting a template does not change agents already created from it.
+
 ## Paper trading and live prices
 
 Switch the top bar to **Live OKX** to paper trade against OKX public market data. No exchange key is needed. Paper orders are simulated locally. See [How paper trading works](docs/PAPER_ENGINE.md) for the rules.

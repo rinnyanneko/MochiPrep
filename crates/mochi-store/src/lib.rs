@@ -5,6 +5,7 @@ mod ai;
 mod paper;
 pub mod rows;
 mod settings;
+pub mod templates;
 mod vault;
 
 pub use paper::SqlitePaperStore;
@@ -77,6 +78,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
     (
         "014_exchange_order_id_lookup.sql",
         include_str!("../migrations/014_exchange_order_id_lookup.sql"),
+    ),
+    (
+        "015_agent_templates.sql",
+        include_str!("../migrations/015_agent_templates.sql"),
     ),
 ];
 
