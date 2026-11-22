@@ -98,6 +98,14 @@ async fn the_replay_downloads_once_when_first_used_and_loads_from_the_database_a
     })
     .await
     .unwrap();
+    let account = rt
+        .call(|r| {
+            let error = r.assert_replay_loaded().unwrap_err();
+            error.message().to_string()
+        })
+        .await
+        .unwrap();
+    assert_eq!(account, mochi_server::runtime::NOT_LOADED);
     let refused = rt
         .call(|r| r.assert_tradable("BTCUSDT", mochi_domain::DataSource::Replay))
         .await

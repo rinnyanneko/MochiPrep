@@ -46,7 +46,7 @@ impl Runtime {
     }
 
     /// Refuses work that needs the replay's bars before they are loaded.
-    pub(super) fn assert_replay_loaded(&self) -> Result<(), ApiError> {
+    pub fn assert_replay_loaded(&self) -> Result<(), ApiError> {
         if self.replay_loaded() {
             Ok(())
         } else {
