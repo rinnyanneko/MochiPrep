@@ -5,7 +5,10 @@ describe('direction color preferences', () => {
   it('migrates the old flip setting only when the new preference is absent', () => {
     expect(parseDirectionColors(null, '1')).toEqual({ preset: 'red-green' });
     expect(parseDirectionColors(null, '0')).toEqual({ preset: 'green-red' });
-    expect(parseDirectionColors('{"preset":"blue-green"}', '1')).toEqual({ preset: 'blue-green' });
+    expect(parseDirectionColors('{"preset":"red-blue"}', '1')).toEqual({ preset: 'red-blue' });
+  });
+  it('moves the retired Blue / Green preset to Blue / Red, keeping blue for up', () => {
+    expect(parseDirectionColors('{"preset":"blue-green"}', null)).toEqual({ preset: 'blue-red' });
   });
   it('rejects malformed storage and CSS values', () => {
     for (const raw of ['null', '[]', '{', '{"preset":"wat"}', '{"preset":"custom","rise":"red","fall":"#00ff00"}']) {
@@ -19,7 +22,7 @@ describe('direction color preferences', () => {
     expect(directionPalette(custom, 'light')).toEqual(directionPalette(custom, 'dark'));
     expect(directionPalette({ preset: 'red-green' }, 'dark').rise).toBe('#f58a9e');
     expect(directionPalette({ preset: 'red-blue' }, 'light').fall).toBe('#2563eb');
-    expect(directionPalette({ preset: 'blue-green' }, 'dark').fall).toBe('#6fd6ae');
+    expect(directionPalette({ preset: 'blue-red' }, 'dark')).toEqual({ rise: '#82b1ff', fall: '#f58a9e' });
   });
 });
 
