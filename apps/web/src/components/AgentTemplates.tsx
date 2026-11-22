@@ -6,10 +6,13 @@ import { api } from '@/lib/api';
 import { duplicateTemplate, intervalOptions, templateBody, type AgentSettings } from '@/lib/templates';
 import { attempt, useQuery } from '@/store';
 
-/** Every template, refetched whenever the backend reports a change. */
+/**
+ * Every template, refetched whenever the backend reports a change. `templates` is null until the
+ * first load succeeds, so a failed load is never shown as an empty list.
+ */
 export function useAgentTemplates() {
-  const { data } = useQuery(() => api.get<AgentTemplate[]>('/agent-templates'), [], ['templates']);
-  return data ?? [];
+  const { data, error, reload } = useQuery(() => api.get<AgentTemplate[]>('/agent-templates'), [], ['templates']);
+  return { templates: data, error, reload };
 }
 
 /**
@@ -142,7 +145,8 @@ type Editing = { id?: string; initial: AgentTemplateFields } | null;
 
 /** Lists every template with create, edit, duplicate, delete and restore-built-ins. */
 export function TemplatesDialog({ onClose }: { onClose(): void }) {
-  const templates = useAgentTemplates();
+  const { templates: loaded, error, reload } = useAgentTemplates();
+  const templates = loaded ?? [];
   const [editing, setEditing] = useState<Editing>(null);
 
   if (editing) return <TemplateEditor id={editing.id} initial={editing.initial} onClose={() => setEditing(null)} />;
@@ -168,7 +172,14 @@ export function TemplatesDialog({ onClose }: { onClose(): void }) {
             </span>
           </li>
         ))}
-        {templates.length === 0 && <li className="py-6 text-center text-[13px] text-ink-3">No templates. Create one or restore the built-ins.</li>}
+        {error && (
+          <li className="flex flex-col items-center gap-2 py-6 text-center text-[13px] text-down" role="alert">
+            Templates could not be loaded: {error}
+            <Button size="sm" onClick={reload}>Retry</Button>
+          </li>
+        )}
+        {!loaded && !error && <li className="py-6 text-center text-[13px] text-ink-3">Loading templates...</li>}
+        {loaded?.length === 0 && <li className="py-6 text-center text-[13px] text-ink-3">No templates. Create one or restore the built-ins.</li>}
       </ul>
       <div className="mt-4 flex flex-wrap justify-end gap-2">
         <Button onClick={() => attempt(() => api.post('/agent-templates/restore-builtins'))} title="Show the built-in templates you deleted again"><RotateCcw /> Restore built-ins</Button>

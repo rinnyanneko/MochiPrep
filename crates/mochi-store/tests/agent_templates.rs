@@ -35,6 +35,24 @@ fn builtins_are_conservative() {
     }
 }
 
+/// An agent sees candles of its own timeframe only, so a preset that asks the model to compare
+/// another timeframe asks for data it never gets.
+#[test]
+fn builtin_strategies_use_only_the_agents_timeframe() {
+    for t in builtin_agent_templates() {
+        let text = t.strategy.to_lowercase();
+        for tf in ["1m", "5m", "15m", "1h", "4h"] {
+            if tf == t.timeframe {
+                continue;
+            }
+            let other_tf = text
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .any(|word| word == tf);
+            assert!(!other_tf, "{} mentions {tf}: {}", t.id, t.strategy);
+        }
+    }
+}
+
 #[test]
 fn user_templates_round_trip() {
     let conn = open_in_memory().unwrap();

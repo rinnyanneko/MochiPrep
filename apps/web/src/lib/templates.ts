@@ -45,9 +45,11 @@ const NAME_MAX = 60;
 /** "Balanced (copy)", then "Balanced (copy 2)" and so on, kept within the 60-character name limit. */
 export function copyName(name: string, taken: readonly string[]): string {
   const used = new Set(taken);
+  // Code points, as the server counts the limit: a UTF-16 slice could split a surrogate pair.
+  const chars = Array.from(name);
   for (let n = 1; ; n++) {
     const suffix = n === 1 ? ' (copy)' : ` (copy ${n})`;
-    const candidate = name.slice(0, NAME_MAX - suffix.length).trimEnd() + suffix;
+    const candidate = chars.slice(0, NAME_MAX - suffix.length).join('').trimEnd() + suffix;
     if (!used.has(candidate)) return candidate;
   }
 }

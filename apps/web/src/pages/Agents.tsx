@@ -52,7 +52,8 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
     },
   );
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
-  const templates = useAgentTemplates();
+  const { templates: loadedTemplates, error: templatesError, reload: reloadTemplates } = useAgentTemplates();
+  const templates = loadedTemplates ?? [];
   const [templateId, setTemplateId] = useState('');
   // Only copies values into the form: the agent is still validated on save and every order still
   // meets the risk engine, so a template can never loosen a limit on its own.
@@ -86,12 +87,20 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
     <Dialog open onOpenChange={onClose} title={agent ? `Edit ${agent.name}` : 'New AI agent'} description="Changes apply from the next cycle." wide>
       <div className="grid gap-3 sm:grid-cols-2">
         {!agent && (
-          <Field label="Start from template" className="sm:col-span-2" hint="Fills in the settings below; you can still change any of them.">
-            <Select value={templateId} onChange={(e) => applyTemplate(e.target.value)}>
-              <option value="">No template</option>
-              {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.builtIn ? ' (built-in)' : ''}</option>)}
-            </Select>
-          </Field>
+          <div className="sm:col-span-2">
+            <Field label="Start from template" hint="Fills in the settings below; you can still change any of them.">
+              <Select value={templateId} onChange={(e) => applyTemplate(e.target.value)}>
+                <option value="">No template</option>
+                {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.builtIn ? ' (built-in)' : ''}</option>)}
+              </Select>
+            </Field>
+            {templatesError && (
+              <p className="mt-1 flex items-center gap-2 text-[11px] text-down" role="alert">
+                Templates could not be loaded: {templatesError}
+                <Button size="sm" onClick={reloadTemplates}>Retry</Button>
+              </p>
+            )}
+          </div>
         )}
         <Field label="Name"><Input value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="Careful Kinako" /></Field>
         <Field label="AI provider">

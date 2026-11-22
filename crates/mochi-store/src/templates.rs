@@ -63,17 +63,20 @@ struct Preset {
 
 /// Every preset suggests rather than trades (SIGNAL), requires a stop loss and keeps leverage
 /// and risk per trade at or below the paper defaults: a preset is a starting point, and the
-/// owner opts into anything riskier by editing a copy.
+/// owner opts into anything riskier by editing a copy. Strategy text names only what the prompt
+/// carries: candles of the agent's own timeframe and the indicators computed from them (see
+/// `mochi-ai`'s indicators). The model is never sent another timeframe to compare against.
 fn presets() -> [Preset; 4] {
     [
         Preset {
             id: "builtin_conservative",
             name: "Conservative",
             description: "Few, small trades with tight limits. Suggests only.",
-            strategy: "Be patient and selective. Only propose a trade when the 1h and 15m trends \
-                       agree and price has pulled back to support (for longs) or resistance (for \
-                       shorts). Always set a stop loss beyond the recent swing and a take profit at \
-                       least 2x the stop distance. When the picture is unclear, HOLD.",
+            strategy: "Be patient and selective. Only propose a trade when ema20 and ema50 agree \
+                       on the trend and price has pulled back to support (for longs) or resistance \
+                       (for shorts) in the recent candles. Always set a stop loss beyond the recent \
+                       swing and a take profit at least 2x the stop distance. When the picture is \
+                       unclear, HOLD.",
             timeframe: "1h",
             interval_sec: 3600,
             allow_trailing_stop: false,
@@ -91,9 +94,9 @@ fn presets() -> [Preset; 4] {
             id: "builtin_balanced",
             name: "Balanced",
             description: "Pullback entries in the direction of the trend. Suggests only.",
-            strategy: "Trade pullbacks in the direction of the 1h trend. Enter on a 15m \
-                       confirmation such as a higher low in an uptrend or a lower high in a \
-                       downtrend. Set the stop loss beyond the pullback's extreme and the take \
+            strategy: "Trade pullbacks in the direction of the trend, taking ema50 as the trend. \
+                       Enter on a confirmation such as a higher low in an uptrend or a lower high \
+                       in a downtrend. Set the stop loss beyond the pullback's extreme and the take \
                        profit near the previous swing. Skip trades during sharp, news-driven moves.",
             timeframe: "15m",
             interval_sec: 900,
@@ -112,10 +115,11 @@ fn presets() -> [Preset; 4] {
             id: "builtin_trend",
             name: "Trend following",
             description: "Rides established trends with a trailing stop. Suggests only.",
-            strategy: "Follow established trends. Go long only when price is above a rising 4h \
-                       moving average and short only when below a falling one. Enter on breakouts \
-                       of recent ranges, set an initial stop loss below the range, and use a \
-                       trailing stop to stay in the move. Close when the trend structure breaks.",
+            strategy: "Follow established trends. Go long only when price and ema20 are above a \
+                       rising ema50, and short only when both are below a falling one. Enter on \
+                       breakouts of recent ranges, set an initial stop loss on the other side of \
+                       the range, and use a trailing stop to stay in the move. Close when the \
+                       trend structure breaks.",
             timeframe: "1h",
             interval_sec: 3600,
             allow_trailing_stop: true,
@@ -133,10 +137,10 @@ fn presets() -> [Preset; 4] {
             id: "builtin_range",
             name: "Range reversion",
             description: "Fades the edges of a clear range on short timeframes. Suggests only.",
-            strategy: "Look for a clear sideways range on the 15m chart. Propose a long near the \
-                       range low or a short near the range high, with the stop loss just outside \
-                       the range and the take profit near the middle or the opposite edge. Do not \
-                       trade when the range is breaking or volatility is expanding.",
+            strategy: "Look for a clear sideways range in the recent candles. Propose a long near \
+                       the range low or a short near the range high, with the stop loss just \
+                       outside the range and the take profit near the middle or the opposite edge. \
+                       Do not trade when the range is breaking or atr14 shows volatility expanding.",
             timeframe: "5m",
             interval_sec: 300,
             allow_trailing_stop: false,

@@ -45,6 +45,12 @@ describe('agent templates', () => {
     expect(copyName('Balanced', ['Balanced (copy)'])).toBe('Balanced (copy 2)');
     const long = 'x'.repeat(60);
     expect(copyName(long, []).length).toBeLessThanOrEqual(60);
+    // The server counts code points, and a cut must never leave half of a surrogate pair.
+    const emoji = `${'x'.repeat(52)}😀😀`;
+    const copied = copyName(emoji, []);
+    expect(copied).toBe(`${'x'.repeat(52)}😀 (copy)`);
+    expect([...copied].length).toBeLessThanOrEqual(60);
+    expect(copied).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
     expect(duplicateTemplate(template, [template]).name).toBe('Balanced (copy)');
   });
 
