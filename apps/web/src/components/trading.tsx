@@ -357,6 +357,7 @@ export function DecisionList({ decisions, selected, onSelect, emptyText }: { dec
           >
             <span className="flex flex-wrap items-center gap-2">
               <span className="text-[13px] font-semibold">{d.agentName}</span>
+              <span className="num text-xs text-ink-2">{d.symbol}</span>
               {d.decision && <Badge tone={actionTone(d.decision.action)}>{d.decision.action}</Badge>}
               <OutcomeBadge outcome={d.outcome} />
               <span className="num ml-auto text-[11px] text-ink-3">{dateTime(d.ts)}</span>

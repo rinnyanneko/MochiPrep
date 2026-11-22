@@ -137,17 +137,17 @@ mod tests {
             hold("BTCUSDT").to_string(),
             json!({"decisions":[hold("BTCUSDT")],"note":"x"}).to_string(),
             json!({"decisions":{"BTCUSDT":hold("BTCUSDT")}}).to_string(),
-            "not json".into(),
         ] {
             assert_eq!(
-                parse_decisions(&text, &pairs())
-                    .unwrap_err()
-                    .contains("decisions")
-                    || text == "not json",
-                true,
+                parse_decisions(&text, &pairs()).unwrap_err(),
+                ONLY_DECISIONS,
                 "{text}"
             );
         }
+        assert_eq!(
+            parse_decisions("not json", &pairs()).unwrap_err(),
+            "Response is not valid JSON"
+        );
         let many: Vec<Value> = (0..5).map(|_| hold("SOLUSDT")).collect();
         let text = json!({ "decisions": many }).to_string();
         assert_eq!(
