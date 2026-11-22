@@ -18,63 +18,32 @@ struct Seed {
     volume: f64,
 }
 
+/// (symbol, PRNG seed, first price, typical base volume a minute). The first three are the
+/// TypeScript port's and are pinned by the golden fixtures. The rest were added later: their
+/// seeds continue the ASCII pattern ("p002".."p008"), and their prices and volumes are round
+/// figures of the right size, so each pair trades a few hundred thousand USDT a minute.
+const SEEDS: [(&str, i32, f64, f64); 10] = [
+    ("BTCUSDT", 0x6d6f6368, 68_000.0, 42.0),
+    ("ETHUSDT", 0x69707265, 3_400.0, 520.0),
+    ("SOLUSDT", 0x70303031, 150.0, 6_400.0),
+    ("BNBUSDT", 0x70303032, 600.0, 800.0),
+    ("XRPUSDT", 0x70303033, 2.5, 200_000.0),
+    ("TRXUSDT", 0x70303034, 0.3, 1_000_000.0),
+    ("HYPEUSDT", 0x70303035, 40.0, 8_000.0),
+    ("ZECUSDT", 0x70303036, 300.0, 1_000.0),
+    ("DOGEUSDT", 0x70303037, 0.2, 2_000_000.0),
+    ("LINKUSDT", 0x70303038, 15.0, 20_000.0),
+];
+
 fn seed_for(symbol: &str) -> Option<Seed> {
-    match symbol {
-        "BTCUSDT" => Some(Seed {
-            seed: 0x6d6f6368,
-            price: 68_000.0,
-            volume: 42.0,
-        }),
-        "ETHUSDT" => Some(Seed {
-            seed: 0x69707265,
-            price: 3_400.0,
-            volume: 520.0,
-        }),
-        "SOLUSDT" => Some(Seed {
-            seed: 0x70303031,
-            price: 150.0,
-            volume: 6_400.0,
-        }),
-        // Added after the TypeScript port, so no golden fixture covers them. Seeds continue the
-        // ASCII pattern above ("p002".."p008"); prices and volumes are round figures of the
-        // right size, chosen so each pair trades a few hundred thousand USDT a minute.
-        "BNBUSDT" => Some(Seed {
-            seed: 0x70303032,
-            price: 600.0,
-            volume: 800.0,
-        }),
-        "XRPUSDT" => Some(Seed {
-            seed: 0x70303033,
-            price: 2.5,
-            volume: 200_000.0,
-        }),
-        "TRXUSDT" => Some(Seed {
-            seed: 0x70303034,
-            price: 0.3,
-            volume: 1_000_000.0,
-        }),
-        "HYPEUSDT" => Some(Seed {
-            seed: 0x70303035,
-            price: 40.0,
-            volume: 8_000.0,
-        }),
-        "ZECUSDT" => Some(Seed {
-            seed: 0x70303036,
-            price: 300.0,
-            volume: 1_000.0,
-        }),
-        "DOGEUSDT" => Some(Seed {
-            seed: 0x70303037,
-            price: 0.2,
-            volume: 2_000_000.0,
-        }),
-        "LINKUSDT" => Some(Seed {
-            seed: 0x70303038,
-            price: 15.0,
-            volume: 20_000.0,
-        }),
-        _ => None,
-    }
+    SEEDS
+        .iter()
+        .find(|(s, ..)| *s == symbol)
+        .map(|&(_, seed, price, volume)| Seed {
+            seed,
+            price,
+            volume,
+        })
 }
 
 /// Integer-only PRNG, so the tape is identical on every machine. JS runs this on int32 values
