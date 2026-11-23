@@ -94,6 +94,8 @@ pub fn effective_risk(a: &RiskSettings, c: Option<&RiskSettings>) -> RiskSetting
             require_stop_loss: a.require_stop_loss || c.require_stop_loss,
             max_quote_age_sec: a.max_quote_age_sec.min(c.max_quote_age_sec),
             max_notional: a.max_notional.min(c.max_notional),
+            // The stricter floor: an account's own floor holds for every agent on it.
+            min_confidence: a.min_confidence.max(c.min_confidence),
         },
     }
 }

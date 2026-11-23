@@ -1486,3 +1486,61 @@ async fn locked_vault_does_not_load_saved_plaintext_provider_keys() {
         .starts_with("[critical]"));
     rt.shutdown().await;
 }
+#[tokio::test]
+async fn a_confidence_floor_holds_back_entries_the_model_is_less_sure_of() {
+    let (rt, m, a) = setup("AUTO").await;
+    // The test model states 0.8.
+    let floor = |min: f64| {
+        let risk = serde_json::to_string(&mochi_domain::RiskSettings {
+            min_confidence: min,
+            ..default_risk_settings()
+        })
+        .unwrap();
+        let rt = rt.clone();
+        async move {
+            rt.call(move |r| {
+                r.connection()
+                    .execute("UPDATE agents SET risk=? WHERE id='agent'", [risk])
+                    .unwrap();
+            })
+            .await
+            .unwrap();
+        }
+    };
+    floor(0.9).await;
+    *m.response.lock().unwrap() = Ok(decision("LONG").to_string());
+    let s = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(s["outcome"], "RISK_REJECTED");
+    assert!(s.to_string().contains("Confidence threshold"), "{s}");
+    assert_eq!(order_count(&rt, a.clone()).await, 0);
+
+    floor(0.8).await;
+    assert_eq!(
+        cycle(&rt, CycleTrigger::RunOnce).await["outcome"],
+        "EXECUTED"
+    );
+    assert!(order_count(&rt, a).await > 0);
+    rt.shutdown().await;
+
+    // A suggestion made before the floor was raised is checked against the floor when accepted.
+    let (rt, m, a) = setup("SIGNAL").await;
+    *m.response.lock().unwrap() = Ok(decision("LONG").to_string());
+    let s = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(s["outcome"], "SIGNAL");
+    let risk = serde_json::to_string(&mochi_domain::RiskSettings {
+        min_confidence: 0.9,
+        ..default_risk_settings()
+    })
+    .unwrap();
+    rt.call(move |r| {
+        r.connection()
+            .execute("UPDATE agents SET risk=? WHERE id='agent'", [risk])
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    let accepted = rt.execute_signal(s["id"].as_str().unwrap()).await.unwrap();
+    assert_eq!(accepted["outcome"], "RISK_REJECTED", "{accepted}");
+    assert_eq!(order_count(&rt, a).await, 0);
+    rt.shutdown().await;
+}

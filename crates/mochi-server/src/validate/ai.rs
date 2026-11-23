@@ -242,6 +242,8 @@ pub(super) fn risk(input: Input) -> Checked {
     f.required("requireStopLoss", check_bool);
     f.required("maxQuoteAgeSec", |v| number(v, 1.0, 3600.0));
     f.required("maxNotional", |v| check_number(v, &POSITIVE));
+    // Optional: risk settings saved before it existed have none, and none means no floor.
+    f.optional("minConfidence", |v| number(v, 0.0, 1.0));
     f.strict()
 }
 pub(super) fn agent_input(input: Input) -> Checked {

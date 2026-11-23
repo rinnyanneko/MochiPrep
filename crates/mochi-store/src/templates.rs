@@ -78,6 +78,7 @@ fn limits(
         require_stop_loss: true,
         max_quote_age_sec,
         max_notional,
+        min_confidence: 0.0,
     }
 }
 

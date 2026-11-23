@@ -76,6 +76,16 @@ export function AgentSettingsFields<T extends AgentSettings>({ value, onChange, 
         {number('Max open positions', 'maxOpenPositions')}
         {number('Max quote age (s)', 'maxQuoteAgeSec')}
         {number('Max notional (USDT)', 'maxNotional')}
+        <Field label="Min confidence (%)" className="col-span-2 sm:col-span-3" hint="New positions only open when the model states at least this confidence. 0 is off. Closing and protecting a position are never held back. The model's confidence is its own, uncalibrated guess.">
+          <Input
+            type="number"
+            step={5}
+            min={0}
+            max={100}
+            value={Math.round((value.risk.minConfidence ?? 0) * 100)}
+            onChange={(e) => setRisk({ minConfidence: Math.min(100, Math.max(0, Number(e.target.value) || 0)) / 100 })}
+          />
+        </Field>
       </div>
       <label className="mt-3 flex items-center gap-2 text-xs text-ink-2">
         <input type="checkbox" checked={value.risk.requireStopLoss} onChange={(e) => setRisk({ requireStopLoss: e.target.checked })} className="accent-[var(--accent)]" />{' '}

@@ -125,6 +125,7 @@ fn run_checks(
         settings.max_open_positions,
         settings.max_quote_age_sec,
         settings.max_notional,
+        settings.min_confidence,
         decision.confidence,
     ];
     numeric.extend(
@@ -219,6 +220,20 @@ fn run_checks(
     if decision.action == AiAction::Protect {
         protect(input, existing, instruments, checks)?;
         return Ok(None);
+    }
+
+    // Only new positions: exits and protection never wait on the model being sure.
+    if settings.min_confidence > 0.0 {
+        checks.check(
+            "confidence",
+            "Confidence threshold",
+            decision.confidence >= settings.min_confidence,
+            format!(
+                "model says {}%, minimum {}%",
+                js_to_fixed(decision.confidence * 100.0, 0),
+                js_to_fixed(settings.min_confidence * 100.0, 0)
+            ),
+        );
     }
 
     let quote = input.quote.as_ref();

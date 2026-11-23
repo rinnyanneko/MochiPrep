@@ -404,6 +404,11 @@ export interface RiskSettings {
   /** Market data older than this blocks new positions. */
   maxQuoteAgeSec: number;
   maxNotional: number;
+  /**
+   * New positions need the model to state at least this confidence, 0 to 1. Absent or 0 is off.
+   * Exits and protection are never held back by it.
+   */
+  minConfidence?: number;
 }
 
 export const DEFAULT_RISK_SETTINGS: RiskSettings = {
