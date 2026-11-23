@@ -24,7 +24,8 @@ use crate::{
 use futures_util::FutureExt;
 use mochi_ai::{
     build_multi_system_prompt, build_multi_user_prompt, build_system_prompt, build_user_prompt,
-    indicator_snapshot, redact_secrets, AiRequest, AiResponse, MarketContext, ProviderError,
+    indicator_snapshot, redact_secrets, with_owner_message, AiRequest, AiResponse, MarketContext,
+    ProviderError,
 };
 use mochi_core::paper::PaperStore;
 use mochi_domain::{
@@ -137,6 +138,7 @@ fn clean_record(record: &mut Value, secrets: &[String]) {
         "/outcomeDetail",
         "/newsError",
         "/decision/reason",
+        "/ownerMessage",
     ] {
         if let Some(v) = record.pointer_mut(path) {
             clean(v);
@@ -409,11 +411,20 @@ impl Runtime {
         c.record["providerKind"] = json!(config.kind);
         // The mock AI was removed, so a new record never comes from it. Old ones keep their flag.
         c.record["isMock"] = json!(false);
+        // Cleaned like the rest of the record: a key pasted into a message never reaches the
+        // model or the history.
+        let message = self.agents.take_messages(&c.agent.id).map(|m| c.clean(&m));
+        if let Some(message) = &message {
+            c.record["ownerMessage"] = json!(message);
+        }
         self.agents.pending.push(Box::pin(async move {
             let request = AiRequest {
                 model: c.agent.model.clone(),
                 system: build_system_prompt(c.agent.allow_trailing_stop),
-                user: build_user_prompt(&context, c.agent.allow_trailing_stop),
+                user: with_owner_message(
+                    build_user_prompt(&context, c.agent.allow_trailing_stop),
+                    message.as_deref(),
+                ),
                 context: Some(context),
             };
             let started = Instant::now();
@@ -1086,15 +1097,27 @@ impl Runtime {
         }
         let contexts: Vec<MarketContext> = contexts.into_iter().flatten().collect();
         let agent = b.legs[open[0]].agent.clone();
+        let message = self
+            .agents
+            .take_messages(&agent.id)
+            .map(|m| b.legs[open[0]].clean(&m));
+        if let Some(message) = &message {
+            for &i in &open {
+                b.legs[i].record["ownerMessage"] = json!(message);
+            }
+        }
         self.agents.pending.push(Box::pin(async move {
             let request = AiRequest {
                 model: agent.model.clone(),
                 system: build_multi_system_prompt(agent.allow_trailing_stop),
-                user: build_multi_user_prompt(
-                    &contexts,
-                    (!news.is_empty()).then_some(news.as_slice()),
-                    &agent.strategy,
-                    agent.allow_trailing_stop,
+                user: with_owner_message(
+                    build_multi_user_prompt(
+                        &contexts,
+                        (!news.is_empty()).then_some(news.as_slice()),
+                        &agent.strategy,
+                        agent.allow_trailing_stop,
+                    ),
+                    message.as_deref(),
                 ),
                 context: None,
             };

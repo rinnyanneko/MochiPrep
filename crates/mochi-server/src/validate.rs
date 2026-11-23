@@ -89,6 +89,8 @@ pub enum Schema {
     ReplayControl,
     /// `{from, to}` in ms: replay dates to estimate or load, or a span of saved bars to delete.
     ReplayRange,
+    /// `{text}`: what the user tells an agent for its next decision.
+    AgentMessage,
     CandleQuery,
     SourceQuery,
     LimitQuery,
@@ -257,6 +259,7 @@ pub fn check(schema: Schema, input: Option<&Value>) -> Result<Value, ApiError> {
         Schema::NewsSourceToggle => news_source_toggle(input),
         Schema::ReplayControl => replay_control(input),
         Schema::ReplayRange => replay_range(input),
+        Schema::AgentMessage => agent_message(input),
         Schema::CandleQuery => candle_query(input),
         Schema::SourceQuery => source_query(input),
         Schema::LimitQuery => limit_query(input),
@@ -422,6 +425,16 @@ fn replay_range(input: Input) -> Checked {
     fields.required("to", time);
     fields.strict()
 }
+
+fn agent_message(input: Input) -> Checked {
+    let mut fields = Fields::new(input)?;
+    fields.required("text", |v| {
+        check_string(v, &StringRule::trimmed(MESSAGE_MAX))
+    });
+    fields.strict()
+}
+/// Characters in one message to an agent: a correction, not a second strategy.
+pub const MESSAGE_MAX: usize = 1000;
 
 // Query schemas are `z.object` (not strict): unknown keys are dropped, not refused.
 

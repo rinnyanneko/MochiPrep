@@ -403,6 +403,13 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
         {d.indicators && <Row label="RSI · EMA20 · EMA50">{d.indicators.rsi14?.toFixed(1) ?? '–'} · {money(d.indicators.ema20)} · {money(d.indicators.ema50)}</Row>}
       </section>
 
+      {d.ownerMessage !== undefined && (
+        <section data-testid="decision-message">
+          <h3 className="mb-1 text-xs font-semibold text-ink-2">Your message</h3>
+          <p className="rounded-xl bg-accent-soft px-3 py-2 text-[13px] leading-relaxed">{d.ownerMessage}</p>
+        </section>
+      )}
+
       {ai && (
         <section>
           <h3 className="mb-1 text-xs font-semibold text-ink-2">AI proposal</h3>

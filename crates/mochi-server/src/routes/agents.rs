@@ -44,6 +44,7 @@ pub fn router() -> Router<AppState> {
             "/api/agents/{id}/run",
             post(|s, p, h, b| action(s, p, h, b, "run")),
         )
+        .route("/api/agents/{id}/message", post(message))
         .route("/api/signals/{id}/execute", post(execute))
         .route("/api/signals/{id}/dismiss", post(dismiss))
 }
@@ -93,6 +94,26 @@ async fn remove(
     body(&state, &headers, &bytes).await?;
     call(&state, move |r| r.delete_agent(&id)).await?;
     Ok(Json(json!({"ok":true})))
+}
+#[derive(serde::Deserialize)]
+struct AgentMessage {
+    text: String,
+}
+/// A message for the agent's next decision, and that cycle run now. The reply says whether the
+/// cycle ran (its record) or the message waits for the cycle already running.
+async fn message(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    bytes: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let body = body(&state, &headers, &bytes).await?;
+    let input: AgentMessage = validate::parse_input(Schema::AgentMessage, body.as_ref())?;
+    let id = call(&state, move |r| Ok(r.api_agent(&id)?.id)).await?;
+    let record = state.runtime.message_agent(id, input.text).await?;
+    Ok(Json(
+        json!({ "queued": record.is_none(), "record": record }),
+    ))
 }
 async fn action(
     State(state): State<AppState>,

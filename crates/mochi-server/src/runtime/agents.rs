@@ -30,6 +30,30 @@ pub(super) struct Agents {
     pub active: HashMap<String, String>,
     pub generations: HashMap<String, u64>,
     pub pending: FuturesUnordered<BoxFuture<'static, super::agent_cycle::Completion>>,
+    /// Messages from the user per agent, oldest first, waiting for that agent's next model call,
+    /// each with the number it was handed in under. In memory only: a message is about the
+    /// market right now, and a restart makes it stale.
+    pub messages: HashMap<String, Vec<(u64, String)>>,
+    pub next_message: u64,
+}
+
+/// Characters of messages that may wait for one agent's next call, all of them together, and
+/// how many messages. Both bound what one prompt can grow by while a cycle is busy.
+const WAITING_MESSAGES_MAX: usize = 4000;
+const WAITING_MESSAGES_COUNT: usize = 10;
+
+impl Agents {
+    /// Every message waiting for `agent`, oldest first, as the one text its next prompt gets.
+    pub(super) fn take_messages(&mut self, agent: &str) -> Option<String> {
+        let waiting = self.messages.remove(agent)?;
+        Some(
+            waiting
+                .into_iter()
+                .map(|(_, text)| text)
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        )
+    }
 }
 impl RuntimeHandle {
     pub async fn run_cycle(
@@ -42,6 +66,51 @@ impl RuntimeHandle {
         self.call(move |r| r.begin_cycle(&id, trigger, Some(reply)))
             .await??;
         done.await.map_err(|_| self.reply_error())?
+    }
+
+    /// Hands the agent a message for its next model call, and starts that cycle now. When a
+    /// cycle is already running, or this one ends before asking the model, the message waits
+    /// for the next one; a cycle that cannot start at all drops it, so it never surprises later.
+    pub async fn message_agent(
+        &self,
+        id: impl Into<String>,
+        text: String,
+    ) -> Result<Option<Value>, ApiError> {
+        let id = id.into();
+        let key = id.clone();
+        // A second message while the first still waits joins it, rather than replacing it.
+        let number = self
+            .call(move |r| {
+                r.api_agent(&key)?;
+                let number = r.agents.next_message;
+                let waiting = r.agents.messages.entry(key).or_default();
+                let used: usize = waiting.iter().map(|(_, t)| t.chars().count()).sum();
+                if waiting.len() >= WAITING_MESSAGES_COUNT
+                    || used + text.chars().count() > WAITING_MESSAGES_MAX
+                {
+                    return Err(ApiError::conflict(
+                        "Too many messages are waiting for this agent's next cycle",
+                    ));
+                }
+                waiting.push((number, text));
+                r.agents.next_message += 1;
+                Ok(number)
+            })
+            .await??;
+        let result = self.run_cycle(id.clone(), CycleTrigger::RunOnce).await;
+        if result.is_err() {
+            // Only this request's message: another may have arrived meanwhile and still waits.
+            self.call(move |r| {
+                if let Some(waiting) = r.agents.messages.get_mut(&id) {
+                    waiting.retain(|(n, _)| *n != number);
+                    if waiting.is_empty() {
+                        r.agents.messages.remove(&id);
+                    }
+                }
+            })
+            .await?;
+        }
+        result
     }
 }
 impl Runtime {

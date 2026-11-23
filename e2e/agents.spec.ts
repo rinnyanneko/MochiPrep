@@ -366,3 +366,18 @@ test('OKX market and limit reductions send the selected isolated position', asyn
   }
   await expect(page.getByRole('button', { name: 'Review pending reduction' })).toHaveCount(0);
 });
+
+test('a message to an agent runs one cycle now and shows on the decision it led to', async ({ page, request }) => {
+  await seed(request);
+  await freshAgent(request, 'Listening Mochi', 'momentum');
+  await page.goto('/');
+  await page.getByRole('button', { name: 'AI Agents' }).click();
+
+  const card = page.getByTestId('agent-card').filter({ hasText: 'Listening Mochi' });
+  await card.getByLabel('Message to Listening Mochi').fill('Funding flipped, stay flat for now');
+  await card.getByRole('button', { name: 'Send' }).click();
+  await expect(card.getByTestId('agent-message')).toContainText('Sent.');
+
+  await page.getByTestId('decision-row').first().click();
+  await expect(page.getByTestId('decision-message')).toHaveText(/Funding flipped, stay flat for now/);
+});

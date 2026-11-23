@@ -105,6 +105,8 @@ impl Runtime {
         }
         self.assert_agent_editable(id)?;
         rows::delete_agent(self.connection(), id).map_err(|e| self.api_error(e))?;
+        // Messages for a deleted agent must not wait for an agent that will never run.
+        self.agents.messages.remove(id);
         self.invalidate(&[Topic::Agents, Topic::Decisions, Topic::Arena]);
         Ok(())
     }

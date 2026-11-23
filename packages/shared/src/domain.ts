@@ -613,6 +613,8 @@ export interface DecisionRecord {
   signalExpiresAt: number | null;
   orderId: string | null;
   fillIds: string[];
+  /** What the user told the agent for this decision, when it was sent with a message. */
+  ownerMessage?: string;
   /** PROTECT only: the protection the decision saw, which an accepted suggestion must still match. */
   protectionBefore?: Protection;
   /** PROTECT only: the protection in force after the change was made. */

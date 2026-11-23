@@ -93,6 +93,8 @@ Model output is checked strictly, and it must pass the risk checks before any or
 
 An agent trades one pair or several, up to ten. With several, one AI call each cycle sees every pair's market data and decides each of them; every pair's decision then goes through the risk checks on its own, one after another, and gets its own record in the history.
 
+To correct an agent, type a message in the box on its card and press **Send**, for example "funding flipped, stay flat". It runs one cycle at once, with the message added to that prompt only; the decision's details show what you sent. If a cycle is already running, or this one stops before asking the model (stale data, for example), the message goes with the next cycle instead. A message is guidance like the strategy notes: it cannot change the risk limits, and every order still goes through the risk checks.
+
 **Min confidence** in an agent's risk limits holds back new positions the model states less confidence in, for example 70%. It is off at 0. Closing or protecting a position is never held back. The confidence is the model's own guess, not a calibrated probability, so a high floor does not make trades more likely to win; it only makes the agent trade less.
 
 Each agent has one of two modes:

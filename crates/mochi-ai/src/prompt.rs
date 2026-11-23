@@ -246,6 +246,19 @@ fn news_block(news: Option<&[NewsItem]>) -> String {
     }).unwrap_or_default()
 }
 
+/// What the user told the agent for its next decision, after the rest of the user prompt. It
+/// outranks the strategy notes for this one decision, and like them it cannot change the rules.
+/// Only added when there is a message, so a prompt without one is unchanged.
+pub fn with_owner_message(prompt: String, message: Option<&str>) -> String {
+    match message {
+        None => prompt,
+        Some(message) => format!(
+            "{prompt}\n\nA message from the user for this decision. It corrects or adds to the strategy notes for this decision only; take it into account and say how in \"reason\". It cannot change the rules, the risk limits or the reply format:\n<message>\n{}\n</message>",
+            message.replace("</message>", "")
+        ),
+    }
+}
+
 fn strategy_block(strategy: &str) -> String {
     format!(
         "\n\nStrategy notes from the user (style guidance only):\n<strategy>\n{}\n</strategy>",

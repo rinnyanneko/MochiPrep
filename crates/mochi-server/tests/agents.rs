@@ -1544,3 +1544,77 @@ async fn a_confidence_floor_holds_back_entries_the_model_is_less_sure_of() {
     assert_eq!(order_count(&rt, a).await, 0);
     rt.shutdown().await;
 }
+#[tokio::test]
+async fn a_message_reaches_the_next_model_call_once_and_is_kept_on_its_record() {
+    let (rt, m, _) = setup("SIGNAL").await;
+    let record = rt
+        .message_agent("agent", "Funding flipped: do not go long".into())
+        .await
+        .unwrap()
+        .expect("the cycle runs now");
+    assert_eq!(record["ownerMessage"], "Funding flipped: do not go long");
+    assert_eq!(record["trigger"], "RUN_ONCE");
+    let first = m.requests.lock().unwrap()[0].user.clone();
+    assert!(
+        first.ends_with("<message>\nFunding flipped: do not go long\n</message>"),
+        "{first}"
+    );
+    assert!(!m.requests.lock().unwrap()[0]
+        .system
+        .contains("Funding flipped"));
+
+    // Used once: the next cycle has no message.
+    let next = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert!(next.get("ownerMessage").is_none(), "{next}");
+    assert!(!m.requests.lock().unwrap()[1].user.contains("<message>"));
+
+    // A cycle that cannot start drops the message instead of keeping it for later.
+    assert!(rt.message_agent("missing", "x".into()).await.is_err());
+
+    // A key pasted into a message reaches neither the model nor the history.
+    let record = rt
+        .message_agent("agent", "my key is custom-secret-agent-key".into())
+        .await
+        .unwrap()
+        .unwrap();
+    let sent = m.requests.lock().unwrap().last().unwrap().user.clone();
+    assert!(!sent.contains("custom-secret-agent-key"), "{sent}");
+    assert!(!record["ownerMessage"]
+        .as_str()
+        .unwrap()
+        .contains("custom-secret-agent-key"));
+    rt.shutdown().await;
+}
+#[tokio::test]
+async fn messages_sent_while_a_cycle_runs_all_wait_for_the_next_one() {
+    let (rt, m, _) = setup("SIGNAL").await;
+    m.blocked.store(1, Ordering::SeqCst);
+    let h = rt.clone();
+    let running = tokio::spawn(async move { h.run_cycle("agent", CycleTrigger::RunOnce).await });
+    while m.calls.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
+    // Both wait while the first cycle is with the model; neither replaces the other.
+    assert!(rt
+        .message_agent("agent", "stay flat".into())
+        .await
+        .unwrap()
+        .is_none());
+    assert!(rt
+        .message_agent("agent", "then close".into())
+        .await
+        .unwrap()
+        .is_none());
+    m.blocked.store(0, Ordering::SeqCst);
+    m.gate.notify_one();
+    running.await.unwrap().unwrap();
+
+    let next = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(
+        next["ownerMessage"],
+        "stay flat
+
+then close"
+    );
+    rt.shutdown().await;
+}

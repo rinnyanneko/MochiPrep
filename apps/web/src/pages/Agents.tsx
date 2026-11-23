@@ -2,6 +2,7 @@ import { LayoutTemplate, Pause, Pencil, Play, Plus, ScanSearch, Square, StepForw
 import { useState } from 'react';
 import { DEFAULT_RISK_SETTINGS, type Agent, type AgentStatus, type DecisionRecord, type SymbolId } from '@mochiprep/shared';
 import { AgentSettingsFields, TemplatesDialog, useAgentTemplates } from '@/components/AgentTemplates';
+import { AgentMessage } from '@/components/AgentMessage';
 import { ArmDialog } from '@/components/ExchangeCard';
 import { MAX_AGENT_PAIRS, PairPicker } from '@/components/PairPicker';
 import { Mochi, type MochiMood } from '@/components/Mochi';
@@ -218,6 +219,7 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
           <Button size="icon" variant="ghost" aria-label={`Delete ${agent.name}`} disabled={agent.running} onClick={() => attempt(() => api.del(`/agents/${agent.id}`))}><Trash2 /></Button>
         </span>
       </div>
+      <AgentMessage agentId={agent.id} agentName={agent.name} send={(run) => armFirst(`${agent.name} reads your message once the account is armed.`, run)} onSent={onSelect} />
     </Card>
   );
 }
