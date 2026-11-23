@@ -4,7 +4,7 @@
 use mochi_launcher_core::model::{menu_model, MenuModel};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{include_image, AppHandle, Manager};
 
 use crate::app::{self, lock, AppState};
@@ -111,7 +111,10 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .icon(icon(false))
         .tooltip(TOOLTIP)
         .menu(&build_menu(app, &model)?)
-        .show_menu_on_left_click(true)
+        // Left click opens the interface, as most tray apps do; the menu is on the right button.
+        // Linux trays ignore both: there a click always shows the menu, which has Open.
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(on_tray_icon_event)
         .on_menu_event(on_menu_event)
         .build(app)?;
     Ok(())
@@ -142,6 +145,20 @@ fn publish_menu(app: &AppHandle) {
     let armed = model.armed_label.is_some();
     let _ = tray.set_icon(Some(icon(armed)));
     let _ = tray.set_tooltip(Some(if armed { TOOLTIP_ARMED } else { TOOLTIP }));
+}
+
+/// A left click opens (or brings forward) the interface. It acts on release, since a press and
+/// its release both arrive as clicks. While the backend is not running there is nothing to open
+/// and the click does nothing; the menu says why.
+fn on_tray_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
+    if let TrayIconEvent::Click {
+        button: MouseButton::Left,
+        button_state: MouseButtonState::Up,
+        ..
+    } = event
+    {
+        run_action(tray.app_handle(), OPEN);
+    }
 }
 
 fn on_menu_event(app: &AppHandle, event: MenuEvent) {
