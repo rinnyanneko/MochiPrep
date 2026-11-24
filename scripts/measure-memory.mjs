@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Measures the resident memory of the Rust backend with the interface closed, so the release
-// gate (<= 20 MiB working set on Windows x86_64, live OKX feed connected) is a number rather
+// gate (<= 32 MiB working set on Windows x86_64, live OKX feed connected) is a number rather
 // than a belief. No dependencies: it runs on any machine that can run the release.
 //
 //   node scripts/measure-memory.mjs --binary <path> [--port 8987] [--idle 12] [--out report.json] [--gate]
@@ -24,8 +24,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isMain } from './is-main.mjs';
 
-export const GATE_MIB = 20;
-// The 20 MiB budget was set and measured on Windows x86_64 only; Windows ARM64 is reported.
+// 20 MiB until 2026-11-22, when the built-in pairs went from three to ten: each replay tape holds
+// 18 days of one-minute bars in memory, and the release measured 30.2 MiB with the live feed on.
+export const GATE_MIB = 32;
+// The budget was set and measured on Windows x86_64 only; Windows ARM64 is reported.
 export const GATED_TARGET = 'win32-x64';
 const READY_PREFIX = 'MochiPrep backend on http://127.0.0.1:';
 const MIB = 1024 * 1024;

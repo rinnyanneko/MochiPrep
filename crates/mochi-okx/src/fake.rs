@@ -328,11 +328,20 @@ impl FakeOkx {
         }
         if ends("/public/instruments") {
             let inst_id = param("instId").unwrap_or_default();
+            // (ctVal, lotSz): the built-in pairs as `default_instruments` has them, plus PEPE as
+            // an added pair. Connect checks every built-in pair against this answer.
             let table = match inst_id.as_str() {
-                "BTC-USDT-SWAP" => Some("0.01"),
-                "ETH-USDT-SWAP" => Some("0.1"),
-                "SOL-USDT-SWAP" => Some("1"),
-                "PEPE-USDT-SWAP" => Some("10000000"),
+                "BTC-USDT-SWAP" => Some(("0.01", "0.01")),
+                "ETH-USDT-SWAP" => Some(("0.1", "0.01")),
+                "BNB-USDT-SWAP" => Some(("0.01", "1")),
+                "XRP-USDT-SWAP" => Some(("100", "0.01")),
+                "SOL-USDT-SWAP" => Some(("1", "0.01")),
+                "TRX-USDT-SWAP" => Some(("1000", "0.01")),
+                "HYPE-USDT-SWAP" => Some(("0.1", "1")),
+                "ZEC-USDT-SWAP" => Some(("0.01", "1")),
+                "DOGE-USDT-SWAP" => Some(("1000", "0.01")),
+                "LINK-USDT-SWAP" => Some(("1", "0.1")),
+                "PEPE-USDT-SWAP" => Some(("10000000", "0.1")),
                 _ => None,
             };
             let is_pepe = inst_id.starts_with("PEPE");
@@ -344,13 +353,16 @@ impl FakeOkx {
                         .then(|| state.pepe_ct_val_override.clone())
                         .flatten()
                 })
-                .or_else(|| table.map(str::to_string));
+                .or_else(|| table.map(|(ct_val, _)| ct_val.to_string()));
             let mut row = Row::new();
             // JSON.stringify drops an undefined ctVal.
             if let Some(ct_val) = ct_val {
                 row.insert("ctVal".into(), json!(ct_val));
             }
-            row.insert("lotSz".into(), json!(if is_pepe { "0.1" } else { "0.01" }));
+            row.insert(
+                "lotSz".into(),
+                json!(table.map_or("0.01", |(_, lot_sz)| lot_sz)),
+            );
             return Ok(ok(json!([row])));
         }
         if ends("/account/balance") {

@@ -20,7 +20,7 @@ test('notes have a memory table row per target, sorted, with the method and cave
   assert.match(notes, /12 s/);
   assert.match(notes, /83 MiB/);
   assert.match(notes, /bd11fbe/);
-  assert.match(notes, /20 MiB gate is checked on Windows x86_64 before a release; CI numbers are for reference/);
+  assert.match(notes, /32 MiB gate is checked on Windows x86_64 before a release; CI numbers are for reference/);
   assert.match(notes, /`win32-x64` is Windows x86_64/);
   assert.doesNotMatch(notes, /is gated/);
   assert.match(notes, /without a connected feed are not comparable/);

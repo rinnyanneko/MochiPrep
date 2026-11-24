@@ -1,8 +1,11 @@
-use mochi_domain::{Timeframe, DEFAULT_SYMBOLS};
+use mochi_domain::{Quote, Timeframe, DEFAULT_SYMBOLS};
 use mochi_market::replay::ReplayMarketData;
 use mochi_market::tape::WARMUP_MINUTES;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+
+/// The pairs the Node backend recorded `replay.json` for. Later built-in pairs have no fixture.
+const NODE_SYMBOLS: [&str; 3] = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
 
 fn golden(name: &str) -> Value {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../golden/");
@@ -32,11 +35,18 @@ fn meta_matches() {
 }
 
 #[test]
+fn a_step_has_one_quote_per_default_symbol() {
+    let mut feed = ReplayMarketData::new(None).unwrap();
+    let symbols: Vec<_> = feed.step().into_iter().map(|quote| quote.symbol).collect();
+    assert_eq!(symbols, DEFAULT_SYMBOLS);
+}
+
+#[test]
 fn steps_match() {
     let golden = golden("replay.json");
     let mut feed = ReplayMarketData::new(None).unwrap();
     for want in golden["steps"].as_array().unwrap() {
-        let got = serde_json::to_value(feed.step()).unwrap();
+        let got = serde_json::to_value(node_quotes(feed.step())).unwrap();
         assert_eq!(&got, want);
     }
 }
@@ -53,7 +63,7 @@ fn snapshots_match() {
             snapshot["now"].as_i64().unwrap(),
             "now at {cursor}"
         );
-        let quotes: Vec<_> = DEFAULT_SYMBOLS
+        let quotes: Vec<_> = NODE_SYMBOLS
             .iter()
             .map(|s| serde_json::to_value(feed.get_quote(s).unwrap()).unwrap())
             .collect();
@@ -110,6 +120,20 @@ fn edges_match() {
     );
 }
 
+/// A step's quotes for the Node-era pairs, in their order.
+fn node_quotes(quotes: Vec<Quote>) -> Vec<Quote> {
+    NODE_SYMBOLS
+        .iter()
+        .map(|symbol| {
+            quotes
+                .iter()
+                .find(|quote| quote.symbol == *symbol)
+                .cloned()
+                .unwrap()
+        })
+        .collect()
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -126,7 +150,7 @@ fn full_step_sequence_hash_matches() {
             break;
         }
         step_count += 1;
-        for quote in quotes {
+        for quote in node_quotes(quotes) {
             // Quote's field order and value types match the TS object literal, so this is
             // byte-identical to JSON.stringify.
             hash.update(serde_json::to_string(&quote).unwrap().as_bytes());
@@ -147,7 +171,7 @@ fn candle_hash_matches() {
     let mut hash = Sha256::new();
     for cursor in [5760, 9000, 20000, 25919] {
         feed.seek(cursor);
-        for symbol in DEFAULT_SYMBOLS {
+        for symbol in NODE_SYMBOLS {
             for (timeframe, _) in TIMEFRAMES {
                 for candle in feed.get_candles(symbol, timeframe, 300) {
                     hash.update(candle.time.to_le_bytes());
@@ -174,6 +198,6 @@ fn candle_hash_matches() {
 #[test]
 fn unknown_symbol_has_no_quote_or_candles() {
     let feed = ReplayMarketData::new(None).unwrap();
-    assert!(feed.get_quote("DOGEUSDT").is_none());
-    assert!(feed.get_candles("DOGEUSDT", Timeframe::M1, 5).is_empty());
+    assert!(feed.get_quote("ADAUSDT").is_none());
+    assert!(feed.get_candles("ADAUSDT", Timeframe::M1, 5).is_empty());
 }

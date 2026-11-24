@@ -192,3 +192,19 @@ fn repeated_unterminated_links_do_not_rescan_the_same_run() {
     assert!(items[0].url.is_empty());
     assert!(started.elapsed() < std::time::Duration::from_secs(3));
 }
+
+/// The pairs built in after the Node backend have no golden cases, but their news is usually
+/// headlined by the coin's name rather than its ticker.
+#[test]
+fn later_built_in_pairs_match_by_coin_name() {
+    for (title, base) in [
+        ("Tron network fees fall again", "TRX"),
+        ("Hyperliquid opens a new vault", "HYPE"),
+        ("Zcash privacy upgrade ships", "ZEC"),
+        ("Chainlink adds a price feed", "LINK"),
+    ] {
+        assert!(mentions_coin(title, base), "{title:?} {base}");
+    }
+    // Whole words only, as for the Node-era names.
+    assert!(!mentions_coin("Electron app update", "TRX"));
+}

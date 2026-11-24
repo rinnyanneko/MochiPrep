@@ -56,28 +56,28 @@ fn trades_an_instrument_registered_after_construction() {
             config: Default::default(),
         })
         .unwrap();
-    quotes.lock().unwrap().push(quote("DOGEUSDT", "0.2"));
+    quotes.lock().unwrap().push(quote("ADAUSDT", "0.2"));
     let order = |client_order_id: &str| -> OrderRequest {
         serde_json::from_value(json!({
-            "accountId": account.id, "symbol": "DOGEUSDT", "side": "BUY", "type": "MARKET",
+            "accountId": account.id, "symbol": "ADAUSDT", "side": "BUY", "type": "MARKET",
             "quantity": "100", "leverage": 5, "clientOrderId": client_order_id,
         }))
         .unwrap()
     };
 
     let error = engine.place_order(order("before")).unwrap_err();
-    assert_eq!(error.to_string(), "Unknown instrument DOGEUSDT");
+    assert_eq!(error.to_string(), "Unknown instrument ADAUSDT");
 
-    let mut doge = engine.instruments().get("SOLUSDT").unwrap().clone();
-    doge.symbol = "DOGEUSDT".into();
-    doge.base_currency = "DOGE".into();
-    engine.instruments_mut().register(doge);
+    let mut ada = engine.instruments().get("SOLUSDT").unwrap().clone();
+    ada.symbol = "ADAUSDT".into();
+    ada.base_currency = "ADA".into();
+    engine.instruments_mut().register(ada);
 
     let placed = engine.place_order(order("after")).unwrap();
     assert_eq!(placed.order.status, OrderStatus::Filled);
     let positions = engine.position_views(&account.id).unwrap();
     assert_eq!(positions.len(), 1);
-    assert_eq!(positions[0].position.symbol, "DOGEUSDT");
+    assert_eq!(positions[0].position.symbol, "ADAUSDT");
 }
 
 // A zero interval never advances the funding clock; the engine must refuse it, not spin.

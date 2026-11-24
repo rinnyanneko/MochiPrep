@@ -40,7 +40,7 @@ use mochi_core::paper::{
 };
 use mochi_domain::registry::Instruments;
 use mochi_domain::{
-    default_instruments, AccountBalance, AccountVenue, Candle, DataSource, FeedState, FeedStatus,
+    default_instrument, AccountBalance, AccountVenue, Candle, DataSource, FeedState, FeedStatus,
     InstrumentSpecification, PaperAccount, PositionSide, Quote, ReplayState, ServerEvent,
     Timeframe, ToastLevel, Topic, VaultStatus, DEFAULT_SYMBOLS,
 };
@@ -86,6 +86,9 @@ pub struct RuntimeOptions {
     pub db: Connection,
     /// Tape length in minutes; `None` is the bundled 18 days. Tests use short tapes.
     pub replay_minutes: Option<usize>,
+    /// The built-in pairs, which are the pairs on the replay tape: `DEFAULT_SYMBOLS`. Tests
+    /// that replay recordings from the Node backend pass the three pairs Node shipped.
+    pub builtin_symbols: Vec<&'static str>,
     pub live: Arc<dyn LiveFeed>,
     /// Quotes the live feed receives, in arrival order. `None` when it sends none.
     pub live_quotes: Option<mpsc::Receiver<Quote>>,
@@ -109,6 +112,7 @@ impl RuntimeOptions {
         RuntimeOptions {
             db,
             replay_minutes: None,
+            builtin_symbols: DEFAULT_SYMBOLS.to_vec(),
             live: Arc::new(OfflineFeed),
             live_quotes: None,
             live_statuses: None,
@@ -128,6 +132,7 @@ impl RuntimeOptions {
         RuntimeOptions {
             db,
             replay_minutes: None,
+            builtin_symbols: DEFAULT_SYMBOLS.to_vec(),
             live: Arc::new(feed),
             live_quotes,
             live_statuses,
@@ -191,9 +196,11 @@ impl RuntimeHandle {
             quotes: options.live_quotes,
             statuses: options.live_statuses,
         };
+        let replay =
+            ReplayMarketData::with_symbols(options.replay_minutes, &options.builtin_symbols)?;
         let mut runtime = Runtime::open(
             options.db,
-            options.replay_minutes,
+            replay,
             options.live,
             options.news,
             options.provider_factory,
@@ -319,6 +326,8 @@ pub struct Runtime {
     /// global INSTRUMENTS object, which `/api/state` sends. The engine keeps its own copy,
     /// updated alongside this one in `register_instrument` and `unregister_instrument`.
     instruments: Vec<InstrumentSpecification>,
+    /// The pairs on the replay tape, which can never be removed.
+    builtin: Vec<&'static str>,
     clock: ReplayClock,
     events: EventHub,
     /// What the engine reported during the current piece of work, handled right after it.
@@ -374,18 +383,19 @@ impl Runtime {
     /// registered and tracked, then the tape cursor and speed restored. The replay is paused.
     fn open(
         db: Connection,
-        replay_minutes: Option<usize>,
+        replay: ReplayMarketData,
         live: Arc<dyn LiveFeed>,
         news: NewsService,
         provider_factory: Option<agents::ProviderFactory>,
         kdf: KdfParams,
         okx: OkxOptions,
     ) -> Result<Self, StartError> {
-        let replay = Arc::new(Mutex::new(ReplayMarketData::new(replay_minutes)?));
+        let builtin = replay.symbols();
+        let replay = Arc::new(Mutex::new(replay));
         let engine_events: Arc<Mutex<Vec<EngineEvent>>> = Arc::default();
         let engine = PaperExecutionEngine::new(PaperEngineDeps {
             store: SqlitePaperStore::new(db),
-            instruments: Instruments::with_defaults(),
+            instruments: Instruments::with_builtin(&builtin),
             get_quote: {
                 let (replay, live) = (replay.clone(), live.clone());
                 Box::new(move |source, symbol| match source {
@@ -424,7 +434,11 @@ impl Runtime {
             replay,
             live,
             news,
-            instruments: default_instruments(),
+            instruments: builtin
+                .iter()
+                .filter_map(|symbol| default_instrument(symbol))
+                .collect(),
+            builtin,
             clock: ReplayClock::new(DEFAULT_SPEED),
             events: EventHub::new(),
             engine_events,
@@ -542,7 +556,7 @@ impl Runtime {
 
     /// Removes an added pair from both registries. Built-in pairs always stay.
     pub fn unregister_instrument(&mut self, symbol: &str) {
-        if !DEFAULT_SYMBOLS.contains(&symbol) {
+        if !self.builtin.contains(&symbol) {
             self.instruments.retain(|s| s.symbol != symbol);
         }
         self.engine.instruments_mut().unregister(symbol);
@@ -577,7 +591,7 @@ impl Runtime {
     /// Node's `removeInstrument`, refusals in its order. Positions are Node's `positionsOf`: a
     /// connected exchange account's from its last sync, none for a disconnected one.
     pub fn remove_instrument(&mut self, symbol: &str) -> Result<(), ApiError> {
-        if DEFAULT_SYMBOLS.contains(&symbol) {
+        if self.builtin.contains(&symbol) {
             return Err(ApiError::bad_request(format!("{symbol} is built in")));
         }
         if !self.has_instrument(symbol) {
@@ -706,14 +720,14 @@ impl Runtime {
 
     // ---- market ---------------------------------------------------------------------------
 
-    /// Custom pairs exist only on live data: the replay tape has just the built-in three.
+    /// Custom pairs exist only on live data: the replay tape has just the built-in pairs.
     pub fn assert_tradable(&self, symbol: &str, source: DataSource) -> Result<(), ApiError> {
         if !self.instruments.iter().any(|spec| spec.symbol == symbol) {
             return Err(ApiError::bad_request(format!(
                 "{symbol} is not an added pair. Add it in Settings first."
             )));
         }
-        if source == DataSource::Replay && !DEFAULT_SYMBOLS.contains(&symbol) {
+        if source == DataSource::Replay && !self.builtin.contains(&symbol) {
             return Err(ApiError::bad_request(format!(
                 "{symbol} has no replay data. Use a Live OKX account."
             )));

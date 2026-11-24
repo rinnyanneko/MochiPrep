@@ -30,7 +30,7 @@ export function buildNotes(reports, ref = 'HEAD') {
 
 ${table}
 
-Method: the backend runs with the interface closed, idle for about 12 s, with the live OKX feed connected. Targets are \`<platform>-<arch>\` as Node names them (\`win32-x64\` is Windows x86_64). The metric is the working set on Windows, VmRSS on Linux and the footprint on macOS. The 20 MiB gate is checked on Windows x86_64 before a release; CI numbers are for reference. The Node backend measured 83 MiB at \`bd11fbe\`. Runs without a connected feed are not comparable.
+Method: the backend runs with the interface closed, idle for about 12 s, with the live OKX feed connected. Targets are \`<platform>-<arch>\` as Node names them (\`win32-x64\` is Windows x86_64). The metric is the working set on Windows, VmRSS on Linux and the footprint on macOS. The 32 MiB gate is checked on Windows x86_64 before a release; CI numbers are for reference. The Node backend measured 83 MiB at \`bd11fbe\`. Runs without a connected feed are not comparable.
 
 ## Install
 

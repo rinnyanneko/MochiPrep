@@ -17,7 +17,7 @@ use axum::routing::get;
 use axum::Router;
 use fake_okx::{accept, FakeOkx, REST, WS};
 use futures_util::{SinkExt, StreamExt};
-use mochi_domain::{FeedState, FeedStatus, Quote, Timeframe};
+use mochi_domain::{FeedState, FeedStatus, Quote, Timeframe, DEFAULT_SYMBOLS};
 use mochi_market::okx_public::{backoff, OkxPublicFeed};
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite, DuplexStream};
@@ -136,7 +136,7 @@ async fn connects_subscribes_and_emits_ticker_quotes() {
 
     let feed = OkxPublicFeed::new(&rest_base, &ws_url);
     let mut quotes = feed.quotes();
-    feed.track("DOGEUSDT");
+    feed.track("ADAUSDT");
     feed.start();
 
     let (stream, _) = timeout(Duration::from_secs(10), ws.accept())
@@ -148,7 +148,7 @@ async fn connects_subscribes_and_emits_ticker_quotes() {
     assert_eq!(subscribe["op"], "subscribe");
     let args = subscribe["args"].as_array().unwrap();
     // Three channels for each of the built-ins and the pair tracked before start.
-    assert_eq!(args.len(), 12);
+    assert_eq!(args.len(), 3 * (DEFAULT_SYMBOLS.len() + 1));
     assert_eq!(
         args[0],
         json!({ "channel": "tickers", "instId": "BTC-USDT-SWAP" })
@@ -162,8 +162,8 @@ async fn connects_subscribes_and_emits_ticker_quotes() {
         json!({ "channel": "funding-rate", "instId": "BTC-USDT-SWAP" })
     );
     assert_eq!(
-        args[9],
-        json!({ "channel": "tickers", "instId": "DOGE-USDT-SWAP" })
+        args[3 * DEFAULT_SYMBOLS.len()],
+        json!({ "channel": "tickers", "instId": "ADA-USDT-SWAP" })
     );
     assert_eq!(feed.status().state, FeedState::Connected);
 
@@ -374,8 +374,11 @@ async fn stop_during_backoff_dials_and_polls_no_more() {
     feed.stop();
     sleep_until_secs(t0, 65.5).await;
     assert_eq!(fake.dial_times().len(), 3);
-    // Two polls of three requests for each of the three built-in pairs.
-    assert_eq!(fake.gets.lock().unwrap().len(), 18);
+    // Two polls of three requests for each built-in pair.
+    assert_eq!(
+        fake.gets.lock().unwrap().len(),
+        2 * 3 * DEFAULT_SYMBOLS.len()
+    );
     assert_eq!(feed.status().state, FeedState::Disconnected);
 }
 
@@ -386,8 +389,11 @@ async fn dropping_the_feed_dials_and_polls_no_more() {
     drop(feed);
     sleep_until_secs(t0, 65.5).await;
     assert_eq!(fake.dial_times().len(), 3);
-    // Two polls of three requests for each of the three built-in pairs.
-    assert_eq!(fake.gets.lock().unwrap().len(), 18);
+    // Two polls of three requests for each built-in pair.
+    assert_eq!(
+        fake.gets.lock().unwrap().len(),
+        2 * 3 * DEFAULT_SYMBOLS.len()
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -422,46 +428,46 @@ async fn track_after_start_subscribes_and_polls() {
     let (feed, fake, mut sockets, mut quotes, _statuses) = started_feed();
     let mut server = accept(&mut sockets).await;
     let first = next_text(&mut server).await;
-    assert!(!first.contains("DOGE"));
+    assert!(!first.contains("ADA"));
     sleep_until_secs(t0, 1.0).await;
-    assert!(fake.gets_matching("DOGE").is_empty());
+    assert!(fake.gets_matching("ADA").is_empty());
 
-    feed.track("DOGEUSDT");
+    feed.track("ADAUSDT");
     let subscribe: Value = serde_json::from_str(&next_text(&mut server).await).unwrap();
     assert_eq!(
         subscribe,
         json!({ "op": "subscribe", "args": [
-            { "channel": "tickers", "instId": "DOGE-USDT-SWAP" },
-            { "channel": "mark-price", "instId": "DOGE-USDT-SWAP" },
-            { "channel": "funding-rate", "instId": "DOGE-USDT-SWAP" },
+            { "channel": "tickers", "instId": "ADA-USDT-SWAP" },
+            { "channel": "mark-price", "instId": "ADA-USDT-SWAP" },
+            { "channel": "funding-rate", "instId": "ADA-USDT-SWAP" },
         ]})
     );
     settle().await;
     // A new pair polls REST at once, even while connected, so it has a quote without waiting.
     let doge: Vec<String> = fake
-        .gets_matching("DOGE")
+        .gets_matching("ADA")
         .into_iter()
         .map(|(_, u)| u)
         .collect();
     assert_eq!(
         doge,
         [
-            "https://okx.test/api/v5/market/ticker?instId=DOGE-USDT-SWAP",
-            "https://okx.test/api/v5/public/mark-price?instType=SWAP&instId=DOGE-USDT-SWAP",
-            "https://okx.test/api/v5/public/funding-rate?instId=DOGE-USDT-SWAP",
+            "https://okx.test/api/v5/market/ticker?instId=ADA-USDT-SWAP",
+            "https://okx.test/api/v5/public/mark-price?instType=SWAP&instId=ADA-USDT-SWAP",
+            "https://okx.test/api/v5/public/funding-rate?instId=ADA-USDT-SWAP",
         ]
     );
     assert_eq!(
-        feed.get_quote("DOGEUSDT").map(|q| q.last),
+        feed.get_quote("ADAUSDT").map(|q| q.last),
         Some("200".into())
     );
     // Tracking it again changes nothing.
-    feed.track("DOGEUSDT");
+    feed.track("ADAUSDT");
     settle().await;
-    assert_eq!(fake.gets_matching("DOGE").len(), 3);
+    assert_eq!(fake.gets_matching("ADA").len(), 3);
 
     server
-        .send(Message::text(ticker("DOGE-USDT-SWAP", "0.3")))
+        .send(Message::text(ticker("ADA-USDT-SWAP", "0.3")))
         .await
         .unwrap();
     settle().await;
@@ -470,18 +476,18 @@ async fn track_after_start_subscribes_and_polls() {
         Some("0.3".into())
     );
 
-    feed.untrack("DOGEUSDT");
+    feed.untrack("ADAUSDT");
     let unsubscribe: Value = serde_json::from_str(&next_text(&mut server).await).unwrap();
     assert_eq!(unsubscribe["op"], "unsubscribe");
-    assert_eq!(unsubscribe["args"][0]["instId"], "DOGE-USDT-SWAP");
-    assert_eq!(feed.get_quote("DOGEUSDT"), None);
+    assert_eq!(unsubscribe["args"][0]["instId"], "ADA-USDT-SWAP");
+    assert_eq!(feed.get_quote("ADAUSDT"), None);
     server
-        .send(Message::text(ticker("DOGE-USDT-SWAP", "0.4")))
+        .send(Message::text(ticker("ADA-USDT-SWAP", "0.4")))
         .await
         .unwrap();
     settle().await;
     assert!(drain(&mut quotes).is_empty());
-    assert_eq!(feed.get_quote("DOGEUSDT"), None);
+    assert_eq!(feed.get_quote("ADAUSDT"), None);
     feed.stop();
 }
 

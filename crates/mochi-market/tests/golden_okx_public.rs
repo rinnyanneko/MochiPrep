@@ -11,7 +11,7 @@ use axum::http::{StatusCode, Uri};
 use axum::response::IntoResponse;
 use axum::Router;
 use fake_okx::{FakeOkx, REST, WS};
-use mochi_domain::{Quote, Timeframe};
+use mochi_domain::{Quote, Timeframe, DEFAULT_SYMBOLS};
 use mochi_market::instrument_parse::parse_okx_instrument;
 use mochi_market::okx_public::{parse_okx_candles, OkxPublicFeed};
 use serde::Serialize;
@@ -57,12 +57,22 @@ fn load(replies: &Replies, table: &Value) {
     }
 }
 
+/// The pairs Node's feed tracked from the start. Later built-in pairs are untracked so the
+/// feed sees what Node's did when it recorded `okx-public.json`.
+const NODE_SYMBOLS: [&str; 3] = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+
 /// A feed over the table, which the fake answers as Node's fake fetch did, except that an
 /// unknown URL is a teapot here and a thrown "fetch failed" there; [`missing_is_fetch_failed`]
 /// maps one onto the other.
 fn feed(replies: &Replies) -> (OkxPublicFeed, Arc<FakeOkx>) {
     let (fake, _sockets) = FakeOkx::new(table_router(replies.clone()));
-    (OkxPublicFeed::with_transport(REST, WS, fake.clone()), fake)
+    let feed = OkxPublicFeed::with_transport(REST, WS, fake.clone());
+    for symbol in DEFAULT_SYMBOLS {
+        if !NODE_SYMBOLS.contains(&symbol) {
+            feed.untrack(symbol);
+        }
+    }
+    (feed, fake)
 }
 
 fn missing_is_fetch_failed(error: String) -> String {
