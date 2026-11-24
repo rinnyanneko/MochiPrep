@@ -112,6 +112,11 @@ fn coin_names(base_currency: &str) -> &'static [&'static str] {
         "LTC" => &["litecoin"],
         "AVAX" => &["avalanche"],
         "SHIB" => &["shiba inu"],
+        // Built in after the Node backend, so no golden fixture covers these names.
+        "TRX" => &["tron"],
+        "HYPE" => &["hyperliquid"],
+        "ZEC" => &["zcash"],
+        "LINK" => &["chainlink"],
         _ => &[],
     }
 }
