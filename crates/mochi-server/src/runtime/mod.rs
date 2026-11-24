@@ -791,16 +791,22 @@ impl Runtime {
         let start = replay.first_playable_time();
         let end = replay.end_time();
         let now = replay.now();
+        // Before bars are loaded there is no clock: no time to show, and nothing played.
+        let loaded = replay.is_loaded();
         ReplayState {
-            loaded: replay.is_loaded(),
+            loaded,
             playing: self.clock.playing(),
             speed: self.clock.speed(),
-            now: Some(now),
-            start_time: Some(start),
-            end_time: Some(end),
+            now: loaded.then_some(now),
+            start_time: loaded.then_some(start),
+            end_time: loaded.then_some(end),
             at_end: replay.at_end(),
             // Like Math.min(1, Math.max(0, x)), NaN included.
-            progress: ((now - start) as f64 / (end - start) as f64).clamp(0.0, 1.0),
+            progress: if loaded {
+                ((now - start) as f64 / (end - start) as f64).clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
             downloading: self.replay_download.as_ref().map(|d| d.fraction()),
             load_error: self.replay_error.clone(),
         }

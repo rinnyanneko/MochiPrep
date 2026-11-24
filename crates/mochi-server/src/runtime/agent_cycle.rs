@@ -902,53 +902,74 @@ impl Runtime {
                 }
                 return Ok(None);
             }
-            let suggested: Vec<Value> = owned
-                .iter()
-                .filter(|r| r["outcome"] == "SIGNAL")
-                .map(|r| r["symbol"].clone())
-                .collect();
-            // One transaction: a failed insert must not leave a pair's old suggestion retired
-            // with no replacement while the other pairs' records are saved.
-            self.engine
-                .store()
-                .transaction(|| -> Result<(), SaveFailure> {
-                    if !suggested.is_empty() {
-                        self.retire_signal_rows(
-                            |s| s["agentId"] == id.as_str() && suggested.contains(&s["symbol"]),
-                            "Replaced by a newer suggestion",
-                        )
-                        .map_err(SaveFailure::Api)?;
-                    }
-                    for record in &owned {
-                        rows::insert_decision(self.connection(), record)
-                            .map_err(|e| SaveFailure::Api(self.api_error(e)))?;
-                    }
-                    Ok(())
-                })
-                .map_err(|e| match e {
-                    SaveFailure::Api(e) => e,
-                    SaveFailure::Store(e) => self.api_error(e),
-                })?;
-            if !suggested.is_empty() {
-                self.invalidate(&[mochi_domain::Topic::Decisions]);
-            }
-            for record in &owned {
-                if let Some(log) = &self.operation_logs {
-                    let outcome = record["outcome"].as_str().unwrap_or("UNKNOWN");
-                    log.record(format_args!("agent cycle -> {outcome}"));
-                }
-            }
-            let first = owned[0].clone();
-            // A cycle can finish after a lifecycle action. Keep its decision in History,
-            // but leave the newer schedule and failure state alone.
-            if self
+            let stale = self
                 .agents
                 .generations
                 .get(&id)
                 .copied()
                 .unwrap_or_default()
-                != generation
-            {
+                != generation;
+            // One pair can settle as a suggestion while another waits for its second try. If
+            // the agent was stopped meanwhile, that suggestion is history only, as a single
+            // pair's is when its answer comes after Stop: nothing pending appears after it.
+            if stale {
+                for record in owned.iter_mut().filter(|r| r["outcome"] == "SIGNAL") {
+                    settle(
+                        record,
+                        "ANALYSIS_ONLY",
+                        Some("Agent was stopped before execution".into()),
+                    );
+                }
+            }
+            // Each record is saved with the retirement of the suggestion it replaces, in one
+            // transaction, so a failed insert leaves that pair's earlier suggestion pending.
+            // The other pairs are still saved: an executed order cannot be rolled back, so its
+            // record must stay. The first failure is reported once every pair was tried.
+            let mut first_error = None;
+            let mut replaced = false;
+            for record in &owned {
+                let replaces = (record["outcome"] == "SIGNAL").then(|| record["symbol"].clone());
+                let saved = self
+                    .engine
+                    .store()
+                    .transaction(|| -> Result<(), SaveFailure> {
+                        if let Some(symbol) = &replaces {
+                            self.retire_signal_rows(
+                                |s| s["agentId"] == id.as_str() && s["symbol"] == *symbol,
+                                "Replaced by a newer suggestion",
+                            )
+                            .map_err(SaveFailure::Api)?;
+                        }
+                        rows::insert_decision(self.connection(), record)
+                            .map_err(|e| SaveFailure::Api(self.api_error(e)))
+                    })
+                    .map_err(|e| match e {
+                        SaveFailure::Api(e) => e,
+                        SaveFailure::Store(e) => self.api_error(e),
+                    });
+                match saved {
+                    Ok(()) => {
+                        replaced |= replaces.is_some();
+                        if let Some(log) = &self.operation_logs {
+                            let outcome = record["outcome"].as_str().unwrap_or("UNKNOWN");
+                            log.record(format_args!("agent cycle -> {outcome}"));
+                        }
+                    }
+                    Err(e) => {
+                        first_error.get_or_insert(e);
+                    }
+                }
+            }
+            if replaced {
+                self.invalidate(&[mochi_domain::Topic::Decisions]);
+            }
+            if let Some(e) = first_error {
+                return Err(e);
+            }
+            let first = owned[0].clone();
+            // A cycle can finish after a lifecycle action. Keep its decision in History,
+            // but leave the newer schedule and failure state alone.
+            if stale {
                 self.invalidate_cycle();
                 return Ok(Some(first));
             }

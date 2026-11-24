@@ -257,3 +257,34 @@ fn trailing_instead_of_take_profit_keeps_the_stop_loss_required() {
         .iter()
         .any(|r| r.contains("must carry a stop loss")));
 }
+
+#[test]
+fn trailing_instead_of_take_profit_keeps_protect_from_removing_the_trail() {
+    let instruments = Instruments::with_defaults();
+    let protect = approved(&instruments, |input| {
+        input.decision.action == mochi_domain::AiAction::Protect && input.protection.is_some()
+    });
+    let mut input = protect.clone();
+    input.settings.trail_instead_of_take_profit = true;
+    input.decision.take_profit = None;
+    input.protection.as_mut().unwrap().take_profit = None;
+    input.protection.as_mut().unwrap().trailing_stop = Some(mochi_domain::TrailingStopSpec {
+        kind: mochi_domain::TrailingKind::Ratio,
+        callback: "0.01".into(),
+        activation_price: None,
+    });
+    // Leaving the trail alone is fine; removing it is not.
+    input.decision.trailing_stop = None;
+    let result = evaluate_risk(&input, &instruments);
+    assert!(result.approved, "{:?}", result.rejection_reasons);
+    input.decision.trailing_stop = Some(None);
+    assert!(evaluate_risk(&input, &instruments)
+        .rejection_reasons
+        .iter()
+        .any(|r| r == "Trailing exit: this agent exits by trailing stop: keep the trailing stop"));
+
+    // With no trail in force there is nothing to remove.
+    input.protection.as_mut().unwrap().trailing_stop = None;
+    let result = evaluate_risk(&input, &instruments);
+    assert!(result.approved, "{:?}", result.rejection_reasons);
+}

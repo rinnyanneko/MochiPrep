@@ -640,6 +640,22 @@ fn protect(
             check_trailing(checks, side, &last, trailing, &input.symbol, instruments)?;
         }
     }
+    // The trailing stop is this agent's only way out at a profit, so PROTECT may not remove it.
+    // A position without one (opened before the setting) has nothing to remove.
+    if settings.trail_instead_of_take_profit
+        && matches!(decision.trailing_stop, Some(None))
+        && input
+            .protection
+            .as_ref()
+            .is_some_and(|p| p.trailing_stop.is_some())
+    {
+        checks.check(
+            "exit-style",
+            "Trailing exit",
+            false,
+            "this agent exits by trailing stop: keep the trailing stop".to_string(),
+        );
+    }
 
     if let Some(stop) = decision.stop_loss {
         let stop_dec = number(stop);

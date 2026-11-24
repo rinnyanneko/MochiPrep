@@ -862,7 +862,7 @@ async fn a_stale_entry_that_cannot_be_cancelled_holds_back_only_its_pair() {
 }
 
 #[tokio::test]
-async fn a_failed_save_keeps_every_pair_s_earlier_suggestion() {
+async fn a_pair_whose_record_cannot_be_saved_keeps_its_earlier_suggestion() {
     let t = Test::new().await;
     let id = multi_agent_in(&t, &["BTCUSDT", "ETHUSDT"], "SIGNAL").await;
     *t.gateway.text.lock().unwrap() = json!({"decisions":[
@@ -878,7 +878,27 @@ async fn a_failed_save_keeps_every_pair_s_earlier_suggestion() {
         "{first:?}"
     );
 
-    // ETH's new record cannot be written, after BTC's would have been.
+    refuse_eth_records(&t).await;
+    let (status, _) = t.send("POST", &format!("/api/agents/{id}/run"), None).await;
+    assert_ne!(status, 200);
+    // BTC's suggestion was replaced. ETH's new one could not be saved, so its earlier one
+    // is still pending rather than retired with nothing in its place.
+    let after = outcomes(&t, &id).await;
+    let count = |symbol: &str, outcome: &str| {
+        after
+            .iter()
+            .filter(|(s, o)| s == symbol && o == outcome)
+            .count()
+    };
+    assert_eq!(count("BTCUSDT", "SIGNAL"), 1, "{after:?}");
+    assert_eq!(count("BTCUSDT", "SIGNAL_EXPIRED"), 1, "{after:?}");
+    assert_eq!(count("ETHUSDT", "SIGNAL"), 1, "{after:?}");
+    assert_eq!(count("ETHUSDT", "SIGNAL_EXPIRED"), 0, "{after:?}");
+    t.close().await;
+}
+
+/// The next ETH decision record fails to insert, as a full disk would make it.
+async fn refuse_eth_records(t: &Test) {
     t.state
         .runtime
         .call(|r| {
@@ -892,9 +912,58 @@ async fn a_failed_save_keeps_every_pair_s_earlier_suggestion() {
         })
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn an_executed_pair_keeps_its_record_when_another_pair_cannot_save() {
+    let t = Test::new().await;
+    let id = multi_agent(&t, &["BTCUSDT", "ETHUSDT"]).await;
+    refuse_eth_records(&t).await;
+    *t.gateway.text.lock().unwrap() = json!({"decisions":[
+        decision("BTCUSDT", "LONG", Some(60000.0)),
+        decision("ETHUSDT", "HOLD", None),
+    ]})
+    .to_string();
     let (status, _) = t.send("POST", &format!("/api/agents/{id}/run"), None).await;
     assert_ne!(status, 200);
-    // Nothing of the failed cycle is kept: both earlier suggestions are still pending.
-    assert_eq!(outcomes(&t, &id).await, first);
+    // The BTC order went through, and its record says so.
+    assert_eq!(
+        outcomes(&t, &id).await,
+        [("BTCUSDT".to_string(), "EXECUTED".to_string())]
+    );
+    t.close().await;
+}
+
+#[tokio::test]
+async fn a_suggestion_waiting_on_another_pair_s_retry_is_not_kept_after_stop_all() {
+    let t = Test::new().await;
+    let id = multi_agent_in(&t, &["BTCUSDT", "ETHUSDT"], "SIGNAL").await;
+    // BTC is a suggestion at once; ETH is refused for its missing stop and asked again.
+    *t.gateway.text.lock().unwrap() = json!({"decisions":[
+        decision("BTCUSDT", "LONG", Some(60000.0)),
+        decision("ETHUSDT", "LONG", None),
+    ]})
+    .to_string();
+    *t.gateway.then.lock().unwrap() =
+        Some(json!({"decisions":[decision("ETHUSDT", "HOLD", None)]}).to_string());
+    t.gateway.blocked.store(true, Ordering::SeqCst);
+    let state = t.state.clone();
+    let path = format!("/api/agents/{id}/run");
+    let run = tokio::spawn(async move { send(&state, "POST", &path, None).await });
+    // The first call answers; the second, the retry, waits until Stop All has run.
+    t.gateway.entered.notified().await;
+    t.gateway.release.notify_one();
+    t.gateway.entered.notified().await;
+    t.ok("POST", "/api/agents/stop-all", None).await;
+    t.gateway.blocked.store(false, Ordering::SeqCst);
+    t.gateway.release.notify_one();
+    run.await.unwrap();
+
+    let after = outcomes(&t, &id).await;
+    assert!(!after.iter().any(|(_, o)| o == "SIGNAL"), "{after:?}");
+    assert!(
+        after.contains(&("BTCUSDT".into(), "ANALYSIS_ONLY".into())),
+        "{after:?}"
+    );
     t.close().await;
 }

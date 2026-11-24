@@ -22,6 +22,8 @@ const LEAD: u64 = 60;
 struct History {
     asked: Mutex<Vec<(String, i64, usize)>>,
     fail: bool,
+    /// Requests starting at or after this time fail, as a download cut off part-way.
+    fail_from: Option<i64>,
     quiet: Vec<i64>,
     /// When set, each request waits for a permit, so a test can act during a download.
     hold: Option<Arc<tokio::sync::Semaphore>>,
@@ -51,7 +53,7 @@ impl LiveFeed for History {
             if let Some(hold) = &self.hold {
                 hold.acquire().await.unwrap().forget();
             }
-            if self.fail {
+            if self.fail || self.fail_from.is_some_and(|from| start >= from) {
                 return Err("offline".to_string());
             }
             let bars = (0..minutes as i64)
@@ -115,8 +117,14 @@ async fn picked_dates_download_once_overlaps_are_reused_and_saved_ranges_can_be_
     let feed = Arc::new(History::default());
     let rt = start(&path, feed.clone());
 
-    // Nothing is fetched or held until dates are picked.
-    assert!(!rt.replay_state().await.unwrap().loaded);
+    // Nothing is fetched or held until dates are picked, and there is no time to show.
+    let unloaded = rt.replay_state().await.unwrap();
+    assert!(!unloaded.loaded);
+    assert_eq!(
+        (unloaded.now, unloaded.start_time, unloaded.end_time),
+        (None, None, None)
+    );
+    assert_eq!(unloaded.progress, 0.0);
     let refused = rt.call(|r| r.load_replay(None)).await.unwrap().unwrap_err();
     assert_eq!(refused.message(), "Choose the replay's dates first");
     let refused = rt
@@ -339,6 +347,49 @@ async fn nothing_plays_or_steps_during_a_download() {
     assert!(state.loaded);
     assert_eq!(state.end_time, Some(later.to));
     rt.step_replay(1).await.unwrap();
+    rt.shutdown().await;
+}
+
+/// Other dates fail to download, so the loaded ones are picked again: they keep the bar they
+/// are on, at a restart too, rather than the start the failed dates were given.
+#[tokio::test]
+async fn dates_picked_again_after_a_failed_download_keep_their_bar() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mochiprep.db");
+    let first = range(5, 1);
+    let later = range(1, 1);
+    let feed = Arc::new(History {
+        fail_from: Some(first.to),
+        ..Default::default()
+    });
+    let rt = start(&path, feed);
+    rt.call(move |x| x.load_replay(Some(first)))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(settle(&rt).await.loaded);
+    rt.step_replay(10).await.unwrap();
+    let at = rt.replay_state().await.unwrap().now;
+
+    rt.call(move |x| x.load_replay(Some(later)))
+        .await
+        .unwrap()
+        .unwrap();
+    let failed = settle(&rt).await;
+    assert!(failed.load_error.is_some());
+    assert_eq!(failed.now, at, "the loaded dates stay where they were");
+    rt.call(move |x| x.load_replay(Some(first)))
+        .await
+        .unwrap()
+        .unwrap();
+    rt.shutdown().await;
+
+    let rt = start(&path, Arc::new(History::default()));
+    rt.call(|x| x.load_replay(None)).await.unwrap().unwrap();
+    let again = rt.replay_state().await.unwrap();
+    assert!(again.loaded);
+    assert_eq!(again.end_time, Some(first.to));
+    assert_eq!(again.now, at);
     rt.shutdown().await;
 }
 

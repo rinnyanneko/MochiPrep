@@ -196,7 +196,9 @@ impl Runtime {
                 "The replay must end by the last UTC midnight: later minutes are not history yet",
             ));
         }
-        if (range.to - range.from) / DAY_MS > MAX_RANGE_DAYS {
+        // Checked: the route bounds the dates, but this is public and must not wrap.
+        let days = range.to.checked_sub(range.from).map(|span| span / DAY_MS);
+        if days.is_none_or(|days| days > MAX_RANGE_DAYS) {
             return Err(bad(format!(
                 "The replay covers at most {MAX_RANGE_DAYS} days"
             )));
@@ -302,8 +304,12 @@ impl Runtime {
                 .ok_or_else(|| bad("Choose the replay's dates first"))?,
         };
         if self.replay_window == Some(window) && self.replay_loaded() {
-            // Picked again after other dates failed to download: these are the dates to keep.
+            // Picked again after other dates failed to download: these are the dates to keep,
+            // at the bar they are on. Picking the other dates set the cursor to their start.
             set_setting(self.connection(), WINDOW_KEY, &window).map_err(|e| self.api_error(e))?;
+            let position = lock(&self.replay).position() as i64;
+            set_setting(self.connection(), "replay.cursor", &position)
+                .map_err(|e| self.api_error(e))?;
             return Ok(());
         }
         if self.replay_loaded() {
