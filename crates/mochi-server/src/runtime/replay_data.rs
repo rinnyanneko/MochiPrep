@@ -21,6 +21,9 @@ use crate::error::ApiError;
 const DAY_MS: i64 = 86_400_000;
 const MINUTE_MS: i64 = 60_000;
 const WINDOW_KEY: &str = "replay.window";
+const CURSOR_KEY: &str = "replay.cursor";
+/// The window the saved cursor counts minutes into. A cursor saved on other dates is not used.
+const CURSOR_WINDOW_KEY: &str = "replay.cursor.window";
 /// Minutes fetched before a window's first minute, for the close a quiet first minute repeats.
 const LEAD_MINUTES: i64 = 60;
 /// The longest range the owner can pick. Every pair's bars are held in memory while it plays
@@ -191,6 +194,15 @@ impl Runtime {
         if range.from >= range.to {
             return Err(bad("The replay must end after it starts"));
         }
+        // The warm-up and the hour before it are fetched too; a start too early for them is no
+        // date OKX has. The route already keeps dates at or after 1970.
+        if range
+            .from
+            .checked_sub(WARMUP_DAYS * DAY_MS + LEAD_MINUTES * MINUTE_MS)
+            .is_none()
+        {
+            return Err(bad("The replay starts too early"));
+        }
         if range.to > last_midnight() {
             return Err(bad(
                 "The replay must end by the last UTC midnight: later minutes are not history yet",
@@ -236,7 +248,7 @@ impl Runtime {
     }
 
     /// Whether the saved bars give no price for the window's first minute: no bar in it and
-    /// none before it.
+    /// none in the hour before it.
     fn lacks_opening_close(&self, symbol: &str, window: Window) -> Result<bool, ApiError> {
         let at_start = load_replay_bars(
             self.connection(),
@@ -244,12 +256,18 @@ impl Runtime {
             (window.start, window.start + MINUTE_MS),
         )
         .map_err(|e| self.api_error(e))?;
-        if !at_start.is_empty() {
-            return Ok(false);
-        }
-        let before = replay_bar_before(self.connection(), symbol, window.start)
+        Ok(at_start.is_empty() && self.opening_close(symbol, window)?.is_none())
+    }
+
+    /// The close a quiet first minute repeats: the last bar in the hour before the window. An
+    /// older saved bar is not used, since the bars between it and the window may be missing
+    /// and the price may have moved since.
+    fn opening_close(&self, symbol: &str, window: Window) -> Result<Option<f64>, ApiError> {
+        let bar = replay_bar_before(self.connection(), symbol, window.start)
             .map_err(|e| self.api_error(e))?;
-        Ok(before.is_none())
+        Ok(bar
+            .filter(|bar| bar.time >= window.start - LEAD_MINUTES * MINUTE_MS)
+            .map(|bar| bar.close))
     }
 
     /// What loading `range` would download and take on disk.
@@ -308,8 +326,7 @@ impl Runtime {
             // at the bar they are on. Picking the other dates set the cursor to their start.
             set_setting(self.connection(), WINDOW_KEY, &window).map_err(|e| self.api_error(e))?;
             let position = lock(&self.replay).position() as i64;
-            set_setting(self.connection(), "replay.cursor", &position)
-                .map_err(|e| self.api_error(e))?;
+            self.save_cursor(Some(window), position)?;
             return Ok(());
         }
         if self.replay_loaded() {
@@ -318,8 +335,7 @@ impl Runtime {
         if self.chosen_window()? != Some(window) {
             set_setting(self.connection(), WINDOW_KEY, &window).map_err(|e| self.api_error(e))?;
             // A cursor counts minutes into the old dates; the new ones start after the warm-up.
-            set_setting(self.connection(), "replay.cursor", &(WARMUP_MINUTES as i64))
-                .map_err(|e| self.api_error(e))?;
+            self.save_cursor(Some(window), WARMUP_MINUTES as i64)?;
         }
         self.replay_error = None;
         let missing = self.missing(window)?;
@@ -360,12 +376,47 @@ impl Runtime {
         Ok(())
     }
 
+    /// Saves the tape cursor with the window it counts into (`None` for the bundled tape).
+    pub(super) fn save_cursor(&self, window: Option<Window>, cursor: i64) -> Result<(), ApiError> {
+        set_setting(self.connection(), CURSOR_KEY, &cursor).map_err(|e| self.api_error(e))?;
+        if let Some(window) = window {
+            set_setting(self.connection(), CURSOR_WINDOW_KEY, &window)
+                .map_err(|e| self.api_error(e))?;
+        }
+        Ok(())
+    }
+
+    /// The saved cursor if it was saved on `window`. Stepping the loaded dates after other
+    /// dates failed to download saves their cursor, which those other dates must not inherit.
+    /// A cursor from before the window was saved with it counts as this window's.
+    fn saved_cursor(&self, window: Window) -> Result<Option<i64>, ApiError> {
+        let saved_on = get_setting::<Window>(self.connection(), CURSOR_WINDOW_KEY)
+            .map_err(|e| self.api_error(e))?;
+        if saved_on.is_some_and(|saved_on| saved_on != window) {
+            return Ok(None);
+        }
+        get_setting::<i64>(self.connection(), CURSOR_KEY).map_err(|e| self.api_error(e))
+    }
+
     /// Replacing the loaded bars moves replay time, so nothing may be trading on them.
     fn assert_replay_replaceable(&mut self) -> Result<(), ApiError> {
         if self.replay_batch.is_some() || !self.replay_queue.is_empty() {
             return Err(ApiError::conflict(
                 "The replay is still stepping; try again in a moment",
             ));
+        }
+        // A cycle run once by hand reads the loaded bars and would trade on the new ones.
+        for id in self.agents.active.keys() {
+            let agent = mochi_store::rows::get_agent(self.connection(), id)
+                .map_err(|e| self.api_error(e))?;
+            if let Some(agent) = agent {
+                if self.require_account(&agent.account_id)?.source == DataSource::Replay {
+                    return Err(ApiError::conflict(format!(
+                        "{} is still deciding on the replay; try again in a moment",
+                        agent.name
+                    )));
+                }
+            }
         }
         for agent in
             mochi_store::rows::list_agents(self.connection()).map_err(|e| self.api_error(e))?
@@ -401,10 +452,14 @@ impl Runtime {
             return self.replay_failed(self.redact(&error));
         }
         // The owner may have picked other dates while this one downloaded.
-        if self.chosen_window().ok().flatten() != Some(window) {
-            return self.emit(ServerEvent::Replay {
-                state: self.replay_state(),
-            });
+        match self.chosen_window() {
+            Ok(chosen) if chosen == Some(window) => {}
+            Ok(_) => {
+                return self.emit(ServerEvent::Replay {
+                    state: self.replay_state(),
+                })
+            }
+            Err(e) => return self.replay_failed(e.message().to_string()),
         }
         let result = (|| {
             if self.replay_loaded() {
@@ -427,9 +482,7 @@ impl Runtime {
                 .map_err(|e| self.api_error(e))?;
             let mut last = match bars.first() {
                 Some(first) if first.time == window.start => Some(first.close),
-                _ => replay_bar_before(self.connection(), symbol, window.start)
-                    .map_err(|e| self.api_error(e))?
-                    .map(|bar| bar.close),
+                _ => self.opening_close(symbol, window)?,
             };
             let mut next = bars.into_iter().peekable();
             let mut candles = Vec::with_capacity(window.minutes);
@@ -485,12 +538,11 @@ impl Runtime {
         let cursor = if switching {
             Some(WARMUP_MINUTES as i64)
         } else {
-            get_setting::<i64>(self.connection(), "replay.cursor").map_err(|e| self.api_error(e))?
+            self.saved_cursor(window)?
         };
         if let Some(cursor) = cursor {
             replay.seek(cursor);
-            set_setting(self.connection(), "replay.cursor", &cursor)
-                .map_err(|e| self.api_error(e))?;
+            self.save_cursor(Some(window), cursor)?;
         }
         self.last_replay_equity_at = replay.now();
         *lock(&self.replay) = replay;

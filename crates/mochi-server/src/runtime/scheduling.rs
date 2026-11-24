@@ -3,7 +3,7 @@
 use super::{lock, Runtime, RuntimeHandle};
 use crate::error::ApiError;
 use mochi_domain::{DataSource, Quote, ServerEvent, Topic};
-use mochi_store::{rows, set_setting};
+use mochi_store::rows;
 use tokio::sync::oneshot;
 
 pub(super) struct ReplayRequest {
@@ -127,9 +127,8 @@ impl Runtime {
                     Err(e)
                 }
             };
-            let position = lock(&self.replay).position();
-            let persisted = set_setting(self.connection(), "replay.cursor", &position)
-                .map_err(|e| self.api_error(e));
+            let position = lock(&self.replay).position() as i64;
+            let persisted = self.save_cursor(self.replay_window, position);
             if let Err(e) = &persisted {
                 self.stop_replay_with(e.message());
             }

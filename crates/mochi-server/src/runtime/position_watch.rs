@@ -129,6 +129,15 @@ impl Runtime {
         changed
     }
 
+    /// Pairs the agent no longer trades: if one is added back, it is new to the agent again.
+    pub(super) fn forget_pairs(&mut self, agent_id: &str, symbols: &[String]) {
+        let watch = &mut self.agents.watch;
+        let gone = |(id, symbol): &Leg| id == agent_id && symbols.contains(symbol);
+        watch.seen.retain(|leg, _| !gone(leg));
+        watch.settling.retain(|leg, _| !gone(leg));
+        watch.woken.retain(|leg| !gone(leg));
+    }
+
     /// A stopped agent watches nothing; it starts again from what it sees then.
     pub(super) fn forget_positions(&mut self, agent_id: &str) {
         let watch = &mut self.agents.watch;

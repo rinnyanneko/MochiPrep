@@ -950,14 +950,20 @@ async fn a_suggestion_waiting_on_another_pair_s_retry_is_not_kept_after_stop_all
     let state = t.state.clone();
     let path = format!("/api/agents/{id}/run");
     let run = tokio::spawn(async move { send(&state, "POST", &path, None).await });
-    // The first call answers; the second, the retry, waits until Stop All has run.
-    t.gateway.entered.notified().await;
+    // The first call answers; the second, the retry, waits until Stop All has run. Bounded, so
+    // a missing retry fails the test instead of hanging it.
+    let bound = Duration::from_secs(5);
+    timeout(bound, t.gateway.entered.notified())
+        .await
+        .expect("the first call");
     t.gateway.release.notify_one();
-    t.gateway.entered.notified().await;
+    timeout(bound, t.gateway.entered.notified())
+        .await
+        .expect("the retry");
     t.ok("POST", "/api/agents/stop-all", None).await;
     t.gateway.blocked.store(false, Ordering::SeqCst);
     t.gateway.release.notify_one();
-    run.await.unwrap();
+    timeout(bound, run).await.expect("the run ends").unwrap();
 
     let after = outcomes(&t, &id).await;
     assert!(!after.iter().any(|(_, o)| o == "SIGNAL"), "{after:?}");

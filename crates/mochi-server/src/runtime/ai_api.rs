@@ -81,12 +81,19 @@ impl Runtime {
             }
         }
         let moved = agent.account_id != input.account_id;
+        let before = agent.symbols.clone();
         apply_input(&mut agent, input)?;
         rows::save_agent(self.connection(), &agent).map_err(|e| self.api_error(e))?;
         // What the agent saw, and any OKX order still settling, belong to the old account. On
         // the new one it starts over: pairs seen there for the first time are only recorded.
         if moved {
             self.forget_positions(id);
+        } else {
+            let removed: Vec<String> = before
+                .into_iter()
+                .filter(|symbol| !agent.symbols.contains(symbol))
+                .collect();
+            self.forget_pairs(id, &removed);
         }
         self.invalidate(&[Topic::Agents, Topic::Arena]);
         Ok(agent)

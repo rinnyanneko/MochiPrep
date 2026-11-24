@@ -1895,3 +1895,40 @@ async fn moving_an_agent_to_another_account_is_no_position_change() {
     assert_eq!(m.calls.load(Ordering::SeqCst), 1);
     rt.shutdown().await;
 }
+/// A pair taken off the agent and added back is new to it again: a position opened in between
+/// is recorded, not taken as a change.
+#[tokio::test]
+async fn a_pair_added_back_starts_from_what_is_there() {
+    let (rt, m, _) = setup("AUTO").await;
+    let edit = |symbols: &'static [&'static str]| {
+        let rt = rt.clone();
+        async move {
+            rt.call(move |r| {
+                let a = r.require_agent("agent").unwrap();
+                let input = serde_json::from_value(json!({"name":"agent","providerId":"provider","model":"test","symbols":symbols,"timeframe":"15m","strategy":"test","accountId":a.account_id,"risk":default_risk_settings(),"intervalSec":3600,"executionMode":"AUTO","useNews":false,"allowTrailingStop":false})).unwrap();
+                r.update_agent("agent", input).unwrap();
+            })
+            .await
+            .unwrap();
+        }
+    };
+    let mut eth = decision("HOLD");
+    eth["symbol"] = json!("ETHUSDT");
+    *m.response.lock().unwrap() = Ok(json!({"decisions":[decision("HOLD"), eth]}).to_string());
+    edit(&["BTCUSDT", "ETHUSDT"]).await;
+    rt.call(|r| r.start_agent("agent")).await.unwrap().unwrap();
+    rt.step_replay(1).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 1);
+
+    edit(&["BTCUSDT"]).await;
+    rt.call(|r| {
+        let a = r.require_agent("agent").unwrap();
+        r.engine_mut().place_order(serde_json::from_value(json!({"accountId":a.account_id,"clientOrderId":"eth-open","symbol":"ETHUSDT","side":"BUY","type":"MARKET","quantity":"0.1","leverage":3})).unwrap()).unwrap();
+    })
+    .await
+    .unwrap();
+    edit(&["BTCUSDT", "ETHUSDT"]).await;
+    rt.step_replay(2).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 1);
+    rt.shutdown().await;
+}

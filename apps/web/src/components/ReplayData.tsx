@@ -29,8 +29,8 @@ function Estimate({ plan, error }: Readonly<{ plan: ReplayPlan | null; error: st
   );
 }
 
-/** Saved bars cover `[start, end)`; people read the last day they include. */
-const spanText = (start: number, end: number) => `${dayText(start)} to ${dayText(end - DAY)}`;
+/** Saved bars cover `[start, end)`, not always whole days; people read the last day included. */
+const spanText = (start: number, end: number) => `${dayText(start)} to ${dayText(end - 1)}`;
 
 /**
  * Picks the replay's dates, says what loading them takes before anything downloads, and lists
@@ -59,9 +59,10 @@ export function ReplayDataDialog({ onClose }: Readonly<{ onClose(): void }>) {
 
   const range = from && to ? { from: dayMs(from), to: dayMs(to) + DAY } : null;
   useEffect(() => {
-    if (!range || !view?.history) return;
+    // Cleared or changed dates: the old estimate no longer describes what Load would do.
     setPlan(null);
     setPlanError(null);
+    if (!range || !view?.history) return;
     // An estimate for dates no longer picked must not describe what Load would download.
     const request = cancellable();
     const timer = setTimeout(() => {
@@ -115,7 +116,7 @@ export function ReplayDataDialog({ onClose }: Readonly<{ onClose(): void }>) {
           </div>
           <div className="flex justify-end gap-2">
             <Button onClick={onClose}>Cancel</Button>
-            <Button variant="primary" disabled={!plan} onClick={load}>
+            <Button variant="primary" disabled={!plan || !range} onClick={load}>
               <Download /> {plan && plan.missingMinutes > 0 ? 'Download and load' : 'Load'}
             </Button>
           </div>

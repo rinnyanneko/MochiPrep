@@ -287,6 +287,13 @@ async fn a_deleted_lead_in_is_fetched_again() {
         })
     };
     let rt = start(&path, quiet());
+    // Older bars are saved too, days before: their last close is no price for this window.
+    let older = range(12, 1);
+    rt.call(move |x| x.load_replay(Some(older)))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(settle(&rt).await.loaded);
     rt.call(move |x| x.load_replay(Some(r)))
         .await
         .unwrap()
@@ -394,6 +401,44 @@ async fn dates_picked_again_after_a_failed_download_keep_their_bar() {
     assert!(again.loaded);
     assert_eq!(again.end_time, Some(first.to));
     assert_eq!(again.now, at);
+    rt.shutdown().await;
+}
+
+/// Stepping the loaded dates after other dates failed to download saves a cursor on the loaded
+/// dates. The other dates, loaded later, start at their own first bar, not at that offset.
+#[tokio::test]
+async fn a_cursor_saved_on_other_dates_is_not_used() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mochiprep.db");
+    let first = range(5, 1);
+    let later = range(1, 1);
+    let feed = Arc::new(History {
+        fail_from: Some(first.to),
+        ..Default::default()
+    });
+    let rt = start(&path, feed);
+    rt.call(move |x| x.load_replay(Some(first)))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(settle(&rt).await.loaded);
+    rt.call(move |x| x.load_replay(Some(later)))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(settle(&rt).await.load_error.is_some());
+    rt.step_replay(30).await.unwrap();
+    rt.shutdown().await;
+
+    let rt = start(&path, Arc::new(History::default()));
+    rt.call(|x| x.load_replay(None)).await.unwrap().unwrap();
+    let state = settle(&rt).await;
+    assert!(state.loaded, "{:?}", state.load_error);
+    assert_eq!(state.end_time, Some(later.to));
+    assert_eq!(
+        state.now, state.start_time,
+        "the later dates start at their first bar"
+    );
     rt.shutdown().await;
 }
 
