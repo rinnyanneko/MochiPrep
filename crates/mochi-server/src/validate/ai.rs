@@ -244,6 +244,7 @@ pub(super) fn risk(input: Input) -> Checked {
     f.required("maxNotional", |v| check_number(v, &POSITIVE));
     // Optional: risk settings saved before it existed have none, and none means no floor.
     f.optional("minConfidence", |v| number(v, 0.0, 1.0));
+    f.optional("trailInsteadOfTakeProfit", check_bool);
     f.strict()
 }
 pub(super) fn agent_input(input: Input) -> Checked {

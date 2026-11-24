@@ -246,6 +246,20 @@ fn news_block(news: Option<&[NewsItem]>) -> String {
     }).unwrap_or_default()
 }
 
+const TRAILING_EXIT_RULE: &str = "\n- This agent exits by trailing stop instead of take profit. LONG and SHORT must set takeProfit null and carry a trailingStop with an activationPrice on the profitable side of the entry, so trailing starts once the trade is in profit. PROTECT may keep a takeProfit the position already has, but cannot set a new one.";
+
+/// The system prompt for an agent that exits by trailing stop instead of take profit: the rules
+/// plus that one. The risk engine enforces it either way; this tells the model up front. Only
+/// added when the setting is on, so other prompts are unchanged. `system` must allow trailing
+/// stops, since the rule needs their keys.
+pub fn with_trailing_exit(system: String, on: bool) -> String {
+    if on {
+        system + TRAILING_EXIT_RULE
+    } else {
+        system
+    }
+}
+
 /// What the user told the agent for its next decision, after the rest of the user prompt. It
 /// outranks the strategy notes for this one decision, and like them it cannot change the rules.
 /// Only added when there is a message, so a prompt without one is unchanged.

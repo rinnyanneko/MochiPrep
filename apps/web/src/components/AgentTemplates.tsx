@@ -19,8 +19,15 @@ export function useAgentTemplates() {
  * The agent settings shared by the agent form and the template editor. `source` is the data
  * source of the agent being edited; a template has none, since it can be used on either.
  */
+function trailingNote(trails: boolean, allowed: boolean): string {
+  if (trails) return 'On, because this agent trails instead of taking profit.';
+  if (allowed) return 'On: this agent can set, change and remove trailing stops.';
+  return 'Off: this agent cannot set, change or remove trailing stops.';
+}
+
 export function AgentSettingsFields<T extends AgentSettings>({ value, onChange, source }: Readonly<{ value: T; onChange(patch: Partial<AgentSettings>): void; source?: DataSource }>) {
   const setRisk = (patch: Partial<RiskSettings>) => onChange({ risk: { ...value.risk, ...patch } });
+  const trails = value.risk.trailInsteadOfTakeProfit === true;
   const number = (label: string, key: keyof RiskSettings) => (
     <Field label={label}>
       <Input type="number" step="any" min={0} value={value.risk[key] as number} onChange={(e) => setRisk({ [key]: Number(e.target.value) })} />
@@ -92,10 +99,32 @@ export function AgentSettingsFields<T extends AgentSettings>({ value, onChange, 
         Require a stop loss on new positions
       </label>
       <label className="mt-2 flex items-start gap-2 text-xs text-ink-2">
-        <input type="checkbox" checked={value.allowTrailingStop} onChange={(e) => onChange({ allowTrailingStop: e.target.checked })} className="mt-0.5 accent-[var(--accent)]" />
+        <input
+          type="checkbox"
+          checked={value.allowTrailingStop || trails}
+          disabled={trails}
+          onChange={(e) => onChange({ allowTrailingStop: e.target.checked })}
+          className="mt-0.5 accent-[var(--accent)]"
+        />
         <span>
           Allow trailing stops{' '}
-          <span className="block text-[11px] text-ink-3">Off: this agent cannot set, change or remove trailing stops.</span>
+          <span className="block text-[11px] text-ink-3">{trailingNote(trails, value.allowTrailingStop)}</span>
+        </span>
+      </label>
+      <label className="mt-2 flex items-start gap-2 text-xs text-ink-2">
+        <input
+          type="checkbox"
+          checked={trails}
+          // Turning it on also turns trailing stops on, so the saved agent reads the same without it.
+          onChange={(e) => onChange({ allowTrailingStop: value.allowTrailingStop || e.target.checked, risk: { ...value.risk, trailInsteadOfTakeProfit: e.target.checked } })}
+          className="mt-0.5 accent-[var(--accent)]"
+          data-testid="trail-instead"
+        />
+        <span>
+          Trail instead of take profit{' '}
+          <span className="block text-[11px] text-ink-3">
+            New positions carry no take profit. Each needs a trailing stop with an activation price, so it only starts following the price once the trade is in profit. A stop loss stays required. Positions that already have a take profit keep it.
+          </span>
         </span>
       </label>
     </>

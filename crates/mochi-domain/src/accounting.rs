@@ -378,10 +378,19 @@ pub struct RiskSettings {
         skip_serializing_if = "is_zero"
     )]
     pub min_confidence: f64,
+    /// New positions exit by a trailing stop with an activation price instead of a take profit:
+    /// an entry must carry one and no take profit, and PROTECT cannot set a new take profit. It
+    /// turns trailing stops on for the agent. Off is left out when written, like `min_confidence`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub trail_instead_of_take_profit: bool,
 }
 
 fn is_zero(value: &f64) -> bool {
     *value == 0.0
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 pub fn default_risk_settings() -> RiskSettings {
@@ -394,6 +403,7 @@ pub fn default_risk_settings() -> RiskSettings {
         max_quote_age_sec: 30.0,
         max_notional: 100_000.0,
         min_confidence: 0.0,
+        trail_instead_of_take_profit: false,
     }
 }
 

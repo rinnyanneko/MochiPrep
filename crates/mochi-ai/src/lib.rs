@@ -10,7 +10,7 @@ pub use indicators::indicator_snapshot;
 pub use mock::MockProvider;
 pub use prompt::{
     build_multi_system_prompt, build_multi_user_prompt, build_system_prompt, build_user_prompt,
-    with_owner_message,
+    with_owner_message, with_trailing_exit,
 };
 pub use redact::redact_secrets;
 pub use remote::{RemoteOptions, RemoteProvider};

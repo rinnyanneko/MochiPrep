@@ -160,13 +160,15 @@ fn run_checks(
         },
     );
 
-    // Before HOLD returns, so a HOLD that carries a trailing stop is still checked.
+    // Before HOLD returns, so a HOLD that carries a trailing stop is still checked. Exiting by
+    // trailing stops instead of take profits needs them, so that setting turns them on too.
+    let trailing_allowed = input.allow_trailing_stop || settings.trail_instead_of_take_profit;
     if decision.trailing_stop.is_some() {
         checks.check(
             "trailing-allowed",
             "Trailing stops allowed",
-            input.allow_trailing_stop,
-            if input.allow_trailing_stop {
+            trailing_allowed,
+            if trailing_allowed {
                 "trailing stops are on for this agent".to_string()
             } else {
                 "trailing stops are off for this agent".to_string()
@@ -300,11 +302,12 @@ fn run_checks(
 
     match decision.stop_loss {
         None => {
+            let required = stop_required(settings);
             checks.check(
                 "stop-loss",
                 "Stop loss present",
-                !settings.require_stop_loss,
-                if settings.require_stop_loss {
+                !required,
+                if required {
                     "new positions must carry a stop loss".to_string()
                 } else {
                     "not required by settings".to_string()
@@ -354,6 +357,9 @@ fn run_checks(
             &input.symbol,
             instruments,
         )?;
+    }
+    if settings.trail_instead_of_take_profit {
+        trailing_exit(decision, checks);
     }
 
     if checks.any_failed() {
@@ -551,11 +557,12 @@ fn protect(
     let last = Dec::parse(&quote.last)?;
     match decision.stop_loss {
         None => {
+            let required = stop_required(settings);
             checks.check(
                 "stop-loss",
                 "Stop loss present",
-                !settings.require_stop_loss,
-                if settings.require_stop_loss {
+                !required,
+                if required {
                     "open positions must keep a stop loss".to_string()
                 } else {
                     "not required by settings".to_string()
@@ -577,6 +584,28 @@ fn protect(
         }
     }
     if let Some(target) = decision.take_profit {
+        // Restating the take profit a position already has keeps it; only a new one is refused,
+        // so a position opened before the setting was turned on can keep its target.
+        if settings.trail_instead_of_take_profit {
+            let kept = match input
+                .protection
+                .as_ref()
+                .and_then(|p| p.take_profit.as_deref())
+            {
+                Some(current) => Dec::parse(current)?.eq_value(&number(target)),
+                None => false,
+            };
+            checks.check(
+                "exit-style",
+                "Trailing exit",
+                kept,
+                if kept {
+                    "keeps the take profit already set".to_string()
+                } else {
+                    "this agent exits by trailing stop: no new take profit".to_string()
+                },
+            );
+        }
         let tp = number(target);
         let valid = if side == PositionSide::Long {
             tp.gt(&last)
@@ -669,6 +698,38 @@ fn protect(
         }
     }
     Ok(())
+}
+
+/// Trailing exits keep the fixed stop: a trailing stop does nothing before its activation price,
+/// and the stop is what sizes the trade.
+fn stop_required(settings: &RiskSettings) -> bool {
+    settings.require_stop_loss || settings.trail_instead_of_take_profit
+}
+
+/// A new position of an agent that exits by trailing stop: a trailing stop with an activation
+/// price, so it only starts following once the trade is in profit, and no take profit to cut the
+/// run short. Where the activation price sits is checked with the rest of the trailing stop.
+fn trailing_exit(decision: &AiDecisionData, checks: &mut Checks) {
+    let activation = match &decision.trailing_stop {
+        Some(Some(trailing)) => trailing.activation_price,
+        _ => None,
+    };
+    let (passed, detail) = match (decision.take_profit, activation) {
+        (Some(_), _) => (
+            false,
+            "this agent exits by trailing stop: no take profit".to_string(),
+        ),
+        (None, None) => (
+            false,
+            "this agent exits by trailing stop: it needs a trailing stop with an activation price"
+                .to_string(),
+        ),
+        (None, Some(price)) => (
+            true,
+            format!("trailing stop activates at {}", js_number_string(price)),
+        ),
+    };
+    checks.check("exit-style", "Trailing exit", passed, detail);
 }
 
 /// None when OKX left the liquidation price empty or 0, which it does for some positions.

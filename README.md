@@ -97,6 +97,8 @@ To correct an agent, type a message in the box on its card and press **Send**, f
 
 **Min confidence** in an agent's risk limits holds back new positions the model states less confidence in, for example 70%. It is off at 0. Closing or protecting a position is never held back. The confidence is the model's own guess, not a calibrated probability, so a high floor does not make trades more likely to win; it only makes the agent trade less.
 
+**Trail instead of take profit** makes an agent exit winners with a trailing stop rather than a fixed target. Every new position must carry a trailing stop with an activation price on the profitable side of the entry, so the stop only starts following the price once the trade is in profit, and no take profit. A stop loss is still required, even with **Require a stop loss** off, and it still sizes the trade. A decision that breaks this is refused by the risk checks, not changed. Turning it on also allows trailing stops for that agent. Positions that already have a take profit keep it, but the agent cannot set a new one.
+
 Each agent has one of two modes:
 
 - **Suggest to me** (the default for new agents). The agent shows its entry, stop and target on the chart and in a list. Nothing is ordered until you accept. Accepting runs the risk checks again and resizes the order at current prices. Suggestions expire after one agent interval.

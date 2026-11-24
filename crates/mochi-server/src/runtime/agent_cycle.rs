@@ -24,8 +24,8 @@ use crate::{
 use futures_util::FutureExt;
 use mochi_ai::{
     build_multi_system_prompt, build_multi_user_prompt, build_system_prompt, build_user_prompt,
-    indicator_snapshot, redact_secrets, with_owner_message, AiRequest, AiResponse, MarketContext,
-    ProviderError,
+    indicator_snapshot, redact_secrets, with_owner_message, with_trailing_exit, AiRequest,
+    AiResponse, MarketContext, ProviderError,
 };
 use mochi_core::paper::PaperStore;
 use mochi_domain::{
@@ -417,14 +417,13 @@ impl Runtime {
         if let Some(message) = &message {
             c.record["ownerMessage"] = json!(message);
         }
+        let trail = self.trails_instead(&c.agent);
+        let trailing = c.agent.allow_trailing_stop || trail;
         self.agents.pending.push(Box::pin(async move {
             let request = AiRequest {
                 model: c.agent.model.clone(),
-                system: build_system_prompt(c.agent.allow_trailing_stop),
-                user: with_owner_message(
-                    build_user_prompt(&context, c.agent.allow_trailing_stop),
-                    message.as_deref(),
-                ),
+                system: with_trailing_exit(build_system_prompt(trailing), trail),
+                user: with_owner_message(build_user_prompt(&context, trailing), message.as_deref()),
                 context: Some(context),
             };
             let started = Instant::now();
@@ -1106,16 +1105,18 @@ impl Runtime {
                 b.legs[i].record["ownerMessage"] = json!(message);
             }
         }
+        let trail = self.trails_instead(&agent);
+        let trailing = agent.allow_trailing_stop || trail;
         self.agents.pending.push(Box::pin(async move {
             let request = AiRequest {
                 model: agent.model.clone(),
-                system: build_multi_system_prompt(agent.allow_trailing_stop),
+                system: with_trailing_exit(build_multi_system_prompt(trailing), trail),
                 user: with_owner_message(
                     build_multi_user_prompt(
                         &contexts,
                         (!news.is_empty()).then_some(news.as_slice()),
                         &agent.strategy,
-                        agent.allow_trailing_stop,
+                        trailing,
                     ),
                     message.as_deref(),
                 ),

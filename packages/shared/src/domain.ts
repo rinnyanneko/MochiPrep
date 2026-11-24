@@ -409,6 +409,11 @@ export interface RiskSettings {
    * Exits and protection are never held back by it.
    */
   minConfidence?: number;
+  /**
+   * New positions exit by a trailing stop with an activation price instead of a take profit, and
+   * PROTECT cannot set a new take profit. Turns trailing stops on for the agent. Absent is off.
+   */
+  trailInsteadOfTakeProfit?: boolean;
 }
 
 export const DEFAULT_RISK_SETTINGS: RiskSettings = {

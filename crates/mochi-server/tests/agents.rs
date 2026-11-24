@@ -1545,6 +1545,46 @@ async fn a_confidence_floor_holds_back_entries_the_model_is_less_sure_of() {
     rt.shutdown().await;
 }
 #[tokio::test]
+async fn an_agent_that_trails_instead_of_taking_profit_is_told_and_held_to_it() {
+    let (rt, m, a) = setup("AUTO").await;
+    let risk = serde_json::to_string(&mochi_domain::RiskSettings {
+        trail_instead_of_take_profit: true,
+        ..default_risk_settings()
+    })
+    .unwrap();
+    // The agent's own trailing switch stays off: the setting turns trailing stops on.
+    rt.call(move |r| {
+        r.connection()
+            .execute(
+                "UPDATE agents SET risk=?, allow_trailing_stop=0 WHERE id='agent'",
+                [risk],
+            )
+            .unwrap();
+    })
+    .await
+    .unwrap();
+
+    let mut target = decision("LONG");
+    target["takeProfit"] = json!(10_000_000);
+    *m.response.lock().unwrap() = Ok(target.to_string());
+    let s = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(s["outcome"], "RISK_REJECTED", "{s}");
+    assert!(s.to_string().contains("Trailing exit"), "{s}");
+    let system = m.requests.lock().unwrap()[0].system.clone();
+    assert!(system.contains("exits by trailing stop instead of take profit"));
+    assert!(system.contains("\"trailingStop\""), "{system}");
+    assert_eq!(order_count(&rt, a.clone()).await, 0);
+
+    let mut trailing = decision("LONG");
+    trailing["trailingStop"] =
+        json!({"kind": "RATIO", "callback": 0.01, "activationPrice": 10_000_000});
+    *m.response.lock().unwrap() = Ok(trailing.to_string());
+    let s = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(s["outcome"], "EXECUTED", "{s}");
+    assert!(order_count(&rt, a).await > 0);
+    rt.shutdown().await;
+}
+#[tokio::test]
 async fn a_message_reaches_the_next_model_call_once_and_is_kept_on_its_record() {
     let (rt, m, _) = setup("SIGNAL").await;
     let record = rt

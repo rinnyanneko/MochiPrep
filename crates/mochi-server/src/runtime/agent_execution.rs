@@ -96,6 +96,8 @@ pub fn effective_risk(a: &RiskSettings, c: Option<&RiskSettings>) -> RiskSetting
             max_notional: a.max_notional.min(c.max_notional),
             // The stricter floor: an account's own floor holds for every agent on it.
             min_confidence: a.min_confidence.max(c.min_confidence),
+            trail_instead_of_take_profit: a.trail_instead_of_take_profit
+                || c.trail_instead_of_take_profit,
         },
     }
 }
@@ -382,6 +384,19 @@ impl Runtime {
                 .any(|p| p.position.symbol == a.symbol && p.close_supported == Some(true))
                 .then(|| engine.protection_of(&a.symbol))),
         }
+    }
+
+    /// Whether the agent exits by trailing stop instead of take profit, by its own limits or its
+    /// account's, as `effective_risk` combines them. The prompt says so up front; the risk
+    /// engine enforces it on every decision either way.
+    pub(super) fn trails_instead(&self, a: &rows::Agent) -> bool {
+        let own = serde_json::from_str::<RiskSettings>(a.risk.get())
+            .is_ok_and(|r| r.trail_instead_of_take_profit);
+        own || self
+            .require_account(&a.account_id)
+            .ok()
+            .and_then(|account| account.live_limits)
+            .is_some_and(|limits| limits.trail_instead_of_take_profit)
     }
 
     pub(super) fn assess(

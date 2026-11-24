@@ -79,6 +79,7 @@ fn limits(
         max_quote_age_sec,
         max_notional,
         min_confidence: 0.0,
+        trail_instead_of_take_profit: false,
     }
 }
 

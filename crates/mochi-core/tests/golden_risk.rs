@@ -130,3 +130,130 @@ fn settings_without_a_floor_serialize_as_before() {
     let value = serde_json::to_value(&floor).unwrap();
     assert_eq!(value["minConfidence"], serde_json::json!(0.65));
 }
+
+fn approved(instruments: &Instruments, pick: impl Fn(&RiskInput) -> bool) -> RiskInput {
+    golden()
+        .iter()
+        .map(|case| serde_json::from_value::<RiskInput>(case["input"].clone()).unwrap())
+        .find(|input| pick(input) && evaluate_risk(input, instruments).approved)
+        .expect("the fixture has such a case")
+}
+
+#[test]
+fn trailing_instead_of_take_profit_needs_an_activated_trail_and_no_target() {
+    let instruments = Instruments::with_defaults();
+    let entry = approved(&instruments, |input| {
+        input.decision.action == mochi_domain::AiAction::Long
+            && input.decision.order_type == mochi_domain::EntryOrderType::Market
+    });
+    let ask: f64 = entry.quote.as_ref().unwrap().ask.parse().unwrap();
+    let mut input = entry.clone();
+    input.settings.trail_instead_of_take_profit = true;
+    // The setting turns trailing stops on, whatever the agent's own switch says.
+    input.allow_trailing_stop = false;
+    let reasons = |input: &RiskInput| evaluate_risk(input, &instruments).rejection_reasons;
+
+    input.decision.take_profit = Some(ask * 1.05);
+    input.decision.trailing_stop = None;
+    assert!(reasons(&input)
+        .iter()
+        .any(|r| r == "Trailing exit: this agent exits by trailing stop: no take profit"));
+
+    input.decision.take_profit = None;
+    assert!(reasons(&input)
+        .iter()
+        .any(|r| r.contains("needs a trailing stop with an activation price")));
+
+    let trail = |activation: Option<f64>| {
+        Some(Some(mochi_domain::AiTrailingStop {
+            kind: mochi_domain::TrailingKind::Ratio,
+            callback: 0.01,
+            activation_price: activation,
+        }))
+    };
+    input.decision.trailing_stop = trail(None);
+    assert!(!evaluate_risk(&input, &instruments).approved);
+
+    input.decision.trailing_stop = trail(Some(ask * 1.01));
+    let result = evaluate_risk(&input, &instruments);
+    assert!(result.approved, "{:?}", result.rejection_reasons);
+    assert!(result
+        .checks
+        .iter()
+        .any(|c| c.id == "exit-style" && c.passed));
+
+    // An activation price behind the entry is refused by the trailing rule itself.
+    input.decision.trailing_stop = trail(Some(ask * 0.99));
+    assert!(!evaluate_risk(&input, &instruments).approved);
+
+    // Exits are never held back by it.
+    let mut close = approved(&instruments, |input| {
+        input.decision.action == mochi_domain::AiAction::Close
+    });
+    close.settings.trail_instead_of_take_profit = true;
+    assert!(evaluate_risk(&close, &instruments).approved);
+}
+
+#[test]
+fn trailing_instead_of_take_profit_lets_protect_keep_but_not_set_a_target() {
+    let instruments = Instruments::with_defaults();
+    let protect = approved(&instruments, |input| {
+        input.decision.action == mochi_domain::AiAction::Protect
+            && input.decision.take_profit.is_some()
+            && input.protection.is_some()
+    });
+    let target = protect.decision.take_profit.unwrap();
+    let mut input = protect.clone();
+    input.settings.trail_instead_of_take_profit = true;
+    input.protection.as_mut().unwrap().take_profit = Some(target.to_string());
+    let result = evaluate_risk(&input, &instruments);
+    assert!(result.approved, "{:?}", result.rejection_reasons);
+
+    input.protection.as_mut().unwrap().take_profit = None;
+    assert!(evaluate_risk(&input, &instruments)
+        .rejection_reasons
+        .iter()
+        .any(|r| r.contains("no new take profit")));
+
+    input.decision.take_profit = None;
+    assert!(evaluate_risk(&input, &instruments).approved);
+}
+
+#[test]
+fn settings_without_trailing_exits_serialize_as_before() {
+    let settings = mochi_domain::default_risk_settings();
+    assert!(!serde_json::to_string(&settings)
+        .unwrap()
+        .contains("trailInsteadOfTakeProfit"));
+    let on = mochi_domain::RiskSettings {
+        trail_instead_of_take_profit: true,
+        ..settings
+    };
+    assert_eq!(
+        serde_json::to_value(&on).unwrap()["trailInsteadOfTakeProfit"],
+        serde_json::json!(true)
+    );
+}
+
+#[test]
+fn trailing_instead_of_take_profit_keeps_the_stop_loss_required() {
+    let instruments = Instruments::with_defaults();
+    let mut input = approved(&instruments, |input| {
+        input.decision.action == mochi_domain::AiAction::Long
+            && input.decision.order_type == mochi_domain::EntryOrderType::Market
+    });
+    let ask: f64 = input.quote.as_ref().unwrap().ask.parse().unwrap();
+    input.settings.require_stop_loss = false;
+    input.settings.trail_instead_of_take_profit = true;
+    input.decision.take_profit = None;
+    input.decision.stop_loss = None;
+    input.decision.trailing_stop = Some(Some(mochi_domain::AiTrailingStop {
+        kind: mochi_domain::TrailingKind::Ratio,
+        callback: 0.01,
+        activation_price: Some(ask * 1.01),
+    }));
+    assert!(evaluate_risk(&input, &instruments)
+        .rejection_reasons
+        .iter()
+        .any(|r| r.contains("must carry a stop loss")));
+}
