@@ -18,6 +18,8 @@ struct Model {
     blocked: AtomicUsize,
     panics: AtomicUsize,
     requests: Mutex<Vec<AiRequest>>,
+    /// The answer from the next call on, when set.
+    then: Mutex<Option<Result<String, ProviderError>>>,
 }
 impl AiProvider for Model {
     fn kind(&self) -> ProviderKind {
@@ -31,15 +33,15 @@ impl AiProvider for Model {
                 self.gate.notified().await;
             }
             assert_eq!(self.panics.swap(0, Ordering::SeqCst), 0, "model panicked");
-            self.response
-                .lock()
-                .unwrap()
-                .clone()
-                .map(|text| AiResponse {
-                    text,
-                    input_tokens: Some(2.0),
-                    output_tokens: Some(3.0),
-                })
+            let response = self.response.lock().unwrap().clone();
+            if let Some(next) = self.then.lock().unwrap().take() {
+                *self.response.lock().unwrap() = next;
+            }
+            response.map(|text| AiResponse {
+                text,
+                input_tokens: Some(2.0),
+                output_tokens: Some(3.0),
+            })
         })
     }
 }
@@ -66,6 +68,7 @@ async fn setup_with(
         blocked: AtomicUsize::new(0),
         panics: AtomicUsize::new(0),
         requests: Mutex::new(Vec::new()),
+        then: Mutex::new(None),
     });
     options.replay_minutes = Some(5800);
     let m = model.clone();
@@ -1016,11 +1019,13 @@ async fn candle_wait_responsive_and_current_quote_rechecked_after_model() {
     f.gate.notify_one();
     wait_calls(&m, 1).await;
     f.quote.lock().unwrap().as_mut().unwrap().ts -= 120000;
+    // The refused reply is asked about once more; that second try is not held.
+    m.blocked.store(0, Ordering::SeqCst);
     m.gate.notify_one();
-    assert_eq!(
-        job.await.unwrap().unwrap().unwrap()["outcome"],
-        "RISK_REJECTED"
-    );
+    let r = job.await.unwrap().unwrap().unwrap();
+    assert_eq!(r["outcome"], "RISK_REJECTED");
+    assert_eq!(r["attempts"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(m.calls.load(Ordering::SeqCst), 2);
     assert_eq!(order_count(&rt, a).await, 0);
     rt.shutdown().await;
 }
@@ -1542,6 +1547,89 @@ async fn a_confidence_floor_holds_back_entries_the_model_is_less_sure_of() {
     let accepted = rt.execute_signal(s["id"].as_str().unwrap()).await.unwrap();
     assert_eq!(accepted["outcome"], "RISK_REJECTED", "{accepted}");
     assert_eq!(order_count(&rt, a).await, 0);
+    rt.shutdown().await;
+}
+#[tokio::test]
+async fn a_refused_reply_is_told_why_and_asked_once_more() {
+    let (rt, m, a) = setup("AUTO").await;
+    let mut unstopped = decision("LONG");
+    unstopped["stopLoss"] = Value::Null;
+    // A key the reply echoes is quoted back redacted.
+    unstopped["reason"] = json!("echo custom-secret-agent-key");
+    *m.response.lock().unwrap() = Ok(unstopped.to_string());
+    *m.then.lock().unwrap() = Some(Ok(decision("LONG").to_string()));
+    let r = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(r["outcome"], "EXECUTED", "{r}");
+    assert!(order_count(&rt, a.clone()).await > 0);
+    let attempts = r["attempts"].as_array().unwrap();
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0]["outcome"], "RISK_REJECTED");
+    assert!(attempts[0]["decision"]["stopLoss"].is_null());
+    // Both calls count.
+    assert_eq!(r["inputTokens"], json!(4.0));
+    assert_eq!(r["outputTokens"], json!(6.0));
+    {
+        let requests = m.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        let retry = &requests[1].user;
+        assert!(retry.starts_with(&requests[0].user));
+        assert!(
+            retry.contains(
+                "<refused>
+BTCUSDT: Stop loss present: new positions must carry a stop loss"
+            ),
+            "{retry}"
+        );
+        assert!(
+            retry.contains(
+                "<reply>
+{"
+            ),
+            "{retry}"
+        );
+        assert!(!retry.contains("custom-secret-agent-key"), "{retry}");
+        assert_eq!(requests[1].system, requests[0].system);
+    }
+    rt.shutdown().await;
+
+    // Refused twice: no third call, and the cycle ends refused.
+    let (rt, m, a) = setup("AUTO").await;
+    *m.response.lock().unwrap() = Ok(unstopped.to_string());
+    let r = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(r["outcome"], "RISK_REJECTED");
+    assert_eq!(m.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(order_count(&rt, a).await, 0);
+
+    // A reply that does not parse is asked about again too; a HOLD then is a fine answer.
+    *m.response.lock().unwrap() = Ok("not json".into());
+    *m.then.lock().unwrap() = Some(Ok(decision("HOLD").to_string()));
+    let r = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(r["outcome"], "HOLD", "{r}");
+    assert_eq!(r["attempts"][0]["outcome"], "INVALID_OUTPUT");
+    assert_eq!(m.calls.load(Ordering::SeqCst), 4);
+    // A first reply that is not refused is never asked about again.
+    let r = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(r["outcome"], "HOLD");
+    assert!(r.get("attempts").is_none());
+    assert_eq!(m.calls.load(Ordering::SeqCst), 5);
+
+    // A retry the provider fails leaves the refusal as the outcome: not an error streak.
+    *m.response.lock().unwrap() = Ok(unstopped.to_string());
+    *m.then.lock().unwrap() = Some(Err(ProviderError::new(
+        mochi_ai::ProviderErrorCode::RateLimit,
+        "slow down",
+    )));
+    let r = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(r["outcome"], "RISK_REJECTED", "{r}");
+    assert!(r.get("attempts").is_none(), "{r}");
+    let detail = r["outcomeDetail"].as_str().unwrap();
+    assert!(detail.contains("asking the model again failed"), "{detail}");
+    assert!(detail.contains("slow down"), "{detail}");
+    let agent = rt
+        .call(|r| r.require_agent("agent").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(agent.consecutive_errors, 0);
     rt.shutdown().await;
 }
 #[tokio::test]

@@ -590,6 +590,16 @@ export interface AiDecisionData {
   trailingStop?: AiTrailingStop | null;
 }
 
+/** One refused try of a cycle, as it stood before the model was asked again. */
+export interface DecisionAttempt {
+  rawResponse: string | null;
+  decision: DecisionRecord['decision'];
+  validationError: string | null;
+  risk: DecisionRecord['risk'];
+  outcome: DecisionRecord['outcome'];
+  outcomeDetail: string | null;
+}
+
 export interface DecisionRecord {
   id: string;
   agentId: string;
@@ -620,6 +630,12 @@ export interface DecisionRecord {
   fillIds: string[];
   /** What the user told the agent for this decision, when it was sent with a message. */
   ownerMessage?: string;
+  /**
+   * Earlier tries of this cycle, oldest first. A reply the risk checks refused, or one that did
+   * not parse, is shown to the model with the reasons and asked once more; the record's own
+   * fields are the last try. Absent when the first reply was not refused.
+   */
+  attempts?: DecisionAttempt[];
   /** PROTECT only: the protection the decision saw, which an accepted suggestion must still match. */
   protectionBefore?: Protection;
   /** PROTECT only: the protection in force after the change was made. */

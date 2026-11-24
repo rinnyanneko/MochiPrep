@@ -20,6 +20,8 @@ struct Gateway {
     entered: Notify,
     release: Notify,
     requests: Mutex<Vec<Value>>,
+    /// The answer from the second request on, when set.
+    then: Mutex<Option<String>>,
 }
 async fn model(State(g): State<Arc<Gateway>>, Json(body): Json<Value>) -> Json<Value> {
     g.requests.lock().unwrap().push(body);
@@ -27,7 +29,11 @@ async fn model(State(g): State<Arc<Gateway>>, Json(body): Json<Value>) -> Json<V
     if g.blocked.load(Ordering::SeqCst) {
         g.release.notified().await;
     }
-    Json(json!({"choices":[{"message":{"content":g.text.lock().unwrap().clone()}}]}))
+    let text = g.text.lock().unwrap().clone();
+    if let Some(next) = g.then.lock().unwrap().take() {
+        *g.text.lock().unwrap() = next;
+    }
+    Json(json!({"choices":[{"message":{"content":text}}]}))
 }
 struct Test {
     state: AppState,
@@ -576,6 +582,66 @@ async fn one_model_call_decides_every_pair_and_each_pair_trades_on_its_own() {
     let eth = by_symbol("ETHUSDT");
     assert_eq!(eth["outcome"], "EXECUTED", "{eth}");
     assert_eq!(eth["decision"]["symbol"], "ETHUSDT");
+    t.close().await;
+}
+
+#[tokio::test]
+async fn only_the_refused_pairs_are_asked_about_again_with_the_reasons() {
+    let t = Test::new().await;
+    let id = multi_agent(&t, &["BTCUSDT", "ETHUSDT"]).await;
+    // BTC holds; ETH goes long without the stop loss the limits require.
+    *t.gateway.text.lock().unwrap() = json!({"decisions":[
+        decision("BTCUSDT", "HOLD", None),
+        decision("ETHUSDT", "LONG", None),
+    ]})
+    .to_string();
+    *t.gateway.then.lock().unwrap() =
+        Some(json!({"decisions":[decision("ETHUSDT", "LONG", Some(3000.0))]}).to_string());
+    t.ok("POST", &format!("/api/agents/{id}/run"), None).await;
+
+    let requests = t.gateway.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+    let retry = requests[1]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["content"].as_str().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
+    assert!(
+        retry.contains(
+            "<refused>
+ETHUSDT: Stop loss present"
+        ),
+        "{retry}"
+    );
+    // Only ETH's market data is sent again; BTC's decision stands.
+    let btc_data = "\\\"symbol\\\":\\\"BTCUSDT\\\",\\\"timeframe\\\"";
+    assert!(requests[0].to_string().contains(btc_data));
+    assert!(!requests[1].to_string().contains(btc_data));
+
+    let decisions = t
+        .ok("GET", &format!("/api/decisions?agentId={id}"), None)
+        .await;
+    let by_symbol = |symbol: &str| {
+        decisions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["symbol"] == symbol)
+            .unwrap()
+            .clone()
+    };
+    let btc = by_symbol("BTCUSDT");
+    assert_eq!(btc["outcome"], "HOLD");
+    assert!(btc.get("attempts").is_none(), "{btc}");
+    let eth = by_symbol("ETHUSDT");
+    assert_eq!(eth["outcome"], "EXECUTED", "{eth}");
+    assert_eq!(eth["attempts"][0]["outcome"], "RISK_REJECTED");
+    assert_eq!(eth["attempts"][0]["decision"]["action"], "LONG");
     t.close().await;
 }
 

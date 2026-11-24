@@ -260,6 +260,23 @@ pub fn with_trailing_exit(system: String, on: bool) -> String {
     }
 }
 
+/// The user prompt again, for a second try after the model's reply was refused: its reply and,
+/// per pair, why. The reasons come from the parser and the risk engine, not from the model, and
+/// the reply is the model's own text, so neither can speak for the user. Tags inside either are
+/// removed so they cannot close the block early.
+pub fn with_refusal(prompt: String, reply: &str, refused: &[(String, String)]) -> String {
+    let strip = |text: &str| text.replace("</reply>", "").replace("</refused>", "");
+    let reasons = refused
+        .iter()
+        .map(|(symbol, why)| format!("{symbol}: {}", strip(why)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{prompt}\n\nYour previous reply was refused, so nothing was done for the pairs below:\n<reply>\n{}\n</reply>\nWhy each was refused:\n<refused>\n{reasons}\n</refused>\nDecide again from the same market data and rules. Fix what was refused, or reply HOLD when no trade fits the limits. This is the last try this cycle.",
+        strip(reply)
+    )
+}
+
 /// What the user told the agent for its next decision, after the rest of the user prompt. It
 /// outranks the strategy notes for this one decision, and like them it cannot change the rules.
 /// Only added when there is a message, so a prompt without one is unchanged.

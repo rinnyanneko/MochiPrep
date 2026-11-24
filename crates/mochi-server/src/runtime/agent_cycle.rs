@@ -24,8 +24,8 @@ use crate::{
 use futures_util::FutureExt;
 use mochi_ai::{
     build_multi_system_prompt, build_multi_user_prompt, build_system_prompt, build_user_prompt,
-    indicator_snapshot, redact_secrets, with_owner_message, with_trailing_exit, AiRequest,
-    AiResponse, MarketContext, ProviderError,
+    indicator_snapshot, redact_secrets, with_owner_message, with_refusal, with_trailing_exit,
+    AiProvider, AiRequest, AiResponse, MarketContext, ProviderError,
 };
 use mochi_core::paper::PaperStore;
 use mochi_domain::{
@@ -34,6 +34,7 @@ use mochi_domain::{
 };
 use mochi_store::rows;
 use serde_json::{json, Value};
+use std::sync::Arc;
 use std::time::Instant;
 
 pub(super) struct Cycle {
@@ -50,6 +51,10 @@ pub(super) struct Cycle {
     secrets: Vec<String>,
     /// The engine this cycle trades through; `None` only before it is resolved.
     target: Option<ExecutionTarget>,
+    /// The first model request without the owner's message, and that message, kept for one
+    /// second try if the reply is refused. Taken by that try, so a cycle asks the model at most
+    /// twice.
+    first_request: Option<(AiRequest, Option<String>)>,
 }
 pub(super) enum Completion {
     Candles(Cycle, Result<Vec<Candle>, String>),
@@ -75,6 +80,130 @@ pub(super) struct Batch {
     reply: Option<CycleReply>,
     /// The model's answer for each leg, from the shared call.
     decisions: Vec<Option<Result<AiDecisionData, String>>>,
+    /// What the shared call was built from, kept for one second try for the refused legs.
+    first_prompt: Option<BatchPrompt>,
+}
+
+/// The parts of a batch prompt, so a second try can ask about only the legs that were refused.
+pub(super) struct BatchPrompt {
+    system: String,
+    /// Each leg's market data, by leg; `None` for a leg the model was not asked about.
+    contexts: Vec<Option<MarketContext>>,
+    news: Vec<NewsItem>,
+    message: Option<String>,
+    trailing: bool,
+}
+
+/// Refused by the risk checks, or a reply that did not parse: the outcomes a second try with
+/// the reasons can change. Provider errors and data problems are not the model's to fix.
+fn refused(record: &Value) -> bool {
+    record["outcome"] == "RISK_REJECTED" || record["outcome"] == "INVALID_OUTPUT"
+}
+
+/// The reply text a second try quotes back: short, since the reasons matter more.
+const REFUSED_REPLY_MAX: usize = 2000;
+
+/// Moves a refused attempt's result into `attempts`, so the record shows both tries, and
+/// clears it for the second.
+fn keep_attempt(record: &mut Value) {
+    let mut attempt = serde_json::Map::new();
+    for key in [
+        "rawResponse",
+        "decision",
+        "validationError",
+        "risk",
+        "outcome",
+        "outcomeDetail",
+    ] {
+        attempt.insert(key.into(), record[key].take());
+    }
+    if !record["attempts"].is_array() {
+        record["attempts"] = json!([]);
+    }
+    record["attempts"]
+        .as_array_mut()
+        .expect("just made an array")
+        .push(Value::Object(attempt));
+    settle(record, "DATA_ERROR", None);
+}
+
+/// A second try that could not reach the model leaves the refusal of the first as the outcome,
+/// noting the failure: a provider hiccup on a retry the cycle did not need is not a failed cycle.
+/// Critical provider errors are left alone by the caller, so they still pause the agent.
+fn restore_refusal(record: &mut Value) {
+    if record["outcome"] != "AI_ERROR" {
+        return;
+    }
+    let Some(Value::Object(mut attempt)) = record
+        .get_mut("attempts")
+        .and_then(Value::as_array_mut)
+        .and_then(Vec::pop)
+    else {
+        return;
+    };
+    let failure = record["outcomeDetail"].as_str().unwrap_or("").to_string();
+    for (key, value) in std::mem::take(&mut attempt) {
+        record[key] = value;
+    }
+    let detail = record["outcomeDetail"].as_str().unwrap_or("").to_string();
+    record["outcomeDetail"] = json!(format!(
+        "{detail} (asking the model again failed: {failure})"
+    ));
+    if record["attempts"].as_array().is_some_and(Vec::is_empty) {
+        record.as_object_mut().map(|o| o.remove("attempts"));
+    }
+}
+
+/// Adds one model call's time, tokens and cost to a record, which may already count an earlier
+/// call of the same cycle.
+fn add_usage(
+    record: &mut Value,
+    config: &mochi_ai::ProviderConfig,
+    response: &Result<AiResponse, ProviderError>,
+    latency: u64,
+    tokens: bool,
+) {
+    record["latencyMs"] = json!(record["latencyMs"].as_u64().unwrap_or(0) + latency);
+    let Ok(r) = response else { return };
+    if !tokens {
+        return;
+    }
+    let sum = |before: &Value, now: Option<f64>| match (before.as_f64(), now) {
+        (Some(a), Some(b)) => Some(a + b),
+        (a, b) => a.or(b),
+    };
+    record["inputTokens"] = json!(sum(&record["inputTokens"], r.input_tokens));
+    record["outputTokens"] = json!(sum(&record["outputTokens"], r.output_tokens));
+    // Each call's estimate is already rounded to 6 places, so the sum is too; added as decimals.
+    let cost = estimate_cost(config, r.input_tokens, r.output_tokens)
+        .and_then(|c| mochi_decimal::Dec::parse(&c).ok());
+    let before = record["estimatedCost"]
+        .as_str()
+        .and_then(|c| mochi_decimal::Dec::parse(c).ok());
+    if let Some(total) = match (before, cost) {
+        (Some(a), Some(b)) => Some(a.add(&b)),
+        (a, b) => a.or(b),
+    } {
+        record["estimatedCost"] = json!(total.to_fixed_dp(6));
+    }
+}
+
+/// One model call, with its time in ms. A panicking provider is an error, not a crash.
+async fn ask(
+    provider: Arc<dyn AiProvider>,
+    request: &AiRequest,
+) -> (Result<AiResponse, ProviderError>, u64) {
+    let started = Instant::now();
+    let response = std::panic::AssertUnwindSafe(async { provider.complete(request).await })
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|_| {
+            Err(ProviderError::new(
+                mochi_ai::ProviderErrorCode::BadResponse,
+                "AI provider panicked",
+            ))
+        });
+    (response, started.elapsed().as_millis() as u64)
 }
 impl Batch {
     fn open_legs(&self) -> impl Iterator<Item = usize> + '_ {
@@ -167,6 +296,11 @@ fn clean_record(record: &mut Value, secrets: &[String]) {
             clean(reason);
         }
     }
+    if let Some(attempts) = record.get_mut("attempts").and_then(Value::as_array_mut) {
+        for attempt in attempts {
+            clean_record(attempt, secrets);
+        }
+    }
     if let Some(news) = record["news"].as_array_mut() {
         for item in news {
             for field in ["id", "source", "title", "url"] {
@@ -214,6 +348,7 @@ impl Runtime {
             critical_error: None,
             secrets: self.secrets(),
             target: None,
+            first_request: None,
         };
         self.agents.active.insert(id.into(), token);
         // Node's `execution(accountId)`: an exchange account without a session cannot trade.
@@ -273,7 +408,7 @@ impl Runtime {
             Completion::Cancelled(c, closed, Ok(())) => self.read_account(c, closed),
             Completion::News(c, context) => self.begin_model(c, *context),
             Completion::Model(mut c, response) => match self.complete_model(&mut c, response) {
-                Ok(None) => self.finish_cycle(c),
+                Ok(None) => self.finish_or_retry(c),
                 Ok(Some((engine, act))) => {
                     self.agents.pending.push(Box::pin(async move {
                         let acted = act.run(engine).await;
@@ -419,33 +554,62 @@ impl Runtime {
         }
         let trail = self.trails_instead(&c.agent);
         let trailing = c.agent.allow_trailing_stop || trail;
+        let base = AiRequest {
+            model: c.agent.model.clone(),
+            system: with_trailing_exit(build_system_prompt(trailing), trail),
+            user: build_user_prompt(&context, trailing),
+            context: Some(context),
+        };
+        let mut request = base.clone();
+        request.user = with_owner_message(request.user, message.as_deref());
+        c.first_request = Some((base, message));
+        self.send_model(c, provider, config, request);
+    }
+    fn send_model(
+        &mut self,
+        mut c: Cycle,
+        provider: Arc<dyn AiProvider>,
+        config: mochi_ai::ProviderConfig,
+        request: AiRequest,
+    ) {
         self.agents.pending.push(Box::pin(async move {
-            let request = AiRequest {
-                model: c.agent.model.clone(),
-                system: with_trailing_exit(build_system_prompt(trailing), trail),
-                user: with_owner_message(build_user_prompt(&context, trailing), message.as_deref()),
-                context: Some(context),
-            };
-            let started = Instant::now();
-            let response =
-                std::panic::AssertUnwindSafe(async { provider.complete(&request).await })
-                    .catch_unwind()
-                    .await
-                    .unwrap_or_else(|_| {
-                        Err(ProviderError::new(
-                            mochi_ai::ProviderErrorCode::BadResponse,
-                            "AI provider panicked",
-                        ))
-                    });
-            c.record["latencyMs"] = json!(started.elapsed().as_millis() as u64);
-            if let Ok(r) = &response {
-                c.record["inputTokens"] = json!(r.input_tokens);
-                c.record["outputTokens"] = json!(r.output_tokens);
-                c.record["estimatedCost"] =
-                    json!(estimate_cost(&config, r.input_tokens, r.output_tokens));
-            }
+            let (response, latency) = ask(provider, &request).await;
+            add_usage(&mut c.record, &config, &response, latency, true);
             Completion::Model(c, response)
         }));
+    }
+    /// A refused reply gets one second try, told what was refused and why; anything else, or a
+    /// second refusal, finishes the cycle.
+    fn finish_or_retry(&mut self, mut c: Cycle) {
+        if c.critical_error.is_none() {
+            restore_refusal(&mut c.record);
+        }
+        if !refused(&c.record) || !self.cycle_owned(&c).unwrap_or(false) {
+            return self.finish_cycle(c);
+        }
+        let Some((mut request, message)) = c.first_request.take() else {
+            return self.finish_cycle(c);
+        };
+        let (provider, config) = match self.resolve_provider(&c.agent) {
+            Ok(p) => p,
+            Err(_) => return self.finish_cycle(c),
+        };
+        // Cleaned again with the secrets known now, which may include a key added since the
+        // reply came, and only then shortened, so a cut can never leave a key's prefix.
+        c.secrets.extend(self.secrets());
+        let reply = truncate_utf16(
+            &c.clean(c.record["rawResponse"].as_str().unwrap_or("")),
+            REFUSED_REPLY_MAX,
+        );
+        let why = c.clean(c.record["outcomeDetail"].as_str().unwrap_or(""));
+        let message = message.map(|m| c.clean(&m));
+        keep_attempt(&mut c.record);
+        request.user = with_refusal(
+            with_owner_message(request.user, message.as_deref()),
+            &reply,
+            &[(c.agent.symbol.clone(), why)],
+        );
+        self.send_model(c, provider, config, request);
     }
     /// The closed candles the model is shown, or `None` once the record is settled.
     fn closed_candles(
@@ -849,6 +1013,7 @@ impl Runtime {
                     critical_error: None,
                     secrets: secrets.clone(),
                     target: None,
+                    first_request: None,
                 }
             })
             .collect();
@@ -858,6 +1023,7 @@ impl Runtime {
             open: vec![true; n],
             reply,
             decisions: (0..n).map(|_| None).collect(),
+            first_prompt: None,
         };
         let token = b.legs[0].record["id"].as_str().unwrap().to_string();
         self.agents.active.insert(agent.id.clone(), token);
@@ -1094,7 +1260,6 @@ impl Runtime {
             b.legs[i].record["providerKind"] = json!(config.kind);
             b.legs[i].record["isMock"] = json!(false);
         }
-        let contexts: Vec<MarketContext> = contexts.into_iter().flatten().collect();
         let agent = b.legs[open[0]].agent.clone();
         let message = self
             .agents
@@ -1106,43 +1271,33 @@ impl Runtime {
             }
         }
         let trail = self.trails_instead(&agent);
-        let trailing = agent.allow_trailing_stop || trail;
+        let prompt = BatchPrompt {
+            system: with_trailing_exit(
+                build_multi_system_prompt(agent.allow_trailing_stop || trail),
+                trail,
+            ),
+            contexts,
+            news,
+            message,
+            trailing: agent.allow_trailing_stop || trail,
+        };
+        let request = batch_request(&agent, &prompt, &open);
+        b.first_prompt = Some(prompt);
+        self.send_batch(b, provider, config, request);
+    }
+    fn send_batch(
+        &mut self,
+        mut b: Batch,
+        provider: Arc<dyn AiProvider>,
+        config: mochi_ai::ProviderConfig,
+        request: AiRequest,
+    ) {
+        let open: Vec<usize> = b.open_legs().collect();
         self.agents.pending.push(Box::pin(async move {
-            let request = AiRequest {
-                model: agent.model.clone(),
-                system: with_trailing_exit(build_multi_system_prompt(trailing), trail),
-                user: with_owner_message(
-                    build_multi_user_prompt(
-                        &contexts,
-                        (!news.is_empty()).then_some(news.as_slice()),
-                        &agent.strategy,
-                        trailing,
-                    ),
-                    message.as_deref(),
-                ),
-                context: None,
-            };
-            let started = Instant::now();
-            let response =
-                std::panic::AssertUnwindSafe(async { provider.complete(&request).await })
-                    .catch_unwind()
-                    .await
-                    .unwrap_or_else(|_| {
-                        Err(ProviderError::new(
-                            mochi_ai::ProviderErrorCode::BadResponse,
-                            "AI provider panicked",
-                        ))
-                    });
-            let latency = started.elapsed().as_millis() as u64;
+            let (response, latency) = ask(provider, &request).await;
             for (n, &i) in open.iter().enumerate() {
-                b.legs[i].record["latencyMs"] = json!(latency);
                 // One call answers every pair; its tokens and cost count once, on the first.
-                if let (0, Ok(r)) = (n, &response) {
-                    b.legs[i].record["inputTokens"] = json!(r.input_tokens);
-                    b.legs[i].record["outputTokens"] = json!(r.output_tokens);
-                    b.legs[i].record["estimatedCost"] =
-                        json!(estimate_cost(&config, r.input_tokens, r.output_tokens));
-                }
+                add_usage(&mut b.legs[i].record, &config, &response, latency, n == 0);
             }
             Completion::BatchModel(b, response)
         }));
@@ -1215,10 +1370,82 @@ impl Runtime {
         }
         self.finish_batch(b);
     }
-    fn finish_batch(&mut self, b: Batch) {
-        self.finish_legs(b.legs, b.reply);
+    /// Like [`Self::finish_or_retry`], for the legs of a batch: one second call about only the
+    /// refused legs, after the others have acted.
+    fn finish_batch(&mut self, mut b: Batch) {
+        for leg in &mut b.legs {
+            if leg.critical_error.is_none() {
+                restore_refusal(&mut leg.record);
+            }
+        }
+        let retry: Vec<usize> = (0..b.legs.len())
+            .filter(|&i| {
+                refused(&b.legs[i].record) && self.cycle_owned(&b.legs[i]).unwrap_or(false)
+            })
+            .filter(|&i| {
+                b.first_prompt
+                    .as_ref()
+                    .is_some_and(|p| p.contexts[i].is_some())
+            })
+            .collect();
+        let mut prompt = match (retry.is_empty(), b.first_prompt.take()) {
+            (false, Some(prompt)) => prompt,
+            _ => return self.finish_legs(b.legs, b.reply),
+        };
+        let (provider, config) = match self.resolve_provider(&b.legs[retry[0]].agent) {
+            Ok(p) => p,
+            Err(_) => return self.finish_legs(b.legs, b.reply),
+        };
+        // As for one pair: cleaned with the secrets known now, then shortened. The shared reply
+        // was the same text on every leg.
+        let secrets = self.secrets();
+        for &i in &retry {
+            b.legs[i].secrets.extend(secrets.iter().cloned());
+        }
+        let first = &b.legs[retry[0]];
+        let reply = truncate_utf16(
+            &first.clean(first.record["rawResponse"].as_str().unwrap_or("")),
+            REFUSED_REPLY_MAX,
+        );
+        prompt.message = prompt.message.map(|m| first.clean(&m));
+        let mut why = Vec::new();
+        for &i in &retry {
+            let leg = &mut b.legs[i];
+            why.push((
+                leg.agent.symbol.clone(),
+                leg.clean(leg.record["outcomeDetail"].as_str().unwrap_or("")),
+            ));
+            keep_attempt(&mut leg.record);
+            b.open[i] = true;
+        }
+        let agent = b.legs[retry[0]].agent.clone();
+        let mut request = batch_request(&agent, &prompt, &retry);
+        request.user = with_refusal(request.user, &reply, &why);
+        self.send_batch(b, provider, config, request);
     }
 }
+/// The shared call for the legs in `legs`, which all have market data in `prompt`.
+fn batch_request(agent: &rows::Agent, prompt: &BatchPrompt, legs: &[usize]) -> AiRequest {
+    let contexts: Vec<MarketContext> = legs
+        .iter()
+        .filter_map(|&i| prompt.contexts[i].clone())
+        .collect();
+    AiRequest {
+        model: agent.model.clone(),
+        system: prompt.system.clone(),
+        user: with_owner_message(
+            build_multi_user_prompt(
+                &contexts,
+                (!prompt.news.is_empty()).then_some(prompt.news.as_slice()),
+                &agent.strategy,
+                prompt.trailing,
+            ),
+            prompt.message.as_deref(),
+        ),
+        context: None,
+    }
+}
+
 /// A new decision record: settled as DATA_ERROR until the cycle gets further.
 fn new_record(
     agent: &rows::Agent,

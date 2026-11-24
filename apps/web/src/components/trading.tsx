@@ -410,6 +410,17 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
         </section>
       )}
 
+      {d.attempts?.map((attempt, n) => (
+        <section key={n} data-testid="decision-attempt">
+          <h3 className="mb-1 text-xs font-semibold text-ink-2">Refused try {n + 1}: asked again</h3>
+          <p className="rounded-xl bg-surface-2 px-3 py-2 text-[13px] leading-relaxed">
+            {attempt.decision ? `${attempt.decision.action} ${attempt.decision.symbol}. ` : ''}
+            {attempt.outcomeDetail ?? attempt.outcome}
+          </p>
+          <p className="mt-1 text-[11px] text-ink-3">The model was shown this reason and decided again. What follows is its last try.</p>
+        </section>
+      ))}
+
       {ai && (
         <section>
           <h3 className="mb-1 text-xs font-semibold text-ink-2">AI proposal</h3>
