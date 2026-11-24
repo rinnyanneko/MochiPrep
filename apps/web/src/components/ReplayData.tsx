@@ -1,5 +1,5 @@
 import { Download, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReplayDataView, ReplayPlan } from '@mochiprep/shared';
 import { Badge, Button, Dialog, Field, Input } from '@/components/ui';
 import { api } from '@/lib/api';
@@ -43,12 +43,18 @@ export function ReplayDataDialog({ onClose }: Readonly<{ onClose(): void }>) {
   const [plan, setPlan] = useState<ReplayPlan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<{ start: number; end: number } | null>(null);
+  // Dates typed while the first answer was on its way are the owner's: defaults never replace them.
+  const touched = useRef(false);
+  const pick = (set: (text: string) => void) => (text: string) => {
+    touched.current = true;
+    set(text);
+  };
 
   const reload = async () => {
     const next = await attempt(() => api.get<ReplayDataView>('/replay/data'));
     if (!next) return;
     setView(next);
-    if (!from) {
+    if (!touched.current && !from) {
       // The last dates picked, or the two weeks before OKX's history ends.
       const chosen = next.chosen ?? { from: next.latest - 14 * DAY, to: next.latest };
       setFrom(dayText(chosen.from));
@@ -100,10 +106,10 @@ export function ReplayDataDialog({ onClose }: Readonly<{ onClose(): void }>) {
         <div className="space-y-4" data-testid="replay-data">
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="From (UTC)">
-              <Input type="date" aria-label="Replay from" value={from} max={view ? dayText(view.latest - DAY) : undefined} onChange={(e) => setFrom(e.target.value)} />
+              <Input type="date" aria-label="Replay from" value={from} max={view ? dayText(view.latest - DAY) : undefined} onChange={(e) => pick(setFrom)(e.target.value)} />
             </Field>
             <Field label="To, included (UTC)">
-              <Input type="date" aria-label="Replay to" value={to} max={view ? dayText(view.latest - DAY) : undefined} onChange={(e) => setTo(e.target.value)} />
+              <Input type="date" aria-label="Replay to" value={to} max={view ? dayText(view.latest - DAY) : undefined} onChange={(e) => pick(setTo)(e.target.value)} />
             </Field>
           </div>
           <div className="rounded-xl bg-surface-2 px-3 py-2.5 text-[13px] text-ink-2" data-testid="replay-estimate">
