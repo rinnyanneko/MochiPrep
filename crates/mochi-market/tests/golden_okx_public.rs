@@ -57,13 +57,13 @@ fn load(replies: &Replies, table: &Value) {
     }
 }
 
-/// A feed over the table, which the fake answers as Node's fake fetch did, except that an
-/// unknown URL is a teapot here and a thrown "fetch failed" there; [`missing_is_fetch_failed`]
-/// maps one onto the other.
 /// The pairs Node's feed tracked from the start. Later built-in pairs are untracked so the
 /// feed sees what Node's did when it recorded `okx-public.json`.
 const NODE_SYMBOLS: [&str; 3] = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
 
+/// A feed over the table, which the fake answers as Node's fake fetch did, except that an
+/// unknown URL is a teapot here and a thrown "fetch failed" there; [`missing_is_fetch_failed`]
+/// maps one onto the other.
 fn feed(replies: &Replies) -> (OkxPublicFeed, Arc<FakeOkx>) {
     let (fake, _sockets) = FakeOkx::new(table_router(replies.clone()));
     let feed = OkxPublicFeed::with_transport(REST, WS, fake.clone());

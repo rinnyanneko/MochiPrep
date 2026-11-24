@@ -1,3 +1,4 @@
+use mochi_decimal::Dec;
 use mochi_domain::{default_instruments, Timeframe, DEFAULT_SYMBOLS};
 
 fn golden(name: &str) -> serde_json::Value {
@@ -26,6 +27,25 @@ fn default_instruments_follow_default_symbols() {
         .map(|spec| spec.symbol)
         .collect();
     assert_eq!(symbols, DEFAULT_SYMBOLS);
+}
+
+/// An order is sent in whole lots, so a quantity step other than ctVal x lotSz would let the
+/// paper side accept sizes OKX cannot take, or refuse sizes it can.
+#[test]
+fn quantity_step_is_contract_value_times_lot_size() {
+    for spec in default_instruments() {
+        let dec = |s: &str| Dec::parse(s).unwrap();
+        let product = dec(&spec.venue_contract_value).mul(&dec(&spec.venue_lot_size));
+        assert!(
+            product.eq_value(&dec(&spec.quantity_step)),
+            "{}: {} x {} is not {}",
+            spec.symbol,
+            spec.venue_contract_value,
+            spec.venue_lot_size,
+            spec.quantity_step
+        );
+        assert_eq!(spec.min_quantity, spec.quantity_step, "{}", spec.symbol);
+    }
 }
 
 #[test]
