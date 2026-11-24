@@ -476,10 +476,12 @@ fn pair_result(
             continue;
         };
         let value = decimal(realized_pnl)?;
+        // An open position's `until` is its last sync, not when anything was realized: its
+        // realized part shows only in the curve's final total, never as a dated close.
         if position.completed {
             result.net.push(to_number(&value));
+            result.closes.push((position.until, value.clone()));
         }
-        result.closes.push((position.until, value.clone()));
         result.realized = result.realized.add(&value);
     }
     Ok(Some(result))

@@ -1719,9 +1719,7 @@ async fn messages_sent_while_a_cycle_runs_all_wait_for_the_next_one() {
     m.blocked.store(1, Ordering::SeqCst);
     let h = rt.clone();
     let running = tokio::spawn(async move { h.run_cycle("agent", CycleTrigger::RunOnce).await });
-    while m.calls.load(Ordering::SeqCst) == 0 {
-        tokio::task::yield_now().await;
-    }
+    wait_calls(&m, 1).await;
     // Both wait while the first cycle is with the model; neither replaces the other.
     assert!(rt
         .message_agent("agent", "stay flat".into())
@@ -1867,5 +1865,33 @@ async fn a_stop_loss_fill_runs_a_live_agent_before_its_interval() {
         .unwrap());
     tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
     assert_eq!(m.calls.load(Ordering::SeqCst), 2, "one run per change");
+    rt.shutdown().await;
+}
+/// Moved to another account, the agent has not seen that account's positions yet: they are
+/// recorded, not taken as a change to run it for.
+#[tokio::test]
+async fn moving_an_agent_to_another_account_is_no_position_change() {
+    let (rt, m, _) = setup("AUTO").await;
+    rt.call(|r| {
+        let mut a = r.require_agent("agent").unwrap();
+        a.interval_sec = 3600;
+        rows::save_agent(r.connection(), &a).unwrap();
+        r.start_agent("agent").unwrap();
+    })
+    .await
+    .unwrap();
+    rt.step_replay(1).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 1);
+
+    rt.call(|r| {
+        let other = r.engine_mut().create_account(CreateAccountArgs{name:"other".into(),source:DataSource::Replay,initial_balance:None,is_demo:None,config:None}).unwrap();
+        r.engine_mut().place_order(serde_json::from_value(json!({"accountId":other.id,"clientOrderId":"other-open","symbol":"BTCUSDT","side":"BUY","type":"MARKET","quantity":"0.01","leverage":3})).unwrap()).unwrap();
+        let input = serde_json::from_value(json!({"name":"agent","providerId":"provider","model":"test","symbols":["BTCUSDT"],"timeframe":"15m","strategy":"test","accountId":other.id,"risk":default_risk_settings(),"intervalSec":3600,"executionMode":"AUTO","useNews":false,"allowTrailingStop":false})).unwrap();
+        r.update_agent("agent", input).unwrap();
+    })
+    .await
+    .unwrap();
+    rt.step_replay(2).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 1);
     rt.shutdown().await;
 }

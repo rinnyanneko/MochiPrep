@@ -633,6 +633,52 @@ async fn the_old_demo_data_and_an_unused_mock_provider_go_at_start() {
     state.runtime.shutdown().await;
 }
 
+/// An agent of the user's own on a demo account keeps that account: deleting it would leave the
+/// agent pointing at nothing, which the database refuses, and the app would not start.
+#[tokio::test]
+async fn a_demo_account_the_user_s_agent_trades_on_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mochiprep.db");
+    let state = state_on(mochi_store::open_database(&path).unwrap());
+    let (_, demo) = send(
+        &state,
+        "POST",
+        "/api/accounts",
+        Some(r#"{"name":"Demo terminal","source":"REPLAY"}"#),
+    )
+    .await;
+    let demo_id = demo["id"].as_str().unwrap().to_string();
+    sql(
+        &state,
+        format!(
+            "{LEGACY_MOCK};
+             UPDATE accounts SET is_demo=1 WHERE id='{demo_id}';
+             INSERT INTO providers (id,name,kind,base_url,default_model,created_at)
+             VALUES ('mine','Mine','OPENAI',NULL,'m',1);
+             INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,
+               risk,interval_sec,status,running,is_demo,created_at)
+             VALUES ('agent_mine','Mine','mine','m','BTCUSDT','15m','',
+               '{demo_id}','{{}}',900,'IDLE',0,0,1);
+             INSERT INTO settings (key,value) VALUES ('demo.active','true');"
+        ),
+    )
+    .await;
+    state.runtime.shutdown().await;
+
+    let state = state_on(mochi_store::open_database(&path).unwrap());
+    let accounts = get(&state, "/api/accounts").await;
+    let account = accounts
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == demo_id.as_str())
+        .expect("the account the agent trades on is kept");
+    assert_eq!(account["isDemo"], false);
+    let agents = get(&state, "/api/agents").await;
+    assert_eq!(agents[0]["id"], "agent_mine");
+    state.runtime.shutdown().await;
+}
+
 // ---- static files -----------------------------------------------------------------------------
 
 fn web_state() -> AppState {

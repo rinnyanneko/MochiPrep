@@ -175,7 +175,11 @@ async fn picked_dates_download_once_overlaps_are_reused_and_saved_ranges_can_be_
     assert_eq!(data.saved[0].bytes, 2 * (6 * 1440 + LEAD) * 57);
 
     // One day later: five of its six days are saved, so only the last day is fetched.
-    let later = range(2, 2);
+    // From `first`, not the clock, so a UTC midnight during the test keeps the one-day overlap.
+    let later = ReplayRange {
+        from: first.from + DAY,
+        to: first.to + DAY,
+    };
     let plan = rt
         .call(move |r| r.plan_replay(later))
         .await

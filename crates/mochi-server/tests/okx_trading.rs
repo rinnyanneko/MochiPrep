@@ -1292,6 +1292,10 @@ async fn the_arena_reads_an_okx_agents_result_from_okx_history_and_its_open_posi
     let curve = row["pnlCurve"].as_array().unwrap();
     assert_eq!(curve[0], json!({ "ts": START + 500, "pnl": 0 }));
     assert_eq!(curve.last().unwrap()["pnl"], json!(2.85));
+    // The open position's realized part is dated by nothing but the last sync, so it shows in
+    // the total only: the start, the agent's close, then the total.
+    let pnls: Vec<&Value> = curve.iter().map(|p| &p["pnl"]).collect();
+    assert_eq!(pnls, [&json!(0), &json!(-1.25), &json!(2.85)]);
     assert!(curve
         .windows(2)
         .all(|w| w[0]["ts"].as_i64() <= w[1]["ts"].as_i64()));

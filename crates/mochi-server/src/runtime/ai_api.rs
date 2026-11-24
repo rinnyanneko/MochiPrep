@@ -80,8 +80,14 @@ impl Runtime {
                 agent.next_run_at = Some(self.market_now(source));
             }
         }
+        let moved = agent.account_id != input.account_id;
         apply_input(&mut agent, input)?;
         rows::save_agent(self.connection(), &agent).map_err(|e| self.api_error(e))?;
+        // What the agent saw, and any OKX order still settling, belong to the old account. On
+        // the new one it starts over: pairs seen there for the first time are only recorded.
+        if moved {
+            self.forget_positions(id);
+        }
         self.invalidate(&[Topic::Agents, Topic::Arena]);
         Ok(agent)
     }
@@ -129,23 +135,32 @@ impl Runtime {
         self.engine()
             .store()
             .transaction(|| -> Result<(), mochi_core::paper::StoreFailure> {
-                for agent in rows::list_agents(self.connection()).map_err(|e| {
+                let failure = |e: mochi_store::StoreError| {
                     mochi_core::paper::StoreFailure::new(
                         mochi_core::paper::StoreFailureKind::Other,
                         e.to_string(),
                     )
-                })? {
+                };
+                // Accounts the user's own agents trade on stay, demo or not: deleting one would
+                // break that agent's row, and with it every start of the app.
+                let mut in_use = Vec::new();
+                for agent in rows::list_agents(self.connection()).map_err(failure)? {
                     if agent.is_demo {
-                        rows::delete_agent(self.connection(), &agent.id).map_err(|e| {
-                            mochi_core::paper::StoreFailure::new(
-                                mochi_core::paper::StoreFailureKind::Other,
-                                e.to_string(),
-                            )
-                        })?;
+                        rows::delete_agent(self.connection(), &agent.id).map_err(failure)?;
+                    } else {
+                        in_use.push(agent.account_id);
                     }
                 }
                 for account in self.engine().store().list_accounts()? {
-                    if account.is_demo {
+                    if !account.is_demo {
+                        continue;
+                    }
+                    if in_use.contains(&account.id) {
+                        // Kept as the user's account now, so this cleanup is not asked again.
+                        self.connection()
+                            .execute("UPDATE accounts SET is_demo=0 WHERE id=?", [&account.id])
+                            .map_err(|e| failure(e.into()))?;
+                    } else {
                         self.engine()
                             .store()
                             .delete_account_data(&account.id, false)?;

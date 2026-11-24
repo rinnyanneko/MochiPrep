@@ -1,5 +1,5 @@
 import { Link2, ShieldAlert, ShieldOff, TriangleAlert, Unplug } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { ARM_PHRASE, DEFAULT_LIVE_LIMITS, type ExchangeStatus, type RiskSettings } from '@mochiprep/shared';
 import { api } from '@/lib/api';
 import { cancellable, type Cancellable } from '@/lib/cancellable';
@@ -97,7 +97,9 @@ export function ArmDialog({ status, onClose, onArmed, reason }: Readonly<{ statu
   // Cancelling while the arm request is in flight must not start what was waiting on it, such
   // as an Auto agent on real money. The account may still end up armed: the server decides.
   const request = useRef<Cancellable | null>(null);
-  useEffect(() => () => request.current?.cancel(), []);
+  // A layout cleanup runs while React removes the dialog, so a parent that drops it without
+  // Cancel also stops the answer from starting anything.
+  useLayoutEffect(() => () => request.current?.cancel(), []);
   const close = () => {
     request.current?.cancel();
     onClose();
