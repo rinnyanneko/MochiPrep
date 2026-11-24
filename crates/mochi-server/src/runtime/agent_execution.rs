@@ -8,6 +8,7 @@
 use super::execution::{ExecutionEngine, ExecutionTarget, ProtectionFailure, ProtectionMeta};
 use super::{internal_error, Runtime, RuntimeHandle};
 use crate::error::ApiError;
+use futures_util::FutureExt;
 use mochi_core::{
     paper::{DailyRisk, PaperStore, ProtectionResult},
     risk::{evaluate_risk, RiskInput},
@@ -124,8 +125,29 @@ pub(super) enum Acted {
 }
 
 impl Act {
-    /// Sends the act through the trait, as Node's runner awaits its engine.
+    /// Sends the act through the trait, as Node's runner awaits its engine. The future runs in
+    /// the agents' pending stream, outside the actor's panic guard, so a panic here would end
+    /// the runtime task: it is caught and answered as an error instead. An order may have
+    /// reached the exchange before the panic, so the error says the next sync settles it, and the
+    /// position watch treats it as a possibly lost answer.
     pub(super) async fn run(self, engine: Arc<dyn ExecutionEngine>) -> Acted {
+        let protect = matches!(self, Act::Protect { .. });
+        std::panic::AssertUnwindSafe(self.send(engine))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| {
+                let error = ApiError::bad_request(
+                    "The order step failed unexpectedly; the next account sync shows whether it went through",
+                );
+                if protect {
+                    Acted::Protected(Err(ProtectionFailure { error, after: None }))
+                } else {
+                    Acted::Placed(Err(error))
+                }
+            })
+    }
+
+    async fn send(self, engine: Arc<dyn ExecutionEngine>) -> Acted {
         match self {
             Act::Place(request) => Acted::Placed(engine.place_order(request).await.map(Box::new)),
             Act::CloseOkx {
@@ -790,6 +812,17 @@ impl Runtime {
         predicate: impl Fn(&Value) -> bool,
         detail: &str,
     ) -> Result<(), ApiError> {
+        self.retire_signal_rows(predicate, detail)?;
+        self.invalidate(&[mochi_domain::Topic::Decisions]);
+        Ok(())
+    }
+    /// The store half of [`Self::retire_signals`], for a caller that holds a transaction and
+    /// invalidates once it commits.
+    pub(super) fn retire_signal_rows(
+        &self,
+        predicate: impl Fn(&Value) -> bool,
+        detail: &str,
+    ) -> Result<(), ApiError> {
         for raw in rows::list_pending_signals(self.connection()).map_err(|e| self.api_error(e))? {
             let mut r: Value = serde_json::from_str(raw.get()).map_err(|e| self.api_error(e))?;
             if predicate(&r) {
@@ -797,7 +830,6 @@ impl Runtime {
                 rows::save_decision(self.connection(), &r).map_err(|e| self.api_error(e))?;
             }
         }
-        self.invalidate(&[mochi_domain::Topic::Decisions]);
         Ok(())
     }
     pub fn retire_all_signals(&mut self) -> Result<(), ApiError> {
@@ -828,5 +860,78 @@ impl Runtime {
             mochi_domain::Topic::Positions,
             mochi_domain::Topic::Arena,
         ]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::future::BoxFuture;
+
+    /// Panics in every call, as a bug in an engine would.
+    struct Panics;
+    impl ExecutionEngine for Panics {
+        fn place_order(&self, _: OrderRequest) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
+            Box::pin(async { panic!("place_order") })
+        }
+        fn cancel_order(&self, _: String) -> BoxFuture<'_, Result<(), ApiError>> {
+            Box::pin(async { panic!("cancel_order") })
+        }
+        fn close_position(
+            &self,
+            _: String,
+            _: String,
+            _: f64,
+            _: String,
+            _: Option<String>,
+        ) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
+            Box::pin(async { panic!("close_position") })
+        }
+        fn positions(&self, _: String) -> BoxFuture<'_, Result<Vec<PositionView>, ApiError>> {
+            Box::pin(async { panic!("positions") })
+        }
+        fn open_orders(&self, _: String) -> BoxFuture<'_, Result<Vec<Order>, ApiError>> {
+            Box::pin(async { panic!("open_orders") })
+        }
+        fn balance(&self, _: String) -> BoxFuture<'_, Result<AccountBalance, ApiError>> {
+            Box::pin(async { panic!("balance") })
+        }
+        fn daily_risk(&self, _: String) -> BoxFuture<'_, Result<DailyRisk, ApiError>> {
+            Box::pin(async { panic!("daily_risk") })
+        }
+        fn set_protection(
+            &self,
+            _: String,
+            _: String,
+            _: Protection,
+            _: ProtectionMeta,
+        ) -> BoxFuture<'_, Result<ProtectionResult, ProtectionFailure>> {
+            Box::pin(async { panic!("set_protection") })
+        }
+        fn protection_of(
+            &self,
+            _: String,
+            _: String,
+        ) -> BoxFuture<'_, Result<Protection, ApiError>> {
+            Box::pin(async { panic!("protection_of") })
+        }
+    }
+
+    /// The agent's act runs off the actor's panic guard, so a panic must come back as an answer
+    /// (an order whose outcome the next sync settles) rather than unwind through the actor.
+    #[tokio::test]
+    async fn a_panicking_engine_is_an_unknown_outcome() {
+        let request: OrderRequest = serde_json::from_value(json!({
+            "accountId": "a", "clientOrderId": "c", "symbol": "BTCUSDT", "side": "BUY",
+            "type": "MARKET", "quantity": "0.01", "leverage": 1
+        }))
+        .unwrap();
+        let mut record = json!({});
+        settle_acted(&mut record, Act::Place(request).run(Arc::new(Panics)).await);
+        assert_eq!(record["outcome"], "ORDER_REJECTED");
+        assert!(record["outcomeDetail"]
+            .as_str()
+            .unwrap()
+            .contains("the next account sync"));
     }
 }

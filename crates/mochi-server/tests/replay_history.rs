@@ -23,6 +23,8 @@ struct History {
     asked: Mutex<Vec<(String, i64, usize)>>,
     fail: bool,
     quiet: Vec<i64>,
+    /// When set, each request waits for a permit, so a test can act during a download.
+    hold: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 impl LiveFeed for History {
@@ -46,6 +48,9 @@ impl LiveFeed for History {
             .unwrap()
             .push((symbol.to_string(), start, minutes));
         Box::pin(async move {
+            if let Some(hold) = &self.hold {
+                hold.acquire().await.unwrap().forget();
+            }
             if self.fail {
                 return Err("offline".to_string());
             }
@@ -251,6 +256,89 @@ async fn a_minute_without_a_trade_repeats_the_last_close() {
         first.close,
         100.0 + ((first_minute - MINUTE) / MINUTE % 1000) as f64
     );
+    rt.shutdown().await;
+}
+
+/// The hour before a window is not part of its dates, so it can be deleted while the window
+/// stays saved. A window whose first minute had no trade then has no close to repeat, so the
+/// hour is fetched again rather than the saved window becoming impossible to load.
+#[tokio::test]
+async fn a_deleted_lead_in_is_fetched_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mochiprep.db");
+    let r = range(3, 1);
+    let first_minute = r.from - 4 * DAY;
+    let quiet = || {
+        Arc::new(History {
+            quiet: vec![first_minute],
+            ..Default::default()
+        })
+    };
+    let rt = start(&path, quiet());
+    rt.call(move |x| x.load_replay(Some(r)))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(settle(&rt).await.loaded);
+    let lead = first_minute - LEAD as i64 * MINUTE;
+    rt.call(move |x| x.delete_replay_data(lead, first_minute))
+        .await
+        .unwrap()
+        .unwrap();
+    rt.shutdown().await;
+
+    let feed = quiet();
+    let rt = start(&path, feed.clone());
+    let plan = rt.call(move |x| x.plan_replay(r)).await.unwrap().unwrap();
+    assert_eq!(plan.missing_minutes, PAIRS.len() as u64 * LEAD);
+    rt.call(|x| x.load_replay(None)).await.unwrap().unwrap();
+    let state = settle(&rt).await;
+    assert!(state.loaded, "{:?}", state.load_error);
+    let asked = feed.asked.lock().unwrap().clone();
+    assert_eq!(asked[0], ("BTCUSDT".to_string(), lead, LEAD as usize));
+    rt.shutdown().await;
+}
+
+/// Loading other dates pauses the replay while their bars download. Playing or stepping the old
+/// bars meanwhile would save a cursor the new dates then start from, so neither is admitted,
+/// even when it reaches the runtime after the route's own check.
+#[tokio::test]
+async fn nothing_plays_or_steps_during_a_download() {
+    let dir = tempfile::tempdir().unwrap();
+    let hold = Arc::new(tokio::sync::Semaphore::new(PAIRS.len()));
+    let feed = Arc::new(History {
+        hold: Some(hold.clone()),
+        ..Default::default()
+    });
+    let rt = start(&dir.path().join("mochiprep.db"), feed);
+    let first = range(3, 1);
+    rt.call(move |x| x.load_replay(Some(first)))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(settle(&rt).await.loaded);
+
+    let later = range(1, 1);
+    let playing = rt
+        .call(move |x| {
+            x.load_replay(Some(later)).unwrap();
+            x.set_playing(true);
+            x.replay_state().playing
+        })
+        .await
+        .unwrap();
+    assert!(!playing);
+    let before = rt.replay_state().await.unwrap();
+    assert!(before.downloading.is_some());
+    let refused = rt.step_replay(1).await.unwrap_err();
+    assert_eq!(refused.status(), axum::http::StatusCode::CONFLICT);
+    assert_eq!(rt.replay_state().await.unwrap().now, before.now);
+
+    hold.add_permits(PAIRS.len());
+    let state = settle(&rt).await;
+    assert!(state.loaded);
+    assert_eq!(state.end_time, Some(later.to));
+    rt.step_replay(1).await.unwrap();
     rt.shutdown().await;
 }
 

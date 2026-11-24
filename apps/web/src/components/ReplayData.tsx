@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { ReplayDataView, ReplayPlan } from '@mochiprep/shared';
 import { Badge, Button, Dialog, Field, Input } from '@/components/ui';
 import { api } from '@/lib/api';
+import { cancellable } from '@/lib/cancellable';
 import { formatBytes, formatDuration } from '@/lib/estimates';
 import { attempt, useApp } from '@/store';
 
@@ -61,10 +62,18 @@ export function ReplayDataDialog({ onClose }: Readonly<{ onClose(): void }>) {
     if (!range || !view?.history) return;
     setPlan(null);
     setPlanError(null);
+    // An estimate for dates no longer picked must not describe what Load would download.
+    const request = cancellable();
     const timer = setTimeout(() => {
-      api.post<ReplayPlan>('/replay/estimate', range).then(setPlan, (e: Error) => setPlanError(e.message));
+      api.post<ReplayPlan>('/replay/estimate', range).then(
+        request.live(setPlan),
+        request.live((e: Error) => setPlanError(e.message)),
+      );
     }, 250);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      request.cancel();
+    };
   }, [from, to, view?.history, view?.saved.length]);
 
   const load = async () => {

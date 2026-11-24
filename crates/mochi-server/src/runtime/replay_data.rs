@@ -216,16 +216,38 @@ impl Runtime {
         for symbol in lock(&self.replay).symbols() {
             let covered =
                 replay_coverage_of(self.connection(), symbol).map_err(|e| self.api_error(e))?;
-            for gap in gaps(window.span(), &covered) {
-                let start = if gap.0 == window.start {
-                    gap.0 - LEAD_MINUTES * MINUTE_MS
-                } else {
-                    gap.0
-                };
+            let gaps = gaps(window.span(), &covered);
+            let lead = (window.start - LEAD_MINUTES * MINUTE_MS, window.start);
+            // The hour before the window can be deleted on its own, since it is outside the
+            // window's dates. Without it a quiet first minute has no close to repeat.
+            if gaps.first().is_none_or(|gap| gap.0 != window.start)
+                && self.lacks_opening_close(symbol, window)?
+            {
+                out.push((symbol, lead));
+            }
+            for gap in gaps {
+                let start = if gap.0 == window.start { lead.0 } else { gap.0 };
                 out.push((symbol, (start, gap.1)));
             }
         }
         Ok(out)
+    }
+
+    /// Whether the saved bars give no price for the window's first minute: no bar in it and
+    /// none before it.
+    fn lacks_opening_close(&self, symbol: &str, window: Window) -> Result<bool, ApiError> {
+        let at_start = load_replay_bars(
+            self.connection(),
+            symbol,
+            (window.start, window.start + MINUTE_MS),
+        )
+        .map_err(|e| self.api_error(e))?;
+        if !at_start.is_empty() {
+            return Ok(false);
+        }
+        let before = replay_bar_before(self.connection(), symbol, window.start)
+            .map_err(|e| self.api_error(e))?;
+        Ok(before.is_none())
     }
 
     /// What loading `range` would download and take on disk.

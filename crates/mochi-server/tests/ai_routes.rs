@@ -1,5 +1,6 @@
 use axum::{body::Body, extract::State, http::Request, routing::post, Json, Router};
 use http_body_util::BodyExt;
+use mochi_core::paper::PaperStore;
 use mochi_domain::default_risk_settings;
 use mochi_server::{app, config::config_from, AppState, RuntimeHandle, RuntimeOptions};
 use serde_json::{json, Value};
@@ -22,10 +23,25 @@ struct Gateway {
     requests: Mutex<Vec<Value>>,
     /// The answer from the second request on, when set.
     then: Mutex<Option<String>>,
+    /// From this request on (1 is the first), the gateway refuses the key with a 401.
+    refuse_from: Mutex<Option<usize>>,
 }
-async fn model(State(g): State<Arc<Gateway>>, Json(body): Json<Value>) -> Json<Value> {
-    g.requests.lock().unwrap().push(body);
+async fn model(
+    State(g): State<Arc<Gateway>>,
+    Json(body): Json<Value>,
+) -> (axum::http::StatusCode, Json<Value>) {
+    let n = {
+        let mut requests = g.requests.lock().unwrap();
+        requests.push(body);
+        requests.len()
+    };
     g.entered.notify_one();
+    if g.refuse_from.lock().unwrap().is_some_and(|from| n >= from) {
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error":{"message":"invalid key"}})),
+        );
+    }
     if g.blocked.load(Ordering::SeqCst) {
         g.release.notified().await;
     }
@@ -33,7 +49,10 @@ async fn model(State(g): State<Arc<Gateway>>, Json(body): Json<Value>) -> Json<V
     if let Some(next) = g.then.lock().unwrap().take() {
         *g.text.lock().unwrap() = next;
     }
-    Json(json!({"choices":[{"message":{"content":text}}]}))
+    (
+        axum::http::StatusCode::OK,
+        Json(json!({"choices":[{"message":{"content":text}}]})),
+    )
 }
 struct Test {
     state: AppState,
@@ -529,6 +548,10 @@ fn decision(symbol: &str, action: &str, stop: Option<f64>) -> Value {
 
 /// An Auto agent on a fresh replay account that trades `symbols`.
 async fn multi_agent(t: &Test, symbols: &[&str]) -> String {
+    multi_agent_in(t, symbols, "AUTO").await
+}
+
+async fn multi_agent_in(t: &Test, symbols: &[&str], mode: &str) -> String {
     let provider = t.provider().await;
     let account = t
         .ok(
@@ -539,7 +562,7 @@ async fn multi_agent(t: &Test, symbols: &[&str]) -> String {
         .await;
     let input = json!({"name":"Pairs","providerId":provider,"model":"m","symbols":symbols,
         "timeframe":"15m","strategy":"","accountId":account["id"],
-        "risk":default_risk_settings(),"intervalSec":900,"executionMode":"AUTO"});
+        "risk":default_risk_settings(),"intervalSec":900,"executionMode":mode});
     let agent = t.ok("POST", "/api/agents", Some(input)).await;
     assert_eq!(agent["symbols"], json!(symbols));
     assert_eq!(agent["symbol"], symbols[0]);
@@ -729,5 +752,149 @@ async fn an_agent_takes_one_to_ten_distinct_pairs() {
             json!({"error":"symbols: an agent trades at most 10 pairs"})
         )
     );
+    t.close().await;
+}
+
+/// Every decision of the agent as (symbol, outcome).
+async fn outcomes(t: &Test, id: &str) -> Vec<(String, String)> {
+    t.ok("GET", &format!("/api/decisions?agentId={id}"), None)
+        .await
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| {
+            (
+                d["symbol"].as_str().unwrap().into(),
+                d["outcome"].as_str().unwrap().into(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_refused_key_on_the_second_call_pauses_a_batch_another_pair_settled() {
+    let t = Test::new().await;
+    let id = multi_agent(&t, &["BTCUSDT", "ETHUSDT"]).await;
+    // BTC holds; ETH is refused for its missing stop loss and asked again, and the provider
+    // then refuses the key.
+    *t.gateway.text.lock().unwrap() = json!({"decisions":[
+        decision("BTCUSDT", "HOLD", None),
+        decision("ETHUSDT", "LONG", None),
+    ]})
+    .to_string();
+    *t.gateway.refuse_from.lock().unwrap() = Some(2);
+    t.ok("POST", &format!("/api/agents/{id}/run"), None).await;
+    assert_eq!(t.gateway.requests.lock().unwrap().len(), 2);
+    let agent = t.ok("GET", "/api/agents", None).await[0].clone();
+    assert_eq!(agent["status"], "PAUSED", "{agent}");
+    assert!(agent["statusDetail"]
+        .as_str()
+        .unwrap()
+        .starts_with("Auto-paused"));
+    t.close().await;
+}
+
+#[tokio::test]
+async fn a_stale_entry_that_cannot_be_cancelled_holds_back_only_its_pair() {
+    let t = Test::new().await;
+    let id = multi_agent(&t, &["BTCUSDT", "ETHUSDT"]).await;
+    let limit = |symbol: &str, entry: f64| {
+        json!({"symbol":symbol,"action":"LONG","orderType":"LIMIT","entryPrice":entry,
+               "stopLoss":entry * 0.9,"takeProfit":null,"reason":"test","confidence":0.8,
+               "expiresAt":null})
+    };
+    *t.gateway.text.lock().unwrap() =
+        json!({"decisions":[limit("BTCUSDT", 1000.0), limit("ETHUSDT", 100.0)]}).to_string();
+    t.ok("POST", &format!("/api/agents/{id}/run"), None).await;
+    let placed = outcomes(&t, &id).await;
+    assert_eq!(
+        placed.iter().filter(|(_, o)| o == "ORDER_PLACED").count(),
+        2,
+        "{placed:?}"
+    );
+
+    // BTC's resting entry can no longer be cancelled; ETH's can.
+    t.state
+        .runtime
+        .call(|r| {
+            r.connection()
+                .execute_batch(
+                    "CREATE TRIGGER keep_btc BEFORE UPDATE ON orders WHEN OLD.symbol='BTCUSDT'
+                     BEGIN SELECT RAISE(ABORT, 'order locked'); END;",
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    *t.gateway.text.lock().unwrap() = json!({"decisions":[
+        decision("BTCUSDT", "HOLD", None),
+        decision("ETHUSDT", "HOLD", None),
+    ]})
+    .to_string();
+    t.ok("POST", &format!("/api/agents/{id}/run"), None).await;
+    let after = outcomes(&t, &id).await;
+    assert!(
+        after.contains(&("BTCUSDT".into(), "DATA_ERROR".into())),
+        "{after:?}"
+    );
+    assert!(
+        after.contains(&("ETHUSDT".into(), "HOLD".into())),
+        "{after:?}"
+    );
+    let agent = t.ok("GET", "/api/agents", None).await[0].clone();
+    let account = agent["accountId"].as_str().unwrap().to_string();
+    let open: Vec<String> = t
+        .state
+        .runtime
+        .call(move |r| {
+            r.engine()
+                .store()
+                .list_open_orders(&account)
+                .unwrap()
+                .into_iter()
+                .map(|o| o.symbol)
+                .collect()
+        })
+        .await
+        .unwrap();
+    assert_eq!(open, ["BTCUSDT"]);
+    t.close().await;
+}
+
+#[tokio::test]
+async fn a_failed_save_keeps_every_pair_s_earlier_suggestion() {
+    let t = Test::new().await;
+    let id = multi_agent_in(&t, &["BTCUSDT", "ETHUSDT"], "SIGNAL").await;
+    *t.gateway.text.lock().unwrap() = json!({"decisions":[
+        decision("BTCUSDT", "LONG", Some(60000.0)),
+        decision("ETHUSDT", "LONG", Some(3000.0)),
+    ]})
+    .to_string();
+    t.ok("POST", &format!("/api/agents/{id}/run"), None).await;
+    let first = outcomes(&t, &id).await;
+    assert_eq!(
+        first.iter().filter(|(_, o)| o == "SIGNAL").count(),
+        2,
+        "{first:?}"
+    );
+
+    // ETH's new record cannot be written, after BTC's would have been.
+    t.state
+        .runtime
+        .call(|r| {
+            r.connection()
+                .execute_batch(
+                    "CREATE TRIGGER no_eth BEFORE INSERT ON decisions
+                     WHEN json_extract(NEW.body, '$.symbol')='ETHUSDT'
+                     BEGIN SELECT RAISE(ABORT, 'disk full'); END;",
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    let (status, _) = t.send("POST", &format!("/api/agents/{id}/run"), None).await;
+    assert_ne!(status, 200);
+    // Nothing of the failed cycle is kept: both earlier suggestions are still pending.
+    assert_eq!(outcomes(&t, &id).await, first);
     t.close().await;
 }

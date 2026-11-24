@@ -36,6 +36,15 @@ impl Runtime {
         steps: u32,
         reply: Option<oneshot::Sender<Result<(), ApiError>>>,
     ) {
+        // Steps move the cursor of bars about to be replaced, as playing would.
+        if self.replay_download.is_some() {
+            if let Some(reply) = reply {
+                let _ = reply.send(Err(ApiError::conflict(
+                    "Wait for the replay download to finish before stepping",
+                )));
+            }
+            return;
+        }
         self.replay_queue.push_back(ReplayRequest { steps, reply });
     }
     pub(super) fn on_replay_tick(&mut self) {

@@ -27,7 +27,7 @@ use mochi_ai::{
     indicator_snapshot, redact_secrets, with_owner_message, with_refusal, with_trailing_exit,
     AiProvider, AiRequest, AiResponse, MarketContext, ProviderError,
 };
-use mochi_core::paper::PaperStore;
+use mochi_core::paper::{PaperStore, StoreFailure};
 use mochi_domain::{
     AiAction, AiDecisionData, Candle, DataSource, NewsItem, OrderType, PaperAccount, Quote,
     RiskSettings, ServerEvent, Timeframe, ToastLevel,
@@ -65,7 +65,8 @@ pub(super) enum Completion {
     /// An exchange answered the decision's order or protection change.
     Acted(Cycle, Box<Acted>),
     BatchCandles(Batch, Vec<Option<Result<Vec<Candle>, String>>>),
-    BatchCancelled(Batch, Vec<Option<Vec<Candle>>>, Result<(), ApiError>),
+    /// The pairs whose stale entries could not be cancelled, each with the first refusal.
+    BatchCancelled(Batch, Vec<Option<Vec<Candle>>>, Vec<(String, ApiError)>),
     BatchNews(Batch, Vec<Option<MarketContext>>, Vec<NewsItem>),
     BatchModel(Batch, Result<AiResponse, ProviderError>),
     /// An exchange answered the order or protection change of leg `.1`.
@@ -213,6 +214,16 @@ impl Batch {
         settle(&mut self.legs[i].record, outcome, detail);
         self.open[i] = false;
     }
+    /// A data error on the open leg that trades `symbol`, if there is one.
+    fn settle_pair(&mut self, symbol: &str, detail: &str) {
+        let leg = self
+            .open_legs()
+            .find(|&i| self.legs[i].agent.symbol == symbol);
+        if let Some(i) = leg {
+            let detail = self.legs[i].clean(detail);
+            self.settle(i, "DATA_ERROR", Some(detail));
+        }
+    }
 }
 impl Cycle {
     fn clean(&self, text: &str) -> String {
@@ -253,6 +264,17 @@ impl Completion {
         (c.agent.id.clone(), c.record["id"].as_str().unwrap().into())
     }
 }
+/// Why saving a cycle's records failed: a step of the runtime's own, or the transaction.
+enum SaveFailure {
+    Api(ApiError),
+    Store(StoreFailure),
+}
+impl From<StoreFailure> for SaveFailure {
+    fn from(e: StoreFailure) -> Self {
+        SaveFailure::Store(e)
+    }
+}
+
 fn clean_record(record: &mut Value, secrets: &[String]) {
     let clean = |v: &mut Value| {
         if let Value::String(s) = v {
@@ -423,15 +445,13 @@ impl Runtime {
                 self.finish_cycle(c);
             }
             Completion::BatchCandles(b, candles) => self.batch_candles(b, candles),
-            Completion::BatchCancelled(mut b, _, Err(e)) => {
-                let detail = format!("Could not read the account: {}", e.message());
-                for i in b.open_legs().collect::<Vec<_>>() {
-                    let detail = b.legs[i].clean(&detail);
-                    b.settle(i, "DATA_ERROR", Some(detail));
+            Completion::BatchCancelled(mut b, closed, failed) => {
+                for (symbol, e) in &failed {
+                    let detail = format!("Could not read the account: {}", e.message());
+                    b.settle_pair(symbol, &detail);
                 }
-                self.finish_batch(b)
+                self.read_batch(b, closed)
             }
-            Completion::BatchCancelled(b, closed, Ok(())) => self.read_batch(b, closed),
             Completion::BatchNews(b, contexts, news) => self.begin_batch_model(b, contexts, news),
             Completion::BatchModel(b, response) => self.complete_batch_model(b, response),
             Completion::BatchActed(mut b, i, acted) => {
@@ -887,14 +907,32 @@ impl Runtime {
                 .filter(|r| r["outcome"] == "SIGNAL")
                 .map(|r| r["symbol"].clone())
                 .collect();
+            // One transaction: a failed insert must not leave a pair's old suggestion retired
+            // with no replacement while the other pairs' records are saved.
+            self.engine
+                .store()
+                .transaction(|| -> Result<(), SaveFailure> {
+                    if !suggested.is_empty() {
+                        self.retire_signal_rows(
+                            |s| s["agentId"] == id.as_str() && suggested.contains(&s["symbol"]),
+                            "Replaced by a newer suggestion",
+                        )
+                        .map_err(SaveFailure::Api)?;
+                    }
+                    for record in &owned {
+                        rows::insert_decision(self.connection(), record)
+                            .map_err(|e| SaveFailure::Api(self.api_error(e)))?;
+                    }
+                    Ok(())
+                })
+                .map_err(|e| match e {
+                    SaveFailure::Api(e) => e,
+                    SaveFailure::Store(e) => self.api_error(e),
+                })?;
             if !suggested.is_empty() {
-                self.retire_signals(
-                    |s| s["agentId"] == id.as_str() && suggested.contains(&s["symbol"]),
-                    "Replaced by a newer suggestion",
-                )?;
+                self.invalidate(&[mochi_domain::Topic::Decisions]);
             }
             for record in &owned {
-                rows::insert_decision(self.connection(), record).map_err(|e| self.api_error(e))?;
                 if let Some(log) = &self.operation_logs {
                     let outcome = record["outcome"].as_str().unwrap_or("UNKNOWN");
                     log.record(format_args!("agent cycle -> {outcome}"));
@@ -934,7 +972,9 @@ impl Runtime {
                 .and_then(|r| r["outcomeDetail"].as_str())
                 .map(String::from);
             let critical = legs.iter().find_map(|c| c.critical_error.clone());
-            if failed && (critical.is_some() || a.consecutive_errors >= 3) {
+            // A critical error (no key, refused credentials) pauses even when another pair
+            // settled otherwise: every later call to the provider fails the same way.
+            if critical.is_some() || (failed && a.consecutive_errors >= 3) {
                 let detail = critical
                     .as_deref()
                     .map(|text| legs[0].clean(text))
@@ -1117,7 +1157,9 @@ impl Runtime {
         }
         self.cancel_batch_entries(b, closed);
     }
-    /// The agent's unfilled entries from its last cycle expire, on every pair at once.
+    /// The agent's unfilled entries from its last cycle expire, on every pair at once. A pair
+    /// whose entry cannot be cancelled sits this cycle out; the others carry on, so one order
+    /// the venue keeps refusing to cancel does not hold back every pair.
     fn cancel_batch_entries(&mut self, mut b: Batch, closed: Vec<Option<Vec<Candle>>>) {
         let target = b.legs[0].target();
         let stale = match self.venue_open_orders(&target, &b.legs[0].agent.account_id) {
@@ -1128,7 +1170,7 @@ impl Runtime {
                         && order.order_type == OrderType::Limit
                         && !order.reduce_only
                 })
-                .map(|order| order.id)
+                .map(|order| (order.id, order.symbol))
                 .collect::<Vec<_>>(),
             Err(e) => {
                 for i in b.open_legs().collect::<Vec<_>>() {
@@ -1140,14 +1182,10 @@ impl Runtime {
         };
         match target {
             ExecutionTarget::Paper => {
-                for id in stale {
+                for (id, symbol) in stale {
                     if let Err(e) = self.engine.cancel_order(&id) {
                         let e = self.api_error(e);
-                        for i in b.open_legs().collect::<Vec<_>>() {
-                            let detail = b.legs[i].clean(e.message());
-                            b.settle(i, "DATA_ERROR", Some(detail));
-                        }
-                        return self.finish_batch(b);
+                        b.settle_pair(&symbol, e.message());
                     }
                 }
                 self.read_batch(b, closed);
@@ -1156,14 +1194,18 @@ impl Runtime {
             ExecutionTarget::Okx(_) => {
                 let engine = self.engine_for(target);
                 self.agents.pending.push(Box::pin(async move {
-                    let mut result = Ok(());
-                    for id in stale {
-                        result = engine.cancel_order(id).await;
-                        if result.is_err() {
-                            break;
+                    let mut failed: Vec<(String, ApiError)> = Vec::new();
+                    for (id, symbol) in stale {
+                        // A pair already refused keeps its first answer; its other entries
+                        // are left for the next cycle.
+                        if failed.iter().any(|(s, _)| *s == symbol) {
+                            continue;
+                        }
+                        if let Err(e) = engine.cancel_order(id).await {
+                            failed.push((symbol, e));
                         }
                     }
-                    Completion::BatchCancelled(b, closed, result)
+                    Completion::BatchCancelled(b, closed, failed)
                 }));
             }
         }

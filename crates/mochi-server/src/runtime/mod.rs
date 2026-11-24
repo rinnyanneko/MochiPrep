@@ -836,9 +836,11 @@ impl Runtime {
     // ---- replay ---------------------------------------------------------------------------
 
     /// Emits the replay state only when `playing` changes, as Node does. A replay without its
-    /// bars cannot play.
+    /// bars cannot play, nor can one whose next dates are downloading: playing the old bars
+    /// would save a cursor the new dates then start from. The route refuses both first; this
+    /// holds when a load starts between that check and this command.
     pub fn set_playing(&mut self, playing: bool) {
-        if playing && !self.replay_loaded() {
+        if playing && (!self.replay_loaded() || self.replay_download.is_some()) {
             return;
         }
         if self.clock.set_playing(playing) {

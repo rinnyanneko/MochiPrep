@@ -97,7 +97,23 @@ pub fn replay_bar_before(
     symbol: &str,
     at: i64,
 ) -> Result<Option<Candle>, StoreError> {
-    Ok(load_replay_bars(conn, symbol, (i64::MIN, at))?.pop())
+    // One row, not every bar before `at`: the estimate asks this on each change of dates.
+    let mut stmt = conn.prepare(
+        "SELECT ts,open,high,low,close,volume FROM replay_bars
+         WHERE symbol=? AND ts<? ORDER BY ts DESC LIMIT 1",
+    )?;
+    let mut bars = stmt.query_map(params![symbol, at], |row| {
+        Ok(Candle {
+            time: row.get(0)?,
+            open: row.get(1)?,
+            high: row.get(2)?,
+            low: row.get(3)?,
+            close: row.get(4)?,
+            volume: row.get(5)?,
+            closed: true,
+        })
+    })?;
+    Ok(bars.next().transpose()?)
 }
 
 /// How many bars every pair has saved in `span`.

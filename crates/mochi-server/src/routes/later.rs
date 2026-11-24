@@ -505,6 +505,20 @@ fn pnl_curve(
         let last = points.last().map_or(created_at, |&(at, _)| at);
         points.push((at.max(last), to_number(total)));
     }
+    // The chart plots whole seconds and keeps the first point of each. Points are in time
+    // order, so keeping each second's last value means a close and the total reported in the
+    // same second chart as the total. The first point stays as it is: the curve starts at 0.
+    let mut merged: Vec<(i64, f64)> = Vec::with_capacity(points.len());
+    for point in points {
+        let after_start = merged.len() > 1;
+        match merged.last_mut() {
+            Some(last) if after_start && last.0.div_euclid(1000) == point.0.div_euclid(1000) => {
+                *last = point
+            }
+            _ => merged.push(point),
+        }
+    }
+    let points = merged;
     let stride = points.len().div_ceil(CURVE_POINTS).max(1);
     let last = points.len().saturating_sub(1);
     points
@@ -543,5 +557,42 @@ fn cost_text(cost: f64) -> String {
         if cost > 0.0 { "Infinity" } else { "-Infinity" }.to_string()
     } else {
         Dec::from_js_number(cost).to_fixed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_curve_keeps_the_later_value_of_a_second() {
+        let dec = |s: &str| Dec::parse(s).unwrap();
+        let curve = pnl_curve(
+            1_000,
+            vec![(5_200, dec("3")), (5_100, dec("2"))],
+            Some(&dec("9")),
+            Some(5_900),
+        );
+        let points: Vec<(i64, String)> = curve
+            .iter()
+            .map(|p| (p.ts, p.pnl.get().to_string()))
+            .collect();
+        // Both closes and the total fall in second 5: one point, the total, at its time.
+        assert_eq!(points, [(1_000, "0".into()), (5_900, "9".into())]);
+
+        // A close in the second the agent was made leaves the start at 0.
+        let curve = pnl_curve(1_000, vec![(1_400, dec("2"))], Some(&dec("5")), Some(9_000));
+        let points: Vec<(i64, String)> = curve
+            .iter()
+            .map(|p| (p.ts, p.pnl.get().to_string()))
+            .collect();
+        assert_eq!(
+            points,
+            [
+                (1_000, "0".into()),
+                (1_400, "2".into()),
+                (9_000, "5".into())
+            ]
+        );
     }
 }

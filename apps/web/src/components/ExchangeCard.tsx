@@ -1,7 +1,8 @@
 import { Link2, ShieldAlert, ShieldOff, TriangleAlert, Unplug } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ARM_PHRASE, DEFAULT_LIVE_LIMITS, type ExchangeStatus, type RiskSettings } from '@mochiprep/shared';
 import { api } from '@/lib/api';
+import { cancellable, type Cancellable } from '@/lib/cancellable';
 
 import { DYOR_NOTICE } from '@/lib/notices';
 import { attempt, useApp, useDateTime } from '@/store';
@@ -92,15 +93,30 @@ function ConnectDialog({ preset, onClose }: { preset: ExchangeStatus | null; onC
 /** `reason` says what is waiting on the arm, such as starting an agent; `onArmed` then does it. */
 export function ArmDialog({ status, onClose, onArmed, reason }: Readonly<{ status: ExchangeStatus; onClose(): void; onArmed?(): void; reason?: string }>) {
   const [phrase, setPhrase] = useState('');
+  const [busy, setBusy] = useState(false);
+  // Cancelling while the arm request is in flight must not start what was waiting on it, such
+  // as an Auto agent on real money. The account may still end up armed: the server decides.
+  const request = useRef<Cancellable | null>(null);
+  useEffect(() => () => request.current?.cancel(), []);
+  const close = () => {
+    request.current?.cancel();
+    onClose();
+  };
   const arm = async () => {
+    const current = cancellable();
+    request.current = current;
+    setBusy(true);
     const ok = await attempt(() => api.post(`/exchange/okx/${status.accountId}/arm`, { confirmation: phrase }));
-    if (ok) {
-      onClose();
-      onArmed?.();
-    }
+    current.live(() => {
+      setBusy(false);
+      if (ok) {
+        onClose();
+        onArmed?.();
+      }
+    })();
   };
   return (
-    <Dialog open onOpenChange={onClose} title={`Arm ${status.name}?`} description="Arming allows real orders from you and from running agents. It ends at Stop All, Disarm, or a backend restart, even when the key is saved.">
+    <Dialog open onOpenChange={close} title={`Arm ${status.name}?`} description="Arming allows real orders from you and from running agents. It ends at Stop All, Disarm, or a backend restart, even when the key is saved.">
       {reason && <p className="mb-3 text-[13px] text-ink-2" data-testid="arm-reason">{reason}</p>}
       <ul className="mb-3 space-y-1 text-[13px] text-ink-2">
         <li>Up to {status.limits.maxNotional} USDT per order, {status.limits.maxLeverage}x leverage</li>
@@ -111,8 +127,8 @@ export function ArmDialog({ status, onClose, onArmed, reason }: Readonly<{ statu
         <Input autoComplete="off" value={phrase} onChange={(e) => setPhrase(e.target.value)} aria-label="Arm confirmation" />
       </Field>
       <div className="mt-4 flex justify-end gap-2">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="danger" disabled={phrase !== ARM_PHRASE} onClick={arm}><ShieldAlert /> Arm real orders</Button>
+        <Button onClick={close}>Cancel</Button>
+        <Button variant="danger" disabled={busy || phrase !== ARM_PHRASE} onClick={arm}><ShieldAlert /> Arm real orders</Button>
       </div>
     </Dialog>
   );
