@@ -21,6 +21,8 @@ pub enum CycleTrigger {
     Analyze,
     RunOnce,
     Schedule,
+    /// A position on one of its pairs changed while the agent waited.
+    PositionChange,
 }
 pub(super) type CycleReply = oneshot::Sender<Result<Option<Value>, ApiError>>;
 #[derive(Default)]
@@ -35,6 +37,7 @@ pub(super) struct Agents {
     /// market right now, and a restart makes it stale.
     pub messages: HashMap<String, Vec<(u64, String)>>,
     pub next_message: u64,
+    pub(super) watch: super::position_watch::PositionWatch,
 }
 
 /// Characters of messages that may wait for one agent's next call, all of them together, and
@@ -313,12 +316,22 @@ impl Runtime {
             // An agent whose lost-sync pause is still owed stays unscheduled until the pause
             // lands: it was reported paused, so it must not trade meanwhile.
             let pause_owed = self.pause_owed.contains(&a.account_id);
-            if a.running
-                && !pause_owed
-                && a.next_run_at.is_some_and(|at| at <= now)
-                && self.require_account(&a.account_id)?.source == source
+            if !a.running {
+                self.forget_positions(&a.id);
+                continue;
+            }
+            if pause_owed
+                || self.is_agent_busy(&a.id)
+                || self.require_account(&a.account_id)?.source != source
             {
+                continue;
+            }
+            // Read every tick, so a change is reported once even when the schedule is due too.
+            let changed = self.positions_changed(&a);
+            if a.next_run_at.is_some_and(|at| at <= now) {
                 self.begin_cycle(&a.id, CycleTrigger::Schedule, None)?;
+            } else if changed {
+                self.begin_cycle(&a.id, CycleTrigger::PositionChange, None)?;
             }
         }
         Ok(())

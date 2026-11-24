@@ -418,6 +418,7 @@ impl Runtime {
                 Err(e) => self.data_error(c, &e),
             },
             Completion::Acted(mut c, acted) => {
+                self.own_order_answered(&c.agent.id, &c.agent.symbol, &acted);
                 settle_acted(&mut c.record, *acted);
                 self.finish_cycle(c);
             }
@@ -434,6 +435,8 @@ impl Runtime {
             Completion::BatchNews(b, contexts, news) => self.begin_batch_model(b, contexts, news),
             Completion::BatchModel(b, response) => self.complete_batch_model(b, response),
             Completion::BatchActed(mut b, i, acted) => {
+                let leg = &b.legs[i].agent;
+                self.own_order_answered(&leg.id, &leg.symbol, &acted);
                 settle_acted(&mut b.legs[i].record, *acted);
                 self.advance_batch(b, i + 1)
             }
@@ -650,6 +653,7 @@ impl Runtime {
             .into_iter()
             .find(|p| p.position.symbol == c.agent.symbol);
         c.analyzed_position_id = position.as_ref().map(|p| p.position.id.clone());
+        self.saw_position(&c.agent);
         let risk: RiskSettings =
             serde_json::from_str(c.agent.risk.get()).map_err(|e| self.api_error(e))?;
         let quote = c.quote.clone().unwrap();
@@ -800,7 +804,8 @@ impl Runtime {
         }
         let latest = self.require_agent(&c.agent.id)?;
         if *self.agents.generations.get(&c.agent.id).unwrap_or(&0) != c.generation
-            || (c.record["trigger"] == "SCHEDULE" && !latest.running)
+            || ((c.record["trigger"] == "SCHEDULE" || c.record["trigger"] == "POSITION_CHANGE")
+                && !latest.running)
         {
             settle(
                 &mut c.record,

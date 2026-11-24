@@ -258,7 +258,8 @@ impl RuntimeHandle {
             let registered =
                 r.register_session(account, session, remember, &saved, reconnect, epoch);
             if sync.is_err() {
-                r.after_sync(&account_id, &engine, sync);
+                // A failed sync settles nothing, so its pass number does not matter.
+                r.after_sync(&account_id, &engine, sync, 0);
             }
             registered
         })
@@ -658,14 +659,17 @@ impl Runtime {
     }
 
     /// Retry local finalization on the sync cadence even for disconnected accounts.
-    pub(super) fn prepare_exchange_sync(&mut self) -> Vec<(String, Arc<OkxEngine>)> {
+    /// The sessions to sync, with the number of this pass.
+    pub(super) fn prepare_exchange_sync(&mut self) -> (u64, Vec<(String, Arc<OkxEngine>)>) {
         let pending: Vec<_> = self.retired_unsent_orders.keys().cloned().collect();
         for id in &pending {
             let _ = self.restore_retired_order(id);
         }
-        self.exchanges
+        let sessions = self
+            .exchanges
             .iter()
             .map(|(id, session)| (id.clone(), session.engine.clone()))
-            .collect()
+            .collect();
+        (self.agents.watch.next_pass(), sessions)
     }
 }

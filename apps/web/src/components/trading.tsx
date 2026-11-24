@@ -337,7 +337,15 @@ const OUTCOME: Record<DecisionOutcome, { label: string; tone: Tone }> = {
   DATA_ERROR: { label: 'Data error', tone: 'warn' },
 };
 
-export const OutcomeBadge = ({ outcome }: { outcome: DecisionOutcome }) => <Badge tone={OUTCOME[outcome].tone}>{OUTCOME[outcome].label}</Badge>;
+/** What started a cycle, as the decision details say it. */
+const TRIGGERS: Record<DecisionRecord['trigger'], string> = {
+  SCHEDULE: 'Schedule',
+  RUN_ONCE: 'Run once',
+  ANALYZE: 'Analyze now',
+  POSITION_CHANGE: 'A position changed',
+};
+
+export const OutcomeBadge =({ outcome }: { outcome: DecisionOutcome }) => <Badge tone={OUTCOME[outcome].tone}>{OUTCOME[outcome].label}</Badge>;
 export const OUTCOME_OPTIONS = Object.entries(OUTCOME).map(([value, o]) => ({ value: value as DecisionOutcome, label: o.label }));
 
 export const actionTone = (action?: string): Tone => (action === 'LONG' ? 'rise' : action === 'SHORT' ? 'fall' : action === 'CLOSE' ? 'accent' : 'neutral');
@@ -395,6 +403,7 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
 
       <section>
         <Row label="Time">{dateTime(d.ts)}</Row>
+        <Row label="Run by">{TRIGGERS[d.trigger] ?? d.trigger}</Row>
         <Row label="Agent">{d.agentName}</Row>
         <Row label="Model">{d.model}</Row>
         <Row label="Symbol">{d.symbol} · {d.timeframe}</Row>

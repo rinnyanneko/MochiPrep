@@ -608,7 +608,8 @@ export interface DecisionRecord {
   source: DataSource;
   venue: AccountVenue;
   ts: number;
-  trigger: 'SCHEDULE' | 'RUN_ONCE' | 'ANALYZE';
+  /** POSITION_CHANGE: a position on one of its pairs changed while the agent waited. */
+  trigger: 'SCHEDULE' | 'RUN_ONCE' | 'ANALYZE' | 'POSITION_CHANGE';
   providerKind: ProviderKind | null;
   model: string;
   symbol: SymbolId;

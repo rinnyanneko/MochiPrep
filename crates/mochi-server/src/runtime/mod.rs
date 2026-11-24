@@ -12,6 +12,7 @@ mod agent_execution;
 mod exchange;
 mod exchange_sync;
 mod execution;
+mod position_watch;
 pub use exchange::{ExchangeStatus, ARM_PHRASE};
 pub use execution::{
     ExecutionEngine, ExecutionTarget, OkxOptions, ProtectionFailure, ProtectionMeta,

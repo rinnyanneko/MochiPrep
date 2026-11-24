@@ -500,13 +500,19 @@ impl Runtime {
         checked: Option<mochi_okx::engine::CheckedProtection>,
     ) -> Result<Option<Outgoing>, ApiError> {
         let act = self.act_for(a, d, r, target, checked)?;
+        let before = self.before_own_order(a, target);
+        let moves = !matches!(act, Act::Protect { .. });
         match target {
             ExecutionTarget::Paper => {
                 let acted = self.act_now(act);
+                self.after_own_order(a, target, before, moves);
                 settle_acted(r, acted);
                 Ok(None)
             }
-            ExecutionTarget::Okx(_) => Ok(Some((self.engine_for(target.clone()), act))),
+            ExecutionTarget::Okx(_) => {
+                self.after_own_order(a, target, before, moves);
+                Ok(Some((self.engine_for(target.clone()), act)))
+            }
         }
     }
 
@@ -764,6 +770,9 @@ impl Runtime {
     ) -> Result<Value, ApiError> {
         if self.agents.active.get(agent_id).map(String::as_str) == Some(token) {
             self.agents.active.remove(agent_id);
+        }
+        if let Some(symbol) = record["symbol"].as_str().map(String::from) {
+            self.own_order_answered(agent_id, &symbol, &acted);
         }
         settle_acted(&mut record, acted);
         self.save_signal(record)

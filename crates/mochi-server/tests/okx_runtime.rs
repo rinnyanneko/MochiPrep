@@ -2605,3 +2605,141 @@ async fn a_reconnect_that_cannot_save_its_limits_keeps_the_current_session() {
     assert!(w.okx.state().position.is_none());
     w.rt.shutdown().await;
 }
+
+/// An OKX position is only read back on sync: the agent's own order shows there one sync later
+/// and does not wake it, while a stop that fills on OKX does, on the sync that sees it.
+#[tokio::test(start_paused = true)]
+async fn a_position_closed_on_okx_runs_the_agent_on_the_sync_that_sees_it() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    let agent = w.agent_on(&account.id, "AUTO").await;
+    let id = agent.clone();
+    w.rt.call(move |r| {
+        r.start_agent(&id).unwrap();
+        // Far in the future, so only a position change runs it.
+        r.connection()
+            .execute(
+                "UPDATE agents SET next_run_at=? WHERE id=?",
+                rusqlite::params![i64::MAX, id],
+            )
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    let calls = || w.seen.lock().unwrap().len();
+    let record = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    assert_eq!(record["outcome"], "EXECUTED", "{record}");
+    assert!(w.okx.state().position.is_some());
+    *w.answer.lock().unwrap() = decision("HOLD", 74_250.0, None);
+    for _ in 0..3 {
+        tokio::time::sleep(Duration::from_millis(5500)).await;
+        w.rt.call(|_| ()).await.unwrap();
+    }
+    assert_eq!(calls(), 1, "its own order");
+
+    // The stop filled on OKX: the position is gone on the next sync.
+    w.okx.state().position = None;
+    tokio::time::sleep(Duration::from_millis(5500)).await;
+    w.rt.call(|_| ()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    w.rt.call(|_| ()).await.unwrap();
+    assert_eq!(calls(), 2);
+    let last =
+        w.rt.call(move |r| {
+            let records =
+                mochi_store::rows::list_decisions(r.connection(), Some(&agent), 1).unwrap();
+            serde_json::from_str::<Value>(records[0].get()).unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(last["trigger"], "POSITION_CHANGE");
+    assert_eq!(last["outcome"], "HOLD", "{last}");
+    tokio::time::sleep(Duration::from_millis(11_000)).await;
+    w.rt.call(|_| ()).await.unwrap();
+    assert_eq!(calls(), 2, "one run per change");
+    w.rt.shutdown().await;
+}
+
+/// A running OKX agent whose next scheduled run is far away, so only a position change runs it.
+async fn waiting_okx_agent(w: &World, account_id: &str) -> String {
+    let agent = w.agent_on(account_id, "AUTO").await;
+    let id = agent.clone();
+    w.rt.call(move |r| {
+        r.start_agent(&id).unwrap();
+        r.connection()
+            .execute(
+                "UPDATE agents SET next_run_at=? WHERE id=?",
+                rusqlite::params![i64::MAX, id],
+            )
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    agent
+}
+
+/// One live tick with its sync, and the cycle it may start.
+async fn sync_tick(w: &World) {
+    tokio::time::sleep(Duration::from_millis(5500)).await;
+    w.rt.call(|_| ()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    w.rt.call(|_| ()).await.unwrap();
+}
+
+async fn last_trigger(w: &World, agent: &str) -> Value {
+    let agent = agent.to_string();
+    w.rt.call(move |r| {
+        let records = mochi_store::rows::list_decisions(r.connection(), Some(&agent), 1).unwrap();
+        serde_json::from_str::<Value>(records[0].get()).unwrap()["trigger"].clone()
+    })
+    .await
+    .unwrap()
+}
+
+/// An entry that fills and is stopped out on OKX before any sync sees it is flat both times, yet
+/// it changed: the agent still runs.
+#[tokio::test(start_paused = true)]
+async fn an_okx_entry_stopped_out_before_the_next_sync_still_runs_the_agent() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    let agent = waiting_okx_agent(&w, &account.id).await;
+    let record = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    assert_eq!(record["outcome"], "EXECUTED", "{record}");
+    w.okx.state().position = None;
+    *w.answer.lock().unwrap() = decision("HOLD", 74_250.0, None);
+    sync_tick(&w).await;
+    assert_eq!(w.seen.lock().unwrap().len(), 2);
+    assert_eq!(last_trigger(&w, &agent).await, "POSITION_CHANGE");
+    sync_tick(&w).await;
+    assert_eq!(w.seen.lock().unwrap().len(), 2);
+    w.rt.shutdown().await;
+}
+
+/// A refused order moved nothing, so a close by the owner right after it still runs the agent.
+#[tokio::test(start_paused = true)]
+async fn a_refused_okx_order_does_not_hide_the_owners_close() {
+    let w = World::new().await;
+    let account = w.connect("OKX_LIVE").await;
+    w.arm(&account.id, ARM_PHRASE).await.unwrap();
+    w.place(&account.id).await;
+    w.rt.sync_exchanges().await.unwrap();
+    let agent = waiting_okx_agent(&w, &account.id).await;
+    sync_tick(&w).await;
+    assert_eq!(
+        w.seen.lock().unwrap().len(),
+        0,
+        "a position it finds on start is no change"
+    );
+    *w.answer.lock().unwrap() = decision("CLOSE", 74_250.0, None);
+    w.okx.state().reject_next = Some(mochi_okx::fake::Refusal::new("51008", "Refused"));
+    let record = w.cycle(&agent, CycleTrigger::RunOnce).await;
+    assert_eq!(record["outcome"], "ORDER_REJECTED", "{record}");
+    *w.answer.lock().unwrap() = decision("HOLD", 74_250.0, None);
+    w.okx.state().position = None;
+    sync_tick(&w).await;
+    assert_eq!(w.seen.lock().unwrap().len(), 2);
+    assert_eq!(last_trigger(&w, &agent).await, "POSITION_CHANGE");
+    w.rt.shutdown().await;
+}

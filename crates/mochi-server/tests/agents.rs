@@ -1746,3 +1746,126 @@ then close"
     );
     rt.shutdown().await;
 }
+/// The agent's last record, newest first.
+async fn last_record(rt: &RuntimeHandle) -> Value {
+    rt.call(|r| {
+        let records = rows::list_decisions(r.connection(), Some("agent"), 1).unwrap();
+        serde_json::from_str(records[0].get()).unwrap()
+    })
+    .await
+    .unwrap()
+}
+async fn close_by_hand(rt: &RuntimeHandle) {
+    rt.call(|r| {
+        let a = r.require_agent("agent").unwrap();
+        let p = r
+            .engine()
+            .store()
+            .get_open_position(&a.account_id, "BTCUSDT")
+            .unwrap()
+            .unwrap();
+        r.engine_mut().place_order(serde_json::from_value(json!({"accountId":a.account_id,"clientOrderId":"manual-close","symbol":"BTCUSDT","side":"SELL","type":"MARKET","quantity":p.quantity,"leverage":p.leverage,"reduceOnly":true})).unwrap()).unwrap();
+    })
+    .await
+    .unwrap();
+}
+#[tokio::test]
+async fn a_position_changed_by_anything_but_the_agent_runs_it_at_once() {
+    let (rt, m, _) = setup("AUTO").await;
+    rt.call(|r| {
+        let mut a = r.require_agent("agent").unwrap();
+        a.interval_sec = 3600;
+        rows::save_agent(r.connection(), &a).unwrap();
+        r.start_agent("agent").unwrap();
+    })
+    .await
+    .unwrap();
+    rt.step_replay(1).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 1);
+    rt.step_replay(2).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 1, "nothing changed");
+
+    // The agent's own entry moves its position: that is no reason to ask again.
+    *m.response.lock().unwrap() = Ok(decision("LONG").to_string());
+    assert_eq!(
+        cycle(&rt, CycleTrigger::RunOnce).await["outcome"],
+        "EXECUTED"
+    );
+    *m.response.lock().unwrap() = Ok(decision("HOLD").to_string());
+    rt.step_replay(2).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 2, "its own order");
+
+    // Closed outside the agent: it runs on the next bar, not an hour later, and once.
+    close_by_hand(&rt).await;
+    rt.step_replay(1).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 3);
+    let record = last_record(&rt).await;
+    assert_eq!(record["trigger"], "POSITION_CHANGE");
+    assert_eq!(record["outcome"], "HOLD");
+    assert!(
+        record["snapshot"]["position"].is_null(),
+        "it sees the position gone"
+    );
+    rt.step_replay(2).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 3);
+
+    // A stopped agent is not woken, and starting it again begins from what is there then.
+    rt.call(|r| r.stop_agent("agent")).await.unwrap().unwrap();
+    open_position(&rt, None, false).await;
+    rt.step_replay(1).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 3);
+    rt.call(|r| r.start_agent("agent")).await.unwrap().unwrap();
+    rt.step_replay(2).await.unwrap();
+    assert_eq!(
+        m.calls.load(Ordering::SeqCst),
+        4,
+        "one scheduled run, no extra one"
+    );
+    assert_eq!(last_record(&rt).await["trigger"], "SCHEDULE");
+    rt.shutdown().await;
+}
+#[tokio::test]
+async fn a_stop_loss_fill_runs_a_live_agent_before_its_interval() {
+    let f = feed();
+    let (sender, quotes) = tokio::sync::mpsc::channel(4);
+    let mut options = RuntimeOptions::new(open_in_memory().unwrap());
+    options.live = f.clone();
+    options.live_quotes = Some(quotes);
+    let (rt, m, account) = setup_with("AUTO", options, DataSource::Live).await;
+    open_position(&rt, Some("69000"), false).await;
+    rt.call(|r| r.start_agent("agent")).await.unwrap().unwrap();
+    wait_calls(&m, 1).await;
+    let idle = |rt: RuntimeHandle| async move {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while rt.call(|r| r.is_agent_busy("agent")).await.unwrap() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    };
+    idle(rt.clone()).await;
+    let mut q = f.quote.lock().unwrap().clone().unwrap();
+    q.last = "68500".into();
+    q.bid = "68499".into();
+    q.ask = "68501".into();
+    q.mark = "68500".into();
+    *f.quote.lock().unwrap() = Some(q.clone());
+    sender.send(q).await.unwrap();
+    wait_calls(&m, 2).await;
+    idle(rt.clone()).await;
+    let record = last_record(&rt).await;
+    assert_eq!(record["trigger"], "POSITION_CHANGE");
+    assert!(rt
+        .call(move |r| r
+            .engine()
+            .store()
+            .get_open_position(&account, "BTCUSDT")
+            .unwrap()
+            .is_none())
+        .await
+        .unwrap());
+    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+    assert_eq!(m.calls.load(Ordering::SeqCst), 2, "one run per change");
+    rt.shutdown().await;
+}
