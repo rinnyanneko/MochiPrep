@@ -37,6 +37,10 @@ use crate::instrument_parse::parse_okx_instruments;
 
 pub const REST_BASE: &str = "https://www.okx.com";
 pub const WS_URL: &str = "wss://ws.okx.com/ws/v5/public";
+/// OKX's most bars for one history-candles request.
+pub const HISTORY_PAGE: usize = 100;
+/// Between history requests: OKX allows 20 per 2 s per address, and the live feed shares it.
+const HISTORY_PAUSE: Duration = Duration::from_millis(150);
 /// The name `/api/state` shows for this feed.
 pub const PROVIDER: &str = "OKX public";
 
@@ -534,6 +538,45 @@ impl OkxPublicFeed {
             .candle_cache
             .insert(key, (Instant::now(), candles.clone()));
         Ok(candles)
+    }
+
+    /// OKX's closed one-minute bars of `symbol` from `start` for `minutes` minutes, oldest
+    /// first. OKX answers at most [`HISTORY_PAGE`] bars a request, newest first, so this pages
+    /// back from the span's end, pausing between requests to stay inside OKX's rate limit. A
+    /// minute without a trade has no bar. `progress` hears how many of the minutes are done.
+    pub async fn history_bars(
+        &self,
+        symbol: &str,
+        start: i64,
+        minutes: usize,
+        progress: &(dyn Fn(usize) + Send + Sync),
+    ) -> Result<Vec<Candle>, String> {
+        let end = start + minutes as i64 * 60_000;
+        let mut bars: std::collections::BTreeMap<i64, Candle> = Default::default();
+        let mut after = end;
+        while after > start {
+            let path = format!(
+                "/api/v5/market/history-candles?instId={}&bar=1m&limit={HISTORY_PAGE}&after={after}",
+                to_inst_id(symbol)
+            );
+            let page = parse_okx_candles(&get(&self.shared, &path).await?)?;
+            let Some(oldest) = page.first().map(|c| c.time) else {
+                break;
+            };
+            if oldest >= after {
+                return Err("OKX sent history out of order".into());
+            }
+            for candle in page {
+                if candle.time >= start && candle.time < end && candle.closed {
+                    bars.insert(candle.time, candle);
+                }
+            }
+            after = oldest;
+            progress((((end - after.max(start)) / 60_000) as usize).min(minutes));
+            tokio::time::sleep(HISTORY_PAUSE).await;
+        }
+        progress(minutes);
+        Ok(bars.into_values().collect())
     }
 
     /// Everything MochiPrep could trade on OKX, cached for 5 minutes. Pass `fresh` when the

@@ -43,7 +43,10 @@ struct Saved {
 
 /// Node's `syncExchanges`: one full sync per session, one after another. The work reaches the
 /// runtime only through short calls, and holds no strong handle.
-async fn sync_all(runtime: WeakRuntimeHandle, sessions: Vec<(String, Arc<OkxEngine>)>) {
+async fn sync_all(
+    runtime: WeakRuntimeHandle,
+    (pass, sessions): (u64, Vec<(String, Arc<OkxEngine>)>),
+) {
     for (id, engine) in sessions {
         let result = engine.sync().await.map_err(|error| error.to_string());
         if result.is_ok() {
@@ -53,7 +56,7 @@ async fn sync_all(runtime: WeakRuntimeHandle, sessions: Vec<(String, Arc<OkxEngi
             return;
         };
         let _ = handle
-            .call(move |r| r.after_sync(&id, &engine, result))
+            .call(move |r| r.after_sync(&id, &engine, result, pass))
             .await;
     }
 }
@@ -167,11 +170,14 @@ impl Runtime {
         account_id: &str,
         engine: &Arc<OkxEngine>,
         result: Result<(), String>,
+        pass: u64,
     ) {
         let mut lost = None;
         let mut retry_pause = false;
+        let mut synced = false;
         if let Some(session) = self.exchanges.get_mut(account_id) {
             if Arc::ptr_eq(&session.engine, engine) {
+                synced = result.is_ok();
                 match result {
                     Ok(()) => session.was_healthy = true,
                     Err(text) if session.was_healthy => {
@@ -182,6 +188,9 @@ impl Runtime {
                 }
                 retry_pause = self.pause_owed.contains(account_id);
             }
+        }
+        if synced {
+            self.settle_synced(account_id, pass);
         }
         if lost.is_none() && !retry_pause {
             self.invalidate(SYNCED);
@@ -232,7 +241,7 @@ impl Runtime {
         if due {
             self.last_exchange_sync_at = Some(now);
             let sessions = self.prepare_exchange_sync();
-            if let (false, Some(runtime)) = (sessions.is_empty(), self.handle.clone()) {
+            if let (false, Some(runtime)) = (sessions.1.is_empty(), self.handle.clone()) {
                 self.live_ticking = true;
                 self.tasks.push(Box::pin(async move {
                     let pass = std::panic::AssertUnwindSafe(sync_all(runtime, sessions));

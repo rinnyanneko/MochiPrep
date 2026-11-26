@@ -38,6 +38,8 @@ To reduce an isolated position by a specified quantity, select **Reduce only** o
 
 An agent in Suggest mode can run without arming, because it places no orders. Accepting a suggestion needs an armed account, except for a close, and the risk checks run again at that moment.
 
+Starting, resuming or running one cycle of an Auto agent on a disarmed real account opens the arm dialog first, and the agent starts only once you have typed the phrase. Disarming an account pauses its running Auto agents, with a note on each, so they stop asking the AI for orders that would be refused; its Suggest agents keep running.
+
 An agent that reads news on a real account takes third-party text as input. Anyone can publish a headline written to steer an AI. The account limits limit the damage, but not the decision, so prefer Suggest mode here.
 
 Keys with Trade permission can also transfer funds and change account settings on OKX. Store them as carefully as a password. We suggest a separate OKX sub-account that holds only money you can afford to lose.

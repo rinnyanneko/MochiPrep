@@ -258,7 +258,8 @@ impl RuntimeHandle {
             let registered =
                 r.register_session(account, session, remember, &saved, reconnect, epoch);
             if sync.is_err() {
-                r.after_sync(&account_id, &engine, sync);
+                // A failed sync settles nothing, so its pass number does not matter.
+                r.after_sync(&account_id, &engine, sync, 0);
             }
             registered
         })
@@ -524,6 +525,33 @@ impl Runtime {
         self.invalidate(&[Topic::Exchange]);
     }
 
+    /// After a disarm: an Auto agent on a disarmed real account would keep paying for AI calls
+    /// whose orders are all refused, so it pauses and says why. Suggest agents place nothing and
+    /// keep running.
+    pub fn pause_disarmed_auto_agents(&mut self, account: &str) -> Result<(), ApiError> {
+        if self.is_armed(account) {
+            return Ok(());
+        }
+        let Some(real) = self
+            .engine()
+            .store()
+            .get_account(account)
+            .map_err(|e| self.api_error(e))?
+            .filter(|a| a.venue == AccountVenue::OkxLive)
+        else {
+            return Ok(());
+        };
+        let detail = format!("{} is not armed. Arm it to resume.", real.name);
+        let mut first_error = None;
+        for a in rows::list_agents(self.connection()).map_err(|e| self.api_error(e))? {
+            if a.account_id == account && a.running && a.execution_mode == "AUTO" {
+                if let Err(error) = self.pause_agent(&a.id, Some(detail.clone())) {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
     pub(super) fn is_armed(&self, account_id: &str) -> bool {
         self.exchanges
             .get(account_id)
@@ -631,14 +659,17 @@ impl Runtime {
     }
 
     /// Retry local finalization on the sync cadence even for disconnected accounts.
-    pub(super) fn prepare_exchange_sync(&mut self) -> Vec<(String, Arc<OkxEngine>)> {
+    /// The sessions to sync, with the number of this pass.
+    pub(super) fn prepare_exchange_sync(&mut self) -> (u64, Vec<(String, Arc<OkxEngine>)>) {
         let pending: Vec<_> = self.retired_unsent_orders.keys().cloned().collect();
         for id in &pending {
             let _ = self.restore_retired_order(id);
         }
-        self.exchanges
+        let sessions = self
+            .exchanges
             .iter()
             .map(|(id, session)| (id.clone(), session.engine.clone()))
-            .collect()
+            .collect();
+        (self.agents.watch.next_pass(), sessions)
     }
 }

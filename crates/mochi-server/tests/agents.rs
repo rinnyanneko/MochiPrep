@@ -18,6 +18,8 @@ struct Model {
     blocked: AtomicUsize,
     panics: AtomicUsize,
     requests: Mutex<Vec<AiRequest>>,
+    /// The answer from the next call on, when set.
+    then: Mutex<Option<Result<String, ProviderError>>>,
 }
 impl AiProvider for Model {
     fn kind(&self) -> ProviderKind {
@@ -31,15 +33,15 @@ impl AiProvider for Model {
                 self.gate.notified().await;
             }
             assert_eq!(self.panics.swap(0, Ordering::SeqCst), 0, "model panicked");
-            self.response
-                .lock()
-                .unwrap()
-                .clone()
-                .map(|text| AiResponse {
-                    text,
-                    input_tokens: Some(2.0),
-                    output_tokens: Some(3.0),
-                })
+            let response = self.response.lock().unwrap().clone();
+            if let Some(next) = self.then.lock().unwrap().take() {
+                *self.response.lock().unwrap() = next;
+            }
+            response.map(|text| AiResponse {
+                text,
+                input_tokens: Some(2.0),
+                output_tokens: Some(3.0),
+            })
         })
     }
 }
@@ -66,6 +68,7 @@ async fn setup_with(
         blocked: AtomicUsize::new(0),
         panics: AtomicUsize::new(0),
         requests: Mutex::new(Vec::new()),
+        then: Mutex::new(None),
     });
     options.replay_minutes = Some(5800);
     let m = model.clone();
@@ -78,7 +81,7 @@ async fn setup_with(
  let a=r.engine_mut().create_account(CreateAccountArgs{name:"agent".into(),source,initial_balance:None,is_demo:None,config:None}).unwrap();
  rows::insert_provider(r.connection(),&serde_json::from_value(json!({"id":"provider","name":"test","kind":"OPENAI","baseUrl":null,"defaultModel":"test","inputPricePerMTok":1,"outputPricePerMTok":2,"createdAt":1})).unwrap()).unwrap();
  r.set_key("provider","custom-secret-agent-key").unwrap();
- rows::insert_agent(r.connection(),&rows::Agent{id:"agent".into(),name:"agent".into(),provider_id:"provider".into(),model:"test".into(),symbol:"BTCUSDT".into(),timeframe:"15m".into(),strategy:"test".into(),account_id:a.id.clone(),risk:serde_json::value::to_raw_value(&default_risk_settings()).unwrap(),interval_sec:900,execution_mode:mode,use_news:false,allow_trailing_stop:false,status:"IDLE".into(),running:false,next_run_at:None,last_run_at:None,status_detail:None,consecutive_errors:0,is_demo:false,created_at:1}).unwrap();a.id
+ rows::insert_agent(r.connection(),&rows::Agent{id:"agent".into(),name:"agent".into(),provider_id:"provider".into(),model:"test".into(),symbol:"BTCUSDT".into(),symbols:vec!["BTCUSDT".into()],timeframe:"15m".into(),strategy:"test".into(),account_id:a.id.clone(),risk:serde_json::value::to_raw_value(&default_risk_settings()).unwrap(),interval_sec:900,execution_mode:mode,use_news:false,allow_trailing_stop:false,status:"IDLE".into(),running:false,next_run_at:None,last_run_at:None,status_detail:None,consecutive_errors:0,is_demo:false,created_at:1}).unwrap();a.id
  }).await.unwrap();
     (rt, model, account)
 }
@@ -1016,11 +1019,13 @@ async fn candle_wait_responsive_and_current_quote_rechecked_after_model() {
     f.gate.notify_one();
     wait_calls(&m, 1).await;
     f.quote.lock().unwrap().as_mut().unwrap().ts -= 120000;
+    // The refused reply is asked about once more; that second try is not held.
+    m.blocked.store(0, Ordering::SeqCst);
     m.gate.notify_one();
-    assert_eq!(
-        job.await.unwrap().unwrap().unwrap()["outcome"],
-        "RISK_REJECTED"
-    );
+    let r = job.await.unwrap().unwrap().unwrap();
+    assert_eq!(r["outcome"], "RISK_REJECTED");
+    assert_eq!(r["attempts"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(m.calls.load(Ordering::SeqCst), 2);
     assert_eq!(order_count(&rt, a).await, 0);
     rt.shutdown().await;
 }
@@ -1484,5 +1489,446 @@ async fn locked_vault_does_not_load_saved_plaintext_provider_keys() {
         .as_str()
         .unwrap()
         .starts_with("[critical]"));
+    rt.shutdown().await;
+}
+#[tokio::test]
+async fn a_confidence_floor_holds_back_entries_the_model_is_less_sure_of() {
+    let (rt, m, a) = setup("AUTO").await;
+    // The test model states 0.8.
+    let floor = |min: f64| {
+        let risk = serde_json::to_string(&mochi_domain::RiskSettings {
+            min_confidence: min,
+            ..default_risk_settings()
+        })
+        .unwrap();
+        let rt = rt.clone();
+        async move {
+            rt.call(move |r| {
+                r.connection()
+                    .execute("UPDATE agents SET risk=? WHERE id='agent'", [risk])
+                    .unwrap();
+            })
+            .await
+            .unwrap();
+        }
+    };
+    floor(0.9).await;
+    *m.response.lock().unwrap() = Ok(decision("LONG").to_string());
+    let s = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(s["outcome"], "RISK_REJECTED");
+    assert!(s.to_string().contains("Confidence threshold"), "{s}");
+    assert_eq!(order_count(&rt, a.clone()).await, 0);
+
+    floor(0.8).await;
+    assert_eq!(
+        cycle(&rt, CycleTrigger::RunOnce).await["outcome"],
+        "EXECUTED"
+    );
+    assert!(order_count(&rt, a).await > 0);
+    rt.shutdown().await;
+
+    // A suggestion made before the floor was raised is checked against the floor when accepted.
+    let (rt, m, a) = setup("SIGNAL").await;
+    *m.response.lock().unwrap() = Ok(decision("LONG").to_string());
+    let s = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(s["outcome"], "SIGNAL");
+    let risk = serde_json::to_string(&mochi_domain::RiskSettings {
+        min_confidence: 0.9,
+        ..default_risk_settings()
+    })
+    .unwrap();
+    rt.call(move |r| {
+        r.connection()
+            .execute("UPDATE agents SET risk=? WHERE id='agent'", [risk])
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    let accepted = rt.execute_signal(s["id"].as_str().unwrap()).await.unwrap();
+    assert_eq!(accepted["outcome"], "RISK_REJECTED", "{accepted}");
+    assert_eq!(order_count(&rt, a).await, 0);
+    rt.shutdown().await;
+}
+#[tokio::test]
+async fn a_refused_reply_is_told_why_and_asked_once_more() {
+    let (rt, m, a) = setup("AUTO").await;
+    let mut unstopped = decision("LONG");
+    unstopped["stopLoss"] = Value::Null;
+    // A key the reply echoes is quoted back redacted.
+    unstopped["reason"] = json!("echo custom-secret-agent-key");
+    *m.response.lock().unwrap() = Ok(unstopped.to_string());
+    *m.then.lock().unwrap() = Some(Ok(decision("LONG").to_string()));
+    let r = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(r["outcome"], "EXECUTED", "{r}");
+    assert!(order_count(&rt, a.clone()).await > 0);
+    let attempts = r["attempts"].as_array().unwrap();
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0]["outcome"], "RISK_REJECTED");
+    assert!(attempts[0]["decision"]["stopLoss"].is_null());
+    // Both calls count.
+    assert_eq!(r["inputTokens"], json!(4.0));
+    assert_eq!(r["outputTokens"], json!(6.0));
+    {
+        let requests = m.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        let retry = &requests[1].user;
+        assert!(retry.starts_with(&requests[0].user));
+        assert!(
+            retry.contains(
+                "<refused>
+BTCUSDT: Stop loss present: new positions must carry a stop loss"
+            ),
+            "{retry}"
+        );
+        assert!(
+            retry.contains(
+                "<reply>
+{"
+            ),
+            "{retry}"
+        );
+        assert!(!retry.contains("custom-secret-agent-key"), "{retry}");
+        assert_eq!(requests[1].system, requests[0].system);
+    }
+    rt.shutdown().await;
+
+    // Refused twice: no third call, and the cycle ends refused.
+    let (rt, m, a) = setup("AUTO").await;
+    *m.response.lock().unwrap() = Ok(unstopped.to_string());
+    let r = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(r["outcome"], "RISK_REJECTED");
+    assert_eq!(m.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(order_count(&rt, a).await, 0);
+
+    // A reply that does not parse is asked about again too; a HOLD then is a fine answer.
+    *m.response.lock().unwrap() = Ok("not json".into());
+    *m.then.lock().unwrap() = Some(Ok(decision("HOLD").to_string()));
+    let r = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(r["outcome"], "HOLD", "{r}");
+    assert_eq!(r["attempts"][0]["outcome"], "INVALID_OUTPUT");
+    assert_eq!(m.calls.load(Ordering::SeqCst), 4);
+    // A first reply that is not refused is never asked about again.
+    let r = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(r["outcome"], "HOLD");
+    assert!(r.get("attempts").is_none());
+    assert_eq!(m.calls.load(Ordering::SeqCst), 5);
+
+    // A retry the provider fails leaves the refusal as the outcome: not an error streak.
+    *m.response.lock().unwrap() = Ok(unstopped.to_string());
+    *m.then.lock().unwrap() = Some(Err(ProviderError::new(
+        mochi_ai::ProviderErrorCode::RateLimit,
+        "slow down",
+    )));
+    let r = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(r["outcome"], "RISK_REJECTED", "{r}");
+    assert!(r.get("attempts").is_none(), "{r}");
+    let detail = r["outcomeDetail"].as_str().unwrap();
+    assert!(detail.contains("asking the model again failed"), "{detail}");
+    assert!(detail.contains("slow down"), "{detail}");
+    let agent = rt
+        .call(|r| r.require_agent("agent").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(agent.consecutive_errors, 0);
+    rt.shutdown().await;
+}
+#[tokio::test]
+async fn an_agent_that_trails_instead_of_taking_profit_is_told_and_held_to_it() {
+    let (rt, m, a) = setup("AUTO").await;
+    let risk = serde_json::to_string(&mochi_domain::RiskSettings {
+        trail_instead_of_take_profit: true,
+        ..default_risk_settings()
+    })
+    .unwrap();
+    // The agent's own trailing switch stays off: the setting turns trailing stops on.
+    rt.call(move |r| {
+        r.connection()
+            .execute(
+                "UPDATE agents SET risk=?, allow_trailing_stop=0 WHERE id='agent'",
+                [risk],
+            )
+            .unwrap();
+    })
+    .await
+    .unwrap();
+
+    let mut target = decision("LONG");
+    target["takeProfit"] = json!(10_000_000);
+    *m.response.lock().unwrap() = Ok(target.to_string());
+    let s = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(s["outcome"], "RISK_REJECTED", "{s}");
+    assert!(s.to_string().contains("Trailing exit"), "{s}");
+    let system = m.requests.lock().unwrap()[0].system.clone();
+    assert!(system.contains("exits by trailing stop instead of take profit"));
+    assert!(system.contains("\"trailingStop\""), "{system}");
+    assert_eq!(order_count(&rt, a.clone()).await, 0);
+
+    let mut trailing = decision("LONG");
+    trailing["trailingStop"] =
+        json!({"kind": "RATIO", "callback": 0.01, "activationPrice": 10_000_000});
+    *m.response.lock().unwrap() = Ok(trailing.to_string());
+    let s = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(s["outcome"], "EXECUTED", "{s}");
+    assert!(order_count(&rt, a).await > 0);
+    rt.shutdown().await;
+}
+#[tokio::test]
+async fn a_message_reaches_the_next_model_call_once_and_is_kept_on_its_record() {
+    let (rt, m, _) = setup("SIGNAL").await;
+    let record = rt
+        .message_agent("agent", "Funding flipped: do not go long".into())
+        .await
+        .unwrap()
+        .expect("the cycle runs now");
+    assert_eq!(record["ownerMessage"], "Funding flipped: do not go long");
+    assert_eq!(record["trigger"], "RUN_ONCE");
+    let first = m.requests.lock().unwrap()[0].user.clone();
+    assert!(
+        first.ends_with("<message>\nFunding flipped: do not go long\n</message>"),
+        "{first}"
+    );
+    assert!(!m.requests.lock().unwrap()[0]
+        .system
+        .contains("Funding flipped"));
+
+    // Used once: the next cycle has no message.
+    let next = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert!(next.get("ownerMessage").is_none(), "{next}");
+    assert!(!m.requests.lock().unwrap()[1].user.contains("<message>"));
+
+    // A cycle that cannot start drops the message instead of keeping it for later.
+    assert!(rt.message_agent("missing", "x".into()).await.is_err());
+
+    // A key pasted into a message reaches neither the model nor the history.
+    let record = rt
+        .message_agent("agent", "my key is custom-secret-agent-key".into())
+        .await
+        .unwrap()
+        .unwrap();
+    let sent = m.requests.lock().unwrap().last().unwrap().user.clone();
+    assert!(!sent.contains("custom-secret-agent-key"), "{sent}");
+    assert!(!record["ownerMessage"]
+        .as_str()
+        .unwrap()
+        .contains("custom-secret-agent-key"));
+    rt.shutdown().await;
+}
+#[tokio::test]
+async fn messages_sent_while_a_cycle_runs_all_wait_for_the_next_one() {
+    let (rt, m, _) = setup("SIGNAL").await;
+    m.blocked.store(1, Ordering::SeqCst);
+    let h = rt.clone();
+    let running = tokio::spawn(async move { h.run_cycle("agent", CycleTrigger::RunOnce).await });
+    wait_calls(&m, 1).await;
+    // Both wait while the first cycle is with the model; neither replaces the other.
+    assert!(rt
+        .message_agent("agent", "stay flat".into())
+        .await
+        .unwrap()
+        .is_none());
+    assert!(rt
+        .message_agent("agent", "then close".into())
+        .await
+        .unwrap()
+        .is_none());
+    m.blocked.store(0, Ordering::SeqCst);
+    m.gate.notify_one();
+    running.await.unwrap().unwrap();
+
+    let next = cycle(&rt, CycleTrigger::RunOnce).await;
+    assert_eq!(
+        next["ownerMessage"],
+        "stay flat
+
+then close"
+    );
+    rt.shutdown().await;
+}
+/// The agent's last record, newest first.
+async fn last_record(rt: &RuntimeHandle) -> Value {
+    rt.call(|r| {
+        let records = rows::list_decisions(r.connection(), Some("agent"), 1).unwrap();
+        serde_json::from_str(records[0].get()).unwrap()
+    })
+    .await
+    .unwrap()
+}
+async fn close_by_hand(rt: &RuntimeHandle) {
+    rt.call(|r| {
+        let a = r.require_agent("agent").unwrap();
+        let p = r
+            .engine()
+            .store()
+            .get_open_position(&a.account_id, "BTCUSDT")
+            .unwrap()
+            .unwrap();
+        r.engine_mut().place_order(serde_json::from_value(json!({"accountId":a.account_id,"clientOrderId":"manual-close","symbol":"BTCUSDT","side":"SELL","type":"MARKET","quantity":p.quantity,"leverage":p.leverage,"reduceOnly":true})).unwrap()).unwrap();
+    })
+    .await
+    .unwrap();
+}
+#[tokio::test]
+async fn a_position_changed_by_anything_but_the_agent_runs_it_at_once() {
+    let (rt, m, _) = setup("AUTO").await;
+    rt.call(|r| {
+        let mut a = r.require_agent("agent").unwrap();
+        a.interval_sec = 3600;
+        rows::save_agent(r.connection(), &a).unwrap();
+        r.start_agent("agent").unwrap();
+    })
+    .await
+    .unwrap();
+    rt.step_replay(1).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 1);
+    rt.step_replay(2).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 1, "nothing changed");
+
+    // The agent's own entry moves its position: that is no reason to ask again.
+    *m.response.lock().unwrap() = Ok(decision("LONG").to_string());
+    assert_eq!(
+        cycle(&rt, CycleTrigger::RunOnce).await["outcome"],
+        "EXECUTED"
+    );
+    *m.response.lock().unwrap() = Ok(decision("HOLD").to_string());
+    rt.step_replay(2).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 2, "its own order");
+
+    // Closed outside the agent: it runs on the next bar, not an hour later, and once.
+    close_by_hand(&rt).await;
+    rt.step_replay(1).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 3);
+    let record = last_record(&rt).await;
+    assert_eq!(record["trigger"], "POSITION_CHANGE");
+    assert_eq!(record["outcome"], "HOLD");
+    assert!(
+        record["snapshot"]["position"].is_null(),
+        "it sees the position gone"
+    );
+    rt.step_replay(2).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 3);
+
+    // A stopped agent is not woken, and starting it again begins from what is there then.
+    rt.call(|r| r.stop_agent("agent")).await.unwrap().unwrap();
+    open_position(&rt, None, false).await;
+    rt.step_replay(1).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 3);
+    rt.call(|r| r.start_agent("agent")).await.unwrap().unwrap();
+    rt.step_replay(2).await.unwrap();
+    assert_eq!(
+        m.calls.load(Ordering::SeqCst),
+        4,
+        "one scheduled run, no extra one"
+    );
+    assert_eq!(last_record(&rt).await["trigger"], "SCHEDULE");
+    rt.shutdown().await;
+}
+#[tokio::test]
+async fn a_stop_loss_fill_runs_a_live_agent_before_its_interval() {
+    let f = feed();
+    let (sender, quotes) = tokio::sync::mpsc::channel(4);
+    let mut options = RuntimeOptions::new(open_in_memory().unwrap());
+    options.live = f.clone();
+    options.live_quotes = Some(quotes);
+    let (rt, m, account) = setup_with("AUTO", options, DataSource::Live).await;
+    open_position(&rt, Some("69000"), false).await;
+    rt.call(|r| r.start_agent("agent")).await.unwrap().unwrap();
+    wait_calls(&m, 1).await;
+    let idle = |rt: RuntimeHandle| async move {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while rt.call(|r| r.is_agent_busy("agent")).await.unwrap() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    };
+    idle(rt.clone()).await;
+    let mut q = f.quote.lock().unwrap().clone().unwrap();
+    q.last = "68500".into();
+    q.bid = "68499".into();
+    q.ask = "68501".into();
+    q.mark = "68500".into();
+    *f.quote.lock().unwrap() = Some(q.clone());
+    sender.send(q).await.unwrap();
+    wait_calls(&m, 2).await;
+    idle(rt.clone()).await;
+    let record = last_record(&rt).await;
+    assert_eq!(record["trigger"], "POSITION_CHANGE");
+    assert!(rt
+        .call(move |r| r
+            .engine()
+            .store()
+            .get_open_position(&account, "BTCUSDT")
+            .unwrap()
+            .is_none())
+        .await
+        .unwrap());
+    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+    assert_eq!(m.calls.load(Ordering::SeqCst), 2, "one run per change");
+    rt.shutdown().await;
+}
+/// Moved to another account, the agent has not seen that account's positions yet: they are
+/// recorded, not taken as a change to run it for.
+#[tokio::test]
+async fn moving_an_agent_to_another_account_is_no_position_change() {
+    let (rt, m, _) = setup("AUTO").await;
+    rt.call(|r| {
+        let mut a = r.require_agent("agent").unwrap();
+        a.interval_sec = 3600;
+        rows::save_agent(r.connection(), &a).unwrap();
+        r.start_agent("agent").unwrap();
+    })
+    .await
+    .unwrap();
+    rt.step_replay(1).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 1);
+
+    rt.call(|r| {
+        let other = r.engine_mut().create_account(CreateAccountArgs{name:"other".into(),source:DataSource::Replay,initial_balance:None,is_demo:None,config:None}).unwrap();
+        r.engine_mut().place_order(serde_json::from_value(json!({"accountId":other.id,"clientOrderId":"other-open","symbol":"BTCUSDT","side":"BUY","type":"MARKET","quantity":"0.01","leverage":3})).unwrap()).unwrap();
+        let input = serde_json::from_value(json!({"name":"agent","providerId":"provider","model":"test","symbols":["BTCUSDT"],"timeframe":"15m","strategy":"test","accountId":other.id,"risk":default_risk_settings(),"intervalSec":3600,"executionMode":"AUTO","useNews":false,"allowTrailingStop":false})).unwrap();
+        r.update_agent("agent", input).unwrap();
+    })
+    .await
+    .unwrap();
+    rt.step_replay(2).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 1);
+    rt.shutdown().await;
+}
+/// A pair taken off the agent and added back is new to it again: a position opened in between
+/// is recorded, not taken as a change.
+#[tokio::test]
+async fn a_pair_added_back_starts_from_what_is_there() {
+    let (rt, m, _) = setup("AUTO").await;
+    let edit = |symbols: &'static [&'static str]| {
+        let rt = rt.clone();
+        async move {
+            rt.call(move |r| {
+                let a = r.require_agent("agent").unwrap();
+                let input = serde_json::from_value(json!({"name":"agent","providerId":"provider","model":"test","symbols":symbols,"timeframe":"15m","strategy":"test","accountId":a.account_id,"risk":default_risk_settings(),"intervalSec":3600,"executionMode":"AUTO","useNews":false,"allowTrailingStop":false})).unwrap();
+                r.update_agent("agent", input).unwrap();
+            })
+            .await
+            .unwrap();
+        }
+    };
+    let mut eth = decision("HOLD");
+    eth["symbol"] = json!("ETHUSDT");
+    *m.response.lock().unwrap() = Ok(json!({"decisions":[decision("HOLD"), eth]}).to_string());
+    edit(&["BTCUSDT", "ETHUSDT"]).await;
+    rt.call(|r| r.start_agent("agent")).await.unwrap().unwrap();
+    rt.step_replay(1).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 1);
+
+    edit(&["BTCUSDT"]).await;
+    rt.call(|r| {
+        let a = r.require_agent("agent").unwrap();
+        r.engine_mut().place_order(serde_json::from_value(json!({"accountId":a.account_id,"clientOrderId":"eth-open","symbol":"ETHUSDT","side":"BUY","type":"MARKET","quantity":"0.1","leverage":3})).unwrap()).unwrap();
+    })
+    .await
+    .unwrap();
+    edit(&["BTCUSDT", "ETHUSDT"]).await;
+    rt.step_replay(2).await.unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), 1);
     rt.shutdown().await;
 }

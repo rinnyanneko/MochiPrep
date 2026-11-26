@@ -8,6 +8,7 @@
 use super::execution::{ExecutionEngine, ExecutionTarget, ProtectionFailure, ProtectionMeta};
 use super::{internal_error, Runtime, RuntimeHandle};
 use crate::error::ApiError;
+use futures_util::FutureExt;
 use mochi_core::{
     paper::{DailyRisk, PaperStore, ProtectionResult},
     risk::{evaluate_risk, RiskInput},
@@ -94,6 +95,10 @@ pub fn effective_risk(a: &RiskSettings, c: Option<&RiskSettings>) -> RiskSetting
             require_stop_loss: a.require_stop_loss || c.require_stop_loss,
             max_quote_age_sec: a.max_quote_age_sec.min(c.max_quote_age_sec),
             max_notional: a.max_notional.min(c.max_notional),
+            // The stricter floor: an account's own floor holds for every agent on it.
+            min_confidence: a.min_confidence.max(c.min_confidence),
+            trail_instead_of_take_profit: a.trail_instead_of_take_profit
+                || c.trail_instead_of_take_profit,
         },
     }
 }
@@ -120,8 +125,29 @@ pub(super) enum Acted {
 }
 
 impl Act {
-    /// Sends the act through the trait, as Node's runner awaits its engine.
+    /// Sends the act through the trait, as Node's runner awaits its engine. The future runs in
+    /// the agents' pending stream, outside the actor's panic guard, so a panic here would end
+    /// the runtime task: it is caught and answered as an error instead. An order may have
+    /// reached the exchange before the panic, so the error says the next sync settles it, and the
+    /// position watch treats it as a possibly lost answer.
     pub(super) async fn run(self, engine: Arc<dyn ExecutionEngine>) -> Acted {
+        let protect = matches!(self, Act::Protect { .. });
+        std::panic::AssertUnwindSafe(self.send(engine))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| {
+                let error = ApiError::bad_request(
+                    "The order step failed unexpectedly; the next account sync shows whether it went through",
+                );
+                if protect {
+                    Acted::Protected(Err(ProtectionFailure { error, after: None }))
+                } else {
+                    Acted::Placed(Err(error))
+                }
+            })
+    }
+
+    async fn send(self, engine: Arc<dyn ExecutionEngine>) -> Acted {
         match self {
             Act::Place(request) => Acted::Placed(engine.place_order(request).await.map(Box::new)),
             Act::CloseOkx {
@@ -382,6 +408,19 @@ impl Runtime {
         }
     }
 
+    /// Whether the agent exits by trailing stop instead of take profit, by its own limits or its
+    /// account's, as `effective_risk` combines them. The prompt says so up front; the risk
+    /// engine enforces it on every decision either way.
+    pub(super) fn trails_instead(&self, a: &rows::Agent) -> bool {
+        let own = serde_json::from_str::<RiskSettings>(a.risk.get())
+            .is_ok_and(|r| r.trail_instead_of_take_profit);
+        own || self
+            .require_account(&a.account_id)
+            .ok()
+            .and_then(|account| account.live_limits)
+            .is_some_and(|limits| limits.trail_instead_of_take_profit)
+    }
+
     pub(super) fn assess(
         &self,
         a: &rows::Agent,
@@ -483,13 +522,19 @@ impl Runtime {
         checked: Option<mochi_okx::engine::CheckedProtection>,
     ) -> Result<Option<Outgoing>, ApiError> {
         let act = self.act_for(a, d, r, target, checked)?;
+        let before = self.before_own_order(a, target);
+        let moves = !matches!(act, Act::Protect { .. });
         match target {
             ExecutionTarget::Paper => {
                 let acted = self.act_now(act);
+                self.after_own_order(a, target, before, moves);
                 settle_acted(r, acted);
                 Ok(None)
             }
-            ExecutionTarget::Okx(_) => Ok(Some((self.engine_for(target.clone()), act))),
+            ExecutionTarget::Okx(_) => {
+                self.after_own_order(a, target, before, moves);
+                Ok(Some((self.engine_for(target.clone()), act)))
+            }
         }
     }
 
@@ -637,15 +682,23 @@ impl Runtime {
     /// trusted except the idea itself: the risk engine runs again on current prices and balances.
     pub(super) fn begin_signal(&mut self, id: &str) -> Result<SignalStep, ApiError> {
         let mut r = self.pending_signal(id)?;
-        let a = self.require_agent(r["agentId"].as_str().unwrap_or_default())?;
+        let mut a = self.require_agent(r["agentId"].as_str().unwrap_or_default())?;
         if self.is_agent_busy(&a.id) {
             return Err(ApiError::bad_request(
                 "This agent is busy. Try again in a moment.",
             ));
         }
         let account = self.require_account(&a.account_id)?;
+        // A suggestion is for one of the agent's pairs; everything below trades that pair.
+        let pair = r["symbol"].as_str().unwrap_or_default().to_string();
+        let traded = a.symbols.contains(&pair);
+        if traded {
+            a.symbol = pair;
+        }
         let expired = if r["accountId"] != account.id || r["source"] != json!(account.source) {
             Some("Account or market source changed since this suggestion")
+        } else if !traded {
+            Some("The agent no longer trades this pair")
         } else {
             (r["signalExpiresAt"].as_i64().unwrap_or(0) <= self.market_now(account.source))
                 .then_some("Expired before it was acted on")
@@ -740,6 +793,9 @@ impl Runtime {
         if self.agents.active.get(agent_id).map(String::as_str) == Some(token) {
             self.agents.active.remove(agent_id);
         }
+        if let Some(symbol) = record["symbol"].as_str().map(String::from) {
+            self.own_order_answered(agent_id, &symbol, &acted);
+        }
         settle_acted(&mut record, acted);
         self.save_signal(record)
     }
@@ -756,6 +812,17 @@ impl Runtime {
         predicate: impl Fn(&Value) -> bool,
         detail: &str,
     ) -> Result<(), ApiError> {
+        self.retire_signal_rows(predicate, detail)?;
+        self.invalidate(&[mochi_domain::Topic::Decisions]);
+        Ok(())
+    }
+    /// The store half of [`Self::retire_signals`], for a caller that holds a transaction and
+    /// invalidates once it commits.
+    pub(super) fn retire_signal_rows(
+        &self,
+        predicate: impl Fn(&Value) -> bool,
+        detail: &str,
+    ) -> Result<(), ApiError> {
         for raw in rows::list_pending_signals(self.connection()).map_err(|e| self.api_error(e))? {
             let mut r: Value = serde_json::from_str(raw.get()).map_err(|e| self.api_error(e))?;
             if predicate(&r) {
@@ -763,7 +830,6 @@ impl Runtime {
                 rows::save_decision(self.connection(), &r).map_err(|e| self.api_error(e))?;
             }
         }
-        self.invalidate(&[mochi_domain::Topic::Decisions]);
         Ok(())
     }
     pub fn retire_all_signals(&mut self) -> Result<(), ApiError> {
@@ -794,5 +860,78 @@ impl Runtime {
             mochi_domain::Topic::Positions,
             mochi_domain::Topic::Arena,
         ]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::future::BoxFuture;
+
+    /// Panics in every call, as a bug in an engine would.
+    struct Panics;
+    impl ExecutionEngine for Panics {
+        fn place_order(&self, _: OrderRequest) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
+            Box::pin(async { panic!("place_order") })
+        }
+        fn cancel_order(&self, _: String) -> BoxFuture<'_, Result<(), ApiError>> {
+            Box::pin(async { panic!("cancel_order") })
+        }
+        fn close_position(
+            &self,
+            _: String,
+            _: String,
+            _: f64,
+            _: String,
+            _: Option<String>,
+        ) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
+            Box::pin(async { panic!("close_position") })
+        }
+        fn positions(&self, _: String) -> BoxFuture<'_, Result<Vec<PositionView>, ApiError>> {
+            Box::pin(async { panic!("positions") })
+        }
+        fn open_orders(&self, _: String) -> BoxFuture<'_, Result<Vec<Order>, ApiError>> {
+            Box::pin(async { panic!("open_orders") })
+        }
+        fn balance(&self, _: String) -> BoxFuture<'_, Result<AccountBalance, ApiError>> {
+            Box::pin(async { panic!("balance") })
+        }
+        fn daily_risk(&self, _: String) -> BoxFuture<'_, Result<DailyRisk, ApiError>> {
+            Box::pin(async { panic!("daily_risk") })
+        }
+        fn set_protection(
+            &self,
+            _: String,
+            _: String,
+            _: Protection,
+            _: ProtectionMeta,
+        ) -> BoxFuture<'_, Result<ProtectionResult, ProtectionFailure>> {
+            Box::pin(async { panic!("set_protection") })
+        }
+        fn protection_of(
+            &self,
+            _: String,
+            _: String,
+        ) -> BoxFuture<'_, Result<Protection, ApiError>> {
+            Box::pin(async { panic!("protection_of") })
+        }
+    }
+
+    /// The agent's act runs off the actor's panic guard, so a panic must come back as an answer
+    /// (an order whose outcome the next sync settles) rather than unwind through the actor.
+    #[tokio::test]
+    async fn a_panicking_engine_is_an_unknown_outcome() {
+        let request: OrderRequest = serde_json::from_value(json!({
+            "accountId": "a", "clientOrderId": "c", "symbol": "BTCUSDT", "side": "BUY",
+            "type": "MARKET", "quantity": "0.01", "leverage": 1
+        }))
+        .unwrap();
+        let mut record = json!({});
+        settle_acted(&mut record, Act::Place(request).run(Arc::new(Panics)).await);
+        assert_eq!(record["outcome"], "ORDER_REJECTED");
+        assert!(record["outcomeDetail"]
+            .as_str()
+            .unwrap()
+            .contains("the next account sync"));
     }
 }

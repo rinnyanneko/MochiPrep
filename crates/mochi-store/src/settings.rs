@@ -28,6 +28,11 @@ pub fn get_setting<T: DeserializeOwned>(
 }
 
 /// `setSetting`: stores `value` as JSON, replacing any earlier value.
+pub fn delete_setting(conn: &Connection, key: &str) -> Result<(), StoreError> {
+    conn.execute("DELETE FROM settings WHERE key=?", [key])?;
+    Ok(())
+}
+
 pub fn set_setting<T: Serialize + ?Sized>(
     conn: &Connection,
     key: &str,

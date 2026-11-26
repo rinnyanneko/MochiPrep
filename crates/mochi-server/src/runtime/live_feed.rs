@@ -23,6 +23,9 @@ pub type FeedResult<'a, T> = BoxFuture<'a, Result<T, String>>;
 /// The calls the runtime makes on a live feed. Quotes and status changes the feed receives
 /// reach the runtime through the `live_quotes` and `live_statuses` channels in `RuntimeOptions`,
 /// not through this trait.
+/// Why an offline feed has no replay history.
+const NO_HISTORY: &str = "Replay history needs the OKX connection";
+
 pub trait LiveFeed: Send + Sync {
     /// Node's `live.start()`, called once the runtime is built.
     fn start(&self) {}
@@ -45,6 +48,18 @@ pub trait LiveFeed: Send + Sync {
     /// Every pair this feed could trade. `fresh` skips any cache, for a spec that will be saved.
     fn list_instruments(&self, _fresh: bool) -> FeedResult<'_, Vec<InstrumentSpecification>> {
         Box::pin(async { Err(CANNOT_LIST.to_string()) })
+    }
+    /// Recorded one-minute bars of `symbol` from `start` for `minutes` minutes, oldest first,
+    /// for the replay; a minute without a trade has none. `progress` hears how many minutes
+    /// are done.
+    fn history_bars<'a>(
+        &'a self,
+        _symbol: &'a str,
+        _start: i64,
+        _minutes: usize,
+        _progress: &'a (dyn Fn(usize) + Send + Sync),
+    ) -> FeedResult<'a, Vec<Candle>> {
+        Box::pin(async { Err(NO_HISTORY.to_string()) })
     }
 }
 
@@ -121,5 +136,17 @@ impl LiveFeed for OkxPublicFeed {
 
     fn list_instruments(&self, fresh: bool) -> FeedResult<'_, Vec<InstrumentSpecification>> {
         Box::pin(OkxPublicFeed::list_instruments(self, fresh))
+    }
+
+    fn history_bars<'a>(
+        &'a self,
+        symbol: &'a str,
+        start: i64,
+        minutes: usize,
+        progress: &'a (dyn Fn(usize) + Send + Sync),
+    ) -> FeedResult<'a, Vec<Candle>> {
+        Box::pin(OkxPublicFeed::history_bars(
+            self, symbol, start, minutes, progress,
+        ))
     }
 }

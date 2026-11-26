@@ -91,7 +91,7 @@ async fn disarm(
         // Cleared before the account lookup: an unreadable store must not leave it armed.
         r.disarm(Some(&id));
         require_account(r, &id)?;
-        Ok(())
+        r.pause_disarmed_auto_agents(&id)
     })
     .await?;
     Ok(Json(json!({ "ok": true })))

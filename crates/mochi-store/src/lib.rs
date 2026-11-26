@@ -3,14 +3,20 @@
 
 mod ai;
 mod paper;
+mod replay_bars;
 pub mod rows;
 mod settings;
 pub mod templates;
 mod vault;
 
 pub use paper::SqlitePaperStore;
+pub use replay_bars::{
+    count_replay_bars, delete_replay_span, load_replay_bars, replay_bar_before, replay_coverage,
+    replay_coverage_of, save_replay_bars, Span,
+};
 pub use settings::{
-    delete_instrument, get_setting, has_vault, list_instruments, save_instrument, set_setting,
+    delete_instrument, delete_setting, get_setting, has_vault, list_instruments, save_instrument,
+    set_setting,
 };
 pub use vault::{
     delete_sealed_exchange_credentials, delete_vault, list_sealed_exchange_credentials,
@@ -87,6 +93,18 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
     (
         "015_agent_templates.sql",
         include_str!("../migrations/015_agent_templates.sql"),
+    ),
+    (
+        "016_agent_symbols.sql",
+        include_str!("../migrations/016_agent_symbols.sql"),
+    ),
+    (
+        "017_replay_history.sql",
+        include_str!("../migrations/017_replay_history.sql"),
+    ),
+    (
+        "018_replay_coverage.sql",
+        include_str!("../migrations/018_replay_coverage.sql"),
     ),
 ];
 

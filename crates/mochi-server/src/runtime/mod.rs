@@ -12,6 +12,7 @@ mod agent_execution;
 mod exchange;
 mod exchange_sync;
 mod execution;
+mod position_watch;
 pub use exchange::{ExchangeStatus, ARM_PHRASE};
 pub use execution::{
     ExecutionEngine, ExecutionTarget, OkxOptions, ProtectionFailure, ProtectionMeta,
@@ -24,8 +25,8 @@ pub mod live_feed;
 pub mod news;
 pub mod redact;
 pub mod replay_clock;
+mod replay_data;
 mod scheduling;
-pub use scheduling::DemoAction;
 mod vault;
 pub use vault::{UnlockOutcome, VAULT_RESET_PHRASE};
 
@@ -63,6 +64,7 @@ pub use news::{NewsService, OfflineNews};
 use redact::redact_secrets;
 pub use replay_clock::ReplayClock;
 use replay_clock::DEFAULT_SPEED;
+pub use replay_data::{ReplayDataView, ReplayPlan, ReplayRange, NOT_LOADED};
 
 /// Equity history points on the replay, in tape time (Node's REPLAY_EQUITY_EVERY_MS).
 const REPLAY_EQUITY_EVERY_MS: i64 = 15 * 60_000;
@@ -75,6 +77,8 @@ const COMMAND_QUEUE: usize = 256;
 
 /// The provider name Node's `ReplayMarketData` reports.
 const REPLAY_PROVIDER: &str = "Synthetic replay";
+/// The replay of recorded OKX one-minute bars.
+const HISTORY_PROVIDER: &str = "OKX history replay";
 
 pub type Engine = PaperExecutionEngine<SqlitePaperStore>;
 
@@ -89,6 +93,9 @@ pub struct RuntimeOptions {
     /// The built-in pairs, which are the pairs on the replay tape: `DEFAULT_SYMBOLS`. Tests
     /// that replay recordings from the Node backend pass the three pairs Node shipped.
     pub builtin_symbols: Vec<&'static str>,
+    /// Replay recorded OKX history, downloaded through `live` the first time the replay is used.
+    /// Off, the bundled synthetic tape plays from the start, as tests and offline runs need.
+    pub replay_history: bool,
     pub live: Arc<dyn LiveFeed>,
     /// Quotes the live feed receives, in arrival order. `None` when it sends none.
     pub live_quotes: Option<mpsc::Receiver<Quote>>,
@@ -113,6 +120,7 @@ impl RuntimeOptions {
             db,
             replay_minutes: None,
             builtin_symbols: DEFAULT_SYMBOLS.to_vec(),
+            replay_history: false,
             live: Arc::new(OfflineFeed),
             live_quotes: None,
             live_statuses: None,
@@ -133,6 +141,7 @@ impl RuntimeOptions {
             db,
             replay_minutes: None,
             builtin_symbols: DEFAULT_SYMBOLS.to_vec(),
+            replay_history: true,
             live: Arc::new(feed),
             live_quotes,
             live_statuses,
@@ -151,13 +160,14 @@ pub enum StartError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Replay(#[from] TapeTooShort),
+    #[error("Cannot remove the old demo data: {0}")]
+    LegacyDemo(String),
 }
 
 /// The `/api/state` body, keys in Node's order.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StateBody {
-    pub demo_active: bool,
     pub vault: VaultStatus,
     pub replay: ReplayState,
     pub feeds: Vec<FeedStatus>,
@@ -196,8 +206,11 @@ impl RuntimeHandle {
             quotes: options.live_quotes,
             statuses: options.live_statuses,
         };
-        let replay =
-            ReplayMarketData::with_symbols(options.replay_minutes, &options.builtin_symbols)?;
+        let replay = if options.replay_history {
+            ReplayMarketData::unloaded(&options.builtin_symbols)
+        } else {
+            ReplayMarketData::with_symbols(options.replay_minutes, &options.builtin_symbols)?
+        };
         let mut runtime = Runtime::open(
             options.db,
             replay,
@@ -207,6 +220,7 @@ impl RuntimeHandle {
             options.kdf,
             options.okx,
         )?;
+        runtime.replay_history = options.replay_history;
         runtime.operation_logs = options.operation_logs.or_else(open_log);
         let events = runtime.events.sender();
         let (commands, inbox) = mpsc::channel(COMMAND_QUEUE);
@@ -315,7 +329,6 @@ pub struct Runtime {
     replay_batch: Option<scheduling::ReplayBatch>,
     replay_queue: std::collections::VecDeque<scheduling::ReplayRequest>,
     replay_idle: Vec<oneshot::Sender<()>>,
-    replay_idle_work: Vec<Command>,
     signal_raised: bool,
     /// Shared with the engine's quote and clock callbacks, which cannot borrow the runtime.
     /// Only the runtime task locks it, so it is never contended.
@@ -328,6 +341,12 @@ pub struct Runtime {
     instruments: Vec<InstrumentSpecification>,
     /// The pairs on the replay tape, which can never be removed.
     builtin: Vec<&'static str>,
+    /// The replay plays recorded OKX history rather than the synthetic tape.
+    replay_history: bool,
+    replay_download: Option<replay_data::Download>,
+    replay_error: Option<String>,
+    /// The dates of the loaded recorded replay.
+    replay_window: Option<replay_data::Window>,
     clock: ReplayClock,
     events: EventHub,
     /// What the engine reported during the current piece of work, handled right after it.
@@ -429,7 +448,6 @@ impl Runtime {
             replay_batch: None,
             replay_queue: Default::default(),
             replay_idle: Vec::new(),
-            replay_idle_work: Vec::new(),
             signal_raised: false,
             replay,
             live,
@@ -439,6 +457,10 @@ impl Runtime {
                 .filter_map(|symbol| default_instrument(symbol))
                 .collect(),
             builtin,
+            replay_history: false,
+            replay_download: None,
+            replay_error: None,
+            replay_window: None,
             clock: ReplayClock::new(DEFAULT_SPEED),
             events: EventHub::new(),
             engine_events,
@@ -458,8 +480,12 @@ impl Runtime {
             live_ticking: false,
         };
 
-        // The mock provider the demo needs, if this database does not have it yet.
-        rows::seed_mock_provider(runtime.connection(), unix_ms())?;
+        // Demo mode and the mock AI were removed: a database that used them loses the demo
+        // data, and the mock provider row unless an agent of the user's still points at it.
+        runtime
+            .remove_legacy_demo()
+            .map_err(|e| StartError::LegacyDemo(e.message().to_string()))?;
+        rows::remove_unused_mock_provider(runtime.connection())?;
         for spec in list_instruments(runtime.connection())? {
             runtime.live.track(&spec.symbol);
             runtime.register_instrument(spec);
@@ -600,7 +626,10 @@ impl Runtime {
             )));
         }
         let agents = rows::list_agents(self.connection()).map_err(|e| self.api_error(e))?;
-        if agents.iter().any(|agent| agent.symbol == symbol) {
+        if agents
+            .iter()
+            .any(|agent| agent.symbols.iter().any(|s| s == symbol))
+        {
             return Err(ApiError::bad_request("Agents still use this pair"));
         }
         let store = self.engine.store();
@@ -732,6 +761,9 @@ impl Runtime {
                 "{symbol} has no replay data. Use a Live OKX account."
             )));
         }
+        if source == DataSource::Replay {
+            self.assert_replay_loaded()?;
+        }
         Ok(())
     }
 
@@ -759,16 +791,24 @@ impl Runtime {
         let start = replay.first_playable_time();
         let end = replay.end_time();
         let now = replay.now();
+        // Before bars are loaded there is no clock: no time to show, and nothing played.
+        let loaded = replay.is_loaded();
         ReplayState {
-            loaded: true,
+            loaded,
             playing: self.clock.playing(),
             speed: self.clock.speed(),
-            now: Some(now),
-            start_time: Some(start),
-            end_time: Some(end),
+            now: loaded.then_some(now),
+            start_time: loaded.then_some(start),
+            end_time: loaded.then_some(end),
             at_end: replay.at_end(),
             // Like Math.min(1, Math.max(0, x)), NaN included.
-            progress: ((now - start) as f64 / (end - start) as f64).clamp(0.0, 1.0),
+            progress: if loaded {
+                ((now - start) as f64 / (end - start) as f64).clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
+            downloading: self.replay_download.as_ref().map(|d| d.fraction()),
+            load_error: self.replay_error.clone(),
         }
     }
 
@@ -776,7 +816,12 @@ impl Runtime {
     pub fn feeds(&self) -> Vec<FeedStatus> {
         let replay = FeedStatus {
             source: DataSource::Replay,
-            provider: REPLAY_PROVIDER.to_string(),
+            provider: if self.replay_history {
+                HISTORY_PROVIDER
+            } else {
+                REPLAY_PROVIDER
+            }
+            .to_string(),
             state: FeedState::OfflineReplay,
             last_message_at: Some(lock(&self.replay).now()),
             detail: None,
@@ -786,11 +831,7 @@ impl Runtime {
 
     /// Assemble state from the actor-owned database and feeds without inventing missing data.
     pub fn state(&self) -> Result<StateBody, ApiError> {
-        let demo = get_setting::<serde_json::Value>(self.connection(), "demo.active")
-            .map_err(|e| self.api_error(e))?;
         Ok(StateBody {
-            // Node's `=== true`: any other stored value is not active.
-            demo_active: demo == Some(serde_json::Value::Bool(true)),
             vault: self.vault_status()?,
             replay: self.replay_state(),
             feeds: self.feeds(),
@@ -800,8 +841,14 @@ impl Runtime {
 
     // ---- replay ---------------------------------------------------------------------------
 
-    /// Emits the replay state only when `playing` changes, as Node does.
+    /// Emits the replay state only when `playing` changes, as Node does. A replay without its
+    /// bars cannot play, nor can one whose next dates are downloading: playing the old bars
+    /// would save a cursor the new dates then start from. The route refuses both first; this
+    /// holds when a load starts between that check and this command.
     pub fn set_playing(&mut self, playing: bool) {
+        if playing && (!self.replay_loaded() || self.replay_download.is_some()) {
+            return;
+        }
         if self.clock.set_playing(playing) {
             self.emit(ServerEvent::Replay {
                 state: self.replay_state(),

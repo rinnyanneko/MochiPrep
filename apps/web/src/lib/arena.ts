@@ -1,5 +1,14 @@
 import type { ArenaRow } from '@mochiprep/shared';
 
+/** The arena's views: the replay, live prices with paper money, and real or demo OKX accounts. */
+export type ArenaView = 'REPLAY' | 'LIVE' | 'OKX';
+export const ARENA_VIEWS: readonly ArenaView[] = ['REPLAY', 'LIVE', 'OKX'];
+
+export function arenaView(row: Pick<ArenaRow, 'source' | 'venue'>): ArenaView {
+  if (row.venue !== 'PAPER') return 'OKX';
+  return row.source;
+}
+
 type Ranked = Pick<ArenaRow, 'returnPct' | 'pnl'>;
 
 const known = (n: number | null): n is number => n !== null && Number.isFinite(n);

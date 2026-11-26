@@ -370,6 +370,27 @@ pub struct RiskSettings {
     pub max_quote_age_sec: f64,
     #[serde(serialize_with = "serialize_js_number")]
     pub max_notional: f64,
+    /// New positions need the model to state at least this confidence, 0 to 1. Zero is off, and
+    /// is left out when written, so settings saved before it existed read and write unchanged.
+    #[serde(
+        default,
+        serialize_with = "serialize_js_number",
+        skip_serializing_if = "is_zero"
+    )]
+    pub min_confidence: f64,
+    /// New positions exit by a trailing stop with an activation price instead of a take profit:
+    /// an entry must carry one and no take profit, and PROTECT cannot set a new take profit. It
+    /// turns trailing stops on for the agent. Off is left out when written, like `min_confidence`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub trail_instead_of_take_profit: bool,
+}
+
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 pub fn default_risk_settings() -> RiskSettings {
@@ -381,6 +402,8 @@ pub fn default_risk_settings() -> RiskSettings {
         require_stop_loss: true,
         max_quote_age_sec: 30.0,
         max_notional: 100_000.0,
+        min_confidence: 0.0,
+        trail_instead_of_take_profit: false,
     }
 }
 

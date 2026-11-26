@@ -10,7 +10,7 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use mochi_core::ledger::audit_ledger;
 use mochi_core::paper::{CreateAccountArgs, PaperStore, StoreFailure};
-use mochi_domain::{AccountVenue, Topic};
+use mochi_domain::{AccountVenue, DataSource, Topic};
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
@@ -62,6 +62,10 @@ async fn create(
     let view = state
         .runtime
         .call(move |runtime| {
+            // A replay account opens at replay time, which starts only once the bars are loaded.
+            if input.source == DataSource::Replay {
+                runtime.assert_replay_loaded()?;
+            }
             let account = runtime
                 .engine_mut()
                 .create_account(CreateAccountArgs {

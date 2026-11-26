@@ -1,4 +1,4 @@
-import { KeyRound, Pencil, Plug, Plus, RotateCcw, ShieldCheck, Trash2, X } from 'lucide-react';
+import { KeyRound, Pencil, Plug, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
 import { ExchangeCard } from '@/components/ExchangeCard';
 import { NewsSourcesCard } from '@/components/NewsPanel';
 import { PairsCard } from '@/components/PairsCard';
@@ -238,16 +238,8 @@ function OperationLogsCard() {
 
 export function SettingsPage() {
   const providers = useApp((s) => s.providers);
-  const demoActive = useApp((s) => s.demoActive);
   const vault = useApp((s) => s.vault);
   const [editing, setEditing] = useState<ProviderView | 'new' | null>(null);
-  const [confirm, setConfirm] = useState<'reset' | 'exit' | null>(null);
-
-  const demoAction = async () => {
-    await attempt(() => api.post(confirm === 'reset' ? '/demo/reset' : '/demo/exit'));
-    await useApp.getState().refreshState();
-    setConfirm(null);
-  };
 
   return (
     <>
@@ -275,16 +267,6 @@ export function SettingsPage() {
 
         <VaultCard />
 
-        <Card>
-          <CardHeader title="Demo Mode" description={demoActive ? 'Active: synthetic tape, mock agents, 10,000 virtual USDT per account.' : 'Not active. Start it from the Dashboard.'} />
-          {demoActive && (
-            <div className="flex flex-wrap gap-2 px-5 pb-4">
-              <Button onClick={() => setConfirm('reset')}><RotateCcw /> Reset demo</Button>
-              <Button variant="danger" onClick={() => setConfirm('exit')}>Exit Demo Mode</Button>
-            </div>
-          )}
-        </Card>
-
         <PairsCard />
 
         <NewsSourcesCard />
@@ -292,17 +274,6 @@ export function SettingsPage() {
         <ExchangeCard />
       </div>
       {editing && <ProviderDialog provider={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
-      <Dialog
-        open={confirm !== null}
-        onOpenChange={() => setConfirm(null)}
-        title={confirm === 'reset' ? 'Reset the demo?' : 'Exit Demo Mode?'}
-        description={`Deletes all demo accounts, agents and trades${confirm === 'reset' ? ', then rebuilds them from the first bar' : ''}. Your own accounts and agents are untouched.`}
-      >
-        <div className="flex justify-end gap-2">
-          <Button onClick={() => setConfirm(null)}>Cancel</Button>
-          <Button variant="danger" onClick={demoAction} data-testid="confirm-demo-action">{confirm === 'reset' ? 'Reset demo' : 'Exit demo'}</Button>
-        </div>
-      </Dialog>
     </>
   );
 }

@@ -869,6 +869,7 @@ async fn keeps_exponent_notation_out_of_an_agent_order() {
                     provider_id: "remote".into(),
                     model: "m".into(),
                     symbol: "PEPEUSDT".into(),
+                    symbols: vec!["PEPEUSDT".into()],
                     timeframe: "15m".into(),
                     strategy: String::new(),
                     account_id: account.id.clone(),
@@ -1225,11 +1226,12 @@ async fn the_arena_reads_an_okx_agents_result_from_okx_history_and_its_open_posi
         async move {
             runtime
                 .call(move |r| {
+                    r.connection().execute(PROVIDER, []).unwrap();
                     r.connection()
                         .execute(
                             "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,
                                account_id,risk,interval_sec,status,running,created_at)
-                             VALUES ('agent_x','X','mock','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,?2)
+                             VALUES ('agent_x','X','p','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,?2)
                              ON CONFLICT(id) DO UPDATE SET created_at=excluded.created_at",
                             rusqlite::params![ACCOUNT, at],
                         )
@@ -1286,6 +1288,48 @@ async fn the_arena_reads_an_okx_agents_result_from_okx_history_and_its_open_posi
     assert_eq!(row["pnl"], "2.85");
     assert_eq!(row["tradeCount"], 1);
     assert_eq!(row["winRatePct"], json!(0));
+    // The P&L curve starts at 0 when the agent was made and ends at its whole P&L.
+    let curve = row["pnlCurve"].as_array().unwrap();
+    assert_eq!(curve[0], json!({ "ts": START + 500, "pnl": 0 }));
+    assert_eq!(curve.last().unwrap()["pnl"], json!(2.85));
+    // The open position's realized part is dated by nothing but the last sync, so it shows in
+    // the total only: the start, the agent's close, then the total.
+    let pnls: Vec<&Value> = curve.iter().map(|p| &p["pnl"]).collect();
+    assert_eq!(pnls, [&json!(0), &json!(-1.25), &json!(2.85)]);
+    assert!(curve
+        .windows(2)
+        .all(|w| w[0]["ts"].as_i64() <= w[1]["ts"].as_i64()));
+
+    // Another agent whose pairs include BTCUSDT shares the net position, so neither owns it.
+    w.state
+        .runtime
+        .call(|r| {
+            r.connection()
+                .execute(
+                    "INSERT INTO agents (id,name,provider_id,model,symbol,symbols,timeframe,
+                       strategy,account_id,risk,interval_sec,status,running,created_at)
+                     VALUES ('agent_y','Y','p','m','ETHUSDT','[\"ETHUSDT\",\"BTCUSDT\"]','15m',
+                       '',?1,'{}',900,'IDLE',0,?2)",
+                    rusqlite::params![ACCOUNT, START + 500],
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    let (_, arena) = send(&w.state, "GET", "/api/arena", None).await;
+    for row in arena.as_array().unwrap() {
+        assert_eq!(row["attribution"], "SHARED", "{row}");
+        assert_eq!(row["pnlCurve"], json!([]));
+    }
+    w.state
+        .runtime
+        .call(|r| {
+            r.connection()
+                .execute("DELETE FROM agents WHERE id='agent_y'", [])
+                .unwrap()
+        })
+        .await
+        .unwrap();
 
     // Created after the position opened: that position is not its own either.
     set_created(START + 2_000).await;
@@ -1358,10 +1402,11 @@ async fn exchange_arena_recovers_execution(remote_state: &str, position_closed: 
         .runtime
         .call(move |r| {
             let conn = r.connection();
+            conn.execute(PROVIDER, []).unwrap();
             conn.execute(
                 "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,
                    account_id,risk,interval_sec,status,running,created_at)
-                 VALUES ('agent_x','X','mock','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,?2)",
+                 VALUES ('agent_x','X','p','m','BTCUSDT','15m','',?1,'{}',900,'IDLE',0,?2)",
                 rusqlite::params![ACCOUNT, START],
             )
             .unwrap();
@@ -1477,4 +1522,84 @@ async fn arena_counts_a_position_opened_by_a_partially_filled_limit_order() {
 #[tokio::test]
 async fn arena_counts_a_position_closed_before_late_confirmation() {
     exchange_arena_recovers_execution("filled", true).await;
+}
+
+/// A provider for agents that never run: inserting an agent needs one.
+const PROVIDER: &str = "INSERT OR IGNORE INTO providers (id,name,kind,base_url,default_model,input_price,output_price,extra_headers,created_at) VALUES ('p','Gateway','OPENAI_COMPATIBLE',NULL,'m',NULL,NULL,'{}',1)";
+
+fn okx_agent(id: &str, execution_mode: &str) -> rows::Agent {
+    rows::Agent {
+        id: id.into(),
+        name: id.into(),
+        provider_id: "remote".into(),
+        model: "m".into(),
+        symbol: "BTCUSDT".into(),
+        symbols: vec!["BTCUSDT".into()],
+        timeframe: "15m".into(),
+        strategy: String::new(),
+        account_id: ACCOUNT.into(),
+        risk: serde_json::value::to_raw_value(&default_risk_settings()).unwrap(),
+        interval_sec: 900,
+        execution_mode: execution_mode.into(),
+        use_news: false,
+        allow_trailing_stop: false,
+        status: "WAITING".into(),
+        running: true,
+        next_run_at: Some(START + 900_000),
+        last_run_at: None,
+        status_detail: None,
+        consecutive_errors: 0,
+        is_demo: false,
+        created_at: 1,
+    }
+}
+
+#[tokio::test]
+async fn disarming_pauses_auto_agents_and_keeps_suggest_agents_running() {
+    let w = world(true).await;
+    w.state
+        .runtime
+        .call(|r| {
+            rows::insert_provider(
+                r.connection(),
+                &serde_json::from_value(json!({
+                    "id": "remote", "name": "r", "kind": "OPENAI", "baseUrl": null,
+                    "defaultModel": "m", "inputPricePerMTok": null, "outputPricePerMTok": null,
+                    "createdAt": 1,
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            rows::insert_agent(r.connection(), &okx_agent("auto", "AUTO")).unwrap();
+            rows::insert_agent(r.connection(), &okx_agent("suggest", "SIGNAL")).unwrap();
+        })
+        .await
+        .unwrap();
+
+    let path = format!("/api/exchange/okx/{ACCOUNT}/disarm");
+    assert_eq!(send(&w.state, "POST", &path, None).await.0, 200);
+    let agents = w
+        .state
+        .runtime
+        .call(|r| rows::list_agents(r.connection()).unwrap())
+        .await
+        .unwrap();
+    let auto = agents.iter().find(|a| a.id == "auto").unwrap();
+    assert!(!auto.running);
+    assert_eq!(auto.status, "PAUSED");
+    assert_eq!(
+        auto.status_detail.as_deref(),
+        Some("OKX is not armed. Arm it to resume.")
+    );
+    let suggest = agents.iter().find(|a| a.id == "suggest").unwrap();
+    assert!(suggest.running);
+
+    // Resuming needs arming again.
+    let (status, refused) = send(&w.state, "POST", "/api/agents/auto/resume", None).await;
+    assert_eq!(status, 400);
+    assert_eq!(
+        refused["error"],
+        "OKX is not armed. Arm it in Settings first."
+    );
+    w.state.runtime.shutdown().await;
 }

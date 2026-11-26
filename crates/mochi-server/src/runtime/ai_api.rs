@@ -1,9 +1,9 @@
-//! API-owned agent configuration and demo ownership. Analysis stays in the runner.
-use super::{lock, unix_ms, Runtime};
+//! API-owned agent configuration, and the removal of old demo data. Analysis stays in the runner.
+use super::{unix_ms, Runtime};
 use crate::{error::ApiError, validate::AgentInput};
-use mochi_core::paper::{CreateAccountArgs, PaperStore};
-use mochi_domain::{default_risk_settings, DataSource, ServerEvent, Timeframe, Topic};
-use mochi_store::{get_setting, rows, set_setting};
+use mochi_core::paper::PaperStore;
+use mochi_domain::Topic;
+use mochi_store::{delete_setting, rows};
 use serde_json::{value::to_raw_value, Value};
 
 impl Runtime {
@@ -11,7 +11,7 @@ impl Runtime {
         &self,
         provider: &str,
         account: &str,
-        symbol: &str,
+        symbols: &[String],
     ) -> Result<(), ApiError> {
         if rows::get_provider(self.connection(), provider)
             .map_err(|e| self.api_error(e))?
@@ -25,20 +25,21 @@ impl Runtime {
             .get_account(account)
             .map_err(|e| self.api_error(e))?
             .ok_or_else(|| ApiError::bad_request("Unknown paper account"))?;
-        self.assert_tradable(symbol, account.source)
+        for symbol in symbols {
+            self.assert_tradable(symbol, account.source)?;
+        }
+        Ok(())
     }
-    pub fn create_agent(
-        &mut self,
-        input: AgentInput,
-        is_demo: bool,
-    ) -> Result<rows::Agent, ApiError> {
-        self.assert_agent_refs(&input.provider_id, &input.account_id, &input.symbol)?;
+    pub fn create_agent(&mut self, input: AgentInput) -> Result<rows::Agent, ApiError> {
+        let symbols = input.pairs();
+        self.assert_agent_refs(&input.provider_id, &input.account_id, &symbols)?;
         let agent = rows::Agent {
             id: format!("agent_{}", uuid::Uuid::new_v4()),
             name: input.name,
             provider_id: input.provider_id,
             model: input.model,
-            symbol: input.symbol,
+            symbol: symbols[0].clone(),
+            symbols,
             timeframe: serde_json::to_value(input.timeframe)
                 .expect("timeframe")
                 .as_str()
@@ -57,7 +58,7 @@ impl Runtime {
             last_run_at: None,
             status_detail: None,
             consecutive_errors: 0,
-            is_demo,
+            is_demo: false,
             created_at: unix_ms(),
         };
         rows::insert_agent(self.connection(), &agent).map_err(|e| self.api_error(e))?;
@@ -65,7 +66,7 @@ impl Runtime {
         Ok(agent)
     }
     pub fn update_agent(&mut self, id: &str, input: AgentInput) -> Result<rows::Agent, ApiError> {
-        self.assert_agent_refs(&input.provider_id, &input.account_id, &input.symbol)?;
+        self.assert_agent_refs(&input.provider_id, &input.account_id, &input.pairs())?;
         let mut agent = self.api_agent(id)?;
         self.assert_agent_editable(id)?;
         if agent.running && agent.account_id != input.account_id {
@@ -79,8 +80,21 @@ impl Runtime {
                 agent.next_run_at = Some(self.market_now(source));
             }
         }
+        let moved = agent.account_id != input.account_id;
+        let before = agent.symbols.clone();
         apply_input(&mut agent, input)?;
         rows::save_agent(self.connection(), &agent).map_err(|e| self.api_error(e))?;
+        // What the agent saw, and any OKX order still settling, belong to the old account. On
+        // the new one it starts over: pairs seen there for the first time are only recorded.
+        if moved {
+            self.forget_positions(id);
+        } else {
+            let removed: Vec<String> = before
+                .into_iter()
+                .filter(|symbol| !agent.symbols.contains(symbol))
+                .collect();
+            self.forget_pairs(id, &removed);
+        }
         self.invalidate(&[Topic::Agents, Topic::Arena]);
         Ok(agent)
     }
@@ -104,6 +118,8 @@ impl Runtime {
         }
         self.assert_agent_editable(id)?;
         rows::delete_agent(self.connection(), id).map_err(|e| self.api_error(e))?;
+        // Messages for a deleted agent must not wait for an agent that will never run.
+        self.agents.messages.remove(id);
         self.invalidate(&[Topic::Agents, Topic::Decisions, Topic::Arena]);
         Ok(())
     }
@@ -116,116 +132,48 @@ impl Runtime {
         }
         Ok(signal)
     }
-    pub(super) fn is_demo_active(&self) -> Result<bool, ApiError> {
-        Ok(
-            get_setting::<Value>(self.connection(), "demo.active")
-                .map_err(|e| self.api_error(e))?
-                == Some(Value::Bool(true)),
-        )
-    }
-
-    pub(super) fn start_demo(&mut self) -> Result<(), ApiError> {
-        if self.is_demo_active()? {
+    /// Deletes what the removed demo mode created: its agents, its accounts with their orders and
+    /// ledger, and its setting. Runs at start; a database that never used the demo is unchanged.
+    pub(super) fn remove_legacy_demo(&mut self) -> Result<(), ApiError> {
+        // Asked in SQL, so a database without demo data is never parsed row by row here.
+        if !rows::has_legacy_demo(self.connection()).map_err(|e| self.api_error(e))? {
             return Ok(());
         }
-        {
-            let mut replay = lock(&self.replay);
-            replay.seek(0);
-            set_setting(self.connection(), "replay.cursor", &replay.position())
-                .map_err(|e| self.api_error(e))?;
-            self.last_replay_equity_at = replay.now();
-        }
-        for (name, model, strategy, label) in [
-            (
-                "Momentum Mochi",
-                "mock-momentum-v1",
-                "Follow the trend: EMA20/EMA50 with MACD confirmation.",
-                "Momentum",
-            ),
-            (
-                "Reversion Daifuku",
-                "mock-reversion-v1",
-                "Fade RSI extremes and exit at the midline.",
-                "Reversion",
-            ),
-            (
-                "Reckless Rice Cake",
-                "mock-reckless-v1",
-                "Misbehaves on purpose to show the risk engine at work.",
-                "Reckless",
-            ),
-        ] {
-            let account = self
-                .engine_mut()
-                .create_account(CreateAccountArgs {
-                    name: format!("{label} account"),
-                    source: DataSource::Replay,
-                    initial_balance: None,
-                    is_demo: Some(true),
-                    config: None,
-                })
-                .map_err(|e| self.api_error(e))?;
-            self.create_agent(
-                AgentInput {
-                    name: name.into(),
-                    provider_id: rows::MOCK_PROVIDER_ID.into(),
-                    model: model.into(),
-                    symbol: "BTCUSDT".into(),
-                    timeframe: Timeframe::M15,
-                    strategy: strategy.into(),
-                    account_id: account.id,
-                    risk: default_risk_settings(),
-                    interval_sec: 900,
-                    execution_mode: "AUTO".into(),
-                    use_news: false,
-                    allow_trailing_stop: false,
-                },
-                true,
-            )?;
-        }
-        self.engine_mut()
-            .create_account(CreateAccountArgs {
-                name: "Demo terminal".into(),
-                source: DataSource::Replay,
-                initial_balance: None,
-                is_demo: Some(true),
-                config: None,
-            })
-            .map_err(|e| self.api_error(e))?;
-        set_setting(self.connection(), "demo.active", &true).map_err(|e| self.api_error(e))?;
-        self.invalidate_demo();
-        self.emit(ServerEvent::Replay {
-            state: self.replay_state(),
-        });
-        Ok(())
-    }
-    pub fn clear_demo(&mut self) -> Result<(), ApiError> {
         self.engine()
             .store()
             .transaction(|| -> Result<(), mochi_core::paper::StoreFailure> {
-                for agent in rows::list_agents(self.connection()).map_err(|e| {
+                let failure = |e: mochi_store::StoreError| {
                     mochi_core::paper::StoreFailure::new(
                         mochi_core::paper::StoreFailureKind::Other,
                         e.to_string(),
                     )
-                })? {
+                };
+                // Accounts the user's own agents trade on stay, demo or not: deleting one would
+                // break that agent's row, and with it every start of the app.
+                let mut in_use = Vec::new();
+                for agent in rows::list_agents(self.connection()).map_err(failure)? {
                     if agent.is_demo {
-                        rows::delete_agent(self.connection(), &agent.id).map_err(|e| {
-                            mochi_core::paper::StoreFailure::new(
-                                mochi_core::paper::StoreFailureKind::Other,
-                                e.to_string(),
-                            )
-                        })?;
+                        rows::delete_agent(self.connection(), &agent.id).map_err(failure)?;
+                    } else {
+                        in_use.push(agent.account_id);
                     }
                 }
                 for account in self.engine().store().list_accounts()? {
-                    if account.is_demo {
+                    if !account.is_demo {
+                        continue;
+                    }
+                    if in_use.contains(&account.id) {
+                        // Kept as the user's account now, so this cleanup is not asked again.
+                        self.connection()
+                            .execute("UPDATE accounts SET is_demo=0 WHERE id=?", [&account.id])
+                            .map_err(|e| failure(e.into()))?;
+                    } else {
                         self.engine()
                             .store()
                             .delete_account_data(&account.id, false)?;
                     }
                 }
-                set_setting(self.connection(), "demo.active", &false).map_err(|e| {
+                delete_setting(self.connection(), "demo.active").map_err(|e| {
                     mochi_core::paper::StoreFailure::new(
                         mochi_core::paper::StoreFailureKind::Other,
                         e.to_string(),
@@ -234,25 +182,16 @@ impl Runtime {
                 Ok(())
             })
             .map_err(|e| self.api_error(e))?;
-        self.invalidate_demo();
         Ok(())
-    }
-    fn invalidate_demo(&mut self) {
-        self.invalidate(&[
-            Topic::Accounts,
-            Topic::Agents,
-            Topic::Arena,
-            Topic::Decisions,
-            Topic::Orders,
-            Topic::Positions,
-        ]);
     }
 }
 fn apply_input(agent: &mut rows::Agent, input: AgentInput) -> Result<(), ApiError> {
+    let symbols = input.pairs();
     agent.name = input.name;
     agent.provider_id = input.provider_id;
     agent.model = input.model;
-    agent.symbol = input.symbol;
+    agent.symbol = symbols[0].clone();
+    agent.symbols = symbols;
     agent.timeframe = serde_json::to_value(input.timeframe)
         .expect("timeframe")
         .as_str()

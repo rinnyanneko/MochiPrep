@@ -3,7 +3,7 @@
 use super::{lock, Runtime, RuntimeHandle};
 use crate::error::ApiError;
 use mochi_domain::{DataSource, Quote, ServerEvent, Topic};
-use mochi_store::{rows, set_setting};
+use mochi_store::rows;
 use tokio::sync::oneshot;
 
 pub(super) struct ReplayRequest {
@@ -15,47 +15,7 @@ pub(super) struct ReplayBatch {
     quotes: Vec<Quote>,
     waiting: bool,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum DemoAction {
-    Start,
-    Reset,
-    Exit,
-}
-
 impl RuntimeHandle {
-    /// Change demo ownership inside the actor's idle transition, without handing an idle
-    /// acknowledgement back to a route that could race a newly queued batch.
-    pub async fn change_demo(&self, action: DemoAction) -> Result<(), ApiError> {
-        let (reply, done) = oneshot::channel();
-        self.call(move |r| {
-            if action == DemoAction::Start {
-                if r.is_demo_active()? {
-                    let _ = reply.send(Ok(()));
-                    return Ok::<(), ApiError>(());
-                }
-            } else {
-                r.set_playing(false);
-            }
-            r.replay_idle_work.push(Box::new(move |r| {
-                let result = if action == DemoAction::Start {
-                    r.start_demo()
-                } else {
-                    // Playing may have been requested again while the earlier batches drained.
-                    r.set_playing(false);
-                    r.clear_demo().and_then(|()| match action {
-                        DemoAction::Reset => r.start_demo(),
-                        _ => Ok(()),
-                    })
-                };
-                let _ = reply
-                    .send(result.map_err(|e| ApiError::new(e.status(), r.redact(e.message()))));
-            }));
-            Ok(())
-        })
-        .await??;
-        done.await.map_err(|_| self.reply_error())?
-    }
-
     /// An observational barrier only; ownership mutations must run inside the idle transition.
     pub async fn wait_replay_idle(&self) -> Result<(), ApiError> {
         let (reply, done) = oneshot::channel();
@@ -76,6 +36,15 @@ impl Runtime {
         steps: u32,
         reply: Option<oneshot::Sender<Result<(), ApiError>>>,
     ) {
+        // Steps move the cursor of bars about to be replaced, as playing would.
+        if self.replay_download.is_some() {
+            if let Some(reply) = reply {
+                let _ = reply.send(Err(ApiError::conflict(
+                    "Wait for the replay download to finish before stepping",
+                )));
+            }
+            return;
+        }
         self.replay_queue.push_back(ReplayRequest { steps, reply });
     }
     pub(super) fn on_replay_tick(&mut self) {
@@ -100,9 +69,6 @@ impl Runtime {
                 let Some(request) = self.replay_queue.pop_front() else {
                     if self.replay_busy() {
                         return;
-                    }
-                    for work in std::mem::take(&mut self.replay_idle_work) {
-                        work(self);
                     }
                     for done in self.replay_idle.drain(..) {
                         let _ = done.send(());
@@ -161,9 +127,8 @@ impl Runtime {
                     Err(e)
                 }
             };
-            let position = lock(&self.replay).position();
-            let persisted = set_setting(self.connection(), "replay.cursor", &position)
-                .map_err(|e| self.api_error(e));
+            let position = lock(&self.replay).position() as i64;
+            let persisted = self.save_cursor(self.replay_window, position);
             if let Err(e) = &persisted {
                 self.stop_replay_with(e.message());
             }

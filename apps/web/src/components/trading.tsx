@@ -337,7 +337,15 @@ const OUTCOME: Record<DecisionOutcome, { label: string; tone: Tone }> = {
   DATA_ERROR: { label: 'Data error', tone: 'warn' },
 };
 
-export const OutcomeBadge = ({ outcome }: { outcome: DecisionOutcome }) => <Badge tone={OUTCOME[outcome].tone}>{OUTCOME[outcome].label}</Badge>;
+/** What started a cycle, as the decision details say it. */
+const TRIGGERS: Record<DecisionRecord['trigger'], string> = {
+  SCHEDULE: 'Schedule',
+  RUN_ONCE: 'Run once',
+  ANALYZE: 'Analyze now',
+  POSITION_CHANGE: 'A position changed',
+};
+
+export const OutcomeBadge =({ outcome }: { outcome: DecisionOutcome }) => <Badge tone={OUTCOME[outcome].tone}>{OUTCOME[outcome].label}</Badge>;
 export const OUTCOME_OPTIONS = Object.entries(OUTCOME).map(([value, o]) => ({ value: value as DecisionOutcome, label: o.label }));
 
 export const actionTone = (action?: string): Tone => (action === 'LONG' ? 'rise' : action === 'SHORT' ? 'fall' : action === 'CLOSE' ? 'accent' : 'neutral');
@@ -357,6 +365,7 @@ export function DecisionList({ decisions, selected, onSelect, emptyText }: { dec
           >
             <span className="flex flex-wrap items-center gap-2">
               <span className="text-[13px] font-semibold">{d.agentName}</span>
+              <span className="num text-xs text-ink-2">{d.symbol}</span>
               {d.decision && <Badge tone={actionTone(d.decision.action)}>{d.decision.action}</Badge>}
               <OutcomeBadge outcome={d.outcome} />
               <span className="num ml-auto text-[11px] text-ink-3">{dateTime(d.ts)}</span>
@@ -394,6 +403,7 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
 
       <section>
         <Row label="Time">{dateTime(d.ts)}</Row>
+        <Row label="Run by">{TRIGGERS[d.trigger] ?? d.trigger}</Row>
         <Row label="Agent">{d.agentName}</Row>
         <Row label="Model">{d.model}</Row>
         <Row label="Symbol">{d.symbol} · {d.timeframe}</Row>
@@ -401,6 +411,24 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
         {d.snapshot && <Row label="Mark · funding">{price(d.snapshot.mark, d.symbol)} · {d.snapshot.fundingRate ? pct(Number(d.snapshot.fundingRate) * 100, 4) : 'n/a'}</Row>}
         {d.indicators && <Row label="RSI · EMA20 · EMA50">{d.indicators.rsi14?.toFixed(1) ?? '–'} · {money(d.indicators.ema20)} · {money(d.indicators.ema50)}</Row>}
       </section>
+
+      {d.ownerMessage !== undefined && (
+        <section data-testid="decision-message">
+          <h3 className="mb-1 text-xs font-semibold text-ink-2">Your message</h3>
+          <p className="rounded-xl bg-accent-soft px-3 py-2 text-[13px] leading-relaxed">{d.ownerMessage}</p>
+        </section>
+      )}
+
+      {d.attempts?.map((attempt, n) => (
+        <section key={n} data-testid="decision-attempt">
+          <h3 className="mb-1 text-xs font-semibold text-ink-2">Refused try {n + 1}: asked again</h3>
+          <p className="rounded-xl bg-surface-2 px-3 py-2 text-[13px] leading-relaxed">
+            {attempt.decision ? `${attempt.decision.action} ${attempt.decision.symbol}. ` : ''}
+            {attempt.outcomeDetail ?? attempt.outcome}
+          </p>
+          <p className="mt-1 text-[11px] text-ink-3">The model was shown this reason and decided again. What follows is its last try.</p>
+        </section>
+      ))}
 
       {ai && (
         <section>

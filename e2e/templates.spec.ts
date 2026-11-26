@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-// Sorts after demo.spec, since creating an agent here also creates a paper account.
+// Sorts after agents.spec, since creating an agent here also creates a paper account.
 test('a duplicated template pre-fills a new agent, which keeps its own limits', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('replay-time')).toBeVisible();

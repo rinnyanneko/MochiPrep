@@ -6,6 +6,8 @@ use crate::{
 use mochi_domain::jsnum::{js_string_to_number, js_to_fixed};
 use serde_json::{json, Value};
 const LABEL: &str = "[DEMO: deterministic mock, not a real model]";
+/// Deterministic rule-based analysis for tests. The app cannot select it: demo mode and the mock
+/// AI were removed, and the runtime refuses the MOCK provider kind.
 pub struct MockProvider;
 fn get(c: &MarketContext, key: &str) -> Option<f64> {
     c.indicators.get(key).copied().flatten()

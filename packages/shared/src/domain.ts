@@ -404,6 +404,16 @@ export interface RiskSettings {
   /** Market data older than this blocks new positions. */
   maxQuoteAgeSec: number;
   maxNotional: number;
+  /**
+   * New positions need the model to state at least this confidence, 0 to 1. Absent or 0 is off.
+   * Exits and protection are never held back by it.
+   */
+  minConfidence?: number;
+  /**
+   * New positions exit by a trailing stop with an activation price instead of a take profit, and
+   * PROTECT cannot set a new take profit. Turns trailing stops on for the agent. Absent is off.
+   */
+  trailInsteadOfTakeProfit?: boolean;
 }
 
 export const DEFAULT_RISK_SETTINGS: RiskSettings = {
@@ -468,7 +478,10 @@ export interface Agent {
   name: string;
   providerId: string;
   model: string;
+  /** The first of `symbols`. */
   symbol: SymbolId;
+  /** Every pair the agent trades, in the order picked. One model call decides them all. */
+  symbols: SymbolId[];
   timeframe: Timeframe;
   strategy: string;
   accountId: string;
@@ -516,6 +529,7 @@ export interface AgentTemplate extends AgentTemplateFields {
   updatedAt: number | null;
 }
 
+/** MOCK only appears on a provider row left from before the mock AI was removed; it cannot run. */
 export type ProviderKind = 'MOCK' | 'OPENAI_COMPATIBLE' | 'OPENAI' | 'ANTHROPIC' | 'GEMINI' | 'DEEPSEEK' | 'OPENCODE';
 
 export interface ProviderConfig {
@@ -576,6 +590,16 @@ export interface AiDecisionData {
   trailingStop?: AiTrailingStop | null;
 }
 
+/** One refused try of a cycle, as it stood before the model was asked again. */
+export interface DecisionAttempt {
+  rawResponse: string | null;
+  decision: DecisionRecord['decision'];
+  validationError: string | null;
+  risk: DecisionRecord['risk'];
+  outcome: DecisionRecord['outcome'];
+  outcomeDetail: string | null;
+}
+
 export interface DecisionRecord {
   id: string;
   agentId: string;
@@ -584,7 +608,8 @@ export interface DecisionRecord {
   source: DataSource;
   venue: AccountVenue;
   ts: number;
-  trigger: 'SCHEDULE' | 'RUN_ONCE' | 'ANALYZE';
+  /** POSITION_CHANGE: a position on one of its pairs changed while the agent waited. */
+  trigger: 'SCHEDULE' | 'RUN_ONCE' | 'ANALYZE' | 'POSITION_CHANGE';
   providerKind: ProviderKind | null;
   model: string;
   symbol: SymbolId;
@@ -604,6 +629,14 @@ export interface DecisionRecord {
   signalExpiresAt: number | null;
   orderId: string | null;
   fillIds: string[];
+  /** What the user told the agent for this decision, when it was sent with a message. */
+  ownerMessage?: string;
+  /**
+   * Earlier tries of this cycle, oldest first. A reply the risk checks refused, or one that did
+   * not parse, is shown to the model with the reasons and asked once more; the record's own
+   * fields are the last try. Absent when the first reply was not refused.
+   */
+  attempts?: DecisionAttempt[];
   /** PROTECT only: the protection the decision saw, which an accepted suggestion must still match. */
   protectionBefore?: Protection;
   /** PROTECT only: the protection in force after the change was made. */
@@ -632,6 +665,8 @@ export interface ArenaRow {
   providerName: string;
   model: string;
   symbol: SymbolId;
+  /** Every pair the agent trades; `symbol` is the first. */
+  symbols: SymbolId[];
   status: AgentStatus;
   initialBalance: string;
   /** The account's equity. On an exchange account it includes deposits and other agents' trading. */
@@ -647,7 +682,10 @@ export interface ArenaRow {
   tradeCount: number;
   decisionCount: number;
   estimatedAiCost: string | null;
+  /** A paper account's equity over time. Empty on exchange rows. */
   curve: { ts: number; equity: number }[];
+  /** An exchange agent's own P&L over time, from 0 when it was made. Empty on paper and shared rows. */
+  pnlCurve: { ts: number; pnl: number }[];
 }
 
 export interface ExchangeStatus {
@@ -682,6 +720,7 @@ export const DEFAULT_LIVE_LIMITS: RiskSettings = {
 };
 
 export interface ReplayState {
+  /** The replay's bars are in memory. Recorded OKX history loads the first time the replay is used. */
   loaded: boolean;
   playing: boolean;
   speed: number;
@@ -690,6 +729,57 @@ export interface ReplayState {
   endTime: number | null;
   atEnd: boolean;
   progress: number;
+  /** 0..1 through downloading the replay's bars from OKX; absent unless downloading. */
+  downloading?: number;
+  /** Why the last load failed; absent unless it did. */
+  loadError?: string;
+}
+
+/** Whole UTC days: `from` included, `to` excluded. */
+export interface DateRange {
+  from: number;
+  to: number;
+}
+
+/** What loading a range of replay dates takes, worked out before anything is fetched. */
+export interface ReplayPlan {
+  range: DateRange;
+  /** The dates plus the warm-up days before them: what is downloaded and held. */
+  span: DateRange;
+  pairs: number;
+  /** Minutes still to download, summed over the pairs. */
+  missingMinutes: number;
+  requests: number;
+  /** A guess from the measured pace at OKX's rate limit. */
+  seconds: number;
+  downloadBytes: number;
+  /** Saved bars in the span that are reused. */
+  savedBytes: number;
+}
+
+export interface SavedReplayRange {
+  start: number;
+  end: number;
+  /** Every built-in pair is saved over the whole stretch. */
+  complete: boolean;
+  bytes: number;
+  /** The loaded replay plays part of it, so it cannot be deleted now. */
+  inUse: boolean;
+}
+
+export interface ReplayDataView {
+  /** False while the replay plays the synthetic tape (offline). */
+  history: boolean;
+  loaded: DateRange | null;
+  chosen: DateRange | null;
+  /** Every minute of `chosen` is saved, so it loads with no download. */
+  chosenReady: boolean;
+  saved: SavedReplayRange[];
+  /** The latest `to` that can be picked: the last UTC midnight. */
+  latest: number;
+  maxDays: number;
+  warmupDays: number;
+  bytesPerBar: number;
 }
 
 export type ServerEvent =

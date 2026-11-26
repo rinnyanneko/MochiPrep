@@ -19,8 +19,10 @@ pub struct TapeTooShort(pub usize);
 /// calls finish, and two runs of the same tape see identical quotes. One quote per 1m bar,
 /// taken at the close: wicks are never treated as tradable prices.
 pub struct ReplayMarketData {
-    /// One tape per built-in pair, `DEFAULT_SYMBOLS` order unless the caller chose others.
-    /// Custom pairs only exist on live data.
+    /// The built-in pairs, `DEFAULT_SYMBOLS` order unless the caller chose others. Custom pairs
+    /// only exist on live data.
+    symbols: Vec<&'static str>,
+    /// One tape per pair in `symbols`, or none while the replay's data is not loaded yet.
     tapes: Vec<(&'static str, Tape)>,
     cursor: usize,
 }
@@ -51,19 +53,59 @@ impl ReplayMarketData {
             })
             .collect();
         Ok(Self {
+            symbols: symbols.to_vec(),
             tapes,
             cursor: WARMUP_MINUTES,
         })
     }
 
-    /// The pairs on this tape, which are the built-in ones.
-    pub fn symbols(&self) -> Vec<&'static str> {
-        self.tapes.iter().map(|(symbol, _)| *symbol).collect()
+    /// A replay of `symbols` whose data comes later (see [`Self::from_tapes`]). Until then it has
+    /// no bars: no quotes, no candles, and it is always at its end.
+    pub fn unloaded(symbols: &[&'static str]) -> Self {
+        Self {
+            symbols: symbols.to_vec(),
+            tapes: Vec::new(),
+            cursor: 0,
+        }
     }
 
-    /// All default tapes share one clock, so the first one answers time questions.
-    fn clock(&self) -> &Tape {
-        &self.tapes[0].1
+    /// A replay over recorded bars, one tape per pair. Every tape must start at the same time
+    /// and have the same length, since the pairs share one clock.
+    pub fn from_tapes(tapes: Vec<(&'static str, Tape)>) -> Result<Self, String> {
+        let Some((_, first)) = tapes.first() else {
+            return Err("A replay needs at least one pair".into());
+        };
+        if first.len() <= WARMUP_MINUTES {
+            return Err(TapeTooShort(first.len()).to_string());
+        }
+        let (start, len) = (first.start(), first.len());
+        if let Some((symbol, _)) = tapes
+            .iter()
+            .find(|(_, t)| t.start() != start || t.len() != len)
+        {
+            return Err(format!(
+                "The {symbol} replay bars do not line up with the others"
+            ));
+        }
+        Ok(Self {
+            symbols: tapes.iter().map(|(symbol, _)| *symbol).collect(),
+            tapes,
+            cursor: WARMUP_MINUTES,
+        })
+    }
+
+    pub fn is_loaded(&self) -> bool {
+        !self.tapes.is_empty()
+    }
+
+    /// The pairs on this tape, which are the built-in ones.
+    pub fn symbols(&self) -> Vec<&'static str> {
+        self.symbols.clone()
+    }
+
+    /// All tapes share one clock, so the first one answers time questions. `None` until loaded.
+    fn clock(&self) -> Option<&Tape> {
+        self.tapes.first().map(|(_, tape)| tape)
     }
 
     fn tape(&self, symbol: &str) -> Option<&Tape> {
@@ -74,11 +116,11 @@ impl ReplayMarketData {
     }
 
     pub fn len(&self) -> usize {
-        self.clock().len()
+        self.clock().map_or(0, Tape::len)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.clock().is_empty()
+        self.len() == 0
     }
 
     pub fn position(&self) -> usize {
@@ -89,20 +131,27 @@ impl ReplayMarketData {
         self.cursor + 1 >= self.len()
     }
 
+    /// The times below are 0 until the data is loaded: no clock has started.
     pub fn first_playable_time(&self) -> i64 {
-        self.clock().time(WARMUP_MINUTES) + MINUTE_MS
+        self.clock()
+            .map_or(0, |clock| clock.time(WARMUP_MINUTES) + MINUTE_MS)
     }
 
     pub fn end_time(&self) -> i64 {
-        self.clock().time(self.len() - 1) + MINUTE_MS
+        self.clock()
+            .map_or(0, |clock| clock.time(clock.len() - 1) + MINUTE_MS)
     }
 
     pub fn now(&self) -> i64 {
-        self.clock().time(self.cursor) + MINUTE_MS
+        self.clock()
+            .map_or(0, |clock| clock.time(self.cursor) + MINUTE_MS)
     }
 
     /// Takes a signed index because callers pass arbitrary numbers; it is clamped to the playable range.
     pub fn seek(&mut self, index: i64) {
+        if !self.is_loaded() {
+            return;
+        }
         let last = self.len() as i64 - 1;
         self.cursor = index.max(WARMUP_MINUTES as i64).min(last) as usize;
     }

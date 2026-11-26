@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test';
+import { TRADING_NAV } from './seed';
 
 const usdt = (text: string | null) => Number((text ?? '').replace(/[^\d.-]/g, ''));
 
 test('a replay paper account trades end to end: order, trailing stop, close, ledger audit', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('replay-time')).toBeVisible();
-  await page.getByRole('button', { name: 'Trading', exact: true }).click();
+  await page.getByRole('button', { name: TRADING_NAV }).click();
 
   await page.getByRole('button', { name: 'New account' }).click();
   const create = page.getByRole('dialog');
@@ -50,7 +51,7 @@ test('a replay paper account trades end to end: order, trailing stop, close, led
   await expect(page.getByTestId('ledger-audit')).toHaveText('Ledger balances match');
 
   // Account changes must remount the ticket and load only that account's preferences.
-  await page.getByRole('button', { name: 'Trading', exact: true }).click();
+  await page.getByRole('button', { name: TRADING_NAV }).click();
   await page.getByTestId('order-ticket').getByRole('button', { name: 'Short', exact: true }).click();
   await page.getByLabel('Leverage', { exact: true }).fill('20');
   await page.getByRole('button', { name: 'New account' }).click();

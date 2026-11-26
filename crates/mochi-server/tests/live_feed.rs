@@ -213,9 +213,10 @@ async fn instrument_add_and_remove_texts() {
     .await;
     let account_id = account["id"].as_str().unwrap().to_string();
     let agent = format!(
-        "INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,risk,
+        "INSERT OR IGNORE INTO providers (id,name,kind,base_url,default_model,input_price,output_price,extra_headers,created_at) VALUES ('p','Gateway','OPENAI_COMPATIBLE',NULL,'m',NULL,NULL,'{{}}',1);
+         INSERT INTO agents (id,name,provider_id,model,symbol,timeframe,strategy,account_id,risk,
          interval_sec,status,running,created_at)
-         VALUES ('agent_1','A','mock','m','ADAUSDT','15m','','{account_id}','{{}}',900,'IDLE',0,1)"
+         VALUES ('agent_1','A','p','m','ADAUSDT','15m','','{account_id}','{{}}',900,'IDLE',0,1)"
     );
     let run = |statement: String| {
         state

@@ -68,11 +68,14 @@ impl Mulberry32 {
 }
 
 /// One-minute bars stored column-wise, like the TypeScript `Float64Array`s.
-/// Times are implicit, `TAPE_START + i * 60_000`, since the tape has no gaps.
+/// Times are implicit, `start + i * 60_000`, since the tape has no gaps.
 ///
 /// The columns are private and only grow together through `push`, so they always have one
 /// length and `candle(i)` can index all five.
+#[derive(Debug, Clone)]
 pub struct Tape {
+    /// The open time of bar 0.
+    start: i64,
     open: Vec<f64>,
     high: Vec<f64>,
     low: Vec<f64>,
@@ -81,8 +84,9 @@ pub struct Tape {
 }
 
 impl Tape {
-    fn with_capacity(minutes: usize) -> Self {
+    fn with_capacity(start: i64, minutes: usize) -> Self {
         Tape {
+            start,
             open: Vec::with_capacity(minutes),
             high: Vec::with_capacity(minutes),
             low: Vec::with_capacity(minutes),
@@ -128,7 +132,27 @@ impl Tape {
     }
 
     pub fn time(&self, i: usize) -> i64 {
-        TAPE_START + i as i64 * 60_000
+        self.start + i as i64 * 60_000
+    }
+
+    pub fn start(&self) -> i64 {
+        self.start
+    }
+
+    /// One-minute bars that open at `start` and follow each other with no gap, as a tape.
+    pub fn from_candles(start: i64, candles: &[Candle]) -> Result<Self, String> {
+        let mut tape = Tape::with_capacity(start, candles.len());
+        for (i, c) in candles.iter().enumerate() {
+            let want = start + i as i64 * 60_000;
+            if c.time != want {
+                return Err(format!(
+                    "A replay bar at {} where {want} was expected",
+                    c.time
+                ));
+            }
+            tape.push(c.open, c.high, c.low, c.close, c.volume);
+        }
+        Ok(tape)
     }
 
     pub fn candle(&self, i: usize) -> Candle {
@@ -162,7 +186,7 @@ pub fn generate_tape(symbol: &str, minutes: usize) -> Option<Tape> {
     };
     let mut rng = Mulberry32 { a: seed };
 
-    let mut tape = Tape::with_capacity(minutes);
+    let mut tape = Tape::with_capacity(TAPE_START, minutes);
     let mut price = start_price;
     let mut drift = 0.0_f64;
     let mut vol = 0.0005_f64;

@@ -36,7 +36,12 @@ pub struct AgentInput {
     pub name: String,
     pub provider_id: String,
     pub model: String,
-    pub symbol: String,
+    /// The one pair of a client that predates several pairs per agent.
+    #[serde(default)]
+    pub symbol: Option<String>,
+    /// The pairs the agent trades, each once, in the order the user chose them.
+    #[serde(default)]
+    pub symbols: Vec<String>,
     pub timeframe: mochi_domain::Timeframe,
     pub strategy: String,
     pub account_id: String,
@@ -237,6 +242,9 @@ pub(super) fn risk(input: Input) -> Checked {
     f.required("requireStopLoss", check_bool);
     f.required("maxQuoteAgeSec", |v| number(v, 1.0, 3600.0));
     f.required("maxNotional", |v| check_number(v, &POSITIVE));
+    // Optional: risk settings saved before it existed have none, and none means no floor.
+    f.optional("minConfidence", |v| number(v, 0.0, 1.0));
+    f.optional("trailInsteadOfTakeProfit", check_bool);
     f.strict()
 }
 pub(super) fn agent_input(input: Input) -> Checked {
@@ -244,12 +252,69 @@ pub(super) fn agent_input(input: Input) -> Checked {
     f.required("name", |v| check_string(v, &StringRule::trimmed(60)));
     f.required("providerId", nonempty);
     f.required("model", |v| check_string(v, &StringRule::trimmed(120)));
-    f.required("symbol", |v| check_string(v, &SYMBOL));
+    // `symbols` is the list; a body without it is checked as Node's one-pair `symbol`.
+    if f.input.contains_key("symbols") {
+        f.required("symbols", agent_symbols);
+    } else {
+        f.required("symbol", |v| check_string(v, &SYMBOL));
+    }
     f.required("timeframe", |v| check_enum(v, TIMEFRAMES));
     f.required("strategy", strategy);
     f.required("accountId", nonempty);
     agent_settings(&mut f);
     f.strict()
+}
+impl AgentInput {
+    /// The pairs to trade: the validated list, or the one pair of an older client.
+    pub fn pairs(&self) -> Vec<String> {
+        if self.symbols.is_empty() {
+            self.symbol.iter().cloned().collect()
+        } else {
+            self.symbols.clone()
+        }
+    }
+}
+/// The most pairs one agent trades. Every pair adds its candles to the one prompt, so the
+/// limit keeps that prompt within what models read reliably.
+pub const MAX_AGENT_SYMBOLS: usize = 10;
+fn agent_symbols(input: Input) -> Checked {
+    let Some(Value::Array(items)) = input else {
+        return Err(vec![Issue::new(msg::invalid_type(
+            "array",
+            received(input),
+        ))]);
+    };
+    if items.is_empty() {
+        return Err(vec![Issue::new("choose at least one pair")]);
+    }
+    if items.len() > MAX_AGENT_SYMBOLS {
+        return Err(vec![Issue::new(format!(
+            "an agent trades at most {MAX_AGENT_SYMBOLS} pairs"
+        ))]);
+    }
+    let mut issues = Vec::new();
+    let mut output = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        match check_string(Some(item), &SYMBOL) {
+            Ok(value) if output.contains(&value) => {
+                let mut issue = Issue::new("each pair can be chosen once");
+                issue.path.push(i.to_string());
+                issues.push(issue);
+            }
+            Ok(value) => output.push(value),
+            Err(found) => {
+                for mut issue in found {
+                    issue.path.insert(0, i.to_string());
+                    issues.push(issue);
+                }
+            }
+        }
+    }
+    if issues.is_empty() {
+        Ok(Value::Array(output))
+    } else {
+        Err(issues)
+    }
 }
 fn strategy(v: Input) -> Checked {
     check_string(

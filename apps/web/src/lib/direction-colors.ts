@@ -1,4 +1,4 @@
-export const COLOR_PRESETS = ['red-green', 'green-red', 'red-blue', 'blue-green'] as const;
+export const COLOR_PRESETS = ['red-green', 'green-red', 'red-blue', 'blue-red'] as const;
 export type ColorPreset = typeof COLOR_PRESETS[number];
 export type DirectionColors = { preset: ColorPreset } | { preset: 'custom'; rise: string; fall: string };
 const hex = (value: unknown): value is string => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
@@ -8,6 +8,8 @@ export function parseDirectionColors(raw: string | null, legacyFlip: string | nu
   try {
     const value: unknown = JSON.parse(raw);
     if (value && typeof value === 'object' && 'preset' in value) {
+      // Blue / Green was a mistake for Blue / Red; a browser that chose it keeps blue for up.
+      if (value.preset === 'blue-green') return { preset: 'blue-red' };
       if (COLOR_PRESETS.includes(value.preset as ColorPreset)) return { preset: value.preset as ColorPreset };
       if (value.preset === 'custom' && 'rise' in value && 'fall' in value && hex(value.rise) && hex(value.fall)) {
         return { preset: 'custom', rise: value.rise, fall: value.fall };

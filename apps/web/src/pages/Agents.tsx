@@ -2,6 +2,9 @@ import { LayoutTemplate, Pause, Pencil, Play, Plus, ScanSearch, Square, StepForw
 import { useState } from 'react';
 import { DEFAULT_RISK_SETTINGS, type Agent, type AgentStatus, type DecisionRecord, type SymbolId } from '@mochiprep/shared';
 import { AgentSettingsFields, TemplatesDialog, useAgentTemplates } from '@/components/AgentTemplates';
+import { AgentMessage } from '@/components/AgentMessage';
+import { ArmDialog } from '@/components/ExchangeCard';
+import { MAX_AGENT_PAIRS, PairPicker } from '@/components/PairPicker';
 import { Mochi, type MochiMood } from '@/components/Mochi';
 import { PageTitle } from '@/components/Shell';
 import { DecisionDetail, DecisionList, VenueBadge } from '@/components/trading';
@@ -21,12 +24,11 @@ const STATUS: Record<AgentStatus, { tone: Tone; mood: MochiMood; label: string }
   ERROR: { tone: 'down', mood: 'confused', label: 'Error' },
 };
 
-const MOCK_MODELS = ['mock-momentum-v1', 'mock-reversion-v1', 'mock-reckless-v1'];
 type Form = AgentSettings & {
   name: string;
   providerId: string;
   model: string;
-  symbol: SymbolId;
+  symbols: SymbolId[];
   accountId: string;
 };
 
@@ -38,9 +40,9 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
   const [form, setForm] = useState<Form>(
     agent ?? {
       name: '',
-      providerId: providers[0]?.id ?? '',
-      model: providers[0]?.defaultModel ?? '',
-      symbol: 'BTCUSDT',
+      providerId: providers.find((p) => p.kind !== 'MOCK')?.id ?? '',
+      model: providers.find((p) => p.kind !== 'MOCK')?.defaultModel ?? '',
+      symbols: ['BTCUSDT'],
       timeframe: '15m',
       strategy: '',
       accountId: 'NEW',
@@ -74,7 +76,7 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
         accountId = created.id;
       }
       const body = { ...form, accountId };
-      const fields = { name: body.name, providerId: body.providerId, model: body.model, symbol: body.symbol, timeframe: body.timeframe, strategy: body.strategy, accountId, risk: body.risk, intervalSec: body.intervalSec, executionMode: body.executionMode, useNews: body.useNews, allowTrailingStop: body.allowTrailingStop };
+      const fields = { name: body.name, providerId: body.providerId, model: body.model, symbols: body.symbols, timeframe: body.timeframe, strategy: body.strategy, accountId, risk: body.risk, intervalSec: body.intervalSec, executionMode: body.executionMode, useNews: body.useNews, allowTrailingStop: body.allowTrailingStop };
       return agent ? api.put(`/agents/${agent.id}`, fields) : api.post('/agents', fields);
     });
     if (done) {
@@ -108,17 +110,11 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
             const next = providers.find((p) => p.id === e.target.value);
             set({ providerId: e.target.value, model: next?.defaultModel ?? '' });
           }}>
-            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}{p.requiresKey && !p.hasKey ? ' (key needed)' : ''}</option>)}
+            {providers.map((p) => <option key={p.id} value={p.id} disabled={p.kind === 'MOCK'}>{p.name}{p.requiresKey && !p.hasKey ? ' (key needed)' : ''}</option>)}
           </Select>
         </Field>
         <Field label="Model">
-          {provider?.kind === 'MOCK' ? (
-            <Select value={form.model} onChange={(e) => set({ model: e.target.value })}>
-              {MOCK_MODELS.map((m) => <option key={m}>{m}</option>)}
-            </Select>
-          ) : (
-            <Input value={form.model} onChange={(e) => set({ model: e.target.value })} />
-          )}
+          <Input value={form.model} onChange={(e) => set({ model: e.target.value })} />
         </Field>
         <Field label="Paper account">
           <Select value={form.accountId} onChange={(e) => set({ accountId: e.target.value })}>
@@ -126,9 +122,14 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.venue === 'OKX_LIVE' ? ' (REAL MONEY)' : a.venue === 'OKX_DEMO' ? ' (OKX demo)' : ''}</option>)}
           </Select>
         </Field>
-        <Field label="Symbol" hint={source === 'REPLAY' ? 'Added pairs need Live OKX: the replay tape has only these.' : 'Add more pairs in Settings.'}>
-          <Select value={form.symbol} onChange={(e) => set({ symbol: e.target.value as SymbolId })}>{symbols.map((s) => <option key={s}>{s}</option>)}</Select>
-        </Field>
+        <div className="sm:col-span-2">
+          <span className="mb-1 block text-xs font-semibold text-ink-2">Pairs ({form.symbols.length} of up to {MAX_AGENT_PAIRS})</span>
+          <PairPicker options={symbols} value={form.symbols} onChange={(next) => set({ symbols: next })} />
+          <span className="mt-1 block text-[11px] text-ink-3">
+            One AI call decides every picked pair each cycle; each pair still meets the risk engine on its own.{' '}
+            {source === 'REPLAY' ? 'Added pairs need Live OKX: the replay has only these.' : 'Add more pairs in Settings.'}
+          </span>
+        </div>
       </div>
       <div className="mt-3">
         <AgentSettingsFields value={form} onChange={set} source={source} />
@@ -140,7 +141,7 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
       )}
       <div className="mt-4 flex justify-end gap-2">
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="primary" disabled={!form.name.trim() || !form.model.trim()} onClick={save}>{agent ? 'Save' : 'Create agent'}</Button>
+        <Button variant="primary" disabled={!form.name.trim() || !form.model.trim() || form.symbols.length === 0} onClick={save}>{agent ? 'Save' : 'Create agent'}</Button>
       </div>
     </Dialog>
   );
@@ -150,7 +151,12 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
   const dateTime = useDateTime();
   const account = useApp((s) => s.accounts.find((a) => a.id === agent.accountId));
   const provider = useApp((s) => s.providers.find((p) => p.id === agent.providerId));
+  const exchange = useApp((s) => s.exchange.find((e) => e.accountId === agent.accountId));
   const [busy, setBusy] = useState(false);
+  // An Auto agent on a real account trades only while it is armed, so starting one arms first.
+  const [pendingArm, setPendingArm] = useState<{ reason: string; run(): void } | null>(null);
+  const needsArm = agent.executionMode === 'AUTO' && account?.venue === 'OKX_LIVE' && exchange?.connected === true && !exchange.armed;
+  const armFirst = (reason: string, run: () => void) => (needsArm ? setPendingArm({ reason, run }) : run());
   const status = STATUS[agent.status];
   const initial = Number(account?.initialBalance ?? 0);
   const equity = Number(account?.balance.equity ?? 0);
@@ -177,7 +183,7 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
             {agent.useNews && <Badge data-testid="agent-news">News</Badge>}
           </span>
           <span className="mt-0.5 block truncate text-xs text-ink-3">{provider?.name} · {agent.model}</span>
-          <span className="block text-xs text-ink-3">{agent.symbol} · {agent.timeframe} · every {agent.intervalSec >= 60 ? `${agent.intervalSec / 60}m` : `${agent.intervalSec}s`}</span>
+          <span className="block truncate text-xs text-ink-3" title={agent.symbols.join(', ')}>{agent.symbols.join(', ')} · {agent.timeframe} · every {agent.intervalSec >= 60 ? `${agent.intervalSec / 60}m` : `${agent.intervalSec}s`}</span>
         </span>
         <span className="text-right">
           <span className="num block text-sm font-semibold">{money(equity)}</span>
@@ -185,6 +191,12 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
         </span>
       </button>
       {agent.statusDetail && <p className="mt-2 rounded-lg bg-warn-soft px-2.5 py-1.5 text-xs text-warn">{agent.statusDetail}</p>}
+      {needsArm && !agent.statusDetail && (
+        <p className="mt-2 rounded-lg bg-down-soft px-2.5 py-1.5 text-xs font-semibold text-down" data-testid="agent-needs-arm">
+          {account?.name} is not armed. Starting this agent asks you to arm it.
+        </p>
+      )}
+      {pendingArm && exchange && <ArmDialog status={exchange} reason={pendingArm.reason} onArmed={pendingArm.run} onClose={() => setPendingArm(null)} />}
       <p className="mt-2 text-[11px] text-ink-3">Last run {dateTime(agent.lastRunAt)}{agent.nextRunAt ? ` · next ${dateTime(agent.nextRunAt)}` : ''}</p>
       <div className="mt-3 flex flex-wrap gap-1.5">
         {agent.running ? (
@@ -194,19 +206,20 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
           </>
         ) : agent.status === 'PAUSED' ? (
           <>
-            <Button size="sm" variant="primary" onClick={() => act('resume')}><Play /> Resume</Button>
+            <Button size="sm" variant="primary" onClick={() => armFirst(`${agent.name} resumes once the account is armed.`, () => void act('resume'))}><Play /> Resume</Button>
             <Button size="sm" onClick={() => act('stop')}><Square /> Stop</Button>
           </>
         ) : (
-          <Button size="sm" variant="primary" onClick={() => act('start')}><Play /> Start</Button>
+          <Button size="sm" variant="primary" onClick={() => armFirst(`${agent.name} starts once the account is armed.`, () => void act('start'))}><Play /> Start</Button>
         )}
         <Button size="sm" disabled={busy} onClick={() => cycle('analyze')} title="Ask the model and show the result without trading"><ScanSearch /> Analyze now</Button>
-        <Button size="sm" disabled={busy} onClick={() => cycle('run')} title={agent.executionMode === 'AUTO' ? 'One full cycle, placing an order if approved' : 'One full cycle, suggesting a trade if approved'}><StepForward /> Run one cycle</Button>
+        <Button size="sm" disabled={busy} onClick={() => armFirst(`${agent.name} runs one cycle once the account is armed.`, () => void cycle('run'))} title={agent.executionMode === 'AUTO' ? 'One full cycle, placing an order if approved' : 'One full cycle, suggesting a trade if approved'}><StepForward /> Run one cycle</Button>
         <span className="ml-auto flex gap-1">
           <Button size="icon" variant="ghost" aria-label={`Edit ${agent.name}`} onClick={onEdit}><Pencil /></Button>
           <Button size="icon" variant="ghost" aria-label={`Delete ${agent.name}`} disabled={agent.running} onClick={() => attempt(() => api.del(`/agents/${agent.id}`))}><Trash2 /></Button>
         </span>
       </div>
+      <AgentMessage agentId={agent.id} agentName={agent.name} send={(run) => armFirst(`${agent.name} reads your message once the account is armed.`, run)} onSent={onSelect} />
     </Card>
   );
 }

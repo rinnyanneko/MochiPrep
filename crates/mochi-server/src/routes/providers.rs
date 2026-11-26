@@ -6,7 +6,7 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use mochi_ai::{redact_secrets, AiRequest, ProviderConfig, ProviderKind};
+use mochi_ai::{redact_secrets, AiRequest, ProviderConfig};
 use mochi_domain::Topic;
 use mochi_store::rows;
 
@@ -61,9 +61,6 @@ fn require(r: &Runtime, id: &str) -> Result<ProviderConfig, ApiError> {
         .ok_or_else(|| ApiError::not_found("Unknown provider"))
 }
 fn editable(r: &Runtime, id: &str) -> Result<ProviderConfig, ApiError> {
-    if id == rows::MOCK_PROVIDER_ID {
-        return Err(ApiError::bad_request("The mock provider is built in"));
-    }
     require(r, id)
 }
 async fn list(State(state): State<AppState>) -> Result<Json<Vec<rows::ProviderView>>, ApiError> {
@@ -179,7 +176,7 @@ async fn test(
     bytes: Bytes,
 ) -> Result<Json<Value>, ApiError> {
     let body = body(&state, &headers, &bytes).await?;
-    let (provider, model, is_mock, secrets) = call(&state, move |r| {
+    let (provider, model, secrets) = call(&state, move |r| {
         let c = require(r, &id)?;
         let empty = json!({});
         let input: ProviderTestInput = validate::parse_input(
@@ -187,19 +184,9 @@ async fn test(
             Some(body.as_ref().filter(|v| !v.is_null()).unwrap_or(&empty)),
         )?;
         let p = r.provider_for(&c).map_err(|e| r.api_error(e))?;
-        Ok((
-            p,
-            input.model.unwrap_or(c.default_model),
-            c.kind == ProviderKind::Mock,
-            r.secrets(),
-        ))
+        Ok((p, input.model.unwrap_or(c.default_model), r.secrets()))
     })
     .await?;
-    if is_mock {
-        return Ok(Json(
-            json!({"ok":true,"sample":"Mock provider needs no connection."}),
-        ));
-    }
     let request = AiRequest {
         model,
         system: "Reply with this JSON object and nothing else: {\"ok\":true}".into(),

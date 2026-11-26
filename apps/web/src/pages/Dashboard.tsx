@@ -1,6 +1,6 @@
 import { writeRemembered } from '@/lib/remembered';
-import { ArrowRight, Sparkles } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { ArrowRight } from 'lucide-react';
+import { useMemo } from 'react';
 import type { EquityPoint, Fill, PositionView } from '@mochiprep/shared';
 import { EquityChart } from '@/components/charts';
 import { Mochi } from '@/components/Mochi';
@@ -10,31 +10,23 @@ import { AccountPicker, DecisionList, FillsTable, PositionsTable } from '@/compo
 import { Button, Card, CardHeader, Stat } from '@/components/ui';
 import { api } from '@/lib/api';
 import { money, pct, pnlClass, signedMoney } from '@/lib/format';
-import { attempt, useApp, useQuery, useSourceAccounts } from '@/store';
+import { useApp, useQuery, useSourceAccounts } from '@/store';
 
 function Welcome() {
   const setPage = useApp((s) => s.setPage);
-  const [starting, setStarting] = useState(false);
-  const start = async () => {
-    setStarting(true);
-    await attempt(() => api.post('/demo/start'));
-    await useApp.getState().refreshState();
-    useApp.getState().setSource('REPLAY');
-    setStarting(false);
-  };
   return (
     <Card className="mx-auto mt-10 max-w-xl px-8 py-10 text-center">
       <Mochi mood="sleeping" size={110} className="mx-auto" />
       <h1 className="mt-4 font-display text-3xl font-black">Your cute little AI trading companion</h1>
       <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-ink-2">
-        Local-first paper trading for crypto perpetuals. Demo Mode needs no API keys and no internet: it loads synthetic data, three mock agents and 10,000 virtual USDT per account.
+        Local-first AI trading for crypto perpetuals. Add a key for your AI provider, then create an agent on a paper account or an OKX account.
       </p>
       <div className="mt-6 flex flex-wrap justify-center gap-2">
-        <Button variant="primary" size="lg" onClick={start} disabled={starting} data-testid="try-demo">
-          <Sparkles /> Try Demo Mode
-        </Button>
-        <Button size="lg" onClick={() => setPage('settings')}>
+        <Button variant="primary" size="lg" onClick={() => setPage('settings')} data-testid="add-ai-key">
           Add my AI key <ArrowRight />
+        </Button>
+        <Button size="lg" onClick={() => setPage('agents')}>
+          Create an agent
         </Button>
       </div>
     </Card>
@@ -62,14 +54,13 @@ export function DashboardPage() {
   const accounts = useSourceAccounts();
   const allAccounts = useApp((s) => s.accounts);
   const accountsLoaded = useApp((s) => s.versions.accounts > 0);
-  const demoActive = useApp((s) => s.demoActive);
   const source = useApp((s) => s.source);
   const accountId = useApp((s) => s.accountId);
   const agents = useApp((s) => s.agents);
   const decisions = useApp((s) => s.decisions);
   const setPage = useApp((s) => s.setPage);
 
-  // The picked account can vanish under us (demo reset), so an unknown id means all accounts.
+  // The picked account can vanish under us (deleted elsewhere), so an unknown id means all accounts.
   const picked = accounts.find((a) => a.id === accountId);
   const scope = picked ? [picked] : accounts;
   const ids = scope.map((a) => a.id).join(',');
@@ -87,7 +78,7 @@ export function DashboardPage() {
 
   // Until the first load, "no accounts" only means "not fetched yet".
   if (!accountsLoaded) return null;
-  if (allAccounts.length === 0 && !demoActive) return <Welcome />;
+  if (allAccounts.length === 0) return <Welcome />;
 
   const sum = (pick: (a: (typeof scope)[number]) => string) => scope.reduce((total, a) => total + Number(pick(a)), 0);
   const initial = sum((a) => a.initialBalance);

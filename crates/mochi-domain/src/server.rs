@@ -39,7 +39,8 @@ fn serialize_js_number<S: Serializer>(x: &f64, serializer: S) -> Result<S::Ok, S
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplayState {
-    /// Always true from the server; the web app starts from a placeholder that is not.
+    /// Whether the replay's bars are in memory. A replay of recorded OKX history loads them the
+    /// first time it is used; until then there is no clock and nothing to trade.
     pub loaded: bool,
     pub playing: bool,
     pub speed: u32,
@@ -50,6 +51,12 @@ pub struct ReplayState {
     /// 0..1 through the playable part of the tape. Display only, so `f64`.
     #[serde(serialize_with = "serialize_js_number")]
     pub progress: f64,
+    /// 0..1 through downloading the replay's bars from OKX; absent unless downloading.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub downloading: Option<f64>,
+    /// Why the last load failed; absent unless it did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub load_error: Option<String>,
 }
 
 /// What an `invalidate` event asks the web app to refetch.

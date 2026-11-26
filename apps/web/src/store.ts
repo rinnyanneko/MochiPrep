@@ -34,7 +34,6 @@ export interface Toast {
 
 interface State {
   connected: boolean;
-  demoActive: boolean;
   /** Master password state. LOCKED means saved keys are sealed until the user unlocks. */
   vault: VaultStatus;
   replay: ReplayState | null;
@@ -102,7 +101,6 @@ const ALL_TOPICS: Topic[] = ['accounts', 'orders', 'positions', 'agents', 'decis
 
 export const useApp = create<State>((set, get) => ({
   connected: false,
-  demoActive: false,
   vault: 'OFF',
   replay: null,
   feeds: {},
@@ -167,9 +165,8 @@ export const useApp = create<State>((set, get) => ({
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
   },
   async refreshState() {
-    const state = await api.get<{ demoActive: boolean; vault: VaultStatus; replay: ReplayState; feeds: FeedStatus[] }>('/state');
+    const state = await api.get<{ vault: VaultStatus; replay: ReplayState; feeds: FeedStatus[] }>('/state');
     set({
-      demoActive: state.demoActive,
       vault: state.vault,
       replay: state.replay,
       feeds: Object.fromEntries(state.feeds.map((f) => [f.source, f])),
@@ -353,6 +350,9 @@ export async function attempt<T>(action: () => T | Promise<T>): Promise<T | unde
 }
 
 /** Pairs that exist on the data source in view. */
+/** The replay plays recorded OKX bars; false while it plays the bundled synthetic tape (offline). */
+export const useRecordedReplay = (): boolean => useApp((s) => s.feeds.REPLAY?.provider === 'OKX history replay');
+
 export const useSymbols = (): SymbolId[] => {
   const symbols = useApp((s) => s.symbols);
   const source = useApp((s) => s.source);

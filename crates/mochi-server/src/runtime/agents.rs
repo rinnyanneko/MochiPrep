@@ -3,8 +3,7 @@ use super::{Runtime, RuntimeHandle};
 use crate::error::ApiError;
 use futures_util::{future::BoxFuture, stream::FuturesUnordered};
 use mochi_ai::{
-    AiProvider, MockProvider, ProviderConfig, ProviderError, ProviderErrorCode, ProviderKind,
-    RemoteProvider,
+    AiProvider, ProviderConfig, ProviderError, ProviderErrorCode, ProviderKind, RemoteProvider,
 };
 use mochi_domain::{DataSource, Topic, VaultStatus};
 use mochi_store::rows;
@@ -22,6 +21,8 @@ pub enum CycleTrigger {
     Analyze,
     RunOnce,
     Schedule,
+    /// A position on one of its pairs changed while the agent waited.
+    PositionChange,
 }
 pub(super) type CycleReply = oneshot::Sender<Result<Option<Value>, ApiError>>;
 #[derive(Default)]
@@ -31,6 +32,31 @@ pub(super) struct Agents {
     pub active: HashMap<String, String>,
     pub generations: HashMap<String, u64>,
     pub pending: FuturesUnordered<BoxFuture<'static, super::agent_cycle::Completion>>,
+    /// Messages from the user per agent, oldest first, waiting for that agent's next model call,
+    /// each with the number it was handed in under. In memory only: a message is about the
+    /// market right now, and a restart makes it stale.
+    pub messages: HashMap<String, Vec<(u64, String)>>,
+    pub next_message: u64,
+    pub(super) watch: super::position_watch::PositionWatch,
+}
+
+/// Characters of messages that may wait for one agent's next call, all of them together, and
+/// how many messages. Both bound what one prompt can grow by while a cycle is busy.
+const WAITING_MESSAGES_MAX: usize = 4000;
+const WAITING_MESSAGES_COUNT: usize = 10;
+
+impl Agents {
+    /// Every message waiting for `agent`, oldest first, as the one text its next prompt gets.
+    pub(super) fn take_messages(&mut self, agent: &str) -> Option<String> {
+        let waiting = self.messages.remove(agent)?;
+        Some(
+            waiting
+                .into_iter()
+                .map(|(_, text)| text)
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        )
+    }
 }
 impl RuntimeHandle {
     pub async fn run_cycle(
@@ -43,6 +69,51 @@ impl RuntimeHandle {
         self.call(move |r| r.begin_cycle(&id, trigger, Some(reply)))
             .await??;
         done.await.map_err(|_| self.reply_error())?
+    }
+
+    /// Hands the agent a message for its next model call, and starts that cycle now. When a
+    /// cycle is already running, or this one ends before asking the model, the message waits
+    /// for the next one; a cycle that cannot start at all drops it, so it never surprises later.
+    pub async fn message_agent(
+        &self,
+        id: impl Into<String>,
+        text: String,
+    ) -> Result<Option<Value>, ApiError> {
+        let id = id.into();
+        let key = id.clone();
+        // A second message while the first still waits joins it, rather than replacing it.
+        let number = self
+            .call(move |r| {
+                r.api_agent(&key)?;
+                let number = r.agents.next_message;
+                let waiting = r.agents.messages.entry(key).or_default();
+                let used: usize = waiting.iter().map(|(_, t)| t.chars().count()).sum();
+                if waiting.len() >= WAITING_MESSAGES_COUNT
+                    || used + text.chars().count() > WAITING_MESSAGES_MAX
+                {
+                    return Err(ApiError::conflict(
+                        "Too many messages are waiting for this agent's next cycle",
+                    ));
+                }
+                waiting.push((number, text));
+                r.agents.next_message += 1;
+                Ok(number)
+            })
+            .await??;
+        let result = self.run_cycle(id.clone(), CycleTrigger::RunOnce).await;
+        if result.is_err() {
+            // Only this request's message: another may have arrived meanwhile and still waits.
+            self.call(move |r| {
+                if let Some(waiting) = r.agents.messages.get_mut(&id) {
+                    waiting.retain(|(n, _)| *n != number);
+                    if waiting.is_empty() {
+                        r.agents.messages.remove(&id);
+                    }
+                }
+            })
+            .await?;
+        }
+        result
     }
 }
 impl Runtime {
@@ -63,6 +134,9 @@ impl Runtime {
         let mut a = self.require_agent(id)?;
         self.assert_can_run(&a)?;
         let source = self.require_account(&a.account_id)?.source;
+        if source == DataSource::Replay {
+            self.assert_replay_loaded()?;
+        }
         a.running = true;
         a.status = "WAITING".into();
         a.next_run_at = Some(self.market_now(source));
@@ -191,7 +265,13 @@ impl Runtime {
             .get(&c.id)
             .map(String::as_str)
             .unwrap_or("");
-        if c.kind != ProviderKind::Mock && key.is_empty() {
+        if c.kind == ProviderKind::Mock {
+            return Err(ProviderError::new(
+                ProviderErrorCode::BadResponse,
+                "Mock AI was removed. Pick another AI provider for this agent.",
+            ));
+        }
+        if key.is_empty() {
             return Err(ProviderError::new(
                 ProviderErrorCode::NoKey,
                 if self
@@ -208,15 +288,10 @@ impl Runtime {
                 },
             ));
         }
-        let provider: Arc<dyn AiProvider> = if c.kind == ProviderKind::Mock {
-            Arc::new(MockProvider)
-        } else {
-            match &self.agents.factory {
-                Some(f) => f(c, key)?,
-                None => Arc::new(RemoteProvider::new(c.clone(), key.into())?),
-            }
-        };
-        Ok(provider)
+        Ok(match &self.agents.factory {
+            Some(f) => f(c, key)?,
+            None => Arc::new(RemoteProvider::new(c.clone(), key.into())?),
+        })
     }
     pub(super) fn market_now(&self, source: DataSource) -> i64 {
         match source {
@@ -241,12 +316,22 @@ impl Runtime {
             // An agent whose lost-sync pause is still owed stays unscheduled until the pause
             // lands: it was reported paused, so it must not trade meanwhile.
             let pause_owed = self.pause_owed.contains(&a.account_id);
-            if a.running
-                && !pause_owed
-                && a.next_run_at.is_some_and(|at| at <= now)
-                && self.require_account(&a.account_id)?.source == source
+            if !a.running {
+                self.forget_positions(&a.id);
+                continue;
+            }
+            if pause_owed
+                || self.is_agent_busy(&a.id)
+                || self.require_account(&a.account_id)?.source != source
             {
+                continue;
+            }
+            // Read every tick, so a change is reported once even when the schedule is due too.
+            let changed = self.positions_changed(&a);
+            if a.next_run_at.is_some_and(|at| at <= now) {
                 self.begin_cycle(&a.id, CycleTrigger::Schedule, None)?;
+            } else if changed {
+                self.begin_cycle(&a.id, CycleTrigger::PositionChange, None)?;
             }
         }
         Ok(())
