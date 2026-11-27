@@ -602,7 +602,7 @@ export function PaperPage() {
       </StatStrip>
       <div className="grid gap-3 xl:grid-cols-[1fr_320px]">
         <Card className="p-3">
-          <div className="mb-2 flex items-center gap-3 px-2">
+          <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 px-2">
             <Select aria-label="Trading symbol" className="w-36" value={symbol} onChange={(e) => setSymbol(e.target.value)}>
               {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
