@@ -28,5 +28,5 @@ test('an agent picks several pairs and one cycle decides each of them', async ({
 
   await page.getByRole('button', { name: 'Trading Arena' }).click();
   await page.getByRole('group', { name: 'Arena market' }).getByRole('button', { name: 'OKX', exact: true }).click();
-  await expect(page.getByText('No agents on OKX accounts yet.')).toBeVisible();
+  await expect(page.getByText('No agents on OKX accounts yet')).toBeVisible();
 });

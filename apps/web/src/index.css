@@ -52,9 +52,9 @@
   --accent-ink: #0b0c0e;
   --accent-soft: #23252b;
   --brand: #ee8fb2;
-  --up: #3fc596;
+  --up: #6fd6ae;
   --up-soft: #12271f;
-  --down: #f2627e;
+  --down: #f58a9e;
   --down-soft: #2c1419;
   --warn: #e7b955;
   --warn-soft: #2b2312;
@@ -63,7 +63,7 @@
   --series-1: #5b9cec;
   --series-2: #e2709a;
   --series-3: #c99a32;
-  --series-4: #3fc596;
+  --series-4: #6fd6ae;
   --series-5: #9a7ee6;
   --series-6: #dd7050;
 }

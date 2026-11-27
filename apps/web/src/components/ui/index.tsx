@@ -190,7 +190,8 @@ export function Segmented<T extends string>({
           aria-pressed={value === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
-            'h-6 rounded px-2.5 text-xs font-medium whitespace-nowrap transition-colors duration-100',
+            // Compact for a mouse; a finger gets a taller target.
+            'h-6 rounded px-2.5 text-xs font-medium whitespace-nowrap transition-colors duration-100 pointer-coarse:h-9',
             value === option.value ? 'bg-surface text-ink shadow-[0_0_0_1px_var(--line)]' : 'text-ink-3 hover:text-ink',
           )}
         >
@@ -228,8 +229,9 @@ export function Stat({ label, value, sub, className }: { label: string; value: R
   return (
     <div className={cn('min-w-0 px-4 py-3', className)}>
       <div className="text-xs text-ink-3">{label}</div>
-      <div className="num mt-1 truncate text-lg font-semibold">{value}</div>
-      {sub && <div className="num mt-0.5 truncate text-[11px] text-ink-3">{sub}</div>}
+      {/* A figure wraps rather than being cut: a hidden digit is a wrong number. */}
+      <div className="num mt-1 text-lg font-semibold break-words">{value}</div>
+      {sub && <div className="num mt-0.5 text-[11px] break-words text-ink-3">{sub}</div>}
     </div>
   );
 }
