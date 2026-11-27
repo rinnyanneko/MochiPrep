@@ -592,13 +592,13 @@ export function PaperPage() {
         </div>
       )}
       <div className="mb-3 empty:hidden"><SignalsCard /></div>
-      <StatStrip className="mb-3 md:grid-cols-6">
+      <StatStrip className="mb-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
         <Stat label="Equity" value={<span data-testid="account-equity">{money(b.equity)}</span>} />
         <Stat label="Wallet" value={money(b.walletBalance)} />
         <Stat label="Available" value={money(b.availableBalance)} sub={Number(b.orderMargin) > 0 ? `${money(b.orderMargin)} held by orders` : undefined} />
         <Stat label="Used margin" value={money(b.usedMargin)} />
-        <Stat label="Realized · Unrealized" value={<span className="text-sm"><span className={pnlClass(b.realizedPnl)}>{signedMoney(b.realizedPnl)}</span> · <span className={pnlClass(b.unrealizedPnl)}>{signedMoney(b.unrealizedPnl)}</span></span>} />
-        <Stat label="Fees · Funding" value={<span className="text-sm">{money(b.feesPaid)} · {signedMoney(Number(b.fundingPaid) * -1)}</span>} sub="Funding: + received, − paid" />
+        <Stat label="Realized · Unrealized" value={<span className="text-sm whitespace-normal"><span className={pnlClass(b.realizedPnl)}>{signedMoney(b.realizedPnl)}</span> · <span className={pnlClass(b.unrealizedPnl)}>{signedMoney(b.unrealizedPnl)}</span></span>} />
+        <Stat label="Fees · Funding" value={<span className="text-sm whitespace-normal">{money(b.feesPaid)} · {signedMoney(Number(b.fundingPaid) * -1)}</span>} sub="Funding: + received, − paid" />
       </StatStrip>
       <div className="grid gap-3 xl:grid-cols-[1fr_320px]">
         <Card className="p-3">

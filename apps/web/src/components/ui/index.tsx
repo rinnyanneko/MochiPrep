@@ -229,17 +229,21 @@ export function Stat({ label, value, sub, className }: { label: string; value: R
   return (
     <div className={cn('min-w-0 px-4 py-3', className)}>
       <div className="text-xs text-ink-3">{label}</div>
-      {/* A figure wraps rather than being cut: a hidden digit is a wrong number. */}
-      <div className="num mt-1 text-lg font-semibold break-words">{value}</div>
+      {/* Never cut or split: a hidden or wrapped digit reads as a different number. Strips give
+          each cell room for a whole figure. */}
+      <div className="num mt-1 text-lg font-semibold whitespace-nowrap">{value}</div>
       {sub && <div className="num mt-0.5 text-[11px] break-words text-ink-3">{sub}</div>}
     </div>
   );
 }
 
-/** A row of figures in one panel, divided by hairlines rather than boxed one by one. */
+/**
+ * A row of figures in one panel, divided by hairlines rather than boxed one by one. The lines are
+ * the panel showing through 1px gaps, so they stay right however the grid wraps.
+ */
 export function StatStrip({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <Card className={cn('grid divide-line max-md:divide-y md:divide-x', className)}>
+    <Card className={cn('grid gap-px overflow-hidden bg-line [&>*]:bg-surface', className)}>
       {children}
     </Card>
   );

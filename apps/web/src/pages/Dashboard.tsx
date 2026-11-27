@@ -16,7 +16,7 @@ function Welcome() {
   const setPage = useApp((s) => s.setPage);
   const steps = [
     { title: 'Add an AI provider key', detail: 'Settings → AI providers. Keys stay on this computer.', page: 'settings', action: 'Open settings', testid: 'add-ai-key' },
-    { title: 'Create an agent', detail: 'Pick a model, pairs and risk limits. It trades a paper account until you connect OKX.', page: 'agents', action: 'Create an agent' },
+    { title: 'Create an agent', detail: 'Pick a model, pairs, risk limits and the account it trades: paper, or a connected OKX account.', page: 'agents', action: 'Create an agent' },
     { title: 'Watch it trade', detail: 'Positions, P&L and every decision show up here and in Trade History.', page: 'paper', action: 'Open trading' },
   ] as const;
   return (
@@ -116,7 +116,7 @@ export function DashboardPage() {
       ) : (
         <div className="space-y-4">
           <SignalsCard />
-          <StatStrip className="md:grid-cols-6">
+          <StatStrip className="grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
             <Stat label="Total equity" value={<span data-testid="total-equity">{money(equity)}</span>} sub={<span className={pnlClass(equity - initial)}>{pct(initial ? ((equity - initial) / initial) * 100 : 0)}</span>} />
             <Stat label="Wallet balance" value={money(sum((a) => a.balance.walletBalance))} sub="USDT" />
             <Stat label="Available" value={money(sum((a) => a.balance.availableBalance))} sub={`${money(sum((a) => a.balance.usedMargin))} in margin`} />

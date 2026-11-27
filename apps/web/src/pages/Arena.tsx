@@ -70,7 +70,7 @@ export function ArenaPage() {
           />
         }
       />
-      <p className="mb-3 flex items-start gap-1.5 text-xs text-ink-3">
+      <p className="mb-3 flex items-start gap-1.5 text-xs text-ink-2">
         <Info className="mt-px size-3.5 shrink-0" />
         <span>
           {view === 'REPLAY' && !recorded
