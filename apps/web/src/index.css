@@ -16,7 +16,7 @@
   --line: #e4e5e8;
   --ink: #121316;
   --ink-2: #4a4e56;
-  --ink-3: #70747c;
+  --ink-3: #62666e;
   /* The primary action: ink on the page, as an exchange draws its main button. */
   --accent: #121316;
   --accent-ink: #ffffff;
@@ -31,12 +31,14 @@
   --warn-soft: #f8eed3;
   --info: #1f63b4;
   --info-soft: #e3edf9;
-  --series-1: #1f63b4;
-  --series-2: #d24d7d;
-  --series-3: #9a6a00;
-  --series-4: #0d8a63;
-  --series-5: #6e4fd1;
-  --series-6: #bc4f2a;
+  /* Agent and indicator lines: hues 30°+ away from the up/down presets' red, green and blue,
+     plus two greys, so no line reads as a rise or a fall. */
+  --series-1: #6d4fd1;
+  --series-2: #b06a00;
+  --series-3: #b3359a;
+  --series-4: #2f333a;
+  --series-5: #6b7d00;
+  --series-6: #7a8494;
 }
 
 [data-theme='dark'] {
@@ -47,7 +49,7 @@
   --line: #222429;
   --ink: #eceef1;
   --ink-2: #a3a7ae;
-  --ink-3: #7a7f88;
+  --ink-3: #8b9099;
   --accent: #eceef1;
   --accent-ink: #0b0c0e;
   --accent-soft: #23252b;
@@ -60,12 +62,12 @@
   --warn-soft: #2b2312;
   --info: #7fb2ee;
   --info-soft: #14212f;
-  --series-1: #5b9cec;
-  --series-2: #e2709a;
-  --series-3: #c99a32;
-  --series-4: #6fd6ae;
-  --series-5: #9a7ee6;
-  --series-6: #dd7050;
+  --series-1: #a68cf2;
+  --series-2: #e0a03f;
+  --series-3: #e27ad0;
+  --series-4: #d4d7dc;
+  --series-5: #b2c24a;
+  --series-6: #7d8796;
 }
 
 /*

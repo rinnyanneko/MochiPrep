@@ -190,9 +190,9 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
           <span className={cn('num block text-xs', pnlClass(change))}>{pct(change)}</span>
         </span>
       </button>
-      {agent.statusDetail && <p className="mt-2 rounded-lg bg-warn-soft px-2.5 py-1.5 text-xs text-warn">{agent.statusDetail}</p>}
+      {agent.statusDetail && <p className="mt-2 rounded-md bg-warn-soft px-2.5 py-1.5 text-xs text-warn">{agent.statusDetail}</p>}
       {needsArm && !agent.statusDetail && (
-        <p className="mt-2 rounded-lg bg-down-soft px-2.5 py-1.5 text-xs font-semibold text-down" data-testid="agent-needs-arm">
+        <p className="mt-2 rounded-md bg-down-soft px-2.5 py-1.5 text-xs font-semibold text-down" data-testid="agent-needs-arm">
           {account?.name} is not armed. Starting this agent asks you to arm it.
         </p>
       )}
