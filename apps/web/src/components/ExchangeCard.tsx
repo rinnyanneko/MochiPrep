@@ -64,7 +64,7 @@ function ConnectDialog({ preset, onClose }: { preset: ExchangeStatus | null; onC
           </span>
         </label>
       </div>
-      <h3 className="mt-4 mb-2 font-display text-sm font-extrabold">Account ceilings</h3>
+      <h3 className="mt-4 mb-2 text-sm font-semibold">Account ceilings</h3>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {limit('Max per order (USDT)', 'maxNotional')}
         {limit('Max leverage (x)', 'maxLeverage')}
@@ -75,7 +75,7 @@ function ConnectDialog({ preset, onClose }: { preset: ExchangeStatus | null; onC
         Enforced on every order from you or any agent. A stop loss is always required. The key must be Trade only: a key with withdrawal permission is refused. The OKX account must use one-way position mode.
       </p>
       {environment === 'OKX_LIVE' && (
-        <p className="mt-3 flex items-start gap-2 rounded-xl bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">
+        <p className="mt-3 flex items-start gap-2 rounded-md bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">
           <TriangleAlert className="mt-0.5 size-4 shrink-0" />
           This connects real funds. MochiPrep's OKX integration has only been tested against a simulated exchange, so use small limits, and try Demo Trading first.
         </p>
@@ -124,7 +124,7 @@ export function ArmDialog({ status, onClose, onArmed, reason }: Readonly<{ statu
         <li>Up to {status.limits.maxNotional} USDT per order, {status.limits.maxLeverage}x leverage</li>
         <li>Up to {status.limits.maxOpenPositions} positions, new orders stop after a {status.limits.maxDailyLossPct}% daily loss</li>
       </ul>
-      <p className="mb-3 rounded-xl bg-down-soft px-3 py-2 text-[13px] font-semibold text-down" data-testid="arm-dyor">{DYOR_NOTICE}</p>
+      <p className="mb-3 rounded-md bg-down-soft px-3 py-2 text-[13px] font-semibold text-down" data-testid="arm-dyor">{DYOR_NOTICE}</p>
       <Field label={`Type ${ARM_PHRASE} to confirm`}>
         <Input autoComplete="off" value={phrase} onChange={(e) => setPhrase(e.target.value)} aria-label="Arm confirmation" />
       </Field>

@@ -112,7 +112,7 @@ export function ReplayDataDialog({ onClose }: Readonly<{ onClose(): void }>) {
               <Input type="date" aria-label="Replay to" value={to} max={view ? dayText(view.latest - DAY) : undefined} onChange={(e) => pick(setTo)(e.target.value)} />
             </Field>
           </div>
-          <div className="rounded-xl bg-surface-2 px-3 py-2.5 text-[13px] text-ink-2" data-testid="replay-estimate">
+          <div className="rounded-md bg-surface-2 px-3 py-2.5 text-[13px] text-ink-2" data-testid="replay-estimate">
             <Estimate plan={plan} error={planError} />
             {view && (
               <span className="mt-1 block text-[11px] text-ink-3">
@@ -132,7 +132,7 @@ export function ReplayDataDialog({ onClose }: Readonly<{ onClose(): void }>) {
             {view?.saved.length === 0 ? (
               <p className="text-[13px] text-ink-3">Nothing yet.</p>
             ) : (
-              <ul className="divide-y divide-line rounded-xl border border-line">
+              <ul className="divide-y divide-line rounded-md border border-line">
                 {view?.saved.map((s) => (
                   <li key={s.start} className="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px]" data-testid="saved-range">
                     <span className="num font-semibold">{spanText(s.start, s.end)}</span>

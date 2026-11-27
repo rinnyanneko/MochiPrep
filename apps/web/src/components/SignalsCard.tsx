@@ -80,7 +80,7 @@ export function SignalsCard() {
       {signals.map((signal) => <SignalRow key={signal.id} signal={signal} onExecute={() => onExecute(signal)} />)}
       <Dialog open={confirming !== null} onOpenChange={() => setConfirming(null)} title={`${confirming?.decision?.action} ${confirming?.symbol}?`} description="The order is sized again at current prices, so it can differ from the suggestion.">
         {confirming?.venue === 'OKX_LIVE' && (
-          <p className="mb-3 flex items-start gap-2 rounded-xl bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">
+          <p className="mb-3 flex items-start gap-2 rounded-md bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">
             <TriangleAlert className="mt-0.5 size-4 shrink-0" /> This places a real order with real money. It cannot be undone.
           </p>
         )}

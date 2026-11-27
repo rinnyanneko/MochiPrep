@@ -5,7 +5,7 @@ import { NewsPanel } from '@/components/NewsPanel';
 import { AccountPicker, useCurrentAccount } from '@/components/trading';
 import { useTradeOverlay } from '@/components/useTradeOverlay';
 import { FeedBadge, PageTitle } from '@/components/Shell';
-import { Badge, Card, Segmented, Select, Stat } from '@/components/ui';
+import { Badge, Card, Segmented, Select, Stat, StatStrip } from '@/components/ui';
 import { api } from '@/lib/api';
 import { isBoolean, isString, oneOf, useRemembered } from '@/lib/remembered';
 import { pct, pnlClass, price } from '@/lib/format';
@@ -65,13 +65,13 @@ export function MarketsPage() {
           </div>
         }
       />
-      <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-5">
+      <StatStrip className="mb-3 md:grid-cols-5">
         <Stat label={`${symbol} last`} value={<span data-testid="ticker-last">{price(quote?.last, symbol)}</span>} sub={change === null ? undefined : <span className={pnlClass(change)}>{pct(change)} 24h</span>} />
         <Stat label="Bid / Ask" value={<span className="text-sm">{price(quote?.bid, symbol)} / {price(quote?.ask, symbol)}</span>} />
         <Stat label="Mark price" value={price(quote?.mark, symbol)} sub={quote?.markEstimated ? 'Estimated from mid' : undefined} />
         <Stat label="Funding rate" value={quote?.fundingRate ? pct(Number(quote.fundingRate) * 100, 4) : '–'} sub={quote?.nextFundingTime ? `Next ${dateTime(quote.nextFundingTime)}` : undefined} />
         <Stat label="Connection" value={<FeedBadge />} sub={quote ? `Quote ${dateTime(quote.ts)}` : 'Waiting for a quote'} />
-      </div>
+      </StatStrip>
       <Card className="p-3">
         <div className="mb-2 flex flex-wrap gap-2 px-2 text-xs text-ink-2">
           <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3.5 rounded-full" style={{ background: 'var(--series-2)' }} />EMA 20</span>

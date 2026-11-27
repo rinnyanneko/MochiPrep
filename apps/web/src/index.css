@@ -9,27 +9,30 @@
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
 :root {
-  --bg: #fbf7f2;
+  --bg: #f7f7f8;
   --surface: #ffffff;
-  --surface-2: #f5eee6;
-  --surface-3: #ece2d7;
-  --line: #e4d9cd;
-  --ink: #2b2433;
-  --ink-2: #625a6b;
-  --ink-3: #7f7687;
-  --accent: #c2406f;
+  --surface-2: #f2f3f4;
+  --surface-3: #e7e8ea;
+  --line: #e4e5e8;
+  --ink: #121316;
+  --ink-2: #4a4e56;
+  --ink-3: #7b7f87;
+  /* The primary action: ink on the page, as an exchange draws its main button. */
+  --accent: #121316;
   --accent-ink: #ffffff;
-  --accent-soft: #fbe3ec;
+  --accent-soft: #ececee;
+  /* MochiPrep's pink, kept for the mark and mascot only. */
+  --brand: #d24d7d;
   --up: #0d8a63;
-  --up-soft: #d9f2e8;
+  --up-soft: #e1f3ec;
   --down: #c8324f;
-  --down-soft: #fbe1e6;
+  --down-soft: #fbe6ea;
   --warn: #8a5f00;
-  --warn-soft: #f8ecc9;
-  --info: #1f73c4;
-  --info-soft: #dcebfa;
-  --series-1: #c2406f;
-  --series-2: #1f73c4;
+  --warn-soft: #f8eed3;
+  --info: #1f63b4;
+  --info-soft: #e3edf9;
+  --series-1: #1f63b4;
+  --series-2: #d24d7d;
   --series-3: #9a6a00;
   --series-4: #0d8a63;
   --series-5: #6e4fd1;
@@ -37,31 +40,32 @@
 }
 
 [data-theme='dark'] {
-  --bg: #100e16;
-  --surface: #17151f;
-  --surface-2: #201d2a;
-  --surface-3: #2b2737;
-  --line: #2f2a3b;
-  --ink: #f4eee7;
-  --ink-2: #b7aebf;
-  --ink-3: #9085a0;
-  --accent: #f29bbb;
-  --accent-ink: #2b1420;
-  --accent-soft: #3a2230;
-  --up: #6fd6ae;
-  --up-soft: #17322a;
-  --down: #f58a9e;
-  --down-soft: #3a1d26;
-  --warn: #efc56b;
-  --warn-soft: #362a12;
-  --info: #8cc4f5;
-  --info-soft: #182c40;
-  --series-1: #db5f8a;
-  --series-2: #3c93d6;
-  --series-3: #c08a20;
-  --series-4: #23a57c;
-  --series-5: #9374e0;
-  --series-6: #d2603f;
+  --bg: #0b0c0e;
+  --surface: #121317;
+  --surface-2: #191a1f;
+  --surface-3: #23252b;
+  --line: #222429;
+  --ink: #eceef1;
+  --ink-2: #a3a7ae;
+  --ink-3: #6f747c;
+  --accent: #eceef1;
+  --accent-ink: #0b0c0e;
+  --accent-soft: #23252b;
+  --brand: #ee8fb2;
+  --up: #3fc596;
+  --up-soft: #12271f;
+  --down: #f2627e;
+  --down-soft: #2c1419;
+  --warn: #e7b955;
+  --warn-soft: #2b2312;
+  --info: #7fb2ee;
+  --info-soft: #14212f;
+  --series-1: #5b9cec;
+  --series-2: #e2709a;
+  --series-3: #c99a32;
+  --series-4: #3fc596;
+  --series-5: #9a7ee6;
+  --series-6: #dd7050;
 }
 
 /*
@@ -94,6 +98,7 @@
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
   --color-accent-soft: var(--accent-soft);
+  --color-brand: var(--brand);
   --color-up: var(--up);
   --color-up-soft: var(--up-soft);
   --color-down: var(--down);
@@ -109,7 +114,7 @@
   --font-sans: 'Google Sans Variable', 'Noto Sans TC Variable', 'Noto Sans SC Variable', 'Noto Sans JP Variable', 'Noto Sans KR Variable', system-ui, sans-serif;
   --font-display: var(--font-sans);
   --font-mono: 'Intel One Mono Variable', 'Noto Sans TC Variable', 'Noto Sans SC Variable', 'Noto Sans JP Variable', 'Noto Sans KR Variable', ui-monospace, monospace;
-  --radius-card: 18px;
+  --radius-card: 8px;
 }
 
 /* Shared Han characters need the regional glyph form of the text's declared language. */
@@ -157,10 +162,16 @@ body {
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: 14px;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
 }
 
-.num,
+/* Figures line up in columns without the width of a monospace face. */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
 code,
 pre,
 kbd,
@@ -175,7 +186,7 @@ samp {
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--info);
   outline-offset: 2px;
 }
 

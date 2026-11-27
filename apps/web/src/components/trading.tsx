@@ -415,14 +415,14 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
       {d.ownerMessage !== undefined && (
         <section data-testid="decision-message">
           <h3 className="mb-1 text-xs font-semibold text-ink-2">Your message</h3>
-          <p className="rounded-xl bg-accent-soft px-3 py-2 text-[13px] leading-relaxed">{d.ownerMessage}</p>
+          <p className="rounded-md bg-accent-soft px-3 py-2 text-[13px] leading-relaxed">{d.ownerMessage}</p>
         </section>
       )}
 
       {d.attempts?.map((attempt, n) => (
         <section key={n} data-testid="decision-attempt">
           <h3 className="mb-1 text-xs font-semibold text-ink-2">Refused try {n + 1}: asked again</h3>
-          <p className="rounded-xl bg-surface-2 px-3 py-2 text-[13px] leading-relaxed">
+          <p className="rounded-md bg-surface-2 px-3 py-2 text-[13px] leading-relaxed">
             {attempt.decision ? `${attempt.decision.action} ${attempt.decision.symbol}. ` : ''}
             {attempt.outcomeDetail ?? attempt.outcome}
           </p>
@@ -433,7 +433,7 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
       {ai && (
         <section>
           <h3 className="mb-1 text-xs font-semibold text-ink-2">AI proposal</h3>
-          <p className="rounded-xl bg-surface-2 px-3 py-2 text-[13px] leading-relaxed">{ai.reason}</p>
+          <p className="rounded-md bg-surface-2 px-3 py-2 text-[13px] leading-relaxed">{ai.reason}</p>
           <p className="mt-1 text-[11px] text-ink-3">The model's own explanation. It is unverified and does not show the trade is sound. DYOR.</p>
           <div className="mt-2">
             <Row label="Order">{ai.orderType}{ai.entryPrice ? ` @ ${ai.entryPrice}` : ''}</Row>
@@ -496,11 +496,11 @@ export function DecisionDetail({ decision: d }: { decision: DecisionRecord }) {
         <Row label="Estimated cost">{d.estimatedCost === null ? 'Unknown (set prices in Settings)' : `$${d.estimatedCost}`}</Row>
       </section>
 
-      {d.validationError && <p className="rounded-xl bg-down-soft px-3 py-2 text-[13px] text-down">Rejected output: {d.validationError}</p>}
+      {d.validationError && <p className="rounded-md bg-down-soft px-3 py-2 text-[13px] text-down">Rejected output: {d.validationError}</p>}
       {d.rawResponse && (
         <section>
           <Button size="sm" variant="ghost" onClick={() => setShowRaw(!showRaw)}>{showRaw ? 'Hide' : 'Show'} raw AI response</Button>
-          {showRaw && <pre className="num mt-2 max-h-56 overflow-auto rounded-xl bg-surface-2 p-3 text-[11px] break-words whitespace-pre-wrap">{d.rawResponse}</pre>}
+          {showRaw && <pre className="num mt-2 max-h-56 overflow-auto rounded-md bg-surface-2 p-3 text-[11px] break-words whitespace-pre-wrap">{d.rawResponse}</pre>}
         </section>
       )}
     </div>

@@ -75,7 +75,7 @@ function CreateDialog({ onClose }: { onClose(): void }) {
         <Field label="Repeat it" hint={mismatch ? 'Does not match.' : undefined}>
           <Input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
         </Field>
-        <p className="flex items-start gap-2 rounded-xl bg-warn-soft px-3 py-2 text-[13px] font-semibold text-warn">
+        <p className="flex items-start gap-2 rounded-md bg-warn-soft px-3 py-2 text-[13px] font-semibold text-warn">
           <TriangleAlert className="mt-0.5 size-4 shrink-0" />
           There is no recovery. If you forget it, the saved keys are lost and you enter them again. Your accounts and trade history are not affected.
         </p>

@@ -135,7 +135,7 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
         <AgentSettingsFields value={form} onChange={set} source={source} />
       </div>
       {selectedAccount?.venue === 'OKX_LIVE' && form.executionMode === 'AUTO' && (
-        <p className="mt-3 rounded-xl bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">
+        <p className="mt-3 rounded-md bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">
           This agent will place real orders on its own while running. The account's limits in Settings cap everything above.
         </p>
       )}
@@ -176,7 +176,7 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
         <Mochi mood={status.mood} size={48} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
-            <span className="truncate font-display text-[15px] font-extrabold">{agent.name}</span>
+            <span className="truncate text-[13px] font-semibold">{agent.name}</span>
             <Badge tone={status.tone} data-testid="agent-status">{status.label}</Badge>
             {account && account.venue !== 'PAPER' && <VenueBadge venue={account.venue} />}
             <Badge tone={agent.executionMode === 'AUTO' ? 'accent' : 'info'} data-testid="agent-mode">{agent.executionMode === 'AUTO' ? 'Auto' : 'Suggest'}</Badge>

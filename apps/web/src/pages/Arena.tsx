@@ -69,7 +69,7 @@ export function ArenaPage() {
           />
         }
       />
-      <div className="mb-3 flex items-start gap-2 rounded-2xl bg-info-soft px-4 py-2.5 text-xs text-info">
+      <div className="mb-3 flex items-start gap-2 rounded-md bg-info-soft px-4 py-2.5 text-xs text-info">
         <Info className="mt-px size-4 shrink-0" />
         <span>
           {view === 'REPLAY' && !recorded
