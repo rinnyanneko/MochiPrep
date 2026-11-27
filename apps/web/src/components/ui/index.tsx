@@ -227,10 +227,11 @@ export function Table({ head, children, empty }: { head: ReactNode[]; children: 
 /** One figure in a [`StatStrip`]: label above, value, optional note below. */
 export function Stat({ label, value, sub, className }: { label: string; value: ReactNode; sub?: ReactNode; className?: string }) {
   return (
-    <div className={cn('min-w-0 px-4 py-3', className)}>
+    <div className={cn('px-4 py-3', className)}>
       <div className="text-xs text-ink-3">{label}</div>
-      {/* Never cut or split: a hidden or wrapped digit reads as a different number. Strips give
-          each cell room for a whole figure. */}
+      {/* Never cut or split: a hidden or wrapped digit reads as a different number. The cell is at
+          least as wide as its figure (see StatStrip); a value of several parts may opt in to
+          wrapping between them with whitespace-normal. */}
       <div className="num mt-1 text-lg font-semibold whitespace-nowrap">{value}</div>
       {sub && <div className="num mt-0.5 text-[11px] break-words text-ink-3">{sub}</div>}
     </div>
@@ -239,11 +240,13 @@ export function Stat({ label, value, sub, className }: { label: string; value: R
 
 /**
  * A row of figures in one panel, divided by hairlines rather than boxed one by one. The lines are
- * the panel showing through 1px gaps, so they stay right however the grid wraps.
+ * the panel showing through 1px gaps. Cells share the row from a 9rem basis but never shrink below
+ * their own figure: one that does not fit moves to the next line, a very large one gets a line of
+ * its own, so no figure is clipped or overlaps its neighbour.
  */
 export function StatStrip({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <Card className={cn('grid gap-px overflow-hidden bg-line [&>*]:bg-surface', className)}>
+    <Card data-testid="stat-strip" className={cn('flex flex-wrap gap-px overflow-hidden bg-line [&>*]:flex-[1_1_9rem] [&>*]:bg-surface', className)}>
       {children}
     </Card>
   );

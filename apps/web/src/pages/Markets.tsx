@@ -65,7 +65,7 @@ export function MarketsPage() {
           </div>
         }
       />
-      <StatStrip className="mb-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+      <StatStrip className="mb-3">
         <Stat label={`${symbol} last`} value={<span data-testid="ticker-last">{price(quote?.last, symbol)}</span>} sub={change === null ? undefined : <span className={pnlClass(change)}>{pct(change)} 24h</span>} />
         <Stat label="Bid / Ask" value={<span className="text-sm whitespace-normal">{price(quote?.bid, symbol)} / {price(quote?.ask, symbol)}</span>} />
         <Stat label="Mark price" value={price(quote?.mark, symbol)} sub={quote?.markEstimated ? 'Estimated from mid' : undefined} />

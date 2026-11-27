@@ -592,7 +592,7 @@ export function PaperPage() {
         </div>
       )}
       <div className="mb-3 empty:hidden"><SignalsCard /></div>
-      <StatStrip className="mb-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+      <StatStrip className="mb-3">
         <Stat label="Equity" value={<span data-testid="account-equity">{money(b.equity)}</span>} />
         <Stat label="Wallet" value={money(b.walletBalance)} />
         <Stat label="Available" value={money(b.availableBalance)} sub={Number(b.orderMargin) > 0 ? `${money(b.orderMargin)} held by orders` : undefined} />
