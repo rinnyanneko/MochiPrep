@@ -7,7 +7,7 @@ import { Mochi } from '@/components/Mochi';
 import { PageTitle } from '@/components/Shell';
 import { SignalsCard } from '@/components/SignalsCard';
 import { AccountPicker, DecisionList, FillsTable, PositionsTable } from '@/components/trading';
-import { Button, Card, CardHeader, Stat, StatStrip } from '@/components/ui';
+import { Button, Card, CardHeader, EmptyState, Stat, StatStrip } from '@/components/ui';
 import { api } from '@/lib/api';
 import { money, pct, pnlClass, signedMoney } from '@/lib/format';
 import { useApp, useQuery, useSourceAccounts } from '@/store';
@@ -109,10 +109,10 @@ export function DashboardPage() {
         action={<AccountPicker allowAll />}
       />
       {scope.length === 0 ? (
-        <Card className="px-6 py-10 text-center text-[13px] text-ink-3">
-          No {source === 'LIVE' ? 'live-data' : 'replay'} paper accounts yet.{' '}
-          <button type="button" className="font-semibold text-accent" onClick={() => setPage('paper')}>Create one in Trading</button>.
-        </Card>
+        <EmptyState
+          title={`No ${source === 'LIVE' ? 'live-data' : 'replay'} accounts yet`}
+          action={<Button onClick={() => setPage('paper')}>Create one in Trading <ArrowRight /></Button>}
+        />
       ) : (
         <div className="space-y-4">
           <SignalsCard />

@@ -6,7 +6,7 @@ import { useTradeOverlay } from '@/components/useTradeOverlay';
 import { PageTitle } from '@/components/Shell';
 import { SignalsCard } from '@/components/SignalsCard';
 import { AccountPicker, ClosedPositionsTable, FillsTable, LedgerTable, OrdersTable, PositionsTable, useCurrentAccount, VenueBadge } from '@/components/trading';
-import { Badge, Button, Card, Dialog, Field, Input, Segmented, Select, Stat, StatStrip, Tabs } from '@/components/ui';
+import { Badge, Button, Card, Dialog, EmptyState, Field, Input, Segmented, Select, Stat, StatStrip, Tabs } from '@/components/ui';
 import { api, isNotDispatched } from '@/lib/api';
 import { isInteger, isString, oneOf, useRemembered } from '@/lib/remembered';
 import { money, pnlClass, price, qty, signedMoney } from '@/lib/format';
@@ -566,7 +566,10 @@ export function PaperPage() {
     return (
       <>
         <PageTitle title="Trading" action={actions} />
-        <Card className="px-6 py-10 text-center text-[13px] text-ink-3">Create a {source === 'LIVE' ? 'live-data' : 'replay'} paper account to start trading.</Card>
+        <EmptyState
+          title={`No ${source === 'LIVE' ? 'live-data' : 'replay'} account yet`}
+          detail="Use New account above. A paper account starts with simulated USDT; nothing reaches an exchange."
+        />
       </>
     );
   }

@@ -242,3 +242,14 @@ export function StatStrip({ className, children }: { className?: string; childre
     </Card>
   );
 }
+
+/** What a page shows with nothing in it: what is missing, and the next step. */
+export function EmptyState({ title, detail, action }: { title: string; detail?: ReactNode; action?: ReactNode }) {
+  return (
+    <Card className="flex flex-col items-center gap-1 px-6 py-12 text-center">
+      <p className="text-[13px] font-medium">{title}</p>
+      {detail && <p className="max-w-md text-xs text-ink-3">{detail}</p>}
+      {action && <div className="mt-3">{action}</div>}
+    </Card>
+  );
+}

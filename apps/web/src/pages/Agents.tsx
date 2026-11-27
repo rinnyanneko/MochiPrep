@@ -8,7 +8,7 @@ import { MAX_AGENT_PAIRS, PairPicker } from '@/components/PairPicker';
 import { Mochi, type MochiMood } from '@/components/Mochi';
 import { PageTitle } from '@/components/Shell';
 import { DecisionDetail, DecisionList, VenueBadge } from '@/components/trading';
-import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Select, type Tone } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, Dialog, EmptyState, Field, Input, Select, type Tone } from '@/components/ui';
 import { api } from '@/lib/api';
 import { money, pct, pnlClass } from '@/lib/format';
 import { settingsFromTemplate, type AgentSettings } from '@/lib/templates';
@@ -256,7 +256,11 @@ export function AgentsPage() {
         }
       />
       {agents.length === 0 ? (
-        <Card className="px-6 py-10 text-center text-[13px] text-ink-3">No agents on this data source yet.</Card>
+        <EmptyState
+          title={`No agents on ${source === 'REPLAY' ? 'the replay' : 'live data'} yet`}
+          detail="An agent asks your AI model for a decision on a schedule and trades through the risk limits you set."
+          action={<Button variant="primary" onClick={() => setEditing('new')}><Plus /> New agent</Button>}
+        />
       ) : (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,4fr)_minmax(0,4fr)]">
           <div className="space-y-3">
