@@ -1,10 +1,10 @@
-import { Info } from 'lucide-react';
+import { ArrowRight, Info } from 'lucide-react';
 import { useMemo } from 'react';
 import type { ArenaRow } from '@mochiprep/shared';
 import { EquityChart } from '@/components/charts';
 import { PageTitle } from '@/components/Shell';
 import { VenueBadge } from '@/components/trading';
-import { Badge, Card, CardHeader, Segmented, Table } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, EmptyState, Segmented, Table } from '@/components/ui';
 import { ARENA_VIEWS, arenaView, compareArenaRows, type ArenaView } from '@/lib/arena';
 import { money, pct, pnlClass, signedMoney } from '@/lib/format';
 import { oneOf, useRemembered } from '@/lib/remembered';
@@ -29,6 +29,7 @@ function chartNote(charted: number, okx: boolean): string {
 export function ArenaPage() {
   const arena = useApp((s) => s.arena);
   const globalSource = useApp((s) => s.source);
+  const setPage = useApp((s) => s.setPage);
   const [view, setView] = useRemembered<ArenaView>('arena.view', globalSource, oneOf(ARENA_VIEWS));
   const rows = arena.filter((r) => arenaView(r) === view);
   const okx = view === 'OKX';
@@ -69,8 +70,8 @@ export function ArenaPage() {
           />
         }
       />
-      <div className="mb-3 flex items-start gap-2 rounded-2xl bg-info-soft px-4 py-2.5 text-xs text-info">
-        <Info className="mt-px size-4 shrink-0" />
+      <p className="mb-3 flex items-start gap-1.5 text-xs text-ink-2">
+        <Info className="mt-px size-3.5 shrink-0" />
         <span>
           {view === 'REPLAY' && !recorded
             ? 'Synthetic replay results. Every agent saw the same tape, so runs are comparable, but they say nothing about real markets.'
@@ -78,9 +79,12 @@ export function ArenaPage() {
           Short-term returns do not predict future performance.
           {!okx && capitals.size > 1 && ' Starting capital differs between these agents, so compare returns, not USDT.'}
         </span>
-      </div>
+      </p>
       {rows.length === 0 ? (
-        <Card className="px-6 py-10 text-center text-[13px] text-ink-3">{okx ? 'No agents on OKX accounts yet.' : 'No agents on this market yet.'}</Card>
+        <EmptyState
+          title={okx ? 'No agents on OKX accounts yet' : 'No agents on this market yet'}
+          action={<Button onClick={() => setPage('agents')}>Create an agent <ArrowRight /></Button>}
+        />
       ) : (
         <div className="space-y-3">
           <Card>

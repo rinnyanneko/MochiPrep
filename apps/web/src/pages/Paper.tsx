@@ -6,7 +6,7 @@ import { useTradeOverlay } from '@/components/useTradeOverlay';
 import { PageTitle } from '@/components/Shell';
 import { SignalsCard } from '@/components/SignalsCard';
 import { AccountPicker, ClosedPositionsTable, FillsTable, LedgerTable, OrdersTable, PositionsTable, useCurrentAccount, VenueBadge } from '@/components/trading';
-import { Badge, Button, Card, Dialog, Field, Input, Segmented, Select, Stat, Tabs } from '@/components/ui';
+import { Badge, Button, Card, Dialog, EmptyState, Field, Input, Segmented, Select, Stat, StatStrip, Tabs } from '@/components/ui';
 import { api, isNotDispatched } from '@/lib/api';
 import { isInteger, isString, oneOf, useRemembered } from '@/lib/remembered';
 import { money, pnlClass, price, qty, signedMoney } from '@/lib/format';
@@ -428,7 +428,7 @@ function OrderTicket({ account, symbol, positions }: Readonly<{ account: Account
 
   return (
     <Card className="space-y-3 p-4" data-testid="order-ticket">
-      {!boundReduction && <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface-2 p-1">
+      {!boundReduction && <div className="grid grid-cols-2 gap-1 rounded-md bg-surface-2 p-1">
         <Button size="sm" variant={side === 'BUY' ? 'long' : 'ghost'} aria-pressed={side === 'BUY'} onClick={() => setSide('BUY')}>Long</Button>
         <Button size="sm" variant={side === 'SELL' ? 'short' : 'ghost'} aria-pressed={side === 'SELL'} onClick={() => setSide('SELL')}>Short</Button>
       </div>}
@@ -470,7 +470,7 @@ function OrderTicket({ account, symbol, positions }: Readonly<{ account: Account
       <label className="flex items-center gap-2 text-xs text-ink-2">
         <input type="checkbox" checked={reduceOnly} onChange={(e) => changeReduceOnly(e.target.checked)} className="accent-[var(--accent)]" /> Reduce only
       </label>
-      <div className="space-y-0.5 rounded-xl bg-surface-2 p-2.5 text-xs">
+      <div className="space-y-0.5 rounded-md bg-surface-2 p-2.5 text-xs">
         <div className="flex justify-between"><span className="text-ink-3">Quantity</span><span className="num">{valid ? `${displayedQuantity} ${instrument.baseCurrency}` : '–'}</span></div>
         <div className="flex justify-between"><span className="text-ink-3">Notional</span><span className="num">{valid ? money(notional) : '–'}</span></div>
         <div className="flex justify-between"><span className="text-ink-3">Available</span><span className="num">{money(account.balance.availableBalance)}</span></div>
@@ -485,7 +485,7 @@ function OrderTicket({ account, symbol, positions }: Readonly<{ account: Account
         description={account.venue === 'PAPER' ? 'Simulated order. Estimates only: the engine fills against the live quote, with spread and slippage.' : 'Sent to OKX. Estimates only: the exchange decides the fill.'}
       >
         {account.venue === 'OKX_LIVE' && (
-          <p className="mb-3 rounded-xl bg-down-soft px-3 py-2 text-[13px] font-semibold text-down" data-testid="real-order-warning">
+          <p className="mb-3 rounded-md bg-down-soft px-3 py-2 text-[13px] font-semibold text-down" data-testid="real-order-warning">
             This is a real order with real money. It cannot be undone.
           </p>
         )}
@@ -566,7 +566,10 @@ export function PaperPage() {
     return (
       <>
         <PageTitle title="Trading" action={actions} />
-        <Card className="px-6 py-10 text-center text-[13px] text-ink-3">Create a {source === 'LIVE' ? 'live-data' : 'replay'} paper account to start trading.</Card>
+        <EmptyState
+          title={`No ${source === 'LIVE' ? 'live-data' : 'replay'} account yet`}
+          detail="Use New account above. A paper account starts with simulated USDT; nothing reaches an exchange."
+        />
       </>
     );
   }
@@ -583,23 +586,23 @@ export function PaperPage() {
         action={actions}
       />
       {account.venue === 'OKX_LIVE' && (
-        <div className="mb-3 flex items-center gap-2 rounded-2xl bg-down-soft px-4 py-2.5 text-[13px] font-semibold text-down" data-testid="real-money-banner">
+        <div className="mb-3 flex items-center gap-2 rounded-md bg-down-soft px-4 py-2.5 text-[13px] font-semibold text-down" data-testid="real-money-banner">
           <TriangleAlert className="size-4 shrink-0" />
           Real money. Orders here, and from any agent on this account, are placed on your OKX account.
         </div>
       )}
       <div className="mb-3 empty:hidden"><SignalsCard /></div>
-      <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <StatStrip className="mb-3">
         <Stat label="Equity" value={<span data-testid="account-equity">{money(b.equity)}</span>} />
         <Stat label="Wallet" value={money(b.walletBalance)} />
         <Stat label="Available" value={money(b.availableBalance)} sub={Number(b.orderMargin) > 0 ? `${money(b.orderMargin)} held by orders` : undefined} />
         <Stat label="Used margin" value={money(b.usedMargin)} />
-        <Stat label="Realized · Unrealized" value={<span className="text-sm"><span className={pnlClass(b.realizedPnl)}>{signedMoney(b.realizedPnl)}</span> · <span className={pnlClass(b.unrealizedPnl)}>{signedMoney(b.unrealizedPnl)}</span></span>} />
-        <Stat label="Fees · Funding" value={<span className="text-sm">{money(b.feesPaid)} · {signedMoney(Number(b.fundingPaid) * -1)}</span>} sub="Funding: + received, − paid" />
-      </div>
+        <Stat label="Realized · Unrealized" value={<span className="text-sm whitespace-normal"><span className={pnlClass(b.realizedPnl)}>{signedMoney(b.realizedPnl)}</span> · <span className={pnlClass(b.unrealizedPnl)}>{signedMoney(b.unrealizedPnl)}</span></span>} />
+        <Stat label="Fees · Funding" value={<span className="text-sm whitespace-normal">{money(b.feesPaid)} · {signedMoney(Number(b.fundingPaid) * -1)}</span>} sub="Funding: + received, − paid" />
+      </StatStrip>
       <div className="grid gap-3 xl:grid-cols-[1fr_320px]">
         <Card className="p-3">
-          <div className="mb-2 flex items-center gap-3 px-2">
+          <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 px-2">
             <Select aria-label="Trading symbol" className="w-36" value={symbol} onChange={(e) => setSymbol(e.target.value)}>
               {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>

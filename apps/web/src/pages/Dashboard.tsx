@@ -7,28 +7,41 @@ import { Mochi } from '@/components/Mochi';
 import { PageTitle } from '@/components/Shell';
 import { SignalsCard } from '@/components/SignalsCard';
 import { AccountPicker, DecisionList, FillsTable, PositionsTable } from '@/components/trading';
-import { Button, Card, CardHeader, Stat } from '@/components/ui';
+import { Button, Card, CardHeader, EmptyState, Stat, StatStrip } from '@/components/ui';
 import { api } from '@/lib/api';
 import { money, pct, pnlClass, signedMoney } from '@/lib/format';
 import { useApp, useQuery, useSourceAccounts } from '@/store';
 
 function Welcome() {
   const setPage = useApp((s) => s.setPage);
+  const steps = [
+    { title: 'Add an AI provider key', detail: 'Settings → AI providers. Keys stay on this computer.', page: 'settings', action: 'Open settings', testid: 'add-ai-key' },
+    { title: 'Create an agent', detail: 'Pick a model, pairs, risk limits and the account it trades: paper, or a connected OKX account.', page: 'agents', action: 'Create an agent' },
+    { title: 'Watch it trade', detail: 'Positions, P&L and every decision show up here and in Trade History.', page: 'paper', action: 'Open trading' },
+  ] as const;
   return (
-    <Card className="mx-auto mt-10 max-w-xl px-8 py-10 text-center">
-      <Mochi mood="sleeping" size={110} className="mx-auto" />
-      <h1 className="mt-4 font-display text-3xl font-black">Your cute little AI trading companion</h1>
-      <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-ink-2">
-        Local-first AI trading for crypto perpetuals. Add a key for your AI provider, then create an agent on a paper account or an OKX account.
-      </p>
-      <div className="mt-6 flex flex-wrap justify-center gap-2">
-        <Button variant="primary" size="lg" onClick={() => setPage('settings')} data-testid="add-ai-key">
-          Add my AI key <ArrowRight />
-        </Button>
-        <Button size="lg" onClick={() => setPage('agents')}>
-          Create an agent
-        </Button>
+    <Card className="mx-auto mt-6 max-w-2xl">
+      <div className="flex items-center gap-3 border-b border-line px-5 py-4">
+        <Mochi mood="sleeping" size={36} />
+        <div>
+          <h1 className="text-base font-semibold">Get started</h1>
+          <p className="text-xs text-ink-3">AI agents for USDT perpetuals, on paper or on your OKX account.</p>
+        </div>
       </div>
+      <ol className="divide-y divide-line">
+        {steps.map((step, i) => (
+          <li key={step.title} className="flex items-center gap-4 px-5 py-3.5">
+            <span className="num grid size-6 shrink-0 place-content-center rounded-full border border-line text-xs text-ink-2">{i + 1}</span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-medium">{step.title}</div>
+              <div className="text-xs text-ink-3">{step.detail}</div>
+            </div>
+            <Button size="sm" variant={i === 0 ? 'primary' : 'secondary'} onClick={() => setPage(step.page)} data-testid={'testid' in step ? step.testid : undefined}>
+              {step.action} <ArrowRight />
+            </Button>
+          </li>
+        ))}
+      </ol>
     </Card>
   );
 }
@@ -96,21 +109,21 @@ export function DashboardPage() {
         action={<AccountPicker allowAll />}
       />
       {scope.length === 0 ? (
-        <Card className="px-6 py-10 text-center text-[13px] text-ink-3">
-          No {source === 'LIVE' ? 'live-data' : 'replay'} paper accounts yet.{' '}
-          <button type="button" className="font-semibold text-accent" onClick={() => setPage('paper')}>Create one in Trading</button>.
-        </Card>
+        <EmptyState
+          title={`No ${source === 'LIVE' ? 'live-data' : 'replay'} accounts yet`}
+          action={<Button onClick={() => setPage('paper')}>Create one in Trading <ArrowRight /></Button>}
+        />
       ) : (
         <div className="space-y-4">
           <SignalsCard />
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          <StatStrip>
             <Stat label="Total equity" value={<span data-testid="total-equity">{money(equity)}</span>} sub={<span className={pnlClass(equity - initial)}>{pct(initial ? ((equity - initial) / initial) * 100 : 0)}</span>} />
             <Stat label="Wallet balance" value={money(sum((a) => a.balance.walletBalance))} sub="USDT" />
             <Stat label="Available" value={money(sum((a) => a.balance.availableBalance))} sub={`${money(sum((a) => a.balance.usedMargin))} in margin`} />
             <Stat label="Realized PnL" value={<span className={pnlClass(realized)}>{signedMoney(realized)}</span>} sub={`Fees ${money(sum((a) => a.balance.feesPaid))}`} />
             <Stat label="Unrealized PnL" value={<span className={pnlClass(unrealized)}>{signedMoney(unrealized)}</span>} sub={`${positions?.length ?? 0} open`} />
             <Stat label="Active agents" value={active.length} sub={`of ${agents.filter((a) => scopeIds.has(a.accountId)).length}`} />
-          </div>
+          </StatStrip>
 
           <div className="grid gap-4 xl:grid-cols-3">
             <Card className="xl:col-span-2">

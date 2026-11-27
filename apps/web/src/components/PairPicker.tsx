@@ -23,8 +23,8 @@ export function PairPicker({ options, value, onChange }: Readonly<{ options: Sym
             disabled={!on && full}
             onClick={() => onChange(on ? value.filter((s) => s !== symbol) : [...value, symbol])}
             className={cn(
-              'num inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-40',
-              on ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-surface-2 text-ink-2 hover:border-ink-3',
+              'num inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors duration-100 disabled:opacity-40',
+              on ? 'border-ink-3 bg-surface-3 text-ink' : 'border-line bg-surface text-ink-2 hover:border-ink-3',
             )}
           >
             {on && <Check className="size-3" />}

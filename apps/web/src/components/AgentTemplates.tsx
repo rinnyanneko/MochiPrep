@@ -75,7 +75,7 @@ export function AgentSettingsFields<T extends AgentSettings>({ value, onChange, 
           <Textarea value={value.strategy} onChange={(e) => onChange({ strategy: e.target.value })} placeholder="Trade pullbacks in the direction of the 1h trend..." />
         </Field>
       </div>
-      <h3 className="mt-4 mb-2 font-display text-sm font-extrabold">Risk limits</h3>
+      <h3 className="mt-4 mb-2 text-sm font-semibold">Risk limits</h3>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {number('Max leverage (x)', 'maxLeverage')}
         {number('Risk per trade (%)', 'maxRiskPerTradePct')}
@@ -286,7 +286,7 @@ function ImportDialog({ existing, onClose }: Readonly<{ existing: AgentTemplate[
         <input type="file" accept="application/json,.json" aria-label="Template file" disabled={busy} onChange={(e) => void pick(e.target.files?.[0])} className="text-xs" />
       </label>
       <Textarea aria-label="Template export text" value={text} readOnly={busy} onChange={(e) => edit(e.target.value)} placeholder="Paste an exported template file here" className="h-48 font-mono text-[11px]" />
-      <p className="mt-2 rounded-xl bg-warn-soft px-3 py-2 text-xs text-warn">
+      <p className="mt-2 rounded-md bg-warn-soft px-3 py-2 text-xs text-warn">
         Only import files you trust, and review each template before using it. Strategy text is sent to the AI model, and an imported template may use Trade automatically. Every order is still limited by the risk checks.
       </p>
       <div className="mt-4 flex justify-end gap-2">
@@ -318,10 +318,10 @@ export function TemplatesDialog({ onClose }: Readonly<{ onClose(): void }>) {
     <Dialog open onOpenChange={onClose} title="Agent templates" description="Pick one when creating an agent to pre-fill its settings. Built-ins are read-only: duplicate one to change it." wide>
       <ul className="max-h-[60vh] space-y-2 overflow-y-auto">
         {templates.map((t) => (
-          <li key={t.id} className="flex items-start gap-3 rounded-xl border border-line px-3 py-2" data-testid="template-row">
+          <li key={t.id} className="flex items-start gap-3 rounded-md border border-line px-3 py-2" data-testid="template-row">
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-2">
-                <span className="truncate text-sm font-bold">{t.name}</span>
+                <span className="truncate text-sm font-semibold">{t.name}</span>
                 {t.builtIn && <Badge>Built-in</Badge>}
                 <Badge tone={t.executionMode === 'AUTO' ? 'accent' : 'info'}>{t.executionMode === 'AUTO' ? 'Auto' : 'Suggest'}</Badge>
               </span>

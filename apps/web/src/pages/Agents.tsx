@@ -8,7 +8,7 @@ import { MAX_AGENT_PAIRS, PairPicker } from '@/components/PairPicker';
 import { Mochi, type MochiMood } from '@/components/Mochi';
 import { PageTitle } from '@/components/Shell';
 import { DecisionDetail, DecisionList, VenueBadge } from '@/components/trading';
-import { Badge, Button, Card, CardHeader, Dialog, Field, Input, Select, type Tone } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, Dialog, EmptyState, Field, Input, Select, type Tone } from '@/components/ui';
 import { api } from '@/lib/api';
 import { money, pct, pnlClass } from '@/lib/format';
 import { settingsFromTemplate, type AgentSettings } from '@/lib/templates';
@@ -135,7 +135,7 @@ function AgentDialog({ agent, onClose }: { agent: Agent | null; onClose(): void 
         <AgentSettingsFields value={form} onChange={set} source={source} />
       </div>
       {selectedAccount?.venue === 'OKX_LIVE' && form.executionMode === 'AUTO' && (
-        <p className="mt-3 rounded-xl bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">
+        <p className="mt-3 rounded-md bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">
           This agent will place real orders on its own while running. The account's limits in Settings cap everything above.
         </p>
       )}
@@ -176,7 +176,7 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
         <Mochi mood={status.mood} size={48} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
-            <span className="truncate font-display text-[15px] font-extrabold">{agent.name}</span>
+            <span className="truncate text-[13px] font-semibold">{agent.name}</span>
             <Badge tone={status.tone} data-testid="agent-status">{status.label}</Badge>
             {account && account.venue !== 'PAPER' && <VenueBadge venue={account.venue} />}
             <Badge tone={agent.executionMode === 'AUTO' ? 'accent' : 'info'} data-testid="agent-mode">{agent.executionMode === 'AUTO' ? 'Auto' : 'Suggest'}</Badge>
@@ -190,9 +190,9 @@ function AgentCard({ agent, selected, onSelect, onEdit }: { agent: Agent; select
           <span className={cn('num block text-xs', pnlClass(change))}>{pct(change)}</span>
         </span>
       </button>
-      {agent.statusDetail && <p className="mt-2 rounded-lg bg-warn-soft px-2.5 py-1.5 text-xs text-warn">{agent.statusDetail}</p>}
+      {agent.statusDetail && <p className="mt-2 rounded-md bg-warn-soft px-2.5 py-1.5 text-xs text-warn">{agent.statusDetail}</p>}
       {needsArm && !agent.statusDetail && (
-        <p className="mt-2 rounded-lg bg-down-soft px-2.5 py-1.5 text-xs font-semibold text-down" data-testid="agent-needs-arm">
+        <p className="mt-2 rounded-md bg-down-soft px-2.5 py-1.5 text-xs font-semibold text-down" data-testid="agent-needs-arm">
           {account?.name} is not armed. Starting this agent asks you to arm it.
         </p>
       )}
@@ -256,7 +256,11 @@ export function AgentsPage() {
         }
       />
       {agents.length === 0 ? (
-        <Card className="px-6 py-10 text-center text-[13px] text-ink-3">No agents on this data source yet.</Card>
+        <EmptyState
+          title={`No agents on ${source === 'REPLAY' ? 'the replay' : 'live data'} yet`}
+          detail="An agent asks your AI model for a decision on a schedule and trades through the risk limits you set."
+          action={<Button variant="primary" onClick={() => setEditing('new')}><Plus /> New agent</Button>}
+        />
       ) : (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,4fr)_minmax(0,4fr)]">
           <div className="space-y-3">

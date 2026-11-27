@@ -87,21 +87,30 @@ function StopAllButton({ className, compact }: { className?: string; compact?: b
   );
 }
 
+/** The mark and mascot. Its mood ticks every second, so it re-renders alone, not the whole sidebar. */
+function Brand() {
+  const mood = useMood();
+  return (
+    <div className="items-center gap-2.5 px-4 pt-4 pb-3 max-lg:hidden lg:flex">
+      <Mochi mood={mood} size={30} />
+      <div className="min-w-0">
+        <div className="text-[15px] leading-none font-semibold">
+          Mochi<span className="text-brand">Prep</span>
+        </div>
+        <div className="mt-1 truncate text-[11px] text-ink-3" data-testid="mochi-mood">{MOOD_LABEL[mood]}</div>
+      </div>
+    </div>
+  );
+}
+
 function Sidebar() {
   const page = useApp((s) => s.page);
   const setPage = useApp((s) => s.setPage);
-  const mood = useMood();
   const pendingSignals = useSourceSignals().length;
 
   return (
-    <aside className="flex shrink-0 flex-col border-line bg-surface max-lg:order-last max-lg:border-t lg:w-56 lg:border-r">
-      <div className="items-center gap-2.5 px-4 pt-4 pb-3 max-lg:hidden lg:flex">
-        <Mochi mood={mood} size={44} />
-        <div>
-          <div className="font-display text-lg leading-none font-black">MochiPrep</div>
-          <div className="mt-1 text-[11px] text-ink-3" data-testid="mochi-mood">{MOOD_LABEL[mood]}</div>
-        </div>
-      </div>
+    <aside className="flex shrink-0 flex-col border-line bg-surface max-lg:order-last max-lg:border-t lg:w-52 lg:border-r">
+      <Brand />
       <nav className="flex gap-0.5 overflow-x-auto px-2 max-lg:py-1 lg:flex-1 lg:flex-col lg:py-2" aria-label="Main">
         {NAV.map((item) => (
           <button
@@ -110,14 +119,14 @@ function Sidebar() {
             onClick={() => setPage(item.id)}
             aria-current={page === item.id ? 'page' : undefined}
             className={cn(
-              'flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-semibold whitespace-nowrap transition-colors max-lg:flex-col max-lg:gap-0.5 max-lg:px-2.5 max-lg:text-[10px]',
-              page === item.id ? 'bg-accent-soft text-accent' : 'text-ink-2 hover:bg-surface-2 hover:text-ink',
+              'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium whitespace-nowrap transition-colors duration-100 max-lg:flex-col max-lg:gap-0.5 max-lg:px-2.5 max-lg:text-[10px]',
+              page === item.id ? 'bg-surface-3 text-ink' : 'text-ink-2 hover:bg-surface-2 hover:text-ink',
             )}
           >
             <item.icon className="size-4 shrink-0" />
             {item.label}
             {item.id === 'paper' && pendingSignals > 0 && (
-              <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] text-accent-ink" data-testid="signal-count">{pendingSignals}</span>
+              <span className="num ml-auto rounded bg-accent px-1.5 text-[11px] text-accent-ink" data-testid="signal-count">{pendingSignals}</span>
             )}
           </button>
         ))}
@@ -250,7 +259,7 @@ function TopBar({ onStopped }: Readonly<{ onStopped: () => void }>) {
   const armedReal = useApp((s) => s.exchange.filter((e) => e.venue === 'OKX_LIVE' && e.armed).length);
   const anyExchange = useApp((s) => s.exchange.some((e) => e.connected));
   return (
-    <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line bg-surface px-4 py-2.5">
+    <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-surface px-4 py-2">
       <Segmented
         label="Market data source"
         value={source}
@@ -267,7 +276,7 @@ function TopBar({ onStopped }: Readonly<{ onStopped: () => void }>) {
         {armedReal > 0 ? (
           <Badge tone="down" data-testid="real-money-badge"><TriangleAlert /> Real money armed</Badge>
         ) : (
-          <Badge tone="accent">{anyExchange ? 'Real orders off' : 'Paper only'}</Badge>
+          <span className="text-xs text-ink-3">{anyExchange ? 'Real orders off' : 'Paper only'}</span>
         )}
         {!connected && <Badge tone="down">Backend offline</Badge>}
         <ShutdownButton onStopped={onStopped} />
@@ -289,7 +298,7 @@ function Toasts() {
       {toasts.map((toast) => {
         const Icon = icons[toast.level];
         return (
-          <div key={toast.id} className="flex items-start gap-2 rounded-2xl border border-line bg-surface-2 p-3 text-[13px] shadow-lg">
+          <div key={toast.id} className="flex items-start gap-2 rounded-md border border-line bg-surface-2 p-3 text-[13px]">
             <Icon className={cn('mt-0.5 size-4 shrink-0', tones[toast.level])} />
             <span className="min-w-0 flex-1 break-words">{toast.message}</span>
             <button type="button" aria-label="Dismiss" onClick={() => dismiss(toast.id)} className="text-ink-3 hover:text-ink">
@@ -306,7 +315,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const [closed, setClosed] = useState(false);
   if (closed) return (
     <main className="grid h-full place-content-center gap-2 px-5 text-center" role="status">
-      <h1 className="font-display text-2xl font-black">MochiPrep is closed</h1>
+      <h1 className="text-xl font-semibold">MochiPrep is closed</h1>
       <p className="text-sm text-ink-2">Start the backend again, then reload this page to reconnect.</p>
     </main>
   );
@@ -317,7 +326,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <UpdateBanner />
         <TopBar onStopped={() => { disconnectBackend(); setClosed(true); }} />
         <UnlockBanner />
-        <main className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-5">
+        <main className="min-h-0 flex-1 overflow-y-auto p-4">
           <div className="mx-auto max-w-[1400px]">{children}</div>
         </main>
         <p className="border-t border-line bg-surface px-4 py-1.5 text-center text-[11px] text-ink-3" data-testid="dyor-notice">
@@ -331,10 +340,10 @@ export function Shell({ children }: { children: ReactNode }) {
 
 export function PageTitle({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
   return (
-    <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+    <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="font-display text-2xl font-black">{title}</h1>
-        {description && <p className="mt-0.5 text-[13px] text-ink-3">{description}</p>}
+        <h1 className="text-lg font-semibold">{title}</h1>
+        {description && <p className="mt-0.5 text-xs text-ink-3">{description}</p>}
       </div>
       {action}
     </div>

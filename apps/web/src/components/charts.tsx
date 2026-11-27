@@ -303,11 +303,24 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
     current.chart.priceScale('right').applyOptions({ autoScale: true });
   }, [priceLines, look.key, digits, symbol, showIndicators]);
 
-  // The price scale refits without any event, so labels follow it frame by frame.
+  // The price scale refits without any event, so labels follow it frame by frame. Each frame only
+  // reads coordinates; a label's style is written when its place actually changes, and a chart
+  // without labels does nothing at all.
   useEffect(() => {
     let frame = 0;
+    const written = new WeakMap<HTMLElement, string>();
+    const write = (node: HTMLElement, place: string) => {
+      if (written.get(node) === place) return;
+      written.set(node, place);
+      if (place === 'hidden') node.style.visibility = 'hidden';
+      else {
+        node.style.visibility = 'visible';
+        node.style.transform = place;
+      }
+    };
     const place = () => {
       frame = requestAnimationFrame(place);
+      if (linesRef.current.length === 0) return;
       const current = slot.current;
       const target = current?.series.candles;
       const paneHeight = current?.chart.panes()[0]?.getHeight() ?? 0;
@@ -318,12 +331,13 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
       let lowest = -Infinity;
       for (const { node, y } of placed) {
         if (!node) continue;
-        const visible = y !== null && y >= 0 && y <= paneHeight;
-        node.style.visibility = visible ? 'visible' : 'hidden';
-        if (!visible) continue;
+        if (y === null || y < 0 || y > paneHeight) {
+          write(node, 'hidden');
+          continue;
+        }
         // Close prices would stack their labels unreadably, so push each one clear of the last.
         const top = Math.max(y - LABEL_HEIGHT / 2, lowest + LABEL_GAP);
-        node.style.transform = `translateY(${top}px)`;
+        write(node, `translateY(${Math.round(top)}px)`);
         lowest = top + LABEL_HEIGHT;
       }
     };
@@ -376,14 +390,14 @@ export function MarketChart({ candles, symbol, timeframe, quote, showIndicators 
             else labelNodes.current.delete(line.id);
           }}
           data-testid="chart-line-label"
-          className={cn('num pointer-events-none invisible absolute top-0 left-2 z-[5] rounded-md px-1.5 text-[11px] leading-[18px] whitespace-nowrap', LABEL_TONES[line.tone])}
+          className={cn('num pointer-events-none invisible absolute top-0 left-2 z-[5] rounded px-1.5 text-[11px] leading-[18px] whitespace-nowrap', LABEL_TONES[line.tone])}
         >
           {line.label}
           {line.pnl && <span className={cn("ml-2 rounded px-1", LABEL_TONES[line.pnl.tone])}>{line.pnl.text}</span>}
         </span>
       ))}
       {hovered && (
-        <div className="pointer-events-none absolute top-2 left-2 z-10 rounded-xl border border-line bg-surface-2 px-3 py-2 text-xs" data-testid="chart-trade-tip">
+        <div className="pointer-events-none absolute top-2 left-2 z-10 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs" data-testid="chart-trade-tip">
           {hovered.map((fill) => (
             <div key={fill.id} className="num flex gap-3 whitespace-nowrap">
               <span className={cn('font-semibold', fill.side === 'BUY' ? 'text-rise' : 'text-fall')}>{fill.liquidity === 'LIQUIDATION' ? 'Liquidated' : fill.side}</span>
