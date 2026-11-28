@@ -333,6 +333,20 @@ async fn account_config_reads_the_connect_fields() {
 }
 
 #[tokio::test]
+async fn trade_with_withdraw_perm_reads_both_flags() {
+    let fake = FakeOkx::new();
+    let adapter = adapter(&fake);
+    fake.state().perm = "read_only,trade,withdraw".into();
+    let config = adapter.account_config().await.unwrap();
+    assert!(config.can_withdraw);
+    assert!(config.can_trade);
+    fake.state().perm = "read_only,trade".into();
+    let config = adapter.account_config().await.unwrap();
+    assert!(!config.can_withdraw);
+    assert!(config.can_trade);
+}
+
+#[tokio::test]
 async fn contract_balance_and_lookups_read_okx() {
     let fake = FakeOkx::new();
     let adapter = adapter(&fake);

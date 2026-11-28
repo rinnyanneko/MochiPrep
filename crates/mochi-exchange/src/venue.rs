@@ -374,7 +374,9 @@ pub trait VenueAdapter: Send + Sync {
     /// The exchange's algo id. A lost answer is `Unknown`: look the algo up, never resend.
     fn place_algo(&self, algo: VenuePlaceAlgo) -> BoxFuture<'_, Result<String, VenueError>>;
     fn pending_algos(&self, kind: AlgoKind) -> BoxFuture<'_, Result<Vec<VenueAlgo>, VenueError>>;
-    /// `None` only on an empty answer; every refusal is an error.
+    /// `None` only on an empty answer. A not-found answer is a `Rejection` whose kind is
+    /// `Some(RejectKind::NotFound)`, which the engine reads as "no such algo"; every other
+    /// refusal is an error too.
     fn get_algo(
         &self,
         client_algo_id: &str,

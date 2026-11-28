@@ -26,7 +26,7 @@ fn new_exchange_strings_parse() {
     assert_eq!(
         venue,
         AccountVenue::Exchange {
-            exchange: ExchangeId::new("bybit"),
+            exchange: ExchangeId::new("bybit").unwrap(),
             environment: Environment::Live,
         }
     );
@@ -38,7 +38,7 @@ fn new_exchange_strings_parse() {
     assert_eq!(
         read("B1N4NCE_DEMO").unwrap(),
         AccountVenue::Exchange {
-            exchange: ExchangeId::new("b1n4nce"),
+            exchange: ExchangeId::new("b1n4nce").unwrap(),
             environment: Environment::Demo,
         }
     );
@@ -53,6 +53,7 @@ fn garbage_rejected() {
         "",
         "_LIVE",
         "OKX_LIVE_LIVE",
+        "OKX_LIVE ",
         "OKX__LIVE",
         "OK-X_LIVE",
         "Okx_LIVE",
@@ -79,5 +80,13 @@ fn only_live_environments_are_live() {
 #[test]
 fn okx_is_lowercase() {
     assert_eq!(ExchangeId::okx().as_str(), "okx");
-    assert_eq!(ExchangeId::okx(), ExchangeId::new("okx"));
+    assert_eq!(ExchangeId::okx(), ExchangeId::new("okx").unwrap());
+}
+
+#[test]
+fn exchange_id_checked() {
+    assert_eq!(ExchangeId::new("OKX").unwrap().as_str(), "okx");
+    for id in ["ok-x", "", "by_bit", " okx"] {
+        assert!(ExchangeId::new(id).is_none(), "{id:?} was accepted");
+    }
 }

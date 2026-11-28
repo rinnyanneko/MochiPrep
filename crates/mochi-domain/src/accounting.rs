@@ -166,9 +166,11 @@ pub enum Liquidity {
 pub struct ExchangeId(Arc<str>);
 
 impl ExchangeId {
-    /// Lowercased, so `OKX` and `okx` are the same exchange.
-    pub fn new(id: &str) -> Self {
-        ExchangeId(Arc::from(id.to_ascii_lowercase()))
+    /// Lowercased, so `OKX` and `okx` are the same exchange. Only nonempty ASCII letters and
+    /// digits are accepted, so every id round-trips through `AccountVenue` text.
+    pub fn new(id: &str) -> Option<Self> {
+        let valid = !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric());
+        valid.then(|| ExchangeId(Arc::from(id.to_ascii_lowercase())))
     }
 
     pub fn okx() -> Self {
@@ -257,7 +259,7 @@ impl AccountVenue {
                 .bytes()
                 .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
         valid.then(|| AccountVenue::Exchange {
-            exchange: ExchangeId::new(exchange),
+            exchange: ExchangeId(Arc::from(exchange.to_ascii_lowercase())),
             environment,
         })
     }

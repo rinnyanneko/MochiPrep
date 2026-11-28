@@ -717,7 +717,7 @@ async fn insert_bybit_account(w: &World) -> PaperAccount {
         name: "Bybit".into(),
         source: DataSource::Live,
         venue: AccountVenue::Exchange {
-            exchange: ExchangeId::new("bybit"),
+            exchange: ExchangeId::new("bybit").unwrap(),
             environment: Environment::Live,
         },
         exchange_uid: Some("77".into()),
