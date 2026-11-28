@@ -16,6 +16,7 @@ indexmap = { version = "2", features = ["serde"], optional = true }
 mochi-core = { path = "../mochi-core" }
 mochi-decimal = { path = "../mochi-decimal" }
 mochi-domain = { path = "../mochi-domain" }
+mochi-exchange = { path = "../mochi-exchange" }
 reqwest = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
