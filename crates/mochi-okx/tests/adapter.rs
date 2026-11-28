@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use mochi_domain::OrderSide;
 use mochi_exchange::venue::{
-    AlgoKind, RejectKind, VenueAccountConfig, VenueAdapter, VenueAlgoOrderType, VenueAttachedAlgo,
-    VenueCancelAlgo, VenueError, VenueMarginMode, VenueOrderType, VenuePlaceAlgo, VenuePlaceOrder,
+    js_number, nullish, strict, truthy, AlgoKind, RejectKind, VenueAccountConfig, VenueAdapter,
+    VenueAlgoOrderType, VenueAttachedAlgo, VenueCancelAlgo, VenueError, VenueField,
+    VenueMarginMode, VenueOrderType, VenuePlaceAlgo, VenuePlaceOrder,
 };
 use mochi_okx::fake::{self, FakeOkx, Refusal};
 use mochi_okx::{
@@ -22,6 +23,14 @@ fn adapter(fake: &Arc<FakeOkx>) -> OkxAdapter {
         Venue::OkxDemo,
         fake.transport(),
     ))
+}
+
+fn t(text: &str) -> Option<VenueField> {
+    Some(VenueField::Text(text.into()))
+}
+
+fn scalar(text: &str) -> Option<VenueField> {
+    Some(VenueField::Scalar(text.into()))
 }
 
 fn row(value: Value) -> Row {
@@ -64,23 +73,27 @@ async fn okx_adapter_keeps_absent_null_and_empty_apart() {
     let trigger = |id: &str| {
         algos
             .iter()
-            .find(|algo| algo.client_algo_id.as_deref() == Some(id))
+            .find(|algo| strict(&algo.client_algo_id) == Some(id))
             .unwrap()
             .sl_trigger_price
             .clone()
     };
     assert_eq!(algos.len(), 3);
     assert_eq!(trigger("absent"), None);
-    assert_eq!(trigger("null"), None);
-    assert_eq!(trigger("empty"), Some(String::new()));
+    assert_eq!(trigger("null"), Some(VenueField::Null));
+    assert_eq!(trigger("empty"), t(""));
+    // `??` passes over absent and null alike, and keeps "".
+    assert_eq!(nullish(&trigger("absent")), None);
+    assert_eq!(nullish(&trigger("null")), None);
+    assert_eq!(nullish(&trigger("empty")), Some(""));
     // A single lookup reads the same way.
     let empty = adapter.get_algo("empty").await.unwrap().unwrap();
-    assert_eq!(empty.sl_trigger_price, Some(String::new()));
-    assert_eq!(empty.symbol.as_deref(), Some("BTCUSDT"));
-    assert_eq!(empty.exchange_algo_id.as_deref(), Some("A3"));
-    assert_eq!(empty.state.as_deref(), Some("live"));
-    assert_eq!(empty.order_type.as_deref(), Some("conditional"));
-    assert_eq!(empty.size.as_deref(), Some("0.1"));
+    assert_eq!(empty.sl_trigger_price, t(""));
+    assert_eq!(empty.symbol, t("BTCUSDT"));
+    assert_eq!(empty.exchange_algo_id, t("A3"));
+    assert_eq!(empty.state, t("live"));
+    assert_eq!(empty.order_type, t("conditional"));
+    assert_eq!(empty.size, t("0.1"));
     assert_eq!(adapter.get_algo("missing").await.unwrap(), None);
     // The other kinds ask OKX for their own lists.
     assert!(adapter
@@ -102,7 +115,61 @@ async fn a_json_number_field_reads_as_its_text() {
         json!({ "algoClOrdId": "n", "ordType": "conditional", "slTriggerPx": 70000.5 }),
     ));
     let algo = adapter(&fake).get_algo("n").await.unwrap().unwrap();
-    assert_eq!(algo.sl_trigger_price.as_deref(), Some("70000.5"));
+    assert_eq!(algo.sl_trigger_price, scalar("70000.5"));
+    assert_eq!(nullish(&algo.sl_trigger_price), Some("70000.5"));
+    assert_eq!(strict(&algo.sl_trigger_price), None);
+}
+
+/// The engine reads `tradeId` and `pos` both through `??` and as strict strings, so a number
+/// must stay a number.
+#[tokio::test]
+async fn numeric_trade_id_and_pos_stay_scalar() {
+    let fake = FakeOkx::new();
+    fake.state().position = Some(row(json!({
+        "instId": "BTC-USDT-SWAP", "pos": -2, "tradeId": 7, "mgnMode": "isolated",
+    })));
+    let positions = adapter(&fake).positions().await.unwrap();
+    let position = &positions[0];
+    assert_eq!(position.size, scalar("-2"));
+    assert_eq!(position.trade_id, scalar("7"));
+    assert_eq!(strict(&position.size), None);
+    assert_eq!(strict(&position.trade_id), None);
+    assert_eq!(nullish(&position.size), Some("-2"));
+    assert_eq!(nullish(&position.trade_id), Some("7"));
+    assert_eq!(js_number(&position.size), -2.0);
+    assert_eq!(strict(&position.symbol), Some("BTCUSDT"));
+}
+
+#[tokio::test]
+async fn absent_null_and_empty_fields_keep_their_state() {
+    let fake = FakeOkx::new();
+    fake.state().position = Some(row(json!({
+        "instId": "BTC-USDT-SWAP", "pos": "1", "liqPx": null, "markPx": "",
+    })));
+    let position = adapter(&fake).positions().await.unwrap().remove(0);
+    assert_eq!(position.entry_price, None);
+    assert_eq!(position.liquidation_price, Some(VenueField::Null));
+    assert_eq!(position.mark_price, t(""));
+    assert_eq!(truthy(&position.mark_price), None);
+}
+
+/// protection.rs compares `uTime` as a whole value, so absent and null must not read as equal.
+#[tokio::test]
+async fn absent_and_null_utime_compare_unequal() {
+    let fake = FakeOkx::new();
+    let adapter = adapter(&fake);
+    let mut read = Vec::new();
+    for position in [
+        json!({ "instId": "BTC-USDT-SWAP", "pos": "1" }),
+        json!({ "instId": "BTC-USDT-SWAP", "pos": "1", "uTime": null }),
+    ] {
+        fake.state().position = Some(row(position));
+        read.push(adapter.positions().await.unwrap().remove(0));
+    }
+    assert_eq!(read[0].updated_ms, None);
+    assert_eq!(read[1].updated_ms, Some(VenueField::Null));
+    assert_ne!(read[0].updated_ms, read[1].updated_ms);
+    assert_ne!(read[0], read[1]);
 }
 
 #[tokio::test]
@@ -201,21 +268,21 @@ async fn positions_map_fields() {
     let positions = adapter(&fake).positions().await.unwrap();
     assert_eq!(positions.len(), 1);
     let position = &positions[0];
-    assert_eq!(position.symbol, "BTCUSDT");
-    assert_eq!(position.size.as_deref(), Some("-2"));
-    assert_eq!(position.entry_price.as_deref(), Some("75000"));
-    assert_eq!(position.liquidation_price.as_deref(), Some(""));
-    assert_eq!(position.unrealized_pnl.as_deref(), Some("1.5"));
-    assert_eq!(position.position_id.as_deref(), Some("P1"));
-    assert_eq!(position.margin_mode.as_deref(), Some("isolated"));
-    assert_eq!(position.position_side.as_deref(), Some("net"));
-    assert_eq!(position.trade_id.as_deref(), Some("7"));
-    assert_eq!(position.updated_ms.as_deref(), Some("1700"));
-    assert_eq!(position.created_ms.as_deref(), Some("1600"));
-    assert_eq!(position.leverage.as_deref(), Some("5"));
-    assert_eq!(position.margin.as_deref(), Some("300"));
-    assert_eq!(position.mark_price.as_deref(), Some("74990"));
-    assert_eq!(position.realized_pnl.as_deref(), Some("-0.2"));
+    assert_eq!(position.symbol, t("BTCUSDT"));
+    assert_eq!(position.size, t("-2"));
+    assert_eq!(position.entry_price, t("75000"));
+    assert_eq!(position.liquidation_price, t(""));
+    assert_eq!(position.unrealized_pnl, t("1.5"));
+    assert_eq!(position.position_id, t("P1"));
+    assert_eq!(position.margin_mode, t("isolated"));
+    assert_eq!(position.position_side, t("net"));
+    assert_eq!(position.trade_id, t("7"));
+    assert_eq!(position.updated_ms, t("1700"));
+    assert_eq!(position.created_ms, t("1600"));
+    assert_eq!(position.leverage, t("5"));
+    assert_eq!(position.margin, t("300"));
+    assert_eq!(position.mark_price, t("74990"));
+    assert_eq!(position.realized_pnl, t("-0.2"));
 }
 
 #[test]
@@ -274,9 +341,9 @@ async fn contract_balance_and_lookups_read_okx() {
     assert_eq!(contract.lot_size, "0.01");
 
     let balance = adapter.balance().await.unwrap().unwrap();
-    assert_eq!(balance.equity.as_deref(), Some("1000"));
-    assert_eq!(balance.available_equity.as_deref(), Some("1000"));
-    assert_eq!(balance.unrealized_pnl.as_deref(), Some("0"));
+    assert_eq!(balance.equity, t("1000"));
+    assert_eq!(balance.available_equity, t("1000"));
+    assert_eq!(balance.unrealized_pnl, t("0"));
     assert_eq!(balance.available_balance, None);
 
     adapter.set_leverage("BTCUSDT", 5).await.unwrap();
@@ -302,9 +369,9 @@ async fn contract_balance_and_lookups_read_okx() {
         .await
         .unwrap();
     let order = adapter.get_order("BTCUSDT", &id).await.unwrap().unwrap();
-    assert_eq!(order.state.as_deref(), Some("filled"));
-    assert_eq!(order.filled_size.as_deref(), Some("1"));
-    assert_eq!(order.average_price.as_deref(), Some(fake::PRICE));
+    assert_eq!(order.state, t("filled"));
+    assert_eq!(order.filled_size, t("1"));
+    assert_eq!(order.average_price, t(fake::PRICE));
     assert!(order.exchange_order_id.is_some());
     // The fake has no cancel endpoint, so OKX's "unhandled" refusal shows the request was sent.
     let refused = adapter.cancel_order("BTCUSDT", &id).await.unwrap_err();
@@ -341,26 +408,26 @@ async fn fills_bills_and_closed_positions_map_fields() {
     let fills = adapter.recent_fills("BTCUSDT").await.unwrap();
     assert_eq!(fills.len(), 1);
     let fill = &fills[0];
-    assert_eq!(fill.symbol.as_deref(), Some("BTCUSDT"));
-    assert_eq!(fill.position_side.as_deref(), Some("net"));
-    assert_eq!(fill.exchange_order_id.as_deref(), Some("O1"));
-    assert_eq!(fill.client_order_id.as_deref(), Some("C1"));
-    assert_eq!(fill.sub_type.as_deref(), Some("5"));
-    assert_eq!(fill.fill_size.as_deref(), Some("2"));
-    assert_eq!(fill.trade_id.as_deref(), Some("9"));
-    assert_eq!(fill.fill_ms.as_deref(), Some("1800"));
+    assert_eq!(fill.symbol, t("BTCUSDT"));
+    assert_eq!(fill.position_side, t("net"));
+    assert_eq!(fill.exchange_order_id, t("O1"));
+    assert_eq!(fill.client_order_id, t("C1"));
+    assert_eq!(fill.sub_type, t("5"));
+    assert_eq!(fill.fill_size, t("2"));
+    assert_eq!(fill.trade_id, t("9"));
+    assert_eq!(fill.fill_ms, t("1800"));
     assert!(adapter.recent_fills("ETHUSDT").await.unwrap().is_empty());
 
     let bills = adapter.execution_history(None).await.unwrap();
     assert_eq!(bills.len(), 1);
     let bill = &bills[0];
-    assert_eq!(bill.bill_id.as_deref(), Some("11"));
-    assert_eq!(bill.exchange_order_id.as_deref(), Some("O1"));
-    assert_eq!(bill.symbol.as_deref(), Some("BTCUSDT"));
-    assert_eq!(bill.position_side.as_deref(), Some("net"));
-    assert_eq!(bill.side.as_deref(), Some("buy"));
-    assert_eq!(bill.trade_id.as_deref(), Some("9"));
-    assert_eq!(bill.fill_ms.as_deref(), Some("1800"));
+    assert_eq!(bill.bill_id, t("11"));
+    assert_eq!(bill.exchange_order_id, t("O1"));
+    assert_eq!(bill.symbol, t("BTCUSDT"));
+    assert_eq!(bill.position_side, t("net"));
+    assert_eq!(bill.side, t("buy"));
+    assert_eq!(bill.trade_id, t("9"));
+    assert_eq!(bill.fill_ms, t("1800"));
     assert!(adapter
         .execution_history(Some(11))
         .await
@@ -370,15 +437,15 @@ async fn fills_bills_and_closed_positions_map_fields() {
     let closed = adapter.positions_history(None).await.unwrap();
     assert_eq!(closed.len(), 1);
     let closed = &closed[0];
-    assert_eq!(closed.position_id.as_deref(), Some("P1"));
-    assert_eq!(closed.symbol.as_deref(), Some("ETHUSDT"));
-    assert_eq!(closed.created_ms.as_deref(), Some("1000"));
-    assert_eq!(closed.updated_ms.as_deref(), Some("2000"));
-    assert_eq!(closed.realized_pnl.as_deref(), Some("3"));
-    assert_eq!(closed.close_type.as_deref(), Some("2"));
-    assert_eq!(closed.margin_mode.as_deref(), Some("isolated"));
-    assert_eq!(closed.position_side.as_deref(), Some("net"));
-    assert_eq!(closed.direction.as_deref(), Some("long"));
+    assert_eq!(closed.position_id, t("P1"));
+    assert_eq!(closed.symbol, t("ETHUSDT"));
+    assert_eq!(closed.created_ms, t("1000"));
+    assert_eq!(closed.updated_ms, t("2000"));
+    assert_eq!(closed.realized_pnl, t("3"));
+    assert_eq!(closed.close_type, t("2"));
+    assert_eq!(closed.margin_mode, t("isolated"));
+    assert_eq!(closed.position_side, t("net"));
+    assert_eq!(closed.direction, t("long"));
     assert!(adapter
         .positions_history(Some(2000))
         .await

@@ -7,8 +7,8 @@ use mochi_domain::OrderSide;
 use mochi_exchange::venue::{
     AlgoKind, BoxFuture, RejectKind, VenueAccountConfig, VenueAdapter, VenueAlgo,
     VenueAlgoOrderType, VenueAttachedAlgo, VenueBalance, VenueBill, VenueCancelAlgo,
-    VenueClosedPosition, VenueContract, VenueError, VenueFill, VenueMarginMode, VenueOrder,
-    VenueOrderType, VenuePlaceAlgo, VenuePlaceOrder, VenuePosition,
+    VenueClosedPosition, VenueContract, VenueError, VenueField, VenueFill, VenueMarginMode,
+    VenueOrder, VenueOrderType, VenuePlaceAlgo, VenuePlaceOrder, VenuePosition,
 };
 use serde_json::Value;
 
@@ -62,13 +62,28 @@ impl From<OkxError> for VenueError {
     }
 }
 
-/// A field as `row.x ?? fallback` reads it: absent and null are `None`, anything else its text.
-fn text(row: &Row, key: &str) -> Option<String> {
-    nullish_text(row.get(key))
+/// A field with its JSON kind kept. The text of a number or bool is `nullish_text`'s, so
+/// `venue::nullish` reads exactly what the engine read from the row.
+fn text(row: &Row, key: &str) -> Option<VenueField> {
+    let value = row.get(key)?;
+    Some(match value {
+        Value::String(text) => VenueField::Text(text.clone()),
+        Value::Number(_) | Value::Bool(_) => {
+            VenueField::Scalar(nullish_text(Some(value)).unwrap_or_default())
+        }
+        // OKX sends no object or array in the fields read here; like null, `??` and `as_str`
+        // both pass over one.
+        Value::Null | Value::Array(_) | Value::Object(_) => VenueField::Null,
+    })
 }
 
-fn symbol(row: &Row) -> Option<String> {
-    text(row, "instId").map(|inst_id| from_inst_id(&inst_id))
+/// `instId` as a pair, its JSON kind kept so a strict read still refuses a non-string.
+fn symbol(row: &Row) -> Option<VenueField> {
+    text(row, "instId").map(|field| match field {
+        VenueField::Text(inst_id) => VenueField::Text(from_inst_id(&inst_id)),
+        VenueField::Scalar(inst_id) => VenueField::Scalar(from_inst_id(&inst_id)),
+        VenueField::Null => VenueField::Null,
+    })
 }
 
 /// One OKX row as a neutral row.
@@ -90,8 +105,7 @@ impl FromRow for VenueBalance {
 impl FromRow for VenuePosition {
     fn from_row(row: &Row) -> Self {
         VenuePosition {
-            // The engine reads a missing instId as the empty string.
-            symbol: symbol(row).unwrap_or_default(),
+            symbol: symbol(row),
             size: text(row, "pos"),
             entry_price: text(row, "avgPx"),
             liquidation_price: text(row, "liqPx"),

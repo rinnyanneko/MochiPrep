@@ -1,16 +1,96 @@
 //! What the trading engine asks of an exchange, in neutral terms.
 //!
-//! Every row field holds the exchange's raw text, so the engine can keep reading it exactly as it
-//! read the exchange's JSON: `None` means the field was absent or JSON `null`, and `Some("")`
-//! stays `Some("")` (Node's `??` and truthiness tell the two apart). Money and quantities stay
-//! text; the engine parses them with `Dec` where it needs a number.
+//! Every row field is an `Option<VenueField>` that keeps the JSON kind of what the exchange sent,
+//! because the engine reads the same field in more than one way (Node's `??`, truthiness, a
+//! strict "is it a string" check, or a whole-value compare) and each way treats the kinds apart.
+//! A field is in one of four states:
+//!
+//! - `None`: the key was absent.
+//! - `Some(VenueField::Null)`: the key was JSON `null`.
+//! - `Some(VenueField::Text(t))`: a JSON string, `""` included.
+//! - `Some(VenueField::Scalar(t))`: a JSON number or bool, as the text `String(value)` gives
+//!   (serde_json's number text, `true`, `false`).
+//!
+//! Read a field with [`nullish`] (`x ?? fallback`), [`strict`] (`typeof x === 'string'`),
+//! [`truthy`] (`x || fallback`), [`js_number`] (`Number(x)`) or [`plain_number`]; compare two
+//! fields with `==`, which keeps absent apart from null like comparing two JSON values. Money and
+//! quantities stay text; the engine parses them with `Dec` where it needs a number.
 
 use std::future::Future;
 use std::pin::Pin;
 
+use mochi_decimal::Dec;
+use mochi_domain::jsnum::js_string_to_number;
 use mochi_domain::OrderSide;
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// One present field of an exchange row. See the module doc for the four states.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VenueField {
+    Null,
+    /// A JSON string.
+    Text(String),
+    /// A JSON number or bool, as its text.
+    Scalar(String),
+}
+
+/// `x ?? fallback`: absent and null are `None`; a string, number or bool is its text.
+pub fn nullish(field: &Option<VenueField>) -> Option<&str> {
+    match field {
+        Some(VenueField::Text(text) | VenueField::Scalar(text)) => Some(text),
+        None | Some(VenueField::Null) => None,
+    }
+}
+
+/// `x` only when it is a JSON string, like `Value::as_str`. A number or bool never matches.
+pub fn strict(field: &Option<VenueField>) -> Option<&str> {
+    match field {
+        Some(VenueField::Text(text)) => Some(text),
+        _ => None,
+    }
+}
+
+/// `x || fallback`: absent, null, `""`, `0` and `false` are `None`.
+pub fn truthy(field: &Option<VenueField>) -> Option<&str> {
+    match field {
+        Some(VenueField::Text(text)) if !text.is_empty() => Some(text),
+        Some(VenueField::Scalar(text)) => {
+            let falsy = text == "false" || text.parse::<f64>().is_ok_and(|n| n == 0.0);
+            (!falsy).then_some(text.as_str())
+        }
+        _ => None,
+    }
+}
+
+/// Node's `Number(x)`: absent is NaN, null is 0, a bool is 0 or 1.
+pub fn js_number(field: &Option<VenueField>) -> f64 {
+    match field {
+        None => f64::NAN,
+        Some(VenueField::Null) => 0.0,
+        Some(VenueField::Text(text)) => js_string_to_number(text),
+        Some(VenueField::Scalar(text)) => match text.as_str() {
+            "true" => 1.0,
+            "false" => 0.0,
+            number => number.parse().unwrap_or(f64::NAN),
+        },
+    }
+}
+
+/// A truthy field that is a plain unsigned decimal (digits, optionally `.` and digits), as fixed
+/// text. Anything else is `None`, so exchange text that is not a number never passes on.
+pub fn plain_number(field: &Option<VenueField>) -> Option<String> {
+    let text = truthy(field)?;
+    let (whole, fraction) = match text.split_once('.') {
+        Some((whole, fraction)) => (whole, Some(fraction)),
+        None => (text, None),
+    };
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    if !digits(whole) || fraction.is_some_and(|f| !digits(f)) {
+        return None;
+    }
+    Dec::parse(text).ok().map(|d| d.to_fixed())
+}
 
 /// Why an exchange call failed. The texts are the adapter's own (for OKX, the client's).
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -93,108 +173,107 @@ pub struct VenueContract {
 /// The USDT balance. OKX: one `details` entry of `account/balance`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VenueBalance {
-    pub equity: Option<String>,
-    pub unrealized_pnl: Option<String>,
-    pub available_equity: Option<String>,
-    pub available_balance: Option<String>,
+    pub equity: Option<VenueField>,
+    pub unrealized_pnl: Option<VenueField>,
+    pub available_equity: Option<VenueField>,
+    pub available_balance: Option<VenueField>,
 }
 
 /// One open position. Sizes are contracts, signed in one-way mode.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VenuePosition {
-    /// Empty when the exchange named no instrument.
-    pub symbol: String,
-    pub size: Option<String>,
-    pub entry_price: Option<String>,
-    pub liquidation_price: Option<String>,
-    pub mark_price: Option<String>,
-    pub margin: Option<String>,
-    pub leverage: Option<String>,
-    pub unrealized_pnl: Option<String>,
-    pub realized_pnl: Option<String>,
-    pub position_id: Option<String>,
-    pub margin_mode: Option<String>,
-    pub position_side: Option<String>,
+    pub symbol: Option<VenueField>,
+    pub size: Option<VenueField>,
+    pub entry_price: Option<VenueField>,
+    pub liquidation_price: Option<VenueField>,
+    pub mark_price: Option<VenueField>,
+    pub margin: Option<VenueField>,
+    pub leverage: Option<VenueField>,
+    pub unrealized_pnl: Option<VenueField>,
+    pub realized_pnl: Option<VenueField>,
+    pub position_id: Option<VenueField>,
+    pub margin_mode: Option<VenueField>,
+    pub position_side: Option<VenueField>,
     /// The last trade that changed the position.
-    pub trade_id: Option<String>,
-    pub created_ms: Option<String>,
-    pub updated_ms: Option<String>,
+    pub trade_id: Option<VenueField>,
+    pub created_ms: Option<VenueField>,
+    pub updated_ms: Option<VenueField>,
 }
 
 /// One order, as a lookup by client id reads it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VenueOrder {
-    pub exchange_order_id: Option<String>,
-    pub state: Option<String>,
+    pub exchange_order_id: Option<VenueField>,
+    pub state: Option<VenueField>,
     /// Contracts filled so far.
-    pub filled_size: Option<String>,
-    pub average_price: Option<String>,
-    pub fee: Option<String>,
-    pub realized_pnl: Option<String>,
+    pub filled_size: Option<VenueField>,
+    pub average_price: Option<VenueField>,
+    pub fee: Option<VenueField>,
+    pub realized_pnl: Option<VenueField>,
     /// The order's last trade.
-    pub trade_id: Option<String>,
-    pub fill_ms: Option<String>,
+    pub trade_id: Option<VenueField>,
+    pub fill_ms: Option<VenueField>,
 }
 
 /// One algo (conditional, OCO or trailing) order.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VenueAlgo {
-    pub symbol: Option<String>,
-    pub exchange_algo_id: Option<String>,
-    pub client_algo_id: Option<String>,
-    pub state: Option<String>,
-    pub order_type: Option<String>,
+    pub symbol: Option<VenueField>,
+    pub exchange_algo_id: Option<VenueField>,
+    pub client_algo_id: Option<VenueField>,
+    pub state: Option<VenueField>,
+    pub order_type: Option<VenueField>,
     /// Contracts.
-    pub size: Option<String>,
-    pub sl_trigger_price: Option<String>,
-    pub sl_order_price: Option<String>,
-    pub tp_trigger_price: Option<String>,
-    pub tp_order_price: Option<String>,
-    pub callback_ratio: Option<String>,
-    pub callback_spread: Option<String>,
-    pub activation_price: Option<String>,
+    pub size: Option<VenueField>,
+    pub sl_trigger_price: Option<VenueField>,
+    pub sl_order_price: Option<VenueField>,
+    pub tp_trigger_price: Option<VenueField>,
+    pub tp_order_price: Option<VenueField>,
+    pub callback_ratio: Option<VenueField>,
+    pub callback_spread: Option<VenueField>,
+    pub activation_price: Option<VenueField>,
     /// A trailing stop's current trigger.
-    pub move_trigger_price: Option<String>,
+    pub move_trigger_price: Option<VenueField>,
 }
 
 /// One recent execution on an instrument, manual, liquidation and ADL fills included.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VenueFill {
-    pub symbol: Option<String>,
-    pub exchange_order_id: Option<String>,
-    pub client_order_id: Option<String>,
-    pub position_side: Option<String>,
-    pub sub_type: Option<String>,
+    pub symbol: Option<VenueField>,
+    pub exchange_order_id: Option<VenueField>,
+    pub client_order_id: Option<VenueField>,
+    pub position_side: Option<VenueField>,
+    pub sub_type: Option<VenueField>,
     /// Contracts.
-    pub fill_size: Option<String>,
-    pub trade_id: Option<String>,
-    pub fill_ms: Option<String>,
+    pub fill_size: Option<VenueField>,
+    pub trade_id: Option<VenueField>,
+    pub fill_ms: Option<VenueField>,
 }
 
 /// One execution from the account's longer history, paged by bill id.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VenueBill {
-    pub bill_id: Option<String>,
-    pub symbol: Option<String>,
-    pub exchange_order_id: Option<String>,
-    pub position_side: Option<String>,
-    pub side: Option<String>,
-    pub trade_id: Option<String>,
-    pub fill_ms: Option<String>,
+    pub bill_id: Option<VenueField>,
+    pub symbol: Option<VenueField>,
+    pub exchange_order_id: Option<VenueField>,
+    pub position_side: Option<VenueField>,
+    pub side: Option<VenueField>,
+    pub trade_id: Option<VenueField>,
+    pub fill_ms: Option<VenueField>,
 }
 
 /// One closed or partly closed position.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VenueClosedPosition {
-    pub symbol: Option<String>,
-    pub position_id: Option<String>,
-    pub realized_pnl: Option<String>,
-    pub close_type: Option<String>,
-    pub margin_mode: Option<String>,
-    pub position_side: Option<String>,
-    pub direction: Option<String>,
-    pub created_ms: Option<String>,
-    pub updated_ms: Option<String>,
+    pub symbol: Option<VenueField>,
+    pub position_id: Option<VenueField>,
+    pub realized_pnl: Option<VenueField>,
+    pub close_type: Option<VenueField>,
+    pub margin_mode: Option<VenueField>,
+    pub position_side: Option<VenueField>,
+    pub direction: Option<VenueField>,
+    pub created_ms: Option<VenueField>,
+    pub updated_ms: Option<VenueField>,
 }
 
 /// One protective leg attached to an entry order. Fields are in the order the engine writes them.
@@ -319,5 +398,58 @@ mod tests {
         assert_eq!(rejection.to_string(), "OKX 51000: Parameter error");
         assert_eq!(VenueError::Unknown("lost".into()).to_string(), "lost");
         assert_eq!(VenueError::Invalid("bad".into()).to_string(), "bad");
+    }
+
+    fn text(t: &str) -> Option<VenueField> {
+        Some(VenueField::Text(t.into()))
+    }
+
+    fn scalar(t: &str) -> Option<VenueField> {
+        Some(VenueField::Scalar(t.into()))
+    }
+
+    #[test]
+    fn readers_follow_the_js_reads() {
+        let null = Some(VenueField::Null);
+        assert_eq!(nullish(&None), None);
+        assert_eq!(nullish(&null), None);
+        assert_eq!(nullish(&text("")), Some(""));
+        assert_eq!(nullish(&scalar("7")), Some("7"));
+
+        assert_eq!(strict(&null), None);
+        assert_eq!(strict(&text("")), Some(""));
+        assert_eq!(strict(&scalar("7")), None);
+        assert_eq!(strict(&scalar("true")), None);
+
+        assert_eq!(truthy(&text("")), None);
+        assert_eq!(truthy(&text("0")), Some("0"));
+        assert_eq!(truthy(&scalar("0")), None);
+        assert_eq!(truthy(&scalar("-0.0")), None);
+        assert_eq!(truthy(&scalar("false")), None);
+        assert_eq!(truthy(&scalar("true")), Some("true"));
+        assert_eq!(truthy(&scalar("1.5")), Some("1.5"));
+        assert_eq!(truthy(&null), None);
+
+        assert!(js_number(&None).is_nan());
+        assert_eq!(js_number(&null), 0.0);
+        assert_eq!(js_number(&text("")), 0.0);
+        assert_eq!(js_number(&text(" 5 ")), 5.0);
+        assert_eq!(js_number(&scalar("true")), 1.0);
+        assert_eq!(js_number(&scalar("false")), 0.0);
+        assert_eq!(js_number(&scalar("2.5")), 2.5);
+
+        assert_eq!(plain_number(&text("1.50")).as_deref(), Some("1.5"));
+        assert_eq!(plain_number(&scalar("3")).as_deref(), Some("3"));
+        assert_eq!(plain_number(&text("-1")), None);
+        assert_eq!(plain_number(&text("1e3")), None);
+        assert_eq!(plain_number(&text("0")), Some("0".into()));
+        assert_eq!(plain_number(&scalar("0")), None);
+    }
+
+    #[test]
+    fn absent_and_null_compare_apart() {
+        assert_ne!(None, Some(VenueField::Null));
+        assert_ne!(text("7"), scalar("7"));
+        assert_eq!(text("7"), text("7"));
     }
 }
