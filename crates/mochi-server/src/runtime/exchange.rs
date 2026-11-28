@@ -152,7 +152,7 @@ impl RuntimeHandle {
         expected_account_id: Option<String>,
         epoch: Option<u64>,
     ) -> Result<PaperAccount, ApiError> {
-        let venue = okx_venue(input.environment)
+        let venue = okx_venue(&input.environment)?
             .ok_or_else(|| ApiError::bad_request("Not an exchange environment"))?;
         let remember = input.remember;
         // 1. Before any network call.
@@ -179,7 +179,7 @@ impl RuntimeHandle {
                 api_key: &input.api_key,
                 secret_key: &input.secret_key,
                 passphrase: &input.passphrase,
-                environment: input.environment,
+                environment: input.environment.clone(),
             })
             .map_err(|_| internal_error())?,
         );
@@ -204,8 +204,11 @@ impl RuntimeHandle {
         // 7. The account row. A new one is written before the first sync, as Node writes it; an
         // existing one keeps its limits until registration, so a connect refused there leaves
         // them as they were.
-        let (name, environment, limits) =
-            (input.name.clone(), input.environment, input.limits.clone());
+        let (name, environment, limits) = (
+            input.name.clone(),
+            input.environment.clone(),
+            input.limits.clone(),
+        );
         let reconnect = expected_account_id.is_some();
         let account = self
             .call(move |r| {
@@ -543,7 +546,7 @@ impl Runtime {
             .store()
             .get_account(account)
             .map_err(|e| self.api_error(e))?
-            .filter(|a| a.venue == AccountVenue::OkxLive)
+            .filter(|a| a.venue.is_live())
         else {
             return Ok(());
         };
@@ -619,7 +622,7 @@ impl Runtime {
             return Ok(());
         }
         let action = signal["decision"]["action"].as_str();
-        if account.venue != AccountVenue::OkxLive || matches!(action, Some("CLOSE" | "PROTECT")) {
+        if !account.venue.is_live() || matches!(action, Some("CLOSE" | "PROTECT")) {
             return Ok(());
         }
         if !self.is_armed(&account.id) {

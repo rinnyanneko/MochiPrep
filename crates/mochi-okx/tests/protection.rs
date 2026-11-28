@@ -117,7 +117,7 @@ fn account(limits: RiskSettings) -> PaperAccount {
         id: ACCOUNT.into(),
         name: "OKX".into(),
         source: DataSource::Live,
-        venue: AccountVenue::OkxLive,
+        venue: AccountVenue::okx_live(),
         exchange_uid: Some("42".into()),
         live_limits: Some(limits),
         is_demo: false,

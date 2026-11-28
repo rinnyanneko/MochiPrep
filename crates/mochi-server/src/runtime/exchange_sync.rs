@@ -12,7 +12,7 @@ use mochi_vault::{exchange_context, open, DataKey};
 use serde::Deserialize;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
-use super::execution::WeakRuntimeHandle;
+use super::execution::{okx_venue, WeakRuntimeHandle};
 use super::{Command, Runtime, RuntimeHandle};
 use crate::error::ApiError;
 use crate::validate::OkxConnectInput;
@@ -103,14 +103,19 @@ impl RuntimeHandle {
             let Some((account, sealed, epoch)) = current else {
                 continue;
             };
-            let result = match read_saved(data_key, &sealed, &account_id) {
+            // An account on an exchange this build cannot trade is reported, never connected,
+            // whatever its saved key says.
+            let supported = okx_venue(&account.venue).map(|_| ());
+            let result = match supported.and_then(|()| {
+                read_saved(data_key, &sealed, &account_id).map_err(ApiError::bad_request)
+            }) {
                 Ok(saved) => {
                     let input = OkxConnectInput {
                         api_key: saved.api_key.clone(),
                         secret_key: saved.secret_key.clone(),
                         passphrase: saved.passphrase.clone(),
                         name: account.name.clone(),
-                        environment: saved.environment,
+                        environment: saved.environment.clone(),
                         limits: account
                             .live_limits
                             .clone()
@@ -121,7 +126,7 @@ impl RuntimeHandle {
                         .await
                         .map(|_| ())
                 }
-                Err(text) => Err(ApiError::bad_request(text)),
+                Err(error) => Err(error),
             };
             if let Err(error) = result {
                 let name = account.name.clone();

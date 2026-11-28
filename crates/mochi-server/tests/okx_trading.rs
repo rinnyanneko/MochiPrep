@@ -105,7 +105,7 @@ fn okx_account() -> PaperAccount {
         id: ACCOUNT.into(),
         name: "OKX".into(),
         source: DataSource::Live,
-        venue: AccountVenue::OkxLive,
+        venue: AccountVenue::okx_live(),
         exchange_uid: Some("42".into()),
         live_limits: Some(default_live_limits()),
         is_demo: false,

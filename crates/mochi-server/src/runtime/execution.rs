@@ -10,8 +10,8 @@ use std::sync::Arc;
 use futures_util::future::BoxFuture;
 use mochi_core::paper::{DailyRisk, PaperStore, ProtectionResult};
 use mochi_domain::{
-    AccountBalance, AccountVenue, Order, OrderRequest, OrderResult, PaperAccount, PositionView,
-    Protection, Topic,
+    AccountBalance, AccountVenue, Environment, ExchangeId, Order, OrderRequest, OrderResult,
+    PaperAccount, PositionView, Protection, Topic,
 };
 use mochi_exchange::engine::{
     EngineDeps, EngineError, ExchangeEngine, Rows, StoreAccess, StoreWork, UnsentOrder,
@@ -195,12 +195,22 @@ impl ExchangeSession {
     }
 }
 
-/// The venue an exchange account trades on.
-pub(super) fn okx_venue(venue: AccountVenue) -> Option<Venue> {
+/// The OKX venue an exchange account trades on; `None` for paper. An account on an exchange
+/// this build has no support for is refused here, so nothing builds an OKX client for it.
+pub(super) fn okx_venue(venue: &AccountVenue) -> Result<Option<Venue>, ApiError> {
     match venue {
-        AccountVenue::OkxDemo => Some(Venue::OkxDemo),
-        AccountVenue::OkxLive => Some(Venue::OkxLive),
-        AccountVenue::Paper => None,
+        AccountVenue::Paper => Ok(None),
+        AccountVenue::Exchange {
+            exchange,
+            environment,
+        } if *exchange == ExchangeId::okx() => Ok(Some(match environment {
+            Environment::Demo => Venue::OkxDemo,
+            Environment::Live => Venue::OkxLive,
+        })),
+        AccountVenue::Exchange { exchange, .. } => Err(ApiError::bad_request(format!(
+            "No exchange support installed for {}",
+            exchange.as_str().to_ascii_uppercase()
+        ))),
     }
 }
 
@@ -229,7 +239,7 @@ pub(super) fn exchange_engine(
 impl Runtime {
     /// Node's `execution(accountId)`. An exchange account without a session cannot trade.
     pub fn execution(&self, account: &PaperAccount) -> Result<ExecutionTarget, ApiError> {
-        if account.venue == AccountVenue::Paper {
+        if okx_venue(&account.venue)?.is_none() {
             return Ok(ExecutionTarget::Paper);
         }
         match self.exchanges.get(&account.id) {
@@ -797,7 +807,7 @@ impl RuntimeHandle {
         let (venue, options, live, epoch) = self
             .call(move |r| {
                 let account = r.require_account(&id)?;
-                let venue = okx_venue(account.venue)
+                let venue = okx_venue(&account.venue)?
                     .ok_or_else(|| ApiError::bad_request("Not an exchange account"))?;
                 r.restore_retired_order(&id)
                     .map_err(|error| r.api_error(error))?;

@@ -6,6 +6,8 @@
 //! open-ended (instruments come from OKX). Optional TS fields (`?`) are skipped when `None`;
 //! `X | null` fields serialize as `null`.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::jsnum::js_number_raw;
@@ -158,13 +160,124 @@ pub enum Liquidity {
     Liquidation,
 }
 
-/// PAPER is simulated locally, OKX_DEMO uses OKX virtual funds, OKX_LIVE is real money.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+/// The exchange an account trades on, by its lowercase id (`okx`). Open-ended, so an account
+/// row can name an exchange this build has no support for; the server refuses to trade it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExchangeId(Arc<str>);
+
+impl ExchangeId {
+    /// Lowercased, so `OKX` and `okx` are the same exchange.
+    pub fn new(id: &str) -> Self {
+        ExchangeId(Arc::from(id.to_ascii_lowercase()))
+    }
+
+    pub fn okx() -> Self {
+        ExchangeId(Arc::from("okx"))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Demo trades the exchange's virtual funds; Live is real money.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Environment {
+    Demo,
+    Live,
+}
+
+/// PAPER is simulated locally; an exchange account is `<EXCHANGE>_DEMO` (virtual funds) or
+/// `<EXCHANGE>_LIVE` (real money), so the stored and sent strings stay `OKX_DEMO`/`OKX_LIVE`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AccountVenue {
     Paper,
-    OkxDemo,
-    OkxLive,
+    Exchange {
+        exchange: ExchangeId,
+        environment: Environment,
+    },
+}
+
+impl AccountVenue {
+    pub fn okx_demo() -> Self {
+        AccountVenue::Exchange {
+            exchange: ExchangeId::okx(),
+            environment: Environment::Demo,
+        }
+    }
+
+    pub fn okx_live() -> Self {
+        AccountVenue::Exchange {
+            exchange: ExchangeId::okx(),
+            environment: Environment::Live,
+        }
+    }
+
+    /// Real money, on any exchange.
+    pub fn is_live(&self) -> bool {
+        matches!(
+            self,
+            AccountVenue::Exchange {
+                environment: Environment::Live,
+                ..
+            }
+        )
+    }
+
+    /// `PAPER`, or `<EXCHANGE upper>_<DEMO|LIVE>`.
+    pub fn as_text(&self) -> String {
+        match self {
+            AccountVenue::Paper => "PAPER".to_string(),
+            AccountVenue::Exchange {
+                exchange,
+                environment,
+            } => {
+                let environment = match environment {
+                    Environment::Demo => "DEMO",
+                    Environment::Live => "LIVE",
+                };
+                format!("{}_{environment}", exchange.as_str().to_ascii_uppercase())
+            }
+        }
+    }
+
+    /// `PAPER`, or a string matching `^[A-Z0-9]+_(DEMO|LIVE)$`; anything else is `None`.
+    pub fn parse(text: &str) -> Option<Self> {
+        if text == "PAPER" {
+            return Some(AccountVenue::Paper);
+        }
+        let (exchange, environment) = text.split_once('_')?;
+        let environment = match environment {
+            "DEMO" => Environment::Demo,
+            "LIVE" => Environment::Live,
+            _ => return None,
+        };
+        let valid = !exchange.is_empty()
+            && exchange
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
+        valid.then(|| AccountVenue::Exchange {
+            exchange: ExchangeId::new(exchange),
+            environment,
+        })
+    }
+}
+
+impl Serialize for AccountVenue {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.as_text())
+    }
+}
+
+impl<'de> Deserialize<'de> for AccountVenue {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        AccountVenue::parse(&text).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "unknown account venue `{text}`, expected `PAPER` or `<EXCHANGE>_DEMO` or `<EXCHANGE>_LIVE`"
+            ))
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
