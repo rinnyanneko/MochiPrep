@@ -295,7 +295,7 @@ impl Runtime {
                 .engine
                 .balance_of(account_id)
                 .map_err(|e| self.api_error(e)),
-            ExecutionTarget::Okx(engine) => engine.balance().map_err(|e| self.api_error(e)),
+            ExecutionTarget::Exchange(engine) => engine.balance().map_err(|e| self.api_error(e)),
         }
     }
 
@@ -310,7 +310,7 @@ impl Runtime {
                 .engine
                 .position_views(account_id)
                 .map_err(|e| self.api_error(e)),
-            ExecutionTarget::Okx(engine) => Ok(engine
+            ExecutionTarget::Exchange(engine) => Ok(engine
                 .positions()
                 .into_iter()
                 .filter(|view| view.close_supported == Some(true))
@@ -330,7 +330,7 @@ impl Runtime {
                 .store()
                 .list_open_positions(account_id)
                 .map_err(|e| self.api_error(e)),
-            ExecutionTarget::Okx(engine) => {
+            ExecutionTarget::Exchange(engine) => {
                 Ok(engine.positions().into_iter().map(|v| v.position).collect())
             }
         }
@@ -347,7 +347,7 @@ impl Runtime {
                 .engine
                 .open_orders(account_id)
                 .map_err(|e| self.api_error(e)),
-            ExecutionTarget::Okx(_) => self
+            ExecutionTarget::Exchange(_) => self
                 .engine
                 .store()
                 .list_open_orders(account_id)
@@ -365,7 +365,7 @@ impl Runtime {
                 .engine
                 .daily_risk(account_id)
                 .map_err(|e| self.api_error(e)),
-            ExecutionTarget::Okx(engine) => {
+            ExecutionTarget::Exchange(engine) => {
                 let equity = self
                     .engine
                     .store()
@@ -400,7 +400,7 @@ impl Runtime {
                     .map(Some)
                     .map_err(|e| self.api_error(e))
             }
-            ExecutionTarget::Okx(engine) => Ok(engine
+            ExecutionTarget::Exchange(engine) => Ok(engine
                 .positions()
                 .iter()
                 .any(|p| p.position.symbol == a.symbol && p.close_supported == Some(true))
@@ -440,7 +440,7 @@ impl Runtime {
             serde_json::from_str(a.risk.get()).map_err(|e| self.api_error(e))?;
         let daily = self.venue_daily_risk(target, &a.account_id)?;
         let (open_positions, checked) = if d.action == AiAction::Protect
-            && matches!(target, ExecutionTarget::Okx(_))
+            && matches!(target, ExecutionTarget::Exchange(_))
         {
             let mut positions = self
                 .venue_positions(target, &a.account_id)?
@@ -467,7 +467,7 @@ impl Runtime {
                 })
                 .transpose()?;
             (position.into_iter().collect(), checked)
-        } else if d.action == AiAction::Close && matches!(target, ExecutionTarget::Okx(_)) {
+        } else if d.action == AiAction::Close && matches!(target, ExecutionTarget::Exchange(_)) {
             // The model and the close command both bind to the manageable isolated position.
             let position = self.position_target(a, target, position_context.bound_id)?;
             (position.into_iter().collect(), None)
@@ -537,7 +537,7 @@ impl Runtime {
                 settle_acted(r, acted);
                 Ok(None)
             }
-            ExecutionTarget::Okx(_) => {
+            ExecutionTarget::Exchange(_) => {
                 self.after_own_order(a, target, before, moves);
                 Ok(Some((self.engine_for(target.clone()), act)))
             }
@@ -606,7 +606,7 @@ impl Runtime {
                 .ok_or_else(|| {
                     ApiError::bad_request("The position changed since it was analyzed")
                 })?;
-            if let ExecutionTarget::Okx(_) = target {
+            if let ExecutionTarget::Exchange(_) = target {
                 return Ok(Act::CloseOkx {
                     request,
                     position_id: p.id,

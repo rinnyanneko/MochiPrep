@@ -9,20 +9,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use mochi_core::paper::PaperStore;
-use mochi_domain::jsnum::{js_string_to_number, js_trim};
+use mochi_domain::jsnum::js_string_to_number;
 use mochi_domain::{
     default_account_config, default_live_limits, AccountVenue, InstrumentSpecification,
     PaperAccount, RiskSettings, Topic, VaultStatus,
 };
 use mochi_exchange::engine::ExchangeEngine;
-use mochi_okx::{Credentials, OkxClient, Venue};
+use mochi_exchange::venue::{VenueAccountConfig, VenueAdapter};
+use mochi_okx::{Credentials, OkxAdapter, Venue};
 use mochi_store::rows;
 use mochi_vault::{exchange_context, seal};
 use serde::Serialize;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
-use super::execution::{okx_engine, okx_venue, ExchangeSession, SessionLink};
+use super::execution::{exchange_engine, okx_venue, ExchangeSession, SessionLink};
 use super::redact::redact_secrets;
 use super::{internal_error, unix_ms, Runtime, RuntimeHandle};
 use crate::error::ApiError;
@@ -66,69 +67,64 @@ struct SavedCredentials<'a> {
     environment: AccountVenue,
 }
 
-/// The key, secret and passphrase, kept for redaction and wiped when dropped.
-pub(super) type Secrets = [Zeroizing<String>; 3];
+/// The values of the key a session was connected with, kept for redaction and wiped when
+/// dropped. For OKX: the key, secret and passphrase, in that order.
+pub(super) type Secrets = Vec<Zeroizing<String>>;
 
 fn secrets_of(input: &OkxConnectInput) -> Secrets {
-    [
+    vec![
         Zeroizing::new(input.api_key.clone()),
         Zeroizing::new(input.secret_key.clone()),
         Zeroizing::new(input.passphrase.clone()),
     ]
 }
 
-/// A config field as Node reads it (`config.x ?? ''` and `===` against a string).
-fn config_text<'a>(config: &'a serde_json::Map<String, Value>, key: &str) -> Option<&'a str> {
-    config.get(key).and_then(Value::as_str)
+/// Why the account a key belongs to may not be connected, checked in Node's order (steps 2-5).
+/// `name` is the venue's, as the texts show it.
+fn key_refusal(config: &VenueAccountConfig, name: &str) -> Option<String> {
+    if config.can_withdraw {
+        return Some("This API key has withdrawal permission. Create a key without it.".into());
+    }
+    if !config.can_trade {
+        return Some("This API key has no trade permission.".into());
+    }
+    if !config.one_way_mode {
+        return Some(format!(
+            "Set {name} position mode to one-way (net) first. MochiPrep does not support hedge mode."
+        ));
+    }
+    if !config.account_mode_ok {
+        return Some(format!(
+            "This {name} account is in Spot mode, which cannot trade perpetuals. Switch it to Futures mode."
+        ));
+    }
+    None
 }
 
-/// The connect checks that ask OKX, in Node's order (steps 2-6). Returns the account's uid.
-async fn check_key(
-    client: &OkxClient,
+/// Step 6: every registered pair, added ones included, since sizing reads these values on every
+/// order. One lookup per pair, in order, stopping at the first failure.
+async fn contract_refusal(
+    venue: &dyn VenueAdapter,
     specs: &[InstrumentSpecification],
-) -> Result<String, String> {
-    let config = client.get_config().await.map_err(|e| e.to_string())?;
-    let permissions: Vec<&str> = config_text(&config, "perm")
-        .unwrap_or("")
-        .split(',')
-        .map(js_trim)
-        .collect();
-    if permissions.contains(&"withdraw") {
-        return Err("This API key has withdrawal permission. Create a key without it.".into());
-    }
-    if !permissions.contains(&"trade") {
-        return Err("This API key has no trade permission.".into());
-    }
-    if config_text(&config, "posMode") != Some("net_mode") {
-        return Err(
-            "Set OKX position mode to one-way (net) first. MochiPrep does not support hedge mode."
-                .into(),
-        );
-    }
-    if config_text(&config, "acctLv") == Some("1") {
-        return Err("This OKX account is in Spot mode, which cannot trade perpetuals. Switch it to Futures mode.".into());
-    }
-    // Every registered pair, added ones included: sizing reads these values on every order.
+) -> Result<(), String> {
     for spec in specs {
-        let venue = client
-            .get_contract_value(&spec.symbol)
+        let contract = venue
+            .contract(&spec.symbol)
             .await
             .map_err(|e| e.to_string())?;
         // `Number(a) !== Number(b)`: NaN never matches, so a missing field refuses too.
-        if js_string_to_number(&venue.ct_val) != js_string_to_number(&spec.venue_contract_value)
-            || js_string_to_number(&venue.lot_sz) != js_string_to_number(&spec.venue_lot_size)
+        if js_string_to_number(&contract.contract_value)
+            != js_string_to_number(&spec.venue_contract_value)
+            || js_string_to_number(&contract.lot_size) != js_string_to_number(&spec.venue_lot_size)
         {
             return Err(format!(
-                "OKX contract specs for {} changed. Refusing to size orders from stale values.",
+                "{} contract specs for {} changed. Refusing to size orders from stale values.",
+                venue.name(),
                 spec.symbol
             ));
         }
     }
-    Ok(match config.get("uid") {
-        None | Some(Value::Null) => String::new(),
-        Some(Value::String(uid)) => uid.clone(),
-        Some(other) => other.to_string(),
-    })
+    Ok(())
 }
 
 impl RuntimeHandle {
@@ -188,13 +184,22 @@ impl RuntimeHandle {
             .map_err(|_| internal_error())?,
         );
         let credentials = Credentials::new(&*input.api_key, &*input.secret_key, &*input.passphrase);
-        let client = options.client(credentials, venue);
+        let adapter: Arc<dyn VenueAdapter> =
+            Arc::new(OkxAdapter::new(options.client(credentials, venue)));
 
-        // 2-6. The checks that ask OKX.
-        let uid = match check_key(&client, &specs).await {
-            Ok(uid) => uid,
-            Err(text) => return Err(self.refused(text, &secrets).await),
+        // 2-6. The checks that ask the exchange: its account config first, then each contract.
+        let config = match adapter.account_config().await {
+            Ok(config) => config,
+            Err(error) => return Err(self.refused(error.to_string(), &secrets).await),
         };
+        if let Some(text) = key_refusal(&config, adapter.name()) {
+            return Err(self.refused(text, &secrets).await);
+        }
+        if let Err(text) = contract_refusal(&*adapter, &specs).await {
+            return Err(self.refused(text, &secrets).await);
+        }
+        // A config without a uid gives the empty string.
+        let uid = config.uid.unwrap_or_default();
 
         // 7. The account row. A new one is written before the first sync, as Node writes it; an
         // existing one keeps its limits until registration, so a connect refused there leaves
@@ -218,10 +223,10 @@ impl RuntimeHandle {
         // reconciliation failed. The engine remains unhealthy until a full sync succeeds.
         let armed = Arc::new(AtomicBool::new(false));
         let link = SessionLink::new(&account.id, epoch);
-        let engine = okx_engine(
+        let engine = exchange_engine(
             self.downgrade(),
             &account.id,
-            client,
+            adapter,
             &options,
             live,
             armed.clone(),
@@ -672,5 +677,89 @@ impl Runtime {
             .map(|(id, session)| (id.clone(), session.engine.clone()))
             .collect();
         (self.agents.watch.next_pass(), sessions)
+    }
+}
+
+#[cfg(test)]
+mod key_refusal_tests {
+    use mochi_exchange::venue::VenueAccountConfig;
+
+    use super::key_refusal;
+
+    fn ok() -> VenueAccountConfig {
+        VenueAccountConfig {
+            uid: Some("1".into()),
+            master_uid: None,
+            can_withdraw: false,
+            can_trade: true,
+            one_way_mode: true,
+            account_mode_ok: true,
+        }
+    }
+
+    #[test]
+    fn withdraw_is_refused() {
+        let config = VenueAccountConfig {
+            can_withdraw: true,
+            ..ok()
+        };
+        assert_eq!(
+            key_refusal(&config, "OKX").as_deref(),
+            Some("This API key has withdrawal permission. Create a key without it.")
+        );
+    }
+
+    #[test]
+    fn no_trade_is_refused() {
+        let config = VenueAccountConfig {
+            can_trade: false,
+            ..ok()
+        };
+        assert_eq!(
+            key_refusal(&config, "OKX").as_deref(),
+            Some("This API key has no trade permission.")
+        );
+    }
+
+    #[test]
+    fn hedge_mode_is_refused() {
+        let config = VenueAccountConfig {
+            one_way_mode: false,
+            ..ok()
+        };
+        assert_eq!(
+            key_refusal(&config, "OKX").as_deref(),
+            Some("Set OKX position mode to one-way (net) first. MochiPrep does not support hedge mode.")
+        );
+    }
+
+    #[test]
+    fn spot_mode_is_refused() {
+        let config = VenueAccountConfig {
+            account_mode_ok: false,
+            ..ok()
+        };
+        assert_eq!(
+            key_refusal(&config, "OKX").as_deref(),
+            Some("This OKX account is in Spot mode, which cannot trade perpetuals. Switch it to Futures mode.")
+        );
+    }
+
+    #[test]
+    fn a_good_key_is_not_refused() {
+        assert_eq!(key_refusal(&ok(), "OKX"), None);
+    }
+
+    #[test]
+    fn withdraw_is_checked_before_trade() {
+        let config = VenueAccountConfig {
+            can_withdraw: true,
+            can_trade: false,
+            ..ok()
+        };
+        assert_eq!(
+            key_refusal(&config, "OKX").as_deref(),
+            Some("This API key has withdrawal permission. Create a key without it.")
+        );
     }
 }

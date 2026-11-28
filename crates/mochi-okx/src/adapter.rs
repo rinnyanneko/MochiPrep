@@ -32,7 +32,7 @@ impl OkxAdapter {
         OkxAdapter { client }
     }
 
-    /// The server's connect step still calls the client directly.
+    /// The client beneath, for tests that call OKX past the adapter.
     pub fn client(&self) -> &OkxClient {
         &self.client
     }

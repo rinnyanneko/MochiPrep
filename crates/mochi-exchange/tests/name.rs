@@ -119,7 +119,7 @@ impl StoreAccess for Local {
 fn account() -> PaperAccount {
     PaperAccount {
         id: ACCOUNT.into(),
-        name: "TESTX".into(),
+        name: "stub account".into(),
         source: DataSource::Live,
         venue: AccountVenue::OkxLive,
         exchange_uid: Some("1".into()),

@@ -166,7 +166,7 @@ impl Runtime {
                 .watched_positions(&a.account_id)
                 .map(|p| mark(&p, &a.symbol))
                 .unwrap_or_default(),
-            ExecutionTarget::Okx(_) => String::new(),
+            ExecutionTarget::Exchange(_) => String::new(),
         }
     }
 
@@ -192,7 +192,7 @@ impl Runtime {
                     watch.seen.insert(leg, after);
                 }
             }
-            ExecutionTarget::Okx(_) if moves => {
+            ExecutionTarget::Exchange(_) if moves => {
                 let settling = Settling {
                     account_id: a.account_id.clone(),
                     pass: None,
@@ -200,7 +200,7 @@ impl Runtime {
                 };
                 self.agents.watch.settling.insert(leg, settling);
             }
-            ExecutionTarget::Okx(_) => {}
+            ExecutionTarget::Exchange(_) => {}
         }
     }
 
