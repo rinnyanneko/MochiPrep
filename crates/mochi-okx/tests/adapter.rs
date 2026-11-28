@@ -577,3 +577,33 @@ async fn requests_match_the_okx_bodies() {
         VenueError::Invalid("OKX cancels at most 10 algo orders per call".into())
     );
 }
+
+#[test]
+fn inst_id_round_trip_is_exact() {
+    let fake = FakeOkx::new();
+    let adapter = adapter(&fake);
+    for inst_id in [
+        "BTC-USDT-SWAP",
+        "1000PEPE-USDT-SWAP",
+        "BTC-USD-SWAP",
+        "ETH-USDC-SWAP",
+        "",
+    ] {
+        assert_eq!(adapter.instrument_id(&from_inst_id(inst_id)), inst_id);
+    }
+}
+
+#[test]
+fn not_found_codes_classified() {
+    for (code, expected) in [("51603", Some(RejectKind::NotFound)), ("51000", None)] {
+        let error = VenueError::from(OkxError::Rejection {
+            code: code.into(),
+            message: "Order does not exist".into(),
+        });
+        let VenueError::Rejection { kind, display, .. } = error else {
+            panic!("{code} is a rejection");
+        };
+        assert_eq!(kind, expected, "{code}");
+        assert_eq!(display, format!("OKX {code}: Order does not exist"));
+    }
+}

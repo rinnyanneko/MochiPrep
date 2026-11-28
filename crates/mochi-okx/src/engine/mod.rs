@@ -35,7 +35,6 @@ use mochi_exchange::venue::{
 };
 
 use crate::client::Venue;
-use crate::ids::to_inst_id;
 
 /// Longest gap since the last good sync before new exposure is refused.
 const MAX_SNAPSHOT_AGE_MS: i64 = 30_000;
@@ -562,10 +561,14 @@ impl Registry {
     }
 
     /// Node's `fromInstId`: unknown instIds are not ours to show.
-    pub(crate) fn symbol_of_inst_id(&self, inst_id: &str) -> Option<&InstrumentSpecification> {
+    pub(crate) fn symbol_of_inst_id(
+        &self,
+        venue: &dyn VenueAdapter,
+        inst_id: &str,
+    ) -> Option<&InstrumentSpecification> {
         self.0
             .iter()
-            .find(|spec| to_inst_id(&spec.symbol) == inst_id)
+            .find(|spec| venue.instrument_id(&spec.symbol) == inst_id)
     }
 }
 
@@ -1201,15 +1204,16 @@ impl OkxEngine {
         selection: CloseSelection,
         registry: &Registry,
     ) -> Result<(SelectedClose, u32), EngineError> {
+        let venue = self.deps.venue.as_ref();
         let spec = registry.get(symbol)?;
         // The cached size can predate a fill or an unanswered reduce-only order.
         let positions = self.deps.venue.positions().await?;
         let (position, side, contracts) =
-            select_close(&positions, symbol, selection.position_id.as_deref())?;
+            select_close(venue, &positions, symbol, selection.position_id.as_deref())?;
         let held = contracts.mul(&dec(&spec.venue_contract_value)?);
         Ok((
             SelectedClose {
-                id: views::position_id(position, side),
+                id: views::position_id(venue, position, side),
                 side,
                 contracts,
                 held,
@@ -1401,6 +1405,7 @@ impl OkxEngine {
         fresh_position: Option<SelectedClose>,
         prepared: Prepared,
     ) -> Result<OrderResult, EngineError> {
+        let venue = self.deps.venue.as_ref();
         let close_selection = fresh_position
             .as_ref()
             .map(|position| position.selection.clone());
@@ -1454,7 +1459,8 @@ impl OkxEngine {
             // dispatch to narrow the window in which a concurrent trade can change the position.
             let checked = async {
                 let positions = self.deps.venue.positions().await?;
-                let (_, _, current) = select_close(&positions, &order.symbol, Some(&selected.id))?;
+                let (_, _, current) =
+                    select_close(venue, &positions, &order.symbol, Some(&selected.id))?;
                 if !current.eq_value(&selected.contracts) {
                     return Err(close_changed());
                 }
@@ -1514,7 +1520,7 @@ impl OkxEngine {
 
     /// Node's `try` block: leverage for an opening order, the order, and the saved ordId.
     async fn send(&self, order: &mut Order, body: VenuePlaceOrder) -> Result<(), EngineError> {
-        let venue = &self.deps.venue;
+        let venue = self.deps.venue.as_ref();
         if !order.reduce_only {
             self.check_dispatch()?;
             if !(self.deps.is_armed)() {
@@ -1665,19 +1671,24 @@ fn close_retry_changed() -> EngineError {
 }
 
 fn select_close<'a>(
+    venue: &dyn VenueAdapter,
     positions: &'a [VenuePosition],
     symbol: &str,
     position_id: Option<&str>,
 ) -> Result<(&'a VenuePosition, PositionSide, Dec), EngineError> {
-    let inst_id = to_inst_id(symbol);
+    let inst_id = venue.instrument_id(symbol);
     let mut matches = positions.iter().filter_map(|p| {
-        if strict(&p.symbol).map(sync::inst_id_of).as_deref() != Some(inst_id.as_str()) {
+        if strict(&p.symbol)
+            .map(|id| venue.instrument_id(id))
+            .as_deref()
+            != Some(inst_id.as_str())
+        {
             return None;
         }
         let signed = dec(strict(&p.size)?).ok()?;
         let side = views::position_side(p, signed.is_negative());
         let selected = match position_id {
-            Some(id) => views::position_id(p, side) == id,
+            Some(id) => views::position_id(venue, p, side) == id,
             None => sync::isolated_net(p),
         };
         if !selected || signed.is_zero() {

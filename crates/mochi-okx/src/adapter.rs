@@ -14,7 +14,8 @@ use serde_json::Value;
 
 use crate::client::{
     nullish_text, AlgoOrdType, AlgoOrderBody, AttachAlgoOrd, CancelAlgo, OkxClient, OkxError,
-    OrdType, PendingAlgoType, PlaceOrderBody, Row, Side, TdMode,
+    OrdType, PendingAlgoType, PlaceOrderBody, Row, Side, TdMode, EXECUTION_HISTORY_PAGE,
+    ORDER_NOT_FOUND, POSITIONS_HISTORY_PAGE, RECENT_FILLS_LIMIT,
 };
 use crate::ids::{from_inst_id, to_algo_cl_ord_id, to_cl_ord_id, to_inst_id};
 
@@ -46,9 +47,13 @@ impl From<OkxError> for VenueError {
                     message: message.clone(),
                 }
                 .to_string();
-                let kind = TRIGGER_WOULD_FIRE_NOW
-                    .contains(&code.as_str())
-                    .then_some(RejectKind::TriggerWouldFireNow);
+                let kind = if TRIGGER_WOULD_FIRE_NOW.contains(&code.as_str()) {
+                    Some(RejectKind::TriggerWouldFireNow)
+                } else if code == ORDER_NOT_FOUND {
+                    Some(RejectKind::NotFound)
+                } else {
+                    None
+                };
                 VenueError::Rejection {
                     code,
                     message,
@@ -438,5 +443,28 @@ impl VenueAdapter for OkxAdapter {
 
     fn client_algo_id(&self, order_id: &str) -> String {
         to_algo_cl_ord_id(order_id)
+    }
+
+    /// The inverse of the rows' `from_inst_id`, exactly: a USDT swap's pair has no dash and
+    /// `to_inst_id` restores it; any other swap id kept its dashes and comes back as it is.
+    /// History records store this id, so the round trip must not change its text.
+    fn instrument_id(&self, symbol: &str) -> String {
+        if symbol.is_empty() || symbol.contains('-') {
+            symbol.to_string()
+        } else {
+            to_inst_id(symbol)
+        }
+    }
+
+    fn recent_fills_page(&self) -> usize {
+        RECENT_FILLS_LIMIT
+    }
+
+    fn execution_history_page(&self) -> usize {
+        EXECUTION_HISTORY_PAGE
+    }
+
+    fn positions_history_page(&self) -> usize {
+        POSITIONS_HISTORY_PAGE
     }
 }

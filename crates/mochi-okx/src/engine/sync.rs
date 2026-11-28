@@ -4,7 +4,8 @@ use std::collections::{HashMap, HashSet};
 
 use mochi_domain::{EquityPoint, Fill, Liquidity, Order, OrderStatus, PositionSide};
 use mochi_exchange::venue::{
-    nullish, strict, truthy, AlgoKind, VenueAlgo, VenueField, VenueOrder, VenuePosition,
+    nullish, strict, truthy, AlgoKind, VenueAdapter, VenueAlgo, VenueField, VenueOrder,
+    VenuePosition,
 };
 
 use super::protection::{
@@ -13,20 +14,6 @@ use super::protection::{
 use super::{
     dec, is_leg, EngineError, OkxEngine, Registry, EQUITY_EVERY_MS, NEVER_ARRIVED_AFTER_MS,
 };
-use crate::client::RECENT_FILLS_LIMIT;
-use crate::ids::to_inst_id;
-
-/// The OKX instId a neutral `symbol` was read from, exactly. The adapter maps `instId` through
-/// `from_inst_id`, which `to_inst_id` undoes for every USDT swap (whose pair has no dash). Any
-/// other swap id keeps its dashes through `from_inst_id`, so it comes back as it is, and `""`
-/// stays `""`. History records store this id, so the round trip must not change its text.
-pub(super) fn inst_id_of(symbol: &str) -> String {
-    if symbol.is_empty() || symbol.contains('-') {
-        symbol.to_string()
-    } else {
-        to_inst_id(symbol)
-    }
-}
 
 /// `d(value || 0)`.
 fn dec_or_zero(field: &Option<VenueField>) -> Result<mochi_decimal::Dec, EngineError> {
@@ -76,7 +63,10 @@ impl PositionSnapshot {
         self.held = snapshot.held;
     }
 
-    pub(super) fn new(rows: Vec<VenuePosition>) -> Result<Self, EngineError> {
+    pub(super) fn new(
+        venue: &dyn VenueAdapter,
+        rows: Vec<VenuePosition>,
+    ) -> Result<Self, EngineError> {
         let mut open = Vec::new();
         let mut held = HashMap::new();
         for row in rows {
@@ -89,7 +79,9 @@ impl PositionSnapshot {
             } else {
                 (PositionSide::Long, size)
             };
-            let inst_id = nullish(&row.symbol).map(inst_id_of).unwrap_or_default();
+            let inst_id = nullish(&row.symbol)
+                .map(|id| venue.instrument_id(id))
+                .unwrap_or_default();
             if isolated_net(&row) {
                 held.insert(
                     inst_id,
@@ -97,7 +89,7 @@ impl PositionSnapshot {
                         side,
                         contracts,
                         trade_id: position_trade_id(&row),
-                        position_id: super::views::position_id(&row, side),
+                        position_id: super::views::position_id(venue, &row, side),
                         updated_at: nullish(&row.updated_ms).map(str::to_owned),
                     },
                 );
@@ -113,13 +105,13 @@ impl PositionSnapshot {
 
     /// Every open position as it would be published, cross-margin ones included, in a
     /// stable order. Two readbacks with the same identity describe the same account.
-    pub(super) fn identity(&self) -> Vec<[Option<String>; 5]> {
+    pub(super) fn identity(&self, venue: &dyn VenueAdapter) -> Vec<[Option<String>; 5]> {
         let mut identity: Vec<_> = self
             .open
             .iter()
             .map(|row| {
                 [
-                    nullish(&row.symbol).map(inst_id_of),
+                    nullish(&row.symbol).map(|id| venue.instrument_id(id)),
                     nullish(&row.margin_mode).map(str::to_owned),
                     nullish(&row.position_side).map(str::to_owned),
                     nullish(&row.size).map(str::to_owned),
@@ -131,15 +123,21 @@ impl PositionSnapshot {
         identity
     }
 
-    fn protection_keys(&self, registry: &Registry) -> HashMap<String, String> {
+    fn protection_keys(
+        &self,
+        venue: &dyn VenueAdapter,
+        registry: &Registry,
+    ) -> HashMap<String, String> {
         let mut keys = HashMap::new();
         let mut seen = HashSet::new();
         for row in &self.open {
             if !isolated_net(row) {
                 continue;
             }
-            let inst_id = nullish(&row.symbol).map(inst_id_of).unwrap_or_default();
-            let Some(spec) = registry.symbol_of_inst_id(&inst_id) else {
+            let inst_id = nullish(&row.symbol)
+                .map(|id| venue.instrument_id(id))
+                .unwrap_or_default();
+            let Some(spec) = registry.symbol_of_inst_id(venue, &inst_id) else {
                 continue;
             };
             if !seen.insert(&spec.symbol) {
@@ -162,7 +160,7 @@ pub(super) fn isolated_net(row: &VenuePosition) -> bool {
 
 impl OkxEngine {
     pub(super) async fn pending_protection(&self) -> Result<Vec<VenueAlgo>, EngineError> {
-        let venue = &self.deps.venue;
+        let venue = self.deps.venue.as_ref();
         let (conditional, oco, trailing) = tokio::try_join!(
             venue.pending_algos(AlgoKind::Conditional),
             venue.pending_algos(AlgoKind::Oco),
@@ -208,7 +206,7 @@ impl OkxEngine {
                                         "Could not verify deferred market exit: {error}"
                                     ))
                                 })?;
-                        if fills.len() >= RECENT_FILLS_LIMIT
+                        if fills.len() >= self.deps.venue.recent_fills_page()
                             || fills
                                 .iter()
                                 .any(|row| strict(&row.client_order_id) == Some(client_id.as_str()))
@@ -479,14 +477,14 @@ impl OkxEngine {
                 }
             }
         }
-        let venue = &self.deps.venue;
+        let venue = self.deps.venue.as_ref();
         let (usdt, remote, algos) = tokio::join!(
             venue.balance(),
             venue.positions(),
             self.pending_protection(),
         );
         let mut usdt = usdt?;
-        let mut snapshot = PositionSnapshot::new(remote?)?;
+        let mut snapshot = PositionSnapshot::new(venue, remote?)?;
         let pre_protection = snapshot.clone();
         let protection = match algos {
             Ok(algos) => {
@@ -500,7 +498,7 @@ impl OkxEngine {
         if snapshot.post_exit_unverified {
             snapshot = pre_protection;
         }
-        let keys = snapshot.protection_keys(&registry);
+        let keys = snapshot.protection_keys(venue, &registry);
         let protection = match protection {
             Ok(protection) => protection,
             Err(error) => {
@@ -523,13 +521,16 @@ impl OkxEngine {
         let (positions, open_results, balance) = {
             let account_id = account_id.clone();
             let now = self.now();
+            let shared = self.deps.venue.clone();
             self.rows(move |rows| {
+                let venue = shared.as_ref();
                 let registry = Registry(rows.instruments());
                 let mut positions = Vec::new();
                 let mut open_results = Vec::new();
                 for p in &snapshot.open {
-                    open_results.extend(super::history::open_result_of(p, &registry)?);
+                    open_results.extend(super::history::open_result_of(venue, p, &registry)?);
                     positions.extend(Self::to_view(
+                        venue,
                         p,
                         rows,
                         &registry,
@@ -615,23 +616,4 @@ fn build_fill(
         liquidity: Liquidity::Taker,
         ts: at,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::inst_id_of;
-    use crate::ids::from_inst_id;
-
-    #[test]
-    fn inst_id_round_trip_is_exact() {
-        for inst_id in [
-            "BTC-USDT-SWAP",
-            "1000PEPE-USDT-SWAP",
-            "BTC-USD-SWAP",
-            "ETH-USDC-SWAP",
-            "",
-        ] {
-            assert_eq!(inst_id_of(&from_inst_id(inst_id)), inst_id);
-        }
-    }
 }

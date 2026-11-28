@@ -6,14 +6,11 @@ use std::collections::HashMap;
 
 use mochi_domain::{ExchangePositionRecord, OrderSide};
 use mochi_exchange::venue::{
-    self, nullish, strict, truthy, VenueBill, VenueClosedPosition, VenueField, VenueOrder,
-    VenuePosition,
+    self, nullish, strict, truthy, VenueAdapter, VenueBill, VenueClosedPosition, VenueField,
+    VenueOrder, VenuePosition,
 };
 
-use super::sync::inst_id_of;
 use super::{dec, is_leg, EngineError, OkxEngine, Registry};
-use crate::client::{EXECUTION_HISTORY_PAGE, POSITIONS_HISTORY_PAGE};
-use crate::ids::to_inst_id;
 
 /// How often the history is read.
 const HISTORY_EVERY_MS: i64 = 60_000;
@@ -154,7 +151,7 @@ impl OkxEngine {
                 }
                 cursor.scan_head.get_or_insert_with(|| newest.to_string());
             }
-            let complete = page.len() < EXECUTION_HISTORY_PAGE
+            let complete = page.len() < self.deps.venue.execution_history_page()
                 || completed
                     .zip(oldest)
                     .is_some_and(|(completed, oldest)| oldest <= completed);
@@ -172,6 +169,7 @@ impl OkxEngine {
 
             let account = account_id.to_string();
             let next = cursor.clone();
+            let venue = self.deps.venue.clone();
             let progressed = self
                 .rows(move |rows| {
                     let mut progressed = false;
@@ -202,7 +200,7 @@ impl OkxEngine {
                                 Some((
                                     (
                                         order.exchange_order_id.as_deref()?,
-                                        to_inst_id(&order.symbol),
+                                        venue.instrument_id(&order.symbol),
                                     ),
                                     order,
                                 ))
@@ -214,7 +212,9 @@ impl OkxEngine {
                             let Some(id) = strict(&fill.exchange_order_id) else {
                                 continue;
                             };
-                            let Some(inst) = nullish(&fill.symbol).map(inst_id_of) else {
+                            let Some(inst) =
+                                nullish(&fill.symbol).map(|id| venue.instrument_id(id))
+                            else {
                                 continue;
                             };
                             let Some(order) = by_identity.get(&(id, inst)) else {
@@ -258,6 +258,7 @@ impl OkxEngine {
         records: &mut Vec<ExchangePositionRecord>,
         account_id: &str,
     ) -> Result<Read, EngineError> {
+        let venue = self.deps.venue.as_ref();
         loop {
             if *budget == 0 {
                 return Ok(match after {
@@ -269,14 +270,14 @@ impl OkxEngine {
             let page = self.deps.venue.positions_history(after).await?;
             let mut oldest: Option<i64> = None;
             for row in &page {
-                let record = record_of(row, account_id)?;
+                let record = record_of(venue, row, account_id)?;
                 oldest = Some(oldest.map_or(record.closed_at, |o| o.min(record.closed_at)));
                 records.push(record);
             }
             let Some(oldest) = oldest else {
                 return Ok(Read::End);
             };
-            if page.len() < POSITIONS_HISTORY_PAGE {
+            if page.len() < self.deps.venue.positions_history_page() {
                 return Ok(Read::End);
             }
             if until.is_some_and(|until| oldest <= until) {
@@ -333,6 +334,7 @@ fn isolated_net(row: &VenueClosedPosition) -> bool {
 
 /// One history row, kept whether or not its pair is in the registry.
 fn record_of(
+    venue: &dyn VenueAdapter,
     row: &VenueClosedPosition,
     account_id: &str,
 ) -> Result<ExchangePositionRecord, EngineError> {
@@ -348,7 +350,7 @@ fn record_of(
             .ok_or_else(|| missing("posId"))?,
         opened_at: venue_time(&row.created_ms).ok_or_else(|| missing("cTime"))?,
         inst_id: nullish(&row.symbol)
-            .map(inst_id_of)
+            .map(|id| venue.instrument_id(id))
             .filter(|id| !id.is_empty())
             .ok_or_else(|| missing("instId"))?,
         closed_at: venue_time(&row.updated_ms).ok_or_else(|| missing("uTime"))?,
@@ -364,11 +366,14 @@ fn record_of(
 
 /// An open OKX position's result so far. `None` for a pair missing from the registry.
 pub(super) fn open_result_of(
+    venue: &dyn VenueAdapter,
     row: &VenuePosition,
     registry: &Registry,
 ) -> Result<Option<OpenPositionResult>, EngineError> {
-    let inst_id = nullish(&row.symbol).map(inst_id_of).unwrap_or_default();
-    let Some(spec) = registry.symbol_of_inst_id(&inst_id) else {
+    let inst_id = nullish(&row.symbol)
+        .map(|id| venue.instrument_id(id))
+        .unwrap_or_default();
+    let Some(spec) = registry.symbol_of_inst_id(venue, &inst_id) else {
         return Ok(None);
     };
     let amount = |field: &Option<VenueField>| -> Result<String, EngineError> {

@@ -9,7 +9,6 @@ use mochi_domain::jsnum::{js_number_string, js_to_fixed};
 use mochi_domain::{Order, OrderSide, OrderStatus, OrderType, PositionSide};
 
 use super::{day_start_equity, dec, is_leg, side_text, EngineError, OkxEngine, Prepared};
-use crate::ids::to_inst_id;
 
 impl OkxEngine {
     pub(super) fn pre_trade_refusal(
@@ -18,6 +17,7 @@ impl OkxEngine {
         position: Option<PositionSide>,
         prepared: &Prepared,
     ) -> Result<Option<String>, EngineError> {
+        let venue = self.deps.venue.as_ref();
         // An exit only needs a position to reduce: no arming, sync, quote or limit checks, so a
         // disarmed or unhealthy account can always get out.
         if order.reduce_only {
@@ -78,7 +78,10 @@ impl OkxEngine {
         }
         // The previous position's algos would otherwise count as the new one's protection, or
         // close it.
-        let leftover = self.state().leftovers.contains(&to_inst_id(&order.symbol))
+        let leftover = self
+            .state()
+            .leftovers
+            .contains(&venue.instrument_id(&order.symbol))
             || prepared.open_orders.iter().any(|o| {
                 o.symbol == order.symbol && is_leg(o) && !super::protection::is_deferred(o)
             });

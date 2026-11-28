@@ -120,6 +120,8 @@ pub enum RejectKind {
     /// The trigger price is already on the wrong side of the market, so the algo would fire at
     /// once. The engine waits for a fresh quote instead of rejecting the leg.
     TriggerWouldFireNow,
+    /// The exchange says the order or algo looked up does not exist.
+    NotFound,
 }
 
 /// The pending-algo lists the engine reads: OKX's `conditional`, `oco` and `move_order_stop`.
@@ -381,6 +383,14 @@ pub trait VenueAdapter: Send + Sync {
     /// The exchange's client-id form of our order id (OKX: `to_cl_ord_id`).
     fn client_order_id(&self, order_id: &str) -> String;
     fn client_algo_id(&self, order_id: &str) -> String;
+    /// The exchange's own instrument id, which the engine keys venue rows by.
+    fn instrument_id(&self, symbol: &str) -> String;
+    /// The most fills [`VenueAdapter::recent_fills`] returns; a shorter list is complete.
+    fn recent_fills_page(&self) -> usize;
+    /// The page size of [`VenueAdapter::execution_history`]; a shorter page is the last.
+    fn execution_history_page(&self) -> usize;
+    /// The page size of [`VenueAdapter::positions_history`]; a shorter page is the last.
+    fn positions_history_page(&self) -> usize;
 }
 
 #[cfg(test)]

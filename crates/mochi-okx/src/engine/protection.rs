@@ -24,13 +24,11 @@ use mochi_exchange::venue::{
     VenuePlaceAlgo, VenuePosition,
 };
 
-use super::sync::{inst_id_of, isolated_net, PositionSnapshot, VenueWrites};
+use super::sync::{isolated_net, PositionSnapshot, VenueWrites};
 use super::{
     align, align_trailing, dec, is_leg, side_text, to_body, to_contracts, EngineError, LiveRows,
     OkxEngine, Registry, NEVER_ARRIVED_AFTER_MS,
 };
-use crate::client::{ORDER_NOT_FOUND, RECENT_FILLS_LIMIT};
-use crate::ids::to_inst_id;
 
 /// How far back sync looks for our own algo ids. Older ones read as external, which is the safe
 /// side.
@@ -298,6 +296,7 @@ fn is_confirmed_reached_exit(order: &Order, symbol: &str, side: OrderSide) -> bo
 }
 
 struct PositionHistory<'a> {
+    venue: &'a dyn VenueAdapter,
     inst_id: &'a str,
     fills: &'a [VenueFill],
     trade: u64,
@@ -363,7 +362,10 @@ impl PositionHistory<'_> {
                 // A system fill is visible before the position snapshot caught up.
                 return None;
             }
-            if strict(&row.symbol).map(inst_id_of).as_deref() != Some(self.inst_id)
+            if strict(&row.symbol)
+                .map(|id| self.venue.instrument_id(id))
+                .as_deref()
+                != Some(self.inst_id)
                 || strict(&row.position_side) != Some("net")
             {
                 return Some(EntryInterval::Different { system: false });
@@ -434,7 +436,7 @@ fn proven_entry_contracts(
     entry_trade: u64,
     expected: &Dec,
 ) -> Option<Dec> {
-    if history.fills.len() >= RECENT_FILLS_LIMIT {
+    if history.fills.len() >= history.venue.recent_fills_page() {
         return None;
     }
     let mut total = super::zero();
@@ -479,11 +481,15 @@ fn proven_entry_contracts(
 }
 
 pub(super) fn isolated_net_position<'a>(
+    venue: &dyn VenueAdapter,
     positions: &'a [VenuePosition],
     inst_id: &str,
 ) -> Option<(&'a VenuePosition, Dec)> {
     positions.iter().find_map(|position| {
-        if strict(&position.symbol).map(inst_id_of).as_deref() != Some(inst_id)
+        if strict(&position.symbol)
+            .map(|id| venue.instrument_id(id))
+            .as_deref()
+            != Some(inst_id)
             || !isolated_net(position)
         {
             return None;
@@ -1382,10 +1388,11 @@ impl OkxEngine {
         stop: Option<&str>,
         changed: &impl Fn() -> EngineError,
     ) -> Result<Dec, EngineError> {
+        let venue = self.deps.venue.as_ref();
         let position = &position.position;
         let remote = self.deps.venue.positions().await?;
         let (row, side, contracts) =
-            super::select_close(&remote, &position.symbol, Some(&position.id))
+            super::select_close(venue, &remote, &position.symbol, Some(&position.id))
                 .map_err(|_| changed())?;
         let size = dec(&position.quantity)?;
         if !size.eq_value(&contracts.mul(&dec(&spec.venue_contract_value)?)) {
@@ -1470,9 +1477,10 @@ impl OkxEngine {
         snapshot: &mut PositionSnapshot,
         inst_id: &str,
     ) -> Result<bool, EngineError> {
-        let fresh = PositionSnapshot::new(self.deps.venue.positions().await?)?;
-        let before = isolated_net_position(&snapshot.open, inst_id);
-        let after = isolated_net_position(&fresh.open, inst_id);
+        let venue = self.deps.venue.as_ref();
+        let fresh = PositionSnapshot::new(venue, self.deps.venue.positions().await?)?;
+        let before = isolated_net_position(venue, &snapshot.open, inst_id);
+        let after = isolated_net_position(venue, &fresh.open, inst_id);
         let same = before
             .zip(after)
             .is_some_and(|((before, size), (after, fresh_size))| {
@@ -1482,7 +1490,7 @@ impl OkxEngine {
                     PositionSide::Long
                 };
                 size.eq_value(&fresh_size)
-                && super::views::position_id(before, side) == super::views::position_id(after, side)
+                && super::views::position_id(venue, before, side) == super::views::position_id(venue, after, side)
                 // Some system reductions do not change tradeId.
                 && before.updated_ms == after.updated_ms
             });
@@ -1783,6 +1791,7 @@ impl OkxEngine {
         registry: &Registry,
         snapshot: &mut PositionSnapshot,
     ) -> Result<bool, EngineError> {
+        let venue = self.deps.venue.as_ref();
         let Some(completion) = linked_replacements.iter().rev().find(|order| {
             order.status == OrderStatus::Open
                 && order.symbol == row.symbol
@@ -1835,19 +1844,23 @@ impl OkxEngine {
             }
             _ => return Ok(false),
         };
-        let inst = to_inst_id(&row.symbol);
+        let inst = venue.instrument_id(&row.symbol);
         let side = match fixed.side {
             OrderSide::Buy => PositionSide::Short,
             OrderSide::Sell => PositionSide::Long,
         };
-        snapshot.update_positions(PositionSnapshot::new(self.deps.venue.positions().await?)?);
-        let Some((position, original_size)) = isolated_net_position(&snapshot.open, &inst) else {
+        snapshot.update_positions(PositionSnapshot::new(
+            venue,
+            self.deps.venue.positions().await?,
+        )?);
+        let Some((position, original_size)) = isolated_net_position(venue, &snapshot.open, &inst)
+        else {
             return Ok(false);
         };
         if (side == PositionSide::Short) != original_size.is_negative() {
             return Ok(false);
         }
-        let original_id = super::views::position_id(position, side);
+        let original_id = super::views::position_id(venue, position, side);
         let Some(algo) = self.lookup_algo(&fixed.id).await? else {
             return Ok(true);
         };
@@ -1855,12 +1868,16 @@ impl OkxEngine {
         {
             return Ok(false);
         }
-        snapshot.update_positions(PositionSnapshot::new(self.deps.venue.positions().await?)?);
-        let Some((position, signed_size)) = isolated_net_position(&snapshot.open, &inst) else {
+        snapshot.update_positions(PositionSnapshot::new(
+            venue,
+            self.deps.venue.positions().await?,
+        )?);
+        let Some((position, signed_size)) = isolated_net_position(venue, &snapshot.open, &inst)
+        else {
             return Ok(false);
         };
         if !original_size.eq_value(&signed_size)
-            || super::views::position_id(position, side) != original_id
+            || super::views::position_id(venue, position, side) != original_id
         {
             return Ok(true);
         }
@@ -1890,9 +1907,15 @@ impl OkxEngine {
         fills: &[VenueFill],
         entry_order_id: &str,
     ) -> Result<HashSet<String>, EngineError> {
+        let venue = self.deps.venue.as_ref();
         let mut ids: Vec<String> = fills
             .iter()
-            .filter(|fill| strict(&fill.symbol).map(inst_id_of).as_deref() == Some(inst_id))
+            .filter(|fill| {
+                strict(&fill.symbol)
+                    .map(|id| venue.instrument_id(id))
+                    .as_deref()
+                    == Some(inst_id)
+            })
             .filter_map(|fill| strict(&fill.exchange_order_id))
             .filter(|id| !id.is_empty() && *id != entry_order_id)
             .map(str::to_owned)
@@ -1922,15 +1945,19 @@ impl OkxEngine {
         fills: &[VenueFill],
         close_subtype: &str,
     ) -> Result<HashMap<String, String>, EngineError> {
+        let venue = self.deps.venue.as_ref();
         // The proof below requires a complete page. Only look up IDs from fills
         // that could belong to a reached exit on this instrument and side.
-        if fills.len() >= RECENT_FILLS_LIMIT {
+        if fills.len() >= self.deps.venue.recent_fills_page() {
             return Ok(HashMap::new());
         }
         let mut ids: Vec<_> = fills
             .iter()
             .filter(|fill| {
-                strict(&fill.symbol).map(inst_id_of).as_deref() == Some(inst_id)
+                strict(&fill.symbol)
+                    .map(|id| venue.instrument_id(id))
+                    .as_deref()
+                    == Some(inst_id)
                     && strict(&fill.position_side) == Some("net")
                     && strict(&fill.sub_type) == Some(close_subtype)
             })
@@ -2009,6 +2036,7 @@ impl OkxEngine {
         registry: &Registry,
         snapshot: &mut PositionSnapshot,
     ) -> Result<(), EngineError> {
+        let venue = self.deps.venue.as_ref();
         let leg =
             leg_of(row).ok_or_else(|| EngineError::message("Invalid deferred protection leg"))?;
         let parent_id = deferred_parent_id(row, leg)
@@ -2041,7 +2069,7 @@ impl OkxEngine {
                 .close_row(row, "Deferred protection canceled: entry did not fill")
                 .await;
         }
-        let inst_id = to_inst_id(&row.symbol);
+        let inst_id = venue.instrument_id(&row.symbol);
         let confirming = self.now().saturating_sub(parent.updated_at) < POSITION_MISSING_MS;
         let context = self.context().await?;
         let replacement = context.open_orders.iter().rev().find(|other| {
@@ -2083,8 +2111,12 @@ impl OkxEngine {
                 false
             };
         // Read fresh after the parent/stop calls, which may have outlived the earlier snapshot.
-        snapshot.update_positions(PositionSnapshot::new(self.deps.venue.positions().await?)?);
-        let Some((position, signed_size)) = isolated_net_position(&snapshot.open, &inst_id) else {
+        snapshot.update_positions(PositionSnapshot::new(
+            venue,
+            self.deps.venue.positions().await?,
+        )?);
+        let Some((position, signed_size)) = isolated_net_position(venue, &snapshot.open, &inst_id)
+        else {
             if confirming {
                 return Ok(());
             }
@@ -2144,7 +2176,7 @@ impl OkxEngine {
                 signed_size.clone()
             },
             trade_id: Some(position_trade),
-            position_id: super::views::position_id(position, side),
+            position_id: super::views::position_id(venue, position, side),
             updated_at: nullish(&position.updated_ms).map(str::to_owned),
         };
         if needs_replacement_stop {
@@ -2176,7 +2208,7 @@ impl OkxEngine {
                     if !self.refresh_matching_position(snapshot, &inst_id).await? {
                         return Ok(());
                     }
-                    let (position, _) = isolated_net_position(&snapshot.open, &inst_id)
+                    let (position, _) = isolated_net_position(venue, &snapshot.open, &inst_id)
                         .expect("the fresh position matched");
                     confirmed = stop_precedes_liquidation(stop, position, side)?;
                 }
@@ -2261,7 +2293,10 @@ impl OkxEngine {
             let unattributed_closings = fills.iter().filter(|fill| {
                 last_trade_id(&fill.trade_id)
                     .is_some_and(|id| (first_entry_trade..=position_trade).contains(&id))
-                    && strict(&fill.symbol).map(inst_id_of).as_deref() == Some(inst_id.as_str())
+                    && strict(&fill.symbol)
+                        .map(|id| venue.instrument_id(id))
+                        .as_deref()
+                        == Some(inst_id.as_str())
                     && strict(&fill.position_side) == Some("net")
                     && strict(&fill.sub_type) == Some(close_subtype)
                     && strict(&fill.exchange_order_id)
@@ -2277,6 +2312,7 @@ impl OkxEngine {
             });
             let isolated_orders = self.own_order_ids(row, &inst_id, &fills, order_id).await?;
             let history = PositionHistory {
+                venue: self.deps.venue.as_ref(),
                 inst_id: &inst_id,
                 fills: &fills,
                 trade: position_trade,
@@ -2304,7 +2340,7 @@ impl OkxEngine {
                     return Ok(());
                 }
                 _ => {
-                    let exchange_ids = if fills.len() < RECENT_FILLS_LIMIT {
+                    let exchange_ids = if fills.len() < self.deps.venue.recent_fills_page() {
                         unattributed_closings
                             .clone()
                             .filter_map(|fill| strict(&fill.exchange_order_id))
@@ -2478,6 +2514,7 @@ impl OkxEngine {
         side: PositionSide,
         snapshot: &mut PositionSnapshot,
     ) -> Result<(), EngineError> {
+        let venue = self.deps.venue.as_ref();
         let prepared = self.prepare(&row.account_id, &row.client_order_id).await?;
         if let Some(reason) = self.pre_trade_refusal(row, Some(side), &prepared)? {
             return self.close_row(row, &reason).await;
@@ -2525,7 +2562,10 @@ impl OkxEngine {
             }
         }
         self.sync_order(row, registry).await?;
-        snapshot.update_positions(PositionSnapshot::new(self.deps.venue.positions().await?)?);
+        snapshot.update_positions(PositionSnapshot::new(
+            venue,
+            self.deps.venue.positions().await?,
+        )?);
         Ok(())
     }
 
@@ -2556,7 +2596,10 @@ impl OkxEngine {
             .await
         {
             Ok(found) => Ok(found),
-            Err(VenueError::Rejection { code, .. }) if code == ORDER_NOT_FOUND => Ok(None),
+            Err(VenueError::Rejection {
+                kind: Some(RejectKind::NotFound),
+                ..
+            }) => Ok(None),
             Err(error) => Err(error.into()),
         }
     }
@@ -2655,6 +2698,7 @@ impl OkxEngine {
         balance: &mut Option<VenueBalance>,
         writes: VenueWrites,
     ) -> Result<ProtectionMap, EngineError> {
+        let venue = self.deps.venue.as_ref();
         match self
             .reconcile_protection_pass(algos, snapshot, writes)
             .await?
@@ -2663,12 +2707,12 @@ impl OkxEngine {
             None => {
                 // An exit or a position change can invalidate the earlier algo list.
                 let refreshed = self.pending_protection().await;
-                let post_exit = PositionSnapshot::new(self.deps.venue.positions().await?)?;
+                let post_exit = PositionSnapshot::new(venue, self.deps.venue.positions().await?)?;
                 let position_changed = snapshot.held != post_exit.held;
                 snapshot.update_positions(post_exit);
                 let refreshed = if position_changed {
                     let refreshed = self.pending_protection().await?;
-                    let latest = PositionSnapshot::new(self.deps.venue.positions().await?)?;
+                    let latest = PositionSnapshot::new(venue, self.deps.venue.positions().await?)?;
                     let changed_again = snapshot.held != latest.held;
                     snapshot.update_positions(latest);
                     if changed_again {
@@ -2683,10 +2727,11 @@ impl OkxEngine {
                 let post_exit_balance = self.deps.venue.balance().await?;
                 // The balance must describe the positions published with it. A change
                 // during the balance read leaves both stale for the next sync.
-                let after_balance = PositionSnapshot::new(self.deps.venue.positions().await?)?;
+                let after_balance =
+                    PositionSnapshot::new(venue, self.deps.venue.positions().await?)?;
                 // Cross-margin positions are published too, so they must also agree.
                 if snapshot.held != after_balance.held
-                    || snapshot.identity() != after_balance.identity()
+                    || snapshot.identity(venue) != after_balance.identity(venue)
                 {
                     return Err(EngineError::message(
                         "Position changed while reading the post-exit balance",
@@ -2707,6 +2752,7 @@ impl OkxEngine {
         snapshot: &mut PositionSnapshot,
         writes: VenueWrites,
     ) -> Result<Option<ProtectionMap>, EngineError> {
+        let venue = self.deps.venue.as_ref();
         let at = self.now();
         let account_id = self.deps.account_id.clone();
         let (open, recent, registry) = self
@@ -2762,8 +2808,10 @@ impl OkxEngine {
             let index = truthy(&algo.client_algo_id).and_then(|id| ours.get(id).copied());
             match index {
                 None => {
-                    let inst_id = nullish(&algo.symbol).map(inst_id_of).unwrap_or_default();
-                    if let Some(spec) = registry.symbol_of_inst_id(&inst_id) {
+                    let inst_id = nullish(&algo.symbol)
+                        .map(|id| venue.instrument_id(id))
+                        .unwrap_or_default();
+                    if let Some(spec) = registry.symbol_of_inst_id(venue, &inst_id) {
                         result
                             .entry(spec.symbol.clone())
                             .or_default()
@@ -2836,11 +2884,12 @@ impl OkxEngine {
         let held = &snapshot.held;
         // Compared by instId, which every row maps to, so a symbol missing from the registry
         // still counts as held.
-        let is_held = |row: &Order| held.contains_key(&to_inst_id(&row.symbol));
+        let is_held = |row: &Order| held.contains_key(&venue.instrument_id(&row.symbol));
         let closes_held = |row: &Order| {
-            held.get(&to_inst_id(&row.symbol)).is_some_and(|held| {
-                (held.side == PositionSide::Long) == (row.side == OrderSide::Sell)
-            })
+            held.get(&venue.instrument_id(&row.symbol))
+                .is_some_and(|held| {
+                    (held.side == PositionSide::Long) == (row.side == OrderSide::Sell)
+                })
         };
         let other_side = |row: &Order| is_held(row) && !closes_held(row);
         let key_of = |row: &Order| format!("{}:{:?}", row.symbol, leg_of(row));
@@ -2868,7 +2917,7 @@ impl OkxEngine {
         {
             let prior = self.state().missing_position.clone();
             for i in alive.iter().chain(strays.iter()).map(|(i, _)| *i) {
-                let inst_id = to_inst_id(&rows[i].symbol);
+                let inst_id = venue.instrument_id(&rows[i].symbol);
                 if held.contains_key(&inst_id) || missing.contains_key(&inst_id) {
                     continue;
                 }
@@ -2887,7 +2936,7 @@ impl OkxEngine {
         }
         let position_gone = |row: &Order| {
             missing
-                .get(&to_inst_id(&row.symbol))
+                .get(&venue.instrument_id(&row.symbol))
                 .is_some_and(|m| m.count >= 2 && at - m.since >= POSITION_MISSING_MS)
         };
 
@@ -2936,7 +2985,7 @@ impl OkxEngine {
         let mut uncovered: Vec<(Vec<usize>, Option<Dec>)> = Vec::new();
         for (_, members) in &groups {
             let first = &rows[members[0].0];
-            let Some(position) = held.get(&to_inst_id(&first.symbol)) else {
+            let Some(position) = held.get(&venue.instrument_id(&first.symbol)) else {
                 if position_gone(first) {
                     for (i, algo) in members {
                         cancel.push((*i, algo.clone(), Some(POSITION_CLOSED)));
@@ -3001,7 +3050,7 @@ impl OkxEngine {
             if awaiting {
                 continue;
             }
-            let Some(position) = held.get(&to_inst_id(&newest.symbol)) else {
+            let Some(position) = held.get(&venue.instrument_id(&newest.symbol)) else {
                 continue;
             };
             // A size that does not read leaves the per-fill rows as they are.

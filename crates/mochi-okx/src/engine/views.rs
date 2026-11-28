@@ -6,11 +6,11 @@ use mochi_domain::{
 };
 
 use mochi_exchange::venue::{
-    js_number, nullish, strict, truthy, VenueBalance, VenueField, VenuePosition,
+    js_number, nullish, strict, truthy, VenueAdapter, VenueBalance, VenueField, VenuePosition,
 };
 
 use super::protection::{effective_of, ProtectionMap};
-use super::sync::{inst_id_of, isolated_net};
+use super::sync::isolated_net;
 use super::{dec, zero, EngineError, LiveRows, OkxEngine, Registry};
 
 /// Node's `Number(p.lever) || 1`. Leverage is whole in MochiPrep, so a fractional OKX value is
@@ -26,12 +26,18 @@ pub(super) fn leverage_of(position: &VenuePosition) -> u32 {
 
 /// posId can be reused after a close. Include the observed trade and direction so a stale
 /// close request cannot select a newer position on the same instrument and margin mode.
-pub(super) fn position_id(row: &VenuePosition, side: PositionSide) -> String {
+pub(super) fn position_id(
+    venue: &dyn VenueAdapter,
+    row: &VenuePosition,
+    side: PositionSide,
+) -> String {
     let field = |field| strict(field).unwrap_or_default();
     let side = super::side_text(side);
     format!(
         "okx:{}:{}:{side}:{}:{}",
-        strict(&row.symbol).map(inst_id_of).unwrap_or_default(),
+        strict(&row.symbol)
+            .map(|id| venue.instrument_id(id))
+            .unwrap_or_default(),
         field(&row.margin_mode),
         field(&row.position_id),
         field(&row.trade_id),
@@ -50,6 +56,7 @@ pub(super) fn position_side(row: &VenuePosition, negative: bool) -> PositionSide
 impl OkxEngine {
     /// One open OKX position. A pair missing from the registry is not shown.
     pub(super) fn to_view(
+        venue: &dyn VenueAdapter,
         p: &VenuePosition,
         rows: &dyn LiveRows,
         registry: &Registry,
@@ -57,8 +64,10 @@ impl OkxEngine {
         now: i64,
         protection: &ProtectionMap,
     ) -> Result<Vec<PositionView>, EngineError> {
-        let inst_id = nullish(&p.symbol).map(inst_id_of).unwrap_or_default();
-        let Some(spec) = registry.symbol_of_inst_id(&inst_id) else {
+        let inst_id = nullish(&p.symbol)
+            .map(|id| venue.instrument_id(id))
+            .unwrap_or_default();
+        let Some(spec) = registry.symbol_of_inst_id(venue, &inst_id) else {
             return Ok(Vec::new());
         };
         let symbol = spec.symbol.clone();
@@ -82,7 +91,7 @@ impl OkxEngine {
             .find(|o| o.symbol == symbol && !o.reduce_only && o.status == OrderStatus::Filled);
         Ok(vec![PositionView {
             position: Position {
-                id: position_id(p, side),
+                id: position_id(venue, p, side),
                 account_id: account_id.to_string(),
                 symbol,
                 side,
