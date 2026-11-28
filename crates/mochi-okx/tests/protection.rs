@@ -15,8 +15,8 @@ use mochi_domain::{
     OrderSide, OrderStatus, OrderType, PaperAccount, PositionView, Protection, Quote, RiskSettings,
     TrailingKind, TrailingStopSpec, TrailingStopView,
 };
-use mochi_okx::engine::{
-    CheckedProtection, EngineError, OkxEngine, OkxEngineDeps, ProtectionOrderOptions, Rows,
+use mochi_exchange::engine::{
+    CheckedProtection, EngineDeps, EngineError, ExchangeEngine, ProtectionOrderOptions, Rows,
     StoreAccess, StoreWork,
 };
 use mochi_okx::fake::{self, FakeOkx, Refusal};
@@ -103,7 +103,7 @@ impl Transport for SyncDown {
 
 struct Harness {
     okx: Arc<FakeOkx>,
-    engine: Arc<OkxEngine>,
+    engine: Arc<ExchangeEngine>,
     store: Arc<Local>,
     clock: Arc<AtomicI64>,
     quote_time: Arc<AtomicI64>,
@@ -175,9 +175,8 @@ async fn connect(extra: Vec<InstrumentSpecification>) -> Harness {
         .with_base_url("https://okx.invalid")
         .with_clock(move || ticks.load(Ordering::SeqCst));
     let ids = Arc::new(AtomicU64::new(0));
-    let engine = OkxEngine::new(OkxEngineDeps {
+    let engine = ExchangeEngine::new(EngineDeps {
         account_id: ACCOUNT.into(),
-        environment: Venue::OkxLive,
         venue: Arc::new(mochi_okx::OkxAdapter::new(client)),
         store: store.clone(),
         get_quote: {
@@ -596,7 +595,7 @@ async fn an_sl_only_edit_started_during_a_trailing_edit_keeps_the_new_trailing_s
         ACCOUNT,
         "BTCUSDT",
         stop("74500"),
-        mochi_okx::engine::ProtectionRetention {
+        mochi_exchange::engine::ProtectionRetention {
             trailing_stop: true,
             ..Default::default()
         },
@@ -1997,7 +1996,7 @@ async fn deferred_trailing_survives_disarming_before_fill() {
     );
 }
 
-fn restart(h: &Harness) -> Arc<OkxEngine> {
+fn restart(h: &Harness) -> Arc<ExchangeEngine> {
     let clock = h.clock.clone();
     let client = OkxClient::new(fake::credentials(), Venue::OkxLive, h.sync_down.clone())
         .with_base_url("https://okx.invalid")
@@ -2006,9 +2005,8 @@ fn restart(h: &Harness) -> Arc<OkxEngine> {
     let prices = h.prices.clone();
     let now = h.clock.clone();
     let armed = h.armed.clone();
-    OkxEngine::new(OkxEngineDeps {
+    ExchangeEngine::new(EngineDeps {
         account_id: ACCOUNT.into(),
-        environment: Venue::OkxLive,
         venue: Arc::new(mochi_okx::OkxAdapter::new(client)),
         store: h.store.clone(),
         get_quote: Arc::new(move |symbol| {
@@ -2167,7 +2165,7 @@ async fn protection_edits_do_not_cancel_trailing_for_a_resting_entry() {
                 take_profit: None,
                 trailing_stop: None,
             },
-            mochi_okx::engine::ProtectionRetention {
+            mochi_exchange::engine::ProtectionRetention {
                 trailing_stop: true,
                 ..Default::default()
             },
@@ -2343,7 +2341,7 @@ async fn each_resting_entry_keeps_its_take_profit_when_both_fill_before_sync() {
             ACCOUNT,
             "BTCUSDT",
             stop("74025"),
-            mochi_okx::engine::ProtectionRetention {
+            mochi_exchange::engine::ProtectionRetention {
                 take_profit: true,
                 trailing_stop: true,
             },
@@ -2697,7 +2695,7 @@ async fn a_partially_filled_canceled_entry_can_use_a_replacement_fixed_stop() {
                 ACCOUNT,
                 "BTCUSDT",
                 stop("74300"),
-                mochi_okx::engine::ProtectionRetention {
+                mochi_exchange::engine::ProtectionRetention {
                     trailing_stop: true,
                     take_profit: true,
                 },
@@ -4677,7 +4675,7 @@ async fn a_fixed_stop_edit_keeps_unsent_optional_exits_on_the_filled_entry() {
             ACCOUNT,
             "BTCUSDT",
             stop("74500"),
-            mochi_okx::engine::ProtectionRetention {
+            mochi_exchange::engine::ProtectionRetention {
                 trailing_stop: true,
                 take_profit: true,
             },

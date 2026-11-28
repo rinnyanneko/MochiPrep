@@ -2549,8 +2549,7 @@ dependencies = [
  "mochi-core",
  "mochi-decimal",
  "mochi-domain",
- "serde",
- "serde_json",
+ "mochi-store",
  "thiserror 2.0.21",
  "tokio",
 ]
@@ -2648,6 +2647,7 @@ dependencies = [
  "mochi-core",
  "mochi-decimal",
  "mochi-domain",
+ "mochi-exchange",
  "mochi-launcher-core",
  "mochi-market",
  "mochi-okx",

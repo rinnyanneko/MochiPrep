@@ -251,9 +251,9 @@ fn td_mode(mode: VenueMarginMode) -> TdMode {
     }
 }
 
-fn order_body(order: VenuePlaceOrder) -> PlaceOrderBody {
+fn order_body(inst_id: String, order: VenuePlaceOrder) -> PlaceOrderBody {
     PlaceOrderBody {
-        inst_id: to_inst_id(&order.symbol),
+        inst_id,
         td_mode: td_mode(order.margin_mode),
         side: side(order.side),
         ord_type: match order.order_type {
@@ -284,9 +284,9 @@ fn attached_body(leg: VenueAttachedAlgo) -> AttachAlgoOrd {
     }
 }
 
-fn algo_body(algo: VenuePlaceAlgo) -> AlgoOrderBody {
+fn algo_body(inst_id: String, algo: VenuePlaceAlgo) -> AlgoOrderBody {
     AlgoOrderBody {
-        inst_id: to_inst_id(&algo.symbol),
+        inst_id,
         td_mode: td_mode(algo.margin_mode),
         side: side(algo.side),
         algo_cl_ord_id: algo.client_algo_id,
@@ -356,17 +356,17 @@ impl VenueAdapter for OkxAdapter {
     }
 
     fn recent_fills(&self, symbol: &str) -> BoxFuture<'_, Result<Vec<VenueFill>, VenueError>> {
-        let inst_id = to_inst_id(symbol);
+        let inst_id = self.instrument_id(symbol);
         Box::pin(async move { Ok(all(self.client.recent_fills(&inst_id).await?)) })
     }
 
     fn set_leverage(&self, symbol: &str, leverage: u32) -> BoxFuture<'_, Result<(), VenueError>> {
-        let inst_id = to_inst_id(symbol);
+        let inst_id = self.instrument_id(symbol);
         Box::pin(async move { Ok(self.client.set_leverage(&inst_id, leverage).await?) })
     }
 
     fn place_order(&self, order: VenuePlaceOrder) -> BoxFuture<'_, Result<String, VenueError>> {
-        let body = order_body(order);
+        let body = order_body(self.instrument_id(&order.symbol), order);
         Box::pin(async move { Ok(self.client.place_order(&body).await?) })
     }
 
@@ -375,7 +375,7 @@ impl VenueAdapter for OkxAdapter {
         symbol: &str,
         client_order_id: &str,
     ) -> BoxFuture<'_, Result<Option<VenueOrder>, VenueError>> {
-        let inst_id = to_inst_id(symbol);
+        let inst_id = self.instrument_id(symbol);
         let client_order_id = client_order_id.to_string();
         Box::pin(async move {
             Ok(self
@@ -392,13 +392,13 @@ impl VenueAdapter for OkxAdapter {
         symbol: &str,
         client_order_id: &str,
     ) -> BoxFuture<'_, Result<(), VenueError>> {
-        let inst_id = to_inst_id(symbol);
+        let inst_id = self.instrument_id(symbol);
         let client_order_id = client_order_id.to_string();
         Box::pin(async move { Ok(self.client.cancel_order(&inst_id, &client_order_id).await?) })
     }
 
     fn place_algo(&self, algo: VenuePlaceAlgo) -> BoxFuture<'_, Result<String, VenueError>> {
-        let body = algo_body(algo);
+        let body = algo_body(self.instrument_id(&algo.symbol), algo);
         Box::pin(async move { Ok(self.client.place_algo(&body).await?) })
     }
 
@@ -430,7 +430,7 @@ impl VenueAdapter for OkxAdapter {
         let items: Vec<CancelAlgo> = items
             .into_iter()
             .map(|item| CancelAlgo {
-                inst_id: to_inst_id(&item.symbol),
+                inst_id: self.instrument_id(&item.symbol),
                 algo_id: item.exchange_algo_id,
             })
             .collect();
@@ -448,6 +448,7 @@ impl VenueAdapter for OkxAdapter {
     /// The inverse of the rows' `from_inst_id`, exactly: a USDT swap's pair has no dash and
     /// `to_inst_id` restores it; any other swap id kept its dashes and comes back as it is.
     /// History records store this id, so the round trip must not change its text.
+    /// Assumes every OKX SWAP id is `BASE-QUOTE-SWAP`, so a dashed symbol is already an id.
     fn instrument_id(&self, symbol: &str) -> String {
         if symbol.is_empty() || symbol.contains('-') {
             symbol.to_string()

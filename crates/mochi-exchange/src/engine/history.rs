@@ -4,13 +4,13 @@
 
 use std::collections::HashMap;
 
-use mochi_domain::{ExchangePositionRecord, OrderSide};
-use mochi_exchange::venue::{
+use crate::venue::{
     self, nullish, strict, truthy, VenueAdapter, VenueBill, VenueClosedPosition, VenueField,
     VenueOrder, VenuePosition,
 };
+use mochi_domain::{ExchangePositionRecord, OrderSide};
 
-use super::{dec, is_leg, EngineError, OkxEngine, Registry};
+use super::{dec, is_leg, EngineError, ExchangeEngine, Registry};
 
 /// How often the history is read.
 const HISTORY_EVERY_MS: i64 = 60_000;
@@ -33,7 +33,7 @@ pub struct OpenPositionResult {
 }
 
 /// Clears the in-flight flag however a pass ends.
-struct Running<'a>(&'a OkxEngine);
+struct Running<'a>(&'a ExchangeEngine);
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
@@ -41,10 +41,10 @@ impl Drop for Running<'_> {
     }
 }
 
-impl OkxEngine {
+impl ExchangeEngine {
     /// One pass, at most once a minute and never two at a time. It takes no part in the order
     /// queue, so it never holds up an order or an exit; the sync loop runs it as a task of its own
-    /// (see [`OkxEngine::spawn_position_history`]) so it never holds up a sync either.
+    /// (see [`ExchangeEngine::spawn_position_history`]) so it never holds up a sync either.
     ///
     /// The pass reads from the newest close back until it meets what is recorded, then carries on
     /// with any older history still unread, within a page budget. It writes everything, records
@@ -138,16 +138,20 @@ impl OkxEngine {
                     strict(&row.bill_id)
                         .and_then(|id| id.parse::<u64>().ok())
                         .ok_or_else(|| {
-                            EngineError::message("OKX execution history is missing a bill ID")
+                            EngineError::message(format!(
+                                "{} execution history is missing a bill ID",
+                                self.deps.venue.name()
+                            ))
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let oldest = bills.iter().copied().min();
             if let Some(newest) = bills.iter().copied().max() {
                 if after.is_some_and(|after| newest >= after) {
-                    return Err(EngineError::message(
-                        "OKX execution history pagination did not advance",
-                    ));
+                    return Err(EngineError::message(format!(
+                        "{} execution history pagination did not advance",
+                        self.deps.venue.name()
+                    )));
                 }
                 cursor.scan_head.get_or_insert_with(|| newest.to_string());
             }
@@ -339,7 +343,10 @@ fn record_of(
     account_id: &str,
 ) -> Result<ExchangePositionRecord, EngineError> {
     let missing = |field: &str| {
-        EngineError::message(format!("OKX reported a closed position without {field}"))
+        EngineError::message(format!(
+            "{} reported a closed position without {field}",
+            venue.name()
+        ))
     };
     let realized = truthy(&row.realized_pnl).ok_or_else(|| missing("realizedPnl"))?;
     Ok(ExchangePositionRecord {

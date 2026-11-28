@@ -1,17 +1,17 @@
-//! What OKX reports, as MochiPrep's balance and position views.
+//! What the exchange reports, as MochiPrep's balance and position views.
 
 use mochi_domain::{
     AccountBalance, OrderStatus, Position, PositionSide, PositionStatus, PositionView,
     TrailingStopView,
 };
 
-use mochi_exchange::venue::{
+use crate::venue::{
     js_number, nullish, strict, truthy, VenueAdapter, VenueBalance, VenueField, VenuePosition,
 };
 
 use super::protection::{effective_of, ProtectionMap};
 use super::sync::isolated_net;
-use super::{dec, zero, EngineError, LiveRows, OkxEngine, Registry};
+use super::{dec, zero, EngineError, ExchangeEngine, LiveRows, Registry};
 
 /// Node's `Number(p.lever) || 1`. Leverage is whole in MochiPrep, so a fractional OKX value is
 /// rounded down, and never below 1.
@@ -53,7 +53,7 @@ pub(super) fn position_side(row: &VenuePosition, negative: bool) -> PositionSide
     }
 }
 
-impl OkxEngine {
+impl ExchangeEngine {
     /// One open OKX position. A pair missing from the registry is not shown.
     pub(super) fn to_view(
         venue: &dyn VenueAdapter,

@@ -429,7 +429,13 @@ impl Runtime {
         quote: Option<Quote>,
         position_context: RiskPosition<'_>,
         target: &ExecutionTarget,
-    ) -> Result<(RiskResult, Option<mochi_okx::engine::CheckedProtection>), ApiError> {
+    ) -> Result<
+        (
+            RiskResult,
+            Option<mochi_exchange::engine::CheckedProtection>,
+        ),
+        ApiError,
+    > {
         let risk: RiskSettings =
             serde_json::from_str(a.risk.get()).map_err(|e| self.api_error(e))?;
         let daily = self.venue_daily_risk(target, &a.account_id)?;
@@ -453,7 +459,7 @@ impl Runtime {
                     let before = position_context.protection.cloned().ok_or_else(|| {
                         ApiError::bad_request("The OKX position changed while checking protection")
                     })?;
-                    Ok::<_, ApiError>(mochi_okx::engine::CheckedProtection {
+                    Ok::<_, ApiError>(mochi_exchange::engine::CheckedProtection {
                         position_id: position.id.clone(),
                         quantity: position.quantity.clone(),
                         before,
@@ -519,7 +525,7 @@ impl Runtime {
         d: &AiDecisionData,
         r: &mut Value,
         target: &ExecutionTarget,
-        checked: Option<mochi_okx::engine::CheckedProtection>,
+        checked: Option<mochi_exchange::engine::CheckedProtection>,
     ) -> Result<Option<Outgoing>, ApiError> {
         let act = self.act_for(a, d, r, target, checked)?;
         let before = self.before_own_order(a, target);
@@ -546,7 +552,7 @@ impl Runtime {
         d: &AiDecisionData,
         r: &Value,
         target: &ExecutionTarget,
-        checked: Option<mochi_okx::engine::CheckedProtection>,
+        checked: Option<mochi_exchange::engine::CheckedProtection>,
     ) -> Result<Act, ApiError> {
         let decision_id = r["id"].as_str().map(String::from);
         if d.action == AiAction::Protect {

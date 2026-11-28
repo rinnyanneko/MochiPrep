@@ -1,18 +1,18 @@
-//! Bringing local rows and the cached account in line with OKX.
+//! Bringing local rows and the cached account in line with the exchange.
 
 use std::collections::{HashMap, HashSet};
 
-use mochi_domain::{EquityPoint, Fill, Liquidity, Order, OrderStatus, PositionSide};
-use mochi_exchange::venue::{
+use crate::venue::{
     nullish, strict, truthy, AlgoKind, VenueAdapter, VenueAlgo, VenueField, VenueOrder,
     VenuePosition,
 };
+use mochi_domain::{EquityPoint, Fill, Liquidity, Order, OrderStatus, PositionSide};
 
 use super::protection::{
-    is_reached_exit, position_trade_id, record_attached, Held, REACHED_EXIT_UNCONFIRMED,
+    is_reached_exit, position_trade_id, reached_exit_unconfirmed, record_attached, Held,
 };
 use super::{
-    dec, is_leg, EngineError, OkxEngine, Registry, EQUITY_EVERY_MS, NEVER_ARRIVED_AFTER_MS,
+    dec, is_leg, EngineError, ExchangeEngine, Registry, EQUITY_EVERY_MS, NEVER_ARRIVED_AFTER_MS,
 };
 
 /// `d(value || 0)`.
@@ -158,7 +158,7 @@ pub(super) fn isolated_net(row: &VenuePosition) -> bool {
     strict(&row.margin_mode) == Some("isolated") && strict(&row.position_side) == Some("net")
 }
 
-impl OkxEngine {
+impl ExchangeEngine {
     pub(super) async fn pending_protection(&self) -> Result<Vec<VenueAlgo>, EngineError> {
         let venue = self.deps.venue.as_ref();
         let (conditional, oco, trailing) = tokio::try_join!(
@@ -215,10 +215,11 @@ impl OkxEngine {
                         }
                     }
                 }
+                let name = self.deps.venue.name();
                 let reason = if is_reached_exit(order) {
-                    REACHED_EXIT_UNCONFIRMED
+                    reached_exit_unconfirmed(name)
                 } else {
-                    super::ORDER_UNCONFIRMED
+                    super::order_unconfirmed(name)
                 };
                 self.expire_unconfirmed_order(order, reason, at).await?;
             }
@@ -251,7 +252,7 @@ impl OkxEngine {
         // A final status is only saved with its fill: only OPEN orders are synced, so a filled
         // order without its fill row would drop out of the ledger, History and Arena for good.
         // The order stays as it was and is looked up again on the next sync.
-        let fill = match fill_of(&row, &remote, &filled, at) {
+        let fill = match fill_of(self.deps.venue.as_ref(), &row, &remote, &filled, at) {
             Some(Ok(fill)) => Some(fill),
             Some(Err(error)) => return Err(error),
             None => None,
@@ -321,7 +322,7 @@ impl OkxEngine {
     pub(super) async fn expire_unconfirmed_order(
         &self,
         row: &mut Order,
-        reason: &'static str,
+        reason: String,
         at: i64,
     ) -> Result<(), EngineError> {
         let observed = row.clone();
@@ -334,7 +335,7 @@ impl OkxEngine {
                         // A connection's readback can overlap the active session restoring
                         // a known-unsent order. Its late lookup may only expire what it saw.
                         order.status = OrderStatus::Canceled;
-                        order.reject_reason = Some(reason.into());
+                        order.reject_reason = Some(reason.clone());
                         order.updated_at = at;
                         rows.save_order(order)?;
                     }
@@ -378,14 +379,20 @@ impl OkxEngine {
     async fn reconcile(&self, writes: VenueWrites) -> Result<(), EngineError> {
         let _ = self.finalize_unsent_rejections().await;
         let account_id = self.deps.account_id.clone();
+        let name = self.deps.venue.name();
+        let (reached_unconfirmed, order_unconfirmed) = (
+            reached_exit_unconfirmed(name),
+            super::order_unconfirmed(name),
+        );
         let (open, registry) = {
             let account_id = account_id.clone();
+            let reasons = [reached_unconfirmed.clone(), order_unconfirmed.clone()];
             self.rows(move |rows| {
                 let mut pending = rows.list_open_orders(&account_id)?;
                 // A locally retired target stays lookup-only. Protection can
                 // wait on matching fill evidence while lookup catches up.
                 const RECOVERY_BATCH: usize = 10;
-                for reason in [REACHED_EXIT_UNCONFIRMED, super::ORDER_UNCONFIRMED] {
+                for reason in &reasons {
                     pending.extend(rows.list_canceled_orders_for_recovery(
                         &account_id,
                         reason,
@@ -401,10 +408,11 @@ impl OkxEngine {
         // stays OPEN and is tried again next sync, nothing resent; it fails this sync, but not
         // before the other orders, positions and protection are brought in line. Only an OKX or
         // shutdown failure stops the pass at once.
-        let mut order_error =
-            self.dispatch().restore_order.is_some().then(|| {
-                EngineError::message("An unsent OKX protection order is awaiting recovery")
-            });
+        let mut order_error = self.dispatch().restore_order.is_some().then(|| {
+            EngineError::message(format!(
+                "An unsent {name} protection order is awaiting recovery"
+            ))
+        });
         // An order refused before dispatch has nothing at OKX to look up.
         for mut order in open
             .into_iter()
@@ -414,16 +422,8 @@ impl OkxEngine {
             let recovering = (order.status == OrderStatus::Canceled)
                 .then_some(order.reject_reason.as_deref())
                 .flatten()
-                .filter(|reason| {
-                    [REACHED_EXIT_UNCONFIRMED, super::ORDER_UNCONFIRMED].contains(reason)
-                })
-                .map(|reason| {
-                    if reason == REACHED_EXIT_UNCONFIRMED {
-                        REACHED_EXIT_UNCONFIRMED
-                    } else {
-                        super::ORDER_UNCONFIRMED
-                    }
-                });
+                .filter(|reason| *reason == reached_unconfirmed || *reason == order_unconfirmed)
+                .map(str::to_owned);
             let mut answered = false;
             match self.sync_order(&mut order, &registry).await {
                 Ok(()) => answered = true,
@@ -434,7 +434,7 @@ impl OkxEngine {
                 }
                 Err(error) => {
                     order_error.get_or_insert(EngineError::Message(format!(
-                        "Could not record OKX order {}: {error}",
+                        "Could not record {name} order {}: {error}",
                         order.id
                     )));
                 }
@@ -446,12 +446,16 @@ impl OkxEngine {
                 // window starts at the local expiry, the row's last update.
                 if answered
                     && order.status == OrderStatus::Canceled
-                    && order.reject_reason.as_deref() == Some(super::ORDER_UNCONFIRMED)
+                    && order.reject_reason.as_deref() == Some(order_unconfirmed.as_str())
                     && checked_at.saturating_sub(order.updated_at) >= super::UNCONFIRMED_LOOKUP_MS
                 {
                     // Long past any delay in OKX's records: OKX never had this order.
                     if let Err(error) = self
-                        .expire_unconfirmed_order(&mut order, super::ORDER_NOT_ARRIVED, checked_at)
+                        .expire_unconfirmed_order(
+                            &mut order,
+                            super::order_not_arrived(name),
+                            checked_at,
+                        )
                         .await
                     {
                         if matches!(error, EngineError::Stopped) {
@@ -465,7 +469,7 @@ impl OkxEngine {
                 // Keep this checkpoint across restarts without changing the order's status.
                 if let Err(error) = self
                     .rows(move |rows| {
-                        Ok(rows.mark_order_recovery_checked(&order.id, reason, checked_at)?)
+                        Ok(rows.mark_order_recovery_checked(&order.id, &reason, checked_at)?)
                     })
                     .await
                 {
@@ -577,6 +581,7 @@ impl OkxEngine {
 /// The fill for an order that is done and filled at least partly, `None` otherwise. Whether one
 /// is already recorded is checked against the store.
 fn fill_of(
+    venue: &dyn VenueAdapter,
     order: &Order,
     remote: &VenueOrder,
     filled: &mochi_decimal::Dec,
@@ -585,10 +590,11 @@ fn fill_of(
     if order.status == OrderStatus::Open || !filled.gt(&super::zero()) {
         return None;
     }
-    Some(build_fill(order, remote, filled, at))
+    Some(build_fill(venue, order, remote, filled, at))
 }
 
 fn build_fill(
+    venue: &dyn VenueAdapter,
     order: &Order,
     remote: &VenueOrder,
     filled: &mochi_decimal::Dec,
@@ -600,7 +606,9 @@ fn build_fill(
     let price = truthy(&remote.average_price)
         .filter(|price| dec(price).is_ok_and(|price| price.gt(&super::zero())))
         .map(str::to_owned)
-        .ok_or_else(|| EngineError::Message("OKX reported a fill without a price".into()))?;
+        .ok_or_else(|| {
+            EngineError::Message(format!("{} reported a fill without a price", venue.name()))
+        })?;
     let fee = dec_or_zero(&remote.fee)?;
     let fee = if fee.is_negative() { fee.neg() } else { fee };
     Ok(Fill {

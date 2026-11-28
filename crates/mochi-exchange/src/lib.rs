@@ -1,5 +1,6 @@
 //! The exchange-neutral side of live trading: the rows and requests every exchange adapter speaks,
-//! and the [`venue::VenueAdapter`] trait the trading engine calls. OKX is the only adapter
-//! (`mochi_okx::OkxAdapter`).
+//! the [`venue::VenueAdapter`] trait, and the trading engine ([`engine::ExchangeEngine`]) that
+//! calls it. OKX is the only adapter (`mochi_okx::OkxAdapter`).
 
+pub mod engine;
 pub mod venue;

@@ -64,7 +64,7 @@ function ResetAccount({ account }: { account: AccountView }) {
 }
 
 // The API's decimal rule needs a digit before the point, so `.5` is sent as `0.5`.
-// The engine's ORDER_UNCONFIRMED reason (crates/mochi-okx/src/engine/mod.rs): OKX had no
+// The engine's order_unconfirmed reason (crates/mochi-exchange/src/engine/mod.rs): OKX had no
 // record of the order yet, so the server keeps looking it up. A Rust test checks the two match.
 const UNCONFIRMED_EXPIRY = 'OKX has no record of this order yet; check its outcome in OKX';
 

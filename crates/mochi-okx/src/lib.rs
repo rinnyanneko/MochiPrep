@@ -4,7 +4,6 @@
 
 pub mod adapter;
 pub mod client;
-pub mod engine;
 #[cfg(feature = "fake")]
 pub mod fake;
 pub mod ids;

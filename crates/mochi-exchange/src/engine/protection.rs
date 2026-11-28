@@ -8,6 +8,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::venue::{
+    nullish, plain_number, strict, truthy, RejectKind, VenueAdapter, VenueAlgo, VenueAlgoOrderType,
+    VenueBalance, VenueCancelAlgo, VenueError, VenueField, VenueFill, VenueMarginMode,
+    VenuePlaceAlgo, VenuePosition,
+};
 use mochi_core::paper::{validate_trailing, ProtectionResult};
 use mochi_core::protection_change::{
     classify_protection_change, same_price, same_trailing, ProtectionChangeClass,
@@ -18,16 +23,11 @@ use mochi_domain::{
     Order, OrderSide, OrderStatus, OrderType, PositionSide, PositionView, Protection, RiskSettings,
     TrailingStopSpec, CANCEL_PENDING_PREFIX,
 };
-use mochi_exchange::venue::{
-    nullish, plain_number, strict, truthy, RejectKind, VenueAdapter, VenueAlgo, VenueAlgoOrderType,
-    VenueBalance, VenueCancelAlgo, VenueError, VenueField, VenueFill, VenueMarginMode,
-    VenuePlaceAlgo, VenuePosition,
-};
 
 use super::sync::{isolated_net, PositionSnapshot, VenueWrites};
 use super::{
-    align, align_trailing, dec, is_leg, side_text, to_body, to_contracts, EngineError, LiveRows,
-    OkxEngine, Registry, NEVER_ARRIVED_AFTER_MS,
+    align, align_trailing, dec, is_leg, side_text, to_body, to_contracts, EngineError,
+    ExchangeEngine, LiveRows, Registry, NEVER_ARRIVED_AFTER_MS,
 };
 
 /// How far back sync looks for our own algo ids. Older ones read as external, which is the safe
@@ -40,9 +40,14 @@ const ALIVE_STATES: [&str; 2] = ["live", "partially_effective"];
 const REPLACED: &str = "Replaced";
 const REMOVED: &str = "Removed";
 const POSITION_CLOSED: &str = "Position closed";
-pub(super) const ALGO_NOT_ARRIVED: &str = "OKX has no record of this algo";
-pub(super) const REACHED_EXIT_UNCONFIRMED: &str =
-    "OKX has no record of this market take profit; check its outcome in OKX";
+/// Stored as an algo row's reason, like [`super::order_unconfirmed`].
+pub(super) fn algo_not_arrived(venue: &str) -> String {
+    format!("{venue} has no record of this algo")
+}
+/// Stored as a reached target's reason and matched as text when recovering it.
+pub(super) fn reached_exit_unconfirmed(venue: &str) -> String {
+    format!("{venue} has no record of this market take profit; check its outcome in {venue}")
+}
 // These durable markers identify an unsent intent. Clearing them before sending permits
 // only lookup after a crash, never another send.
 const DEFERRED_TRAILING: &str = "Pending entry fill: trailing stop not yet sent";
@@ -932,7 +937,7 @@ struct Context {
     open_orders: Vec<Order>,
 }
 
-impl OkxEngine {
+impl ExchangeEngine {
     /// Our protection that OKX listed as pending on the last sync, as the runner and risk engine
     /// see it. External algos are not included.
     pub fn protection_of(&self, symbol: &str) -> Protection {
@@ -1061,10 +1066,11 @@ impl OkxEngine {
             .cloned()
             .unwrap_or_default();
         let position_changed = || {
+            let name = self.deps.venue.name();
             EngineError::message(if checked.is_some() {
-                "The OKX position or protection changed after the agent's risk check"
+                format!("The {name} position or protection changed after the agent's risk check")
             } else {
-                "The OKX position changed while checking the stop loss"
+                format!("The {name} position changed while checking the stop loss")
             })
         };
         if let Some(checked) = &checked {
@@ -1428,9 +1434,12 @@ impl OkxEngine {
     async fn protection_edit_error(&self, symbol: &str, error: EngineError) -> EngineError {
         let confirmed = self.sync_without_deferred_orders().await.is_ok();
         let note = if confirmed {
-            ""
+            String::new()
         } else {
-            "; current protection not yet confirmed from OKX"
+            format!(
+                "; current protection not yet confirmed from {}",
+                self.deps.venue.name()
+            )
         };
         EngineError::ProtectionChange {
             message: format!("{error}{note}"),
@@ -1521,9 +1530,10 @@ impl OkxEngine {
             ));
         }
         if !covers_with_reported_size(fixed, &algo, &contracts, registry) {
-            return Err(EngineError::message(
-                "The fixed stop loss does not cover the entire OKX position",
-            ));
+            return Err(EngineError::message(format!(
+                "The fixed stop loss does not cover the entire {} position",
+                self.deps.venue.name()
+            )));
         }
         self.check_protection_position(position, spec, fixed.trigger_price.as_deref(), changed)
             .await?;
@@ -1639,10 +1649,10 @@ impl OkxEngine {
                 && o.exchange_order_id.as_deref().is_none_or(str::is_empty)
         });
         if unresolved {
-            return Ok(Some(
-                "PROTECTION_PENDING: an earlier protection change is awaiting confirmation from OKX"
-                    .into(),
-            ));
+            return Ok(Some(format!(
+                "PROTECTION_PENDING: an earlier protection change is awaiting confirmation from {}",
+                self.deps.venue.name()
+            )));
         }
         if !(self.deps.is_armed)()
             && classify_protection_change(side, before, target).map_err(decimal_error)?
@@ -1692,7 +1702,8 @@ impl OkxEngine {
             (state.balance.is_some(), state.sync_error.clone())
         };
         if !healthy || !has_balance {
-            let why = sync_error.unwrap_or_else(|| "no recent sync with OKX".into());
+            let why = sync_error
+                .unwrap_or_else(|| format!("no recent sync with {}", self.deps.venue.name()));
             return Ok(Err(format!("EXCHANGE_NOT_SYNCED: {why}")));
         }
         let Some(quote) = (self.deps.get_quote)(symbol) else {
@@ -1739,7 +1750,10 @@ impl OkxEngine {
             }
             dispatched.extend(batch.iter().map(|item| item.exchange_algo_id.as_str()));
             if let Err(error) = self.deps.venue.cancel_algos(batch.to_vec()).await {
-                failure = Some(format!("Could not cancel an OKX algo order: {error}"));
+                failure = Some(format!(
+                    "Could not cancel an {} algo order: {error}",
+                    self.deps.venue.name()
+                ));
             }
         }
         let now = self.now();
@@ -2011,7 +2025,7 @@ impl OkxEngine {
                     &account_id,
                     &symbol,
                     side,
-                    REACHED_EXIT_UNCONFIRMED,
+                    &reached_exit_unconfirmed(venue.name()),
                     &|order| {
                         is_reached_exit(order)
                             && client_ids.contains(&venue.client_order_id(&order.client_order_id))
@@ -2217,7 +2231,11 @@ impl OkxEngine {
                 if confirming {
                     return Ok(());
                 }
-                return self.close_row(row, "Deferred protection canceled: OKX did not confirm the fixed stop for the partial fill").await;
+                let reason = format!(
+                    "Deferred protection canceled: {} did not confirm the fixed stop for the partial fill",
+                    self.deps.venue.name()
+                );
+                return self.close_row(row, &reason).await;
             }
         }
         if let Some(replacement) = replacement {
@@ -2467,10 +2485,13 @@ impl OkxEngine {
         ));
         row.created_at = self.now();
         row.updated_at = self.now();
-        let _staged = self.stage_order(super::UnsentOrder::Deferred {
-            original: Box::new(unsent),
-            marker: Box::new(row.clone()),
-        })?;
+        let _staged = self.stage_order(super::UnsentOrder::new(
+            self.deps.venue.as_ref(),
+            super::Unsent::Deferred {
+                original: Box::new(unsent),
+                marker: Box::new(row.clone()),
+            },
+        ))?;
         self.save(row.clone()).await?;
         if !self
             .recheck_deferred_dispatch(row, snapshot, &inst_id)
@@ -2533,10 +2554,13 @@ impl OkxEngine {
             Some("Awaiting confirmation: reached take profit submission started".into());
         row.created_at = self.now();
         row.updated_at = self.now();
-        let _staged = self.stage_order(super::UnsentOrder::Deferred {
-            original: Box::new(unsent),
-            marker: Box::new(row.clone()),
-        })?;
+        let _staged = self.stage_order(super::UnsentOrder::new(
+            self.deps.venue.as_ref(),
+            super::Unsent::Deferred {
+                original: Box::new(unsent),
+                marker: Box::new(row.clone()),
+            },
+        ))?;
         self.save(row.clone()).await?;
         let body = to_body(row, self.deps.venue.as_ref(), contracts.to_fixed());
         if !self
@@ -2871,10 +2895,15 @@ impl OkxEngine {
                 {
                     row.exchange_order_id = Some(id);
                 }
-                self.close_row(row, "Gone from OKX").await?;
+                let reason = format!("Gone from {}", self.deps.venue.name());
+                self.close_row(row, &reason).await?;
             } else if at - row.created_at >= NEVER_ARRIVED_AFTER_MS {
-                self.expire_unconfirmed_order(row, ALGO_NOT_ARRIVED, self.now())
-                    .await?;
+                self.expire_unconfirmed_order(
+                    row,
+                    algo_not_arrived(self.deps.venue.name()),
+                    self.now(),
+                )
+                .await?;
             }
         }
         if refresh_readback || snapshot.post_exit_unverified {

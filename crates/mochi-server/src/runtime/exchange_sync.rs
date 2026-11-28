@@ -7,7 +7,7 @@ use std::time::Duration;
 use futures_util::FutureExt;
 use mochi_core::paper::PaperStore;
 use mochi_domain::{default_live_limits, ServerEvent, ToastLevel, Topic};
-use mochi_okx::engine::OkxEngine;
+use mochi_exchange::engine::ExchangeEngine;
 use mochi_vault::{exchange_context, open, DataKey};
 use serde::Deserialize;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
@@ -45,7 +45,7 @@ struct Saved {
 /// runtime only through short calls, and holds no strong handle.
 async fn sync_all(
     runtime: WeakRuntimeHandle,
-    (pass, sessions): (u64, Vec<(String, Arc<OkxEngine>)>),
+    (pass, sessions): (u64, Vec<(String, Arc<ExchangeEngine>)>),
 ) {
     for (id, engine) in sessions {
         let result = engine.sync().await.map_err(|error| error.to_string());
@@ -168,7 +168,7 @@ impl Runtime {
     pub(super) fn after_sync(
         &mut self,
         account_id: &str,
-        engine: &Arc<OkxEngine>,
+        engine: &Arc<ExchangeEngine>,
         result: Result<(), String>,
         pass: u64,
     ) {

@@ -13,8 +13,8 @@ use mochi_domain::{
     AccountBalance, AccountVenue, Order, OrderRequest, OrderResult, PaperAccount, PositionView,
     Protection, Topic,
 };
-use mochi_okx::engine::{
-    EngineError, OkxEngine, OkxEngineDeps, Rows, StoreAccess, StoreWork, UnsentOrder,
+use mochi_exchange::engine::{
+    EngineDeps, EngineError, ExchangeEngine, Rows, StoreAccess, StoreWork, UnsentOrder,
 };
 use mochi_okx::{Clock, Credentials, NetTransport, OkxAdapter, OkxClient, Transport, Venue};
 use tokio::sync::{broadcast, mpsc};
@@ -33,7 +33,7 @@ pub struct ProtectionMeta {
     /// the same serialized step as the change, so a concurrent trailing edit is never undone.
     pub keep_trailing: bool,
     pub keep_take_profit: bool,
-    pub checked: Option<mochi_okx::engine::CheckedProtection>,
+    pub checked: Option<mochi_exchange::engine::CheckedProtection>,
 }
 
 /// A refused protection change. `after` is Node's `ProtectionChangeError.after`: set when the
@@ -105,7 +105,7 @@ pub trait ExecutionEngine: Send + Sync {
 #[derive(Clone)]
 pub enum ExecutionTarget {
     Paper,
-    Okx(Arc<OkxEngine>),
+    Okx(Arc<ExchangeEngine>),
 }
 
 /// How OKX is reached. Tests inject an in-process fake and a fixed clock.
@@ -149,7 +149,9 @@ impl OkxOptions {
 
 /// A connected exchange account. Sessions live in memory only, so a restart forgets them.
 pub(super) struct ExchangeSession {
-    pub engine: Arc<OkxEngine>,
+    pub engine: Arc<ExchangeEngine>,
+    /// OKX Demo or live, from the account's venue; fixed for the session's life.
+    pub venue: Venue,
     pub armed: Arc<AtomicBool>,
     /// The key, secret and passphrase (Node's `session.secrets`), so every text that leaves the
     /// runtime has them removed. Wiped when the session goes.
@@ -208,10 +210,9 @@ pub(super) fn okx_engine(
     live: Arc<dyn LiveFeed>,
     armed: Arc<AtomicBool>,
     link: Arc<SessionLink>,
-) -> Arc<OkxEngine> {
-    OkxEngine::new(OkxEngineDeps {
+) -> Arc<ExchangeEngine> {
+    ExchangeEngine::new(EngineDeps {
         account_id: account_id.to_string(),
-        environment: client.venue(),
         venue: Arc::new(OkxAdapter::new(client)),
         store: Arc::new(ActorStore { runtime, link }),
         get_quote: Arc::new(move |symbol: &str| live.get_quote(symbol)),
@@ -616,7 +617,7 @@ impl ExecutionEngine for PaperExecution {
 }
 
 struct OkxExecution {
-    engine: Arc<OkxEngine>,
+    engine: Arc<ExchangeEngine>,
     runtime: WeakRuntimeHandle,
 }
 
@@ -729,8 +730,8 @@ impl ExecutionEngine for OkxExecution {
                     &account_id,
                     &symbol,
                     protection,
-                    mochi_okx::engine::ProtectionOrderOptions {
-                        retain: mochi_okx::engine::ProtectionRetention {
+                    mochi_exchange::engine::ProtectionOrderOptions {
+                        retain: mochi_exchange::engine::ProtectionRetention {
                             trailing_stop: meta.keep_trailing,
                             take_profit: meta.keep_take_profit,
                         },
@@ -824,6 +825,7 @@ impl RuntimeHandle {
         self.call(move |r| {
             let session = ExchangeSession {
                 engine,
+                venue,
                 armed: flag,
                 secrets,
                 was_healthy: true,

@@ -7,14 +7,13 @@ license.workspace = true
 
 [features]
 # An in-memory OKX for tests, here and in mochi-server's dev-dependencies.
-fake = ["dep:indexmap", "dep:url"]
+fake = ["dep:indexmap", "dep:mochi-decimal", "dep:url"]
 
 [dependencies]
 base64 = "0.22"
 hmac = { workspace = true }
 indexmap = { version = "2", features = ["serde"], optional = true }
-mochi-core = { path = "../mochi-core" }
-mochi-decimal = { path = "../mochi-decimal" }
+mochi-decimal = { path = "../mochi-decimal", optional = true }
 mochi-domain = { path = "../mochi-domain" }
 mochi-exchange = { path = "../mochi-exchange" }
 reqwest = { workspace = true }
@@ -29,6 +28,7 @@ webpki-roots = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+mochi-core = { path = "../mochi-core" }
 mochi-market = { path = "../mochi-market" }
 mochi-okx = { path = ".", features = ["fake"] }
 mochi-store = { path = "../mochi-store" }

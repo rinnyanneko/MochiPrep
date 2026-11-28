@@ -8,9 +8,9 @@ use mochi_decimal::Dec;
 use mochi_domain::jsnum::{js_number_string, js_to_fixed};
 use mochi_domain::{Order, OrderSide, OrderStatus, OrderType, PositionSide};
 
-use super::{day_start_equity, dec, is_leg, side_text, EngineError, OkxEngine, Prepared};
+use super::{day_start_equity, dec, is_leg, side_text, EngineError, ExchangeEngine, Prepared};
 
-impl OkxEngine {
+impl ExchangeEngine {
     pub(super) fn pre_trade_refusal(
         &self,
         order: &Order,
@@ -47,7 +47,7 @@ impl OkxEngine {
             )
         };
         let Some(balance) = balance.filter(|_| healthy) else {
-            let why = sync_error.unwrap_or_else(|| "no recent sync with OKX".into());
+            let why = sync_error.unwrap_or_else(|| format!("no recent sync with {}", venue.name()));
             return Ok(Some(format!("EXCHANGE_NOT_SYNCED: {why}")));
         };
 

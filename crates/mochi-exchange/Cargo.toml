@@ -9,7 +9,8 @@ license.workspace = true
 mochi-core = { path = "../mochi-core" }
 mochi-decimal = { path = "../mochi-decimal" }
 mochi-domain = { path = "../mochi-domain" }
-serde = { workspace = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+mochi-store = { path = "../mochi-store" }

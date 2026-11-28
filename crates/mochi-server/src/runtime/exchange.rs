@@ -14,7 +14,7 @@ use mochi_domain::{
     default_account_config, default_live_limits, AccountVenue, InstrumentSpecification,
     PaperAccount, RiskSettings, Topic, VaultStatus,
 };
-use mochi_okx::engine::OkxEngine;
+use mochi_exchange::engine::ExchangeEngine;
 use mochi_okx::{Credentials, OkxClient, Venue};
 use mochi_store::rows;
 use mochi_vault::{exchange_context, seal};
@@ -247,6 +247,7 @@ impl RuntimeHandle {
         let session = ExchangeSession {
             was_healthy: true,
             engine: engine.clone(),
+            venue,
             armed,
             secrets,
             link,
@@ -424,7 +425,7 @@ impl Runtime {
         let engine = session.engine.clone();
         session
             .armed
-            .store(engine.venue() == Venue::OkxDemo, Ordering::SeqCst);
+            .store(session.venue == Venue::OkxDemo, Ordering::SeqCst);
         self.exchanges.insert(account.id.clone(), session);
         let now = unix_ms();
         if let Some(vault) = remember {
@@ -518,7 +519,7 @@ impl Runtime {
             }
             // The venue is fixed for the session's life, so this needs no store read: a read that
             // failed would leave real money armed.
-            if session.engine.venue() == Venue::OkxLive {
+            if session.venue == Venue::OkxLive {
                 session.armed.store(false, Ordering::SeqCst);
             }
         }
@@ -660,7 +661,7 @@ impl Runtime {
 
     /// Retry local finalization on the sync cadence even for disconnected accounts.
     /// The sessions to sync, with the number of this pass.
-    pub(super) fn prepare_exchange_sync(&mut self) -> (u64, Vec<(String, Arc<OkxEngine>)>) {
+    pub(super) fn prepare_exchange_sync(&mut self) -> (u64, Vec<(String, Arc<ExchangeEngine>)>) {
         let pending: Vec<_> = self.retired_unsent_orders.keys().cloned().collect();
         for id in &pending {
             let _ = self.restore_retired_order(id);

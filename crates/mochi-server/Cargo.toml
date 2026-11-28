@@ -20,6 +20,7 @@ mochi-ai = { path = "../mochi-ai" }
 mochi-core = { path = "../mochi-core" }
 mochi-decimal = { path = "../mochi-decimal" }
 mochi-domain = { path = "../mochi-domain" }
+mochi-exchange = { path = "../mochi-exchange" }
 mochi-market = { path = "../mochi-market" }
 mochi-okx = { path = "../mochi-okx" }
 mochi-store = { path = "../mochi-store" }
