@@ -4,16 +4,31 @@ use mochi_domain::jsnum::js_string_to_number;
 use std::collections::{HashMap, HashSet};
 
 use mochi_domain::{EquityPoint, Fill, Liquidity, Order, OrderStatus, PositionSide};
+use mochi_exchange::venue::{
+    nullish, strict, truthy, AlgoKind, VenueAlgo, VenueField, VenueOrder, VenuePosition,
+};
 use serde_json::Value;
 
 use super::protection::{
-    is_reached_exit, last_trade_id, record_attached, Held, REACHED_EXIT_UNCONFIRMED,
+    is_reached_exit, position_trade_id, record_attached, Held, REACHED_EXIT_UNCONFIRMED,
 };
 use super::{
     dec, is_leg, EngineError, OkxEngine, Registry, EQUITY_EVERY_MS, NEVER_ARRIVED_AFTER_MS,
 };
-use crate::client::{nullish_text, truthy_text, PendingAlgoType, Row, RECENT_FILLS_LIMIT};
+use crate::client::RECENT_FILLS_LIMIT;
 use crate::ids::{to_cl_ord_id, to_inst_id};
+
+/// The OKX instId a neutral `symbol` was read from. The adapter maps `instId` through
+/// `from_inst_id`, which `to_inst_id` undoes for every USDT swap, and `""` stays `""`. Positions
+/// and algos are read with `instType=SWAP`, so any other instId ends in `-SWAP` and maps to an id
+/// only a pair named after that instId would have, which keeps it apart from the registered pairs.
+pub(super) fn inst_id_of(symbol: &str) -> String {
+    if symbol.is_empty() {
+        String::new()
+    } else {
+        to_inst_id(symbol)
+    }
+}
 
 /// Node's `Number(value)` for an OKX field.
 pub(super) fn js_number(value: Option<&Value>) -> f64 {
@@ -28,8 +43,8 @@ pub(super) fn js_number(value: Option<&Value>) -> f64 {
 }
 
 /// `d(value || 0)`.
-fn dec_or_zero(value: Option<&Value>) -> Result<mochi_decimal::Dec, EngineError> {
-    dec(&truthy_text(value).unwrap_or_else(|| "0".into()))
+fn dec_or_zero(field: &Option<VenueField>) -> Result<mochi_decimal::Dec, EngineError> {
+    dec(truthy(field).unwrap_or("0"))
 }
 
 /// Which protection changes a reconciliation may send to OKX. Order lookups and
@@ -64,7 +79,7 @@ impl VenueWrites {
 
 #[derive(Clone)]
 pub(super) struct PositionSnapshot {
-    pub(super) open: Vec<Row>,
+    pub(super) open: Vec<VenuePosition>,
     pub(super) held: HashMap<String, Held>,
     pub(super) post_exit_unverified: bool,
 }
@@ -75,11 +90,11 @@ impl PositionSnapshot {
         self.held = snapshot.held;
     }
 
-    pub(super) fn new(rows: Vec<Row>) -> Result<Self, EngineError> {
+    pub(super) fn new(rows: Vec<VenuePosition>) -> Result<Self, EngineError> {
         let mut open = Vec::new();
         let mut held = HashMap::new();
         for row in rows {
-            let size = dec_or_zero(row.get("pos"))?;
+            let size = dec_or_zero(&row.size)?;
             if size.is_zero() {
                 continue;
             }
@@ -88,16 +103,16 @@ impl PositionSnapshot {
             } else {
                 (PositionSide::Long, size)
             };
-            let inst_id = nullish_text(row.get("instId")).unwrap_or_default();
+            let inst_id = nullish(&row.symbol).map(inst_id_of).unwrap_or_default();
             if isolated_net(&row) {
                 held.insert(
                     inst_id,
                     Held {
                         side,
                         contracts,
-                        trade_id: last_trade_id(&row),
+                        trade_id: position_trade_id(&row),
                         position_id: super::views::position_id(&row, side),
-                        updated_at: nullish_text(row.get("uTime")),
+                        updated_at: nullish(&row.updated_ms).map(str::to_owned),
                     },
                 );
             }
@@ -117,8 +132,13 @@ impl PositionSnapshot {
             .open
             .iter()
             .map(|row| {
-                ["instId", "mgnMode", "posSide", "pos", "uTime"]
-                    .map(|field| nullish_text(row.get(field)))
+                [
+                    nullish(&row.symbol).map(inst_id_of),
+                    nullish(&row.margin_mode).map(str::to_owned),
+                    nullish(&row.position_side).map(str::to_owned),
+                    nullish(&row.size).map(str::to_owned),
+                    nullish(&row.updated_ms).map(str::to_owned),
+                ]
             })
             .collect();
         identity.sort();
@@ -132,7 +152,7 @@ impl PositionSnapshot {
             if !isolated_net(row) {
                 continue;
             }
-            let inst_id = nullish_text(row.get("instId")).unwrap_or_default();
+            let inst_id = nullish(&row.symbol).map(inst_id_of).unwrap_or_default();
             let Some(spec) = registry.symbol_of_inst_id(&inst_id) else {
                 continue;
             };
@@ -150,18 +170,17 @@ impl PositionSnapshot {
     }
 }
 
-pub(super) fn isolated_net(row: &Row) -> bool {
-    row.get("mgnMode").and_then(Value::as_str) == Some("isolated")
-        && row.get("posSide").and_then(Value::as_str) == Some("net")
+pub(super) fn isolated_net(row: &VenuePosition) -> bool {
+    strict(&row.margin_mode) == Some("isolated") && strict(&row.position_side) == Some("net")
 }
 
 impl OkxEngine {
-    pub(super) async fn pending_protection(&self) -> Result<Vec<Row>, EngineError> {
-        let client = &self.deps.client;
+    pub(super) async fn pending_protection(&self) -> Result<Vec<VenueAlgo>, EngineError> {
+        let venue = &self.deps.venue;
         let (conditional, oco, trailing) = tokio::try_join!(
-            client.get_pending_algos(PendingAlgoType::Conditional),
-            client.get_pending_algos(PendingAlgoType::Oco),
-            client.get_pending_algos(PendingAlgoType::MoveOrderStop),
+            venue.pending_algos(AlgoKind::Conditional),
+            venue.pending_algos(AlgoKind::Oco),
+            venue.pending_algos(AlgoKind::Trailing),
         )?;
         Ok(conditional.into_iter().chain(oco).chain(trailing).collect())
     }
@@ -175,7 +194,7 @@ impl OkxEngine {
     ) -> Result<(), EngineError> {
         let inst_id = to_inst_id(&order.symbol);
         let client_id = to_cl_ord_id(&order.client_order_id);
-        let remote = self.deps.client.get_order(&inst_id, &client_id).await?;
+        let remote = self.deps.venue.get_order(&order.symbol, &client_id).await?;
         let at = self.now();
         let Some(remote) = remote else {
             // Only OKX's own "order does not exist", and only once the order has had time to
@@ -226,22 +245,22 @@ impl OkxEngine {
         let observed = order.clone();
         let mut row = observed.clone();
         let spec = registry.get(&row.symbol)?;
-        row.exchange_order_id = nullish_text(remote.get("ordId"));
+        row.exchange_order_id = nullish(&remote.exchange_order_id).map(str::to_owned);
         row.reject_reason = None;
-        let filled = dec_or_zero(remote.get("accFillSz"))?.mul(&dec(&spec.venue_contract_value)?);
+        let filled = dec_or_zero(&remote.filled_size)?.mul(&dec(&spec.venue_contract_value)?);
         row.filled_quantity = filled.to_fixed();
-        if let Some(average) = truthy_text(remote.get("avgPx")) {
-            row.avg_fill_price = Some(average);
+        if let Some(average) = truthy(&remote.average_price) {
+            row.avg_fill_price = Some(average.to_owned());
         }
         row.updated_at = at;
-        match remote.get("state").and_then(Value::as_str) {
+        match strict(&remote.state) {
             Some("filled") => row.status = OrderStatus::Filled,
             Some("canceled" | "mmp_canceled") => row.status = OrderStatus::Canceled,
             // Live or partly filled: still working on OKX.
             _ => row.status = OrderStatus::Open,
         }
         let execution = if filled.gt(&super::zero()) && row.agent_id.is_some() {
-            super::history::execution_of(&remote)
+            super::history::order_execution(&remote)
         } else {
             None
         };
@@ -476,10 +495,10 @@ impl OkxEngine {
                 }
             }
         }
-        let client = &self.deps.client;
+        let venue = &self.deps.venue;
         let (usdt, remote, algos) = tokio::join!(
-            client.get_usdt_balance(),
-            client.get_positions(),
+            venue.balance(),
+            venue.positions(),
             self.pending_protection(),
         );
         let mut usdt = usdt?;
@@ -574,7 +593,7 @@ impl OkxEngine {
 /// is already recorded is checked against the store.
 fn fill_of(
     order: &Order,
-    remote: &Row,
+    remote: &VenueOrder,
     filled: &mochi_decimal::Dec,
     at: i64,
 ) -> Option<Result<Fill, EngineError>> {
@@ -586,17 +605,18 @@ fn fill_of(
 
 fn build_fill(
     order: &Order,
-    remote: &Row,
+    remote: &VenueOrder,
     filled: &mochi_decimal::Dec,
     at: i64,
 ) -> Result<Fill, EngineError> {
-    let ord_id = nullish_text(remote.get("ordId")).unwrap_or_else(|| "undefined".into());
+    let ord_id = nullish(&remote.exchange_order_id).unwrap_or("undefined");
     // OKX sends an empty avgPx until something fills; a fill must never get an invented or
     // empty price.
-    let price = truthy_text(remote.get("avgPx"))
+    let price = truthy(&remote.average_price)
         .filter(|price| dec(price).is_ok_and(|price| price.gt(&super::zero())))
+        .map(str::to_owned)
         .ok_or_else(|| EngineError::Message("OKX reported a fill without a price".into()))?;
-    let fee = dec_or_zero(remote.get("fee"))?;
+    let fee = dec_or_zero(&remote.fee)?;
     let fee = if fee.is_negative() { fee.neg() } else { fee };
     Ok(Fill {
         id: format!("fill_okx_{ord_id}"),
@@ -607,7 +627,7 @@ fn build_fill(
         quantity: filled.to_fixed(),
         price,
         fee: fee.to_fixed(),
-        realized_pnl: truthy_text(remote.get("pnl")).unwrap_or_else(|| "0".into()),
+        realized_pnl: truthy(&remote.realized_pnl).unwrap_or("0").to_owned(),
         liquidity: Liquidity::Taker,
         ts: at,
     })

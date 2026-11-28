@@ -387,6 +387,7 @@ fn unix_ms() -> i64 {
     i64::try_from(since_epoch.as_millis()).unwrap_or(i64::MAX)
 }
 
+#[derive(Clone)]
 pub struct OkxClient {
     credentials: Credentials,
     venue: Venue,

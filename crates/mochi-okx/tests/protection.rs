@@ -177,7 +177,8 @@ async fn connect(extra: Vec<InstrumentSpecification>) -> Harness {
     let ids = Arc::new(AtomicU64::new(0));
     let engine = OkxEngine::new(OkxEngineDeps {
         account_id: ACCOUNT.into(),
-        venue: Venue::OkxLive,
+        environment: Venue::OkxLive,
+        venue: Arc::new(mochi_okx::OkxAdapter::new(client.clone())),
         client,
         store: store.clone(),
         get_quote: {
@@ -2008,7 +2009,8 @@ fn restart(h: &Harness) -> Arc<OkxEngine> {
     let armed = h.armed.clone();
     OkxEngine::new(OkxEngineDeps {
         account_id: ACCOUNT.into(),
-        venue: Venue::OkxLive,
+        environment: Venue::OkxLive,
+        venue: Arc::new(mochi_okx::OkxAdapter::new(client.clone())),
         client,
         store: h.store.clone(),
         get_quote: Arc::new(move |symbol| {

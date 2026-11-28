@@ -29,9 +29,10 @@ use mochi_domain::{
 use protection::{Held, Miss, ProtectionMap};
 use tokio::sync::oneshot;
 
+use mochi_exchange::venue::{strict, VenueAdapter, VenueError, VenuePosition};
+
 use crate::client::{
-    AttachAlgoOrd, BoxFuture, OkxClient, OkxError, OrdType, PlaceOrderBody, Row, Side, TdMode,
-    Venue,
+    AttachAlgoOrd, BoxFuture, OkxClient, OkxError, OrdType, PlaceOrderBody, Side, TdMode, Venue,
 };
 use crate::ids::{to_algo_cl_ord_id, to_cl_ord_id, to_inst_id};
 
@@ -319,7 +320,10 @@ pub type NewId = Arc<dyn Fn(&str) -> String + Send + Sync>;
 /// row on every call, as Node's `limits()` callback does.
 pub struct OkxEngineDeps {
     pub account_id: String,
-    pub venue: Venue,
+    /// OKX Demo or live; the adapter below talks to the same one.
+    pub environment: Venue,
+    /// The exchange the engine reads through. `client` stays for the writes until they move here.
+    pub venue: Arc<dyn VenueAdapter>,
     pub client: OkxClient,
     pub store: Arc<dyn StoreAccess>,
     pub get_quote: QuoteSource,
@@ -360,6 +364,17 @@ pub enum EngineError {
     /// under a new client order ID.
     #[error("{0}")]
     RefusedBeforeDispatch(String),
+}
+
+/// Back to the OKX error the adapter made it from, so every text stays as it was.
+impl From<VenueError> for EngineError {
+    fn from(error: VenueError) -> Self {
+        EngineError::Okx(match error {
+            VenueError::Rejection { code, message, .. } => OkxError::Rejection { code, message },
+            VenueError::Unknown(text) => OkxError::Unknown(text),
+            VenueError::Invalid(text) => OkxError::Invalid(text),
+        })
+    }
 }
 
 impl EngineError {
@@ -751,7 +766,7 @@ impl OkxEngine {
     }
 
     pub fn venue(&self) -> Venue {
-        self.deps.venue
+        self.deps.environment
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -1199,7 +1214,7 @@ impl OkxEngine {
     ) -> Result<(SelectedClose, u32), EngineError> {
         let spec = registry.get(symbol)?;
         // The cached size can predate a fill or an unanswered reduce-only order.
-        let positions = self.deps.client.get_positions().await?;
+        let positions = self.deps.venue.positions().await?;
         let (position, side, contracts) =
             select_close(&positions, symbol, selection.position_id.as_deref())?;
         let held = contracts.mul(&dec(&spec.venue_contract_value)?);
@@ -1453,7 +1468,7 @@ impl OkxEngine {
             // OKX's order endpoint has no position-version condition. Recheck just before
             // dispatch to narrow the window in which a concurrent trade can change the position.
             let checked = async {
-                let positions = self.deps.client.get_positions().await?;
+                let positions = self.deps.venue.positions().await?;
                 let (_, _, current) = select_close(&positions, &order.symbol, Some(&selected.id))?;
                 if !current.eq_value(&selected.contracts) {
                     return Err(close_changed());
@@ -1670,16 +1685,16 @@ fn close_retry_changed() -> EngineError {
 }
 
 fn select_close<'a>(
-    positions: &'a [Row],
+    positions: &'a [VenuePosition],
     symbol: &str,
     position_id: Option<&str>,
-) -> Result<(&'a Row, PositionSide, Dec), EngineError> {
+) -> Result<(&'a VenuePosition, PositionSide, Dec), EngineError> {
     let inst_id = to_inst_id(symbol);
     let mut matches = positions.iter().filter_map(|p| {
-        if p.get("instId").and_then(serde_json::Value::as_str) != Some(inst_id.as_str()) {
+        if strict(&p.symbol).map(sync::inst_id_of).as_deref() != Some(inst_id.as_str()) {
             return None;
         }
-        let signed = dec(p.get("pos")?.as_str()?).ok()?;
+        let signed = dec(strict(&p.size)?).ok()?;
         let side = views::position_side(p, signed.is_negative());
         let selected = match position_id {
             Some(id) => views::position_id(p, side) == id,

@@ -5,15 +5,18 @@ use mochi_domain::{
     TrailingStopView,
 };
 
+use mochi_exchange::venue::{
+    js_number, nullish, strict, truthy, VenueBalance, VenueField, VenuePosition,
+};
+
 use super::protection::{effective_of, ProtectionMap};
-use super::sync::{isolated_net, js_number};
+use super::sync::{inst_id_of, isolated_net};
 use super::{dec, zero, EngineError, LiveRows, OkxEngine, Registry};
-use crate::client::{nullish_text, truthy_text, Row};
 
 /// Node's `Number(p.lever) || 1`. Leverage is whole in MochiPrep, so a fractional OKX value is
 /// rounded down, and never below 1.
-pub(super) fn leverage_of(position: &Row) -> u32 {
-    let lever = js_number(position.get("lever"));
+pub(super) fn leverage_of(position: &VenuePosition) -> u32 {
+    let lever = js_number(&position.leverage);
     if lever.is_nan() || lever < 1.0 {
         1
     } else {
@@ -23,24 +26,20 @@ pub(super) fn leverage_of(position: &Row) -> u32 {
 
 /// posId can be reused after a close. Include the observed trade and direction so a stale
 /// close request cannot select a newer position on the same instrument and margin mode.
-pub(super) fn position_id(row: &Row, side: PositionSide) -> String {
-    let field = |name| {
-        row.get(name)
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-    };
+pub(super) fn position_id(row: &VenuePosition, side: PositionSide) -> String {
+    let field = |field| strict(field).unwrap_or_default();
     let side = super::side_text(side);
     format!(
         "okx:{}:{}:{side}:{}:{}",
-        field("instId"),
-        field("mgnMode"),
-        field("posId"),
-        field("tradeId"),
+        strict(&row.symbol).map(inst_id_of).unwrap_or_default(),
+        field(&row.margin_mode),
+        field(&row.position_id),
+        field(&row.trade_id),
     )
 }
 
-pub(super) fn position_side(row: &Row, negative: bool) -> PositionSide {
-    match row.get("posSide").and_then(serde_json::Value::as_str) {
+pub(super) fn position_side(row: &VenuePosition, negative: bool) -> PositionSide {
+    match strict(&row.position_side) {
         Some("short") => PositionSide::Short,
         Some("long") => PositionSide::Long,
         _ if negative => PositionSide::Short,
@@ -51,14 +50,14 @@ pub(super) fn position_side(row: &Row, negative: bool) -> PositionSide {
 impl OkxEngine {
     /// One open OKX position. A pair missing from the registry is not shown.
     pub(super) fn to_view(
-        p: &Row,
+        p: &VenuePosition,
         rows: &dyn LiveRows,
         registry: &Registry,
         account_id: &str,
         now: i64,
         protection: &ProtectionMap,
     ) -> Result<Vec<PositionView>, EngineError> {
-        let inst_id = nullish_text(p.get("instId")).unwrap_or_default();
+        let inst_id = nullish(&p.symbol).map(inst_id_of).unwrap_or_default();
         let Some(spec) = registry.symbol_of_inst_id(&inst_id) else {
             return Ok(Vec::new());
         };
@@ -73,8 +72,7 @@ impl OkxEngine {
                 trailing_stop: None,
             }
         };
-        let pos = nullish_text(p.get("pos")).unwrap_or_else(|| "undefined".into());
-        let size = dec(&pos)?;
+        let size = dec(nullish(&p.size).unwrap_or("undefined"))?;
         let side = position_side(p, size.is_negative());
         let size = if size.is_negative() { size.neg() } else { size };
         let quantity = size.mul(&dec(&spec.venue_contract_value)?).to_fixed();
@@ -89,10 +87,10 @@ impl OkxEngine {
                 symbol,
                 side,
                 quantity: quantity.clone(),
-                entry_price: nullish_text(p.get("avgPx")).unwrap_or_default(),
+                entry_price: nullish(&p.entry_price).unwrap_or_default().to_owned(),
                 leverage: leverage_of(p),
-                margin: truthy_text(p.get("margin")).unwrap_or_else(|| "0".into()),
-                liquidation_price: truthy_text(p.get("liqPx")).unwrap_or_else(|| "0".into()),
+                margin: truthy(&p.margin).unwrap_or("0").to_owned(),
+                liquidation_price: truthy(&p.liquidation_price).unwrap_or("0").to_owned(),
                 status: PositionStatus::Open,
                 realized_pnl: "0".into(),
                 fees_paid: "0".into(),
@@ -103,10 +101,10 @@ impl OkxEngine {
                 opened_at: entry.map_or(now, |o| o.created_at),
                 closed_at: None,
             },
-            margin_mode: nullish_text(p.get("mgnMode")),
+            margin_mode: nullish(&p.margin_mode).map(str::to_owned),
             close_supported: Some(isolated_net(p)),
-            mark_price: truthy_text(p.get("markPx")),
-            unrealized_pnl: truthy_text(p.get("upl")).unwrap_or_else(|| "0".into()),
+            mark_price: truthy(&p.mark_price).map(str::to_owned),
+            unrealized_pnl: truthy(&p.unrealized_pnl).unwrap_or("0").to_owned(),
             stop_loss: in_force.stop_loss,
             take_profit: in_force.take_profit,
             // OKX does not report the tracked extreme, only the current trigger.
@@ -121,16 +119,21 @@ impl OkxEngine {
 
     /// The USDT balance OKX reports, with realized PnL and fees summed from our own fills.
     pub(super) fn to_balance(
-        usdt: Option<&Row>,
+        usdt: Option<&VenueBalance>,
         rows: &dyn LiveRows,
         account_id: &str,
     ) -> Result<AccountBalance, EngineError> {
-        let field = |key: &str| usdt.and_then(|row| truthy_text(row.get(key)));
-        let equity = dec(&field("eq").unwrap_or_else(|| "0".into()))?;
-        let unrealized = dec(&field("upl").unwrap_or_else(|| "0".into()))?;
-        let available = dec(&field("availEq")
-            .or_else(|| field("availBal"))
-            .unwrap_or_else(|| "0".into()))?;
+        fn field(
+            usdt: Option<&VenueBalance>,
+            read: fn(&VenueBalance) -> &Option<VenueField>,
+        ) -> Option<&str> {
+            usdt.and_then(|row| truthy(read(row)))
+        }
+        let equity = dec(field(usdt, |b| &b.equity).unwrap_or("0"))?;
+        let unrealized = dec(field(usdt, |b| &b.unrealized_pnl).unwrap_or("0"))?;
+        let available = dec(field(usdt, |b| &b.available_equity)
+            .or_else(|| field(usdt, |b| &b.available_balance))
+            .unwrap_or("0"))?;
         let fills = rows.list_fills(account_id, 5000)?;
         let (mut realized, mut fees) = (zero(), zero());
         for fill in &fills {

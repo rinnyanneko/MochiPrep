@@ -16,7 +16,7 @@ use mochi_domain::{
 use mochi_okx::engine::{
     EngineError, OkxEngine, OkxEngineDeps, Rows, StoreAccess, StoreWork, UnsentOrder,
 };
-use mochi_okx::{Clock, Credentials, NetTransport, OkxClient, Transport, Venue};
+use mochi_okx::{Clock, Credentials, NetTransport, OkxAdapter, OkxClient, Transport, Venue};
 use tokio::sync::{broadcast, mpsc};
 use zeroize::Zeroizing;
 
@@ -211,7 +211,8 @@ pub(super) fn okx_engine(
 ) -> Arc<OkxEngine> {
     OkxEngine::new(OkxEngineDeps {
         account_id: account_id.to_string(),
-        venue: client.venue(),
+        environment: client.venue(),
+        venue: Arc::new(OkxAdapter::new(client.clone())),
         client,
         store: Arc::new(ActorStore { runtime, link }),
         get_quote: Arc::new(move |symbol: &str| live.get_quote(symbol)),

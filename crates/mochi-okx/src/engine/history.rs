@@ -5,8 +5,9 @@
 use std::collections::HashMap;
 
 use mochi_domain::{ExchangePositionRecord, OrderSide};
+use mochi_exchange::venue::{self, nullish, strict, truthy, VenueField, VenueOrder, VenuePosition};
 
-use super::sync::js_number;
+use super::sync::{inst_id_of, js_number};
 use super::{dec, is_leg, EngineError, OkxEngine, Registry};
 use crate::client::{
     nullish_text, truthy_text, Row, EXECUTION_HISTORY_PAGE, POSITIONS_HISTORY_PAGE,
@@ -303,14 +304,34 @@ enum Read {
 }
 
 pub(super) fn execution_of(row: &Row) -> Option<(String, i64)> {
-    let trade_id = row.get("tradeId")?.as_str()?.parse::<u64>().ok()?;
-    let executed_at = row.get("fillTime")?.as_str()?.parse::<i64>().ok()?;
+    execution_from(
+        row.get("tradeId")?.as_str()?,
+        row.get("fillTime")?.as_str()?,
+    )
+}
+
+/// [`execution_of`] for an order lookup.
+pub(super) fn order_execution(order: &VenueOrder) -> Option<(String, i64)> {
+    execution_from(strict(&order.trade_id)?, strict(&order.fill_ms)?)
+}
+
+fn execution_from(trade_id: &str, fill_time: &str) -> Option<(String, i64)> {
+    let trade_id = trade_id.parse::<u64>().ok()?;
+    let executed_at = fill_time.parse::<i64>().ok()?;
     (trade_id > 0 && executed_at > 0).then(|| (trade_id.to_string(), executed_at))
 }
 
 /// A whole number of milliseconds from an OKX time field.
 pub(super) fn okx_time(row: &Row, field: &str) -> Option<i64> {
-    let value = js_number(row.get(field));
+    whole_ms(js_number(row.get(field)))
+}
+
+/// [`okx_time`] for a neutral field.
+fn venue_time(field: &Option<VenueField>) -> Option<i64> {
+    whole_ms(venue::js_number(field))
+}
+
+fn whole_ms(value: f64) -> Option<i64> {
     (value.is_finite() && value > 0.0 && value.fract() == 0.0).then_some(value as i64)
 }
 
@@ -350,23 +371,23 @@ fn record_of(row: &Row, account_id: &str) -> Result<ExchangePositionRecord, Engi
 
 /// An open OKX position's result so far. `None` for a pair missing from the registry.
 pub(super) fn open_result_of(
-    row: &Row,
+    row: &VenuePosition,
     registry: &Registry,
 ) -> Result<Option<OpenPositionResult>, EngineError> {
-    let inst_id = nullish_text(row.get("instId")).unwrap_or_default();
+    let inst_id = nullish(&row.symbol).map(inst_id_of).unwrap_or_default();
     let Some(spec) = registry.symbol_of_inst_id(&inst_id) else {
         return Ok(None);
     };
-    let amount = |field: &str| -> Result<String, EngineError> {
-        Ok(dec(&truthy_text(row.get(field)).unwrap_or_else(|| "0".into()))?.to_fixed())
+    let amount = |field: &Option<VenueField>| -> Result<String, EngineError> {
+        Ok(dec(truthy(field).unwrap_or("0"))?.to_fixed())
     };
     Ok(Some(OpenPositionResult {
         symbol: spec.symbol.clone(),
-        pos_id: nullish_text(row.get("posId")).unwrap_or_default(),
-        opened_at: okx_time(row, "cTime"),
-        updated_at: okx_time(row, "uTime"),
-        opening_side: if isolated_net(row) {
-            let size = dec(&amount("pos")?)?;
+        pos_id: nullish(&row.position_id).unwrap_or_default().to_owned(),
+        opened_at: venue_time(&row.created_ms),
+        updated_at: venue_time(&row.updated_ms),
+        opening_side: if super::sync::isolated_net(row) {
+            let size = dec(&amount(&row.size)?)?;
             if size.is_zero() {
                 None
             } else if size.is_negative() {
@@ -377,7 +398,7 @@ pub(super) fn open_result_of(
         } else {
             None
         },
-        realized_pnl: amount("realizedPnl").ok(),
-        unrealized_pnl: amount("upl").ok(),
+        realized_pnl: amount(&row.realized_pnl).ok(),
+        unrealized_pnl: amount(&row.unrealized_pnl).ok(),
     }))
 }
