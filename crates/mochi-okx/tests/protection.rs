@@ -178,8 +178,7 @@ async fn connect(extra: Vec<InstrumentSpecification>) -> Harness {
     let engine = OkxEngine::new(OkxEngineDeps {
         account_id: ACCOUNT.into(),
         environment: Venue::OkxLive,
-        venue: Arc::new(mochi_okx::OkxAdapter::new(client.clone())),
-        client,
+        venue: Arc::new(mochi_okx::OkxAdapter::new(client)),
         store: store.clone(),
         get_quote: {
             let (clock, prices, quote_time) = (clock.clone(), prices.clone(), quote_time.clone());
@@ -2010,8 +2009,7 @@ fn restart(h: &Harness) -> Arc<OkxEngine> {
     OkxEngine::new(OkxEngineDeps {
         account_id: ACCOUNT.into(),
         environment: Venue::OkxLive,
-        venue: Arc::new(mochi_okx::OkxAdapter::new(client.clone())),
-        client,
+        venue: Arc::new(mochi_okx::OkxAdapter::new(client)),
         store: h.store.clone(),
         get_quote: Arc::new(move |symbol| {
             let (bid, ask, last) = prices.lock().unwrap().clone();

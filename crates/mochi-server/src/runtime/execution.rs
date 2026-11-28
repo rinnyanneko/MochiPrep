@@ -212,8 +212,7 @@ pub(super) fn okx_engine(
     OkxEngine::new(OkxEngineDeps {
         account_id: account_id.to_string(),
         environment: client.venue(),
-        venue: Arc::new(OkxAdapter::new(client.clone())),
-        client,
+        venue: Arc::new(OkxAdapter::new(client)),
         store: Arc::new(ActorStore { runtime, link }),
         get_quote: Arc::new(move |symbol: &str| live.get_quote(symbol)),
         now: options.now.clone(),

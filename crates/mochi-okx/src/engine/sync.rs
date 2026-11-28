@@ -6,7 +6,6 @@ use mochi_domain::{EquityPoint, Fill, Liquidity, Order, OrderStatus, PositionSid
 use mochi_exchange::venue::{
     nullish, strict, truthy, AlgoKind, VenueAlgo, VenueField, VenueOrder, VenuePosition,
 };
-use serde_json::Value;
 
 use super::protection::{
     is_reached_exit, position_trade_id, record_attached, Held, REACHED_EXIT_UNCONFIRMED,
@@ -15,15 +14,15 @@ use super::{
     dec, is_leg, EngineError, OkxEngine, Registry, EQUITY_EVERY_MS, NEVER_ARRIVED_AFTER_MS,
 };
 use crate::client::RECENT_FILLS_LIMIT;
-use crate::ids::{to_cl_ord_id, to_inst_id};
+use crate::ids::to_inst_id;
 
-/// The OKX instId a neutral `symbol` was read from. The adapter maps `instId` through
-/// `from_inst_id`, which `to_inst_id` undoes for every USDT swap, and `""` stays `""`. Positions
-/// and algos are read with `instType=SWAP`, so any other instId ends in `-SWAP` and maps to an id
-/// only a pair named after that instId would have, which keeps it apart from the registered pairs.
+/// The OKX instId a neutral `symbol` was read from, exactly. The adapter maps `instId` through
+/// `from_inst_id`, which `to_inst_id` undoes for every USDT swap (whose pair has no dash). Any
+/// other swap id keeps its dashes through `from_inst_id`, so it comes back as it is, and `""`
+/// stays `""`. History records store this id, so the round trip must not change its text.
 pub(super) fn inst_id_of(symbol: &str) -> String {
-    if symbol.is_empty() {
-        String::new()
+    if symbol.is_empty() || symbol.contains('-') {
+        symbol.to_string()
     } else {
         to_inst_id(symbol)
     }
@@ -179,8 +178,7 @@ impl OkxEngine {
         order: &mut Order,
         registry: &Registry,
     ) -> Result<(), EngineError> {
-        let inst_id = to_inst_id(&order.symbol);
-        let client_id = to_cl_ord_id(&order.client_order_id);
+        let client_id = self.deps.venue.client_order_id(&order.client_order_id);
         let remote = self.deps.venue.get_order(&order.symbol, &client_id).await?;
         let at = self.now();
         let Some(remote) = remote else {
@@ -202,8 +200,8 @@ impl OkxEngine {
                     if age < RECENT_FILL_WINDOW {
                         let fills =
                             self.deps
-                                .client
-                                .recent_fills(&inst_id)
+                                .venue
+                                .recent_fills(&order.symbol)
                                 .await
                                 .map_err(|error| {
                                     EngineError::message(format!(
@@ -211,10 +209,9 @@ impl OkxEngine {
                                     ))
                                 })?;
                         if fills.len() >= RECENT_FILLS_LIMIT
-                            || fills.iter().any(|row| {
-                                row.get("clOrdId").and_then(Value::as_str)
-                                    == Some(client_id.as_str())
-                            })
+                            || fills
+                                .iter()
+                                .any(|row| strict(&row.client_order_id) == Some(client_id.as_str()))
                         {
                             return Ok(());
                         }
@@ -434,7 +431,7 @@ impl OkxEngine {
                 Ok(()) => answered = true,
                 Err(error @ EngineError::Stopped) => return Err(error),
                 // A recovery lookup must not stop the readback of orders still open.
-                Err(error @ EngineError::Okx(_)) if !reached_exit && recovering.is_none() => {
+                Err(error @ EngineError::Venue(_)) if !reached_exit && recovering.is_none() => {
                     return Err(error)
                 }
                 Err(error) => {
@@ -618,4 +615,23 @@ fn build_fill(
         liquidity: Liquidity::Taker,
         ts: at,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::inst_id_of;
+    use crate::ids::from_inst_id;
+
+    #[test]
+    fn inst_id_round_trip_is_exact() {
+        for inst_id in [
+            "BTC-USDT-SWAP",
+            "1000PEPE-USDT-SWAP",
+            "BTC-USD-SWAP",
+            "ETH-USDC-SWAP",
+            "",
+        ] {
+            assert_eq!(inst_id_of(&from_inst_id(inst_id)), inst_id);
+        }
+    }
 }

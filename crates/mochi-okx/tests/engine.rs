@@ -142,8 +142,7 @@ async fn connect(limits: RiskSettings, extra: Vec<InstrumentSpecification>) -> H
     let engine = OkxEngine::new(OkxEngineDeps {
         account_id: ACCOUNT.into(),
         environment: Venue::OkxLive,
-        venue: Arc::new(mochi_okx::OkxAdapter::new(client.clone())),
-        client,
+        venue: Arc::new(mochi_okx::OkxAdapter::new(client)),
         store: store.clone(),
         get_quote: {
             let (clock, age, prices) = (clock.clone(), quote_age_ms.clone(), prices.clone());

@@ -19,21 +19,18 @@ use mochi_domain::{
     TrailingStopSpec, CANCEL_PENDING_PREFIX,
 };
 use mochi_exchange::venue::{
-    nullish, plain_number, strict, truthy, VenueAlgo, VenueBalance, VenueError, VenueField,
-    VenuePosition,
+    nullish, plain_number, strict, truthy, RejectKind, VenueAdapter, VenueAlgo, VenueAlgoOrderType,
+    VenueBalance, VenueCancelAlgo, VenueError, VenueField, VenueFill, VenueMarginMode,
+    VenuePlaceAlgo, VenuePosition,
 };
-use serde_json::Value;
 
 use super::sync::{inst_id_of, isolated_net, PositionSnapshot, VenueWrites};
 use super::{
     align, align_trailing, dec, is_leg, side_text, to_body, to_contracts, EngineError, LiveRows,
     OkxEngine, Registry, NEVER_ARRIVED_AFTER_MS,
 };
-use crate::client::{
-    truthy_text, AlgoOrdType, AlgoOrderBody, CancelAlgo, OkxError, Row, Side, TdMode,
-    ORDER_NOT_FOUND, RECENT_FILLS_LIMIT,
-};
-use crate::ids::{to_algo_cl_ord_id, to_cl_ord_id, to_inst_id};
+use crate::client::{ORDER_NOT_FOUND, RECENT_FILLS_LIMIT};
+use crate::ids::to_inst_id;
 
 /// How far back sync looks for our own algo ids. Older ones read as external, which is the safe
 /// side.
@@ -263,8 +260,9 @@ impl Held {
     }
 }
 
-pub(super) fn last_trade_id(row: &Row) -> Option<u64> {
-    trade_id(row.get("tradeId").and_then(Value::as_str))
+/// An order's or fill's last trade, when it is a positive id.
+fn last_trade_id(field: &Option<VenueField>) -> Option<u64> {
+    trade_id(strict(field))
 }
 
 /// [`last_trade_id`] for a position.
@@ -276,15 +274,7 @@ fn trade_id(text: Option<&str>) -> Option<u64> {
     text?.parse().ok().filter(|id| *id > 0)
 }
 
-fn fill_time(row: &Row) -> Option<i64> {
-    exchange_time(row, "fillTime")
-}
-
-fn exchange_time(row: &Row, field: &str) -> Option<i64> {
-    time_of(row.get(field)?.as_str()?)
-}
-
-/// [`exchange_time`] for a neutral field.
+/// An exchange time in ms, when it is a positive number sent as a string.
 fn venue_time(field: &Option<VenueField>) -> Option<i64> {
     time_of(strict(field)?)
 }
@@ -309,7 +299,7 @@ fn is_confirmed_reached_exit(order: &Order, symbol: &str, side: OrderSide) -> bo
 
 struct PositionHistory<'a> {
     inst_id: &'a str,
-    fills: &'a [Row],
+    fills: &'a [VenueFill],
     trade: u64,
     updated_at: i64,
     side: PositionSide,
@@ -332,19 +322,23 @@ enum EntryInterval {
 }
 
 impl PositionHistory<'_> {
-    fn trade_row(&self, id: u64) -> Option<&Row> {
-        self.fills.iter().find(|row| last_trade_id(row) == Some(id))
+    fn trade_row(&self, id: u64) -> Option<&VenueFill> {
+        self.fills
+            .iter()
+            .find(|row| last_trade_id(&row.trade_id) == Some(id))
     }
 
     fn last_trade_accounts_for_update(&self) -> bool {
         // Fill records can be generated after later position changes. Only the
         // execution time can account for the update directly.
-        self.trade_row(self.trade).and_then(fill_time) == Some(self.updated_at)
+        self.trade_row(self.trade)
+            .and_then(|row| venue_time(&row.fill_ms))
+            == Some(self.updated_at)
     }
 
     fn entry_interval(&self, first_trade: u64, parent: &str) -> Option<EntryInterval> {
-        let first = fill_time(self.trade_row(first_trade)?)?;
-        let last = fill_time(self.trade_row(self.trade)?)?;
+        let first = venue_time(&self.trade_row(first_trade)?.fill_ms)?;
+        let last = venue_time(&self.trade_row(self.trade)?.fill_ms)?;
         if first > last || last > self.updated_at {
             return None;
         }
@@ -354,8 +348,8 @@ impl PositionHistory<'_> {
         };
         let mut changes = Vec::new();
         for row in self.fills {
-            let at = fill_time(row)?;
-            let trade = last_trade_id(row);
+            let at = venue_time(&row.fill_ms)?;
+            let trade = last_trade_id(&row.trade_id);
             // Liquidation and ADL have negative IDs and can change the position
             // after its last ordinary trade without advancing that trade ID.
             if at < first
@@ -369,8 +363,8 @@ impl PositionHistory<'_> {
                 // A system fill is visible before the position snapshot caught up.
                 return None;
             }
-            if row.get("instId").and_then(Value::as_str) != Some(self.inst_id)
-                || row.get("posSide").and_then(Value::as_str) != Some("net")
+            if strict(&row.symbol).map(inst_id_of).as_deref() != Some(self.inst_id)
+                || strict(&row.position_side) != Some("net")
             {
                 return Some(EntryInterval::Different { system: false });
             }
@@ -378,23 +372,18 @@ impl PositionHistory<'_> {
             // fills. Until the fill's margin mode is known, the interval stays unresolved
             // rather than splitting the entry into a smaller allocation.
             if trade.is_some()
-                && row
-                    .get("ordId")
-                    .and_then(Value::as_str)
+                && strict(&row.exchange_order_id)
                     .is_none_or(|id| !self.isolated_orders.contains(id))
             {
                 return None;
             }
-            let opening = row.get("subType").and_then(Value::as_str) == Some(open_type);
+            let opening = strict(&row.sub_type) == Some(open_type);
             let own_exit = if opening {
                 false
             } else {
-                let source = row
-                    .get("ordId")
-                    .and_then(Value::as_str)
-                    .and_then(|id| self.reached_exit_parents.get(id));
-                let Some(source) = source
-                    .filter(|_| row.get("subType").and_then(Value::as_str) == Some(close_type))
+                let source =
+                    strict(&row.exchange_order_id).and_then(|id| self.reached_exit_parents.get(id));
+                let Some(source) = source.filter(|_| strict(&row.sub_type) == Some(close_type))
                 else {
                     return Some(EntryInterval::Different {
                         system: trade.is_none(),
@@ -416,7 +405,7 @@ impl PositionHistory<'_> {
             if !contracts.gt(&super::zero()) {
                 return Some(EntryInterval::Different { system: false });
             }
-            let size = dec(row.get("fillSz")?.as_str()?).ok()?;
+            let size = dec(strict(&row.fill_size)?).ok()?;
             if !size.gt(&super::zero()) {
                 return None;
             }
@@ -454,14 +443,14 @@ fn proven_entry_contracts(
     let mut trades = HashSet::new();
     let (mut split_by_system, mut continuous) = (false, false);
     for fill in history.fills {
-        if fill.get("ordId").and_then(Value::as_str) != Some(order_id) {
+        if strict(&fill.exchange_order_id) != Some(order_id) {
             continue;
         }
-        let trade = last_trade_id(fill)?;
+        let trade = last_trade_id(&fill.trade_id)?;
         if trade > entry_trade || !trades.insert(trade) {
             return None;
         }
-        let size = dec(fill.get("fillSz")?.as_str()?).ok()?;
+        let size = dec(strict(&fill.fill_size)?).ok()?;
         if !size.gt(&super::zero()) {
             return None;
         }
@@ -745,37 +734,38 @@ pub(crate) fn record_attached(
 }
 
 /// Net mode is required at connect, so no posSide, exactly as entry orders are sent.
-fn algo_body(row: &Order, registry: &Registry) -> Result<AlgoOrderBody, EngineError> {
-    let mut body = AlgoOrderBody {
-        inst_id: to_inst_id(&row.symbol),
-        td_mode: TdMode::Isolated,
-        side: match row.side {
-            OrderSide::Buy => Side::Buy,
-            OrderSide::Sell => Side::Sell,
-        },
-        algo_cl_ord_id: to_algo_cl_ord_id(&row.id),
-        sz: to_contracts(row, registry)?.to_fixed(),
+fn algo_body(
+    row: &Order,
+    registry: &Registry,
+    venue: &dyn VenueAdapter,
+) -> Result<VenuePlaceAlgo, EngineError> {
+    let mut body = VenuePlaceAlgo {
+        symbol: row.symbol.clone(),
+        margin_mode: VenueMarginMode::Isolated,
+        side: row.side,
+        client_algo_id: venue.client_algo_id(&row.id),
+        size: to_contracts(row, registry)?.to_fixed(),
         reduce_only: true,
-        ord_type: AlgoOrdType::Conditional,
-        sl_trigger_px: None,
-        sl_ord_px: None,
-        tp_trigger_px: None,
-        tp_ord_px: None,
+        order_type: VenueAlgoOrderType::Conditional,
+        sl_trigger_price: None,
+        sl_order_price: None,
+        tp_trigger_price: None,
+        tp_order_price: None,
         callback_ratio: None,
         callback_spread: None,
-        active_px: None,
+        activation_price: None,
     };
     match row.order_type {
         OrderType::StopMarket => {
-            body.sl_trigger_px = row.trigger_price.clone();
-            body.sl_ord_px = Some("-1".into());
+            body.sl_trigger_price = row.trigger_price.clone();
+            body.sl_order_price = Some("-1".into());
         }
         OrderType::TakeProfitMarket => {
-            body.tp_trigger_px = row.trigger_price.clone();
-            body.tp_ord_px = Some("-1".into());
+            body.tp_trigger_price = row.trigger_price.clone();
+            body.tp_order_price = Some("-1".into());
         }
         _ => {
-            body.ord_type = AlgoOrdType::MoveOrderStop;
+            body.order_type = VenueAlgoOrderType::Trailing;
             // A row without a spec sends neither callback, which the client refuses before
             // anything is signed.
             if let Some(spec) = spec_of(row) {
@@ -785,7 +775,7 @@ fn algo_body(row: &Order, registry: &Registry) -> Result<AlgoOrderBody, EngineEr
                         body.callback_spread = Some(spec.callback)
                     }
                 }
-                body.active_px = spec.activation_price.filter(|p| !p.is_empty());
+                body.activation_price = spec.activation_price.filter(|p| !p.is_empty());
             }
         }
     }
@@ -1244,7 +1234,7 @@ impl OkxEngine {
                 // Unknown outcome: never placed again. A sync looks it up by algoClOrdId; if OKX
                 // shows it live, the placement is known to have succeeded and the change carries
                 // on.
-                Err(EngineError::Okx(OkxError::Unknown(message))) => {
+                Err(EngineError::Venue(VenueError::Unknown(message))) => {
                     row.reject_reason = Some(format!("Awaiting confirmation: {message}"));
                     self.save(row.clone()).await?;
                     let _ = self.sync_without_deferred_orders().await;
@@ -1576,22 +1566,17 @@ impl OkxEngine {
             let retire = if check_exchange && parent.status == OrderStatus::Open {
                 // The current position may already contain some or all of this
                 // order. Truly unfilled entries keep their own future take profit.
+                let client_id = self.deps.venue.client_order_id(&parent.client_order_id);
                 let remote = self
                     .deps
-                    .client
-                    .get_order(
-                        &to_inst_id(&parent.symbol),
-                        &to_cl_ord_id(&parent.client_order_id),
-                    )
+                    .venue
+                    .get_order(&parent.symbol, &client_id)
                     .await?;
-                let state = remote
-                    .as_ref()
-                    .and_then(|row| row.get("state"))
-                    .and_then(Value::as_str);
+                let state = remote.as_ref().and_then(|row| strict(&row.state));
                 let filled = remote
                     .as_ref()
-                    .and_then(|row| truthy_text(row.get("accFillSz")))
-                    .map(|size| dec(&size))
+                    .and_then(|row| truthy(&row.filled_size))
+                    .map(dec)
                     .transpose()?;
                 matches!(
                     state,
@@ -1621,9 +1606,9 @@ impl OkxEngine {
 
     /// Node's `try` block for one leg: the body, the placement and the saved algoId.
     async fn place(&self, row: &mut Order, registry: &Registry) -> Result<(), EngineError> {
-        let body = algo_body(row, registry)?;
+        let body = algo_body(row, registry, self.deps.venue.as_ref())?;
         self.check_dispatch()?;
-        row.exchange_order_id = Some(self.deps.client.place_algo(&body).await?);
+        row.exchange_order_id = Some(self.deps.venue.place_algo(body).await?);
         row.updated_at = self.now();
         self.save(row.clone()).await
     }
@@ -1723,13 +1708,13 @@ impl OkxEngine {
         rows: Vec<Order>,
         reason: Option<&'static str>,
     ) -> Result<Option<String>, EngineError> {
-        let sent: Vec<CancelAlgo> = rows
+        let sent: Vec<VenueCancelAlgo> = rows
             .iter()
             .filter_map(|row| {
-                let algo_id = row.exchange_order_id.clone().filter(|id| !id.is_empty())?;
-                Some(CancelAlgo {
-                    inst_id: to_inst_id(&row.symbol),
-                    algo_id,
+                let exchange_algo_id = row.exchange_order_id.clone().filter(|id| !id.is_empty())?;
+                Some(VenueCancelAlgo {
+                    symbol: row.symbol.clone(),
+                    exchange_algo_id,
                 })
             })
             .collect();
@@ -1744,8 +1729,8 @@ impl OkxEngine {
                 retirement = Some(error);
                 break;
             }
-            dispatched.extend(batch.iter().map(|item| item.algo_id.as_str()));
-            if let Err(error) = self.deps.client.cancel_algos(batch).await {
+            dispatched.extend(batch.iter().map(|item| item.exchange_algo_id.as_str()));
+            if let Err(error) = self.deps.venue.cancel_algos(batch.to_vec()).await {
                 failure = Some(format!("Could not cancel an OKX algo order: {error}"));
             }
         }
@@ -1902,13 +1887,13 @@ impl OkxEngine {
         &self,
         row: &Order,
         inst_id: &str,
-        fills: &[Row],
+        fills: &[VenueFill],
         entry_order_id: &str,
     ) -> Result<HashSet<String>, EngineError> {
         let mut ids: Vec<String> = fills
             .iter()
-            .filter(|fill| fill.get("instId").and_then(Value::as_str) == Some(inst_id))
-            .filter_map(|fill| fill.get("ordId").and_then(Value::as_str))
+            .filter(|fill| strict(&fill.symbol).map(inst_id_of).as_deref() == Some(inst_id))
+            .filter_map(|fill| strict(&fill.exchange_order_id))
             .filter(|id| !id.is_empty() && *id != entry_order_id)
             .map(str::to_owned)
             .collect();
@@ -1934,7 +1919,7 @@ impl OkxEngine {
         &self,
         row: &Order,
         inst_id: &str,
-        fills: &[Row],
+        fills: &[VenueFill],
         close_subtype: &str,
     ) -> Result<HashMap<String, String>, EngineError> {
         // The proof below requires a complete page. Only look up IDs from fills
@@ -1945,11 +1930,11 @@ impl OkxEngine {
         let mut ids: Vec<_> = fills
             .iter()
             .filter(|fill| {
-                fill.get("instId").and_then(Value::as_str) == Some(inst_id)
-                    && fill.get("posSide").and_then(Value::as_str) == Some("net")
-                    && fill.get("subType").and_then(Value::as_str) == Some(close_subtype)
+                strict(&fill.symbol).map(inst_id_of).as_deref() == Some(inst_id)
+                    && strict(&fill.position_side) == Some("net")
+                    && strict(&fill.sub_type) == Some(close_subtype)
             })
-            .filter_map(|fill| fill.get("ordId").and_then(Value::as_str))
+            .filter_map(|fill| strict(&fill.exchange_order_id))
             .filter(|id| !id.is_empty())
             .map(str::to_owned)
             .collect();
@@ -1990,6 +1975,7 @@ impl OkxEngine {
         let account_id = row.account_id.clone();
         let symbol = row.symbol.clone();
         let side = row.side;
+        let venue = self.deps.venue.clone();
         self.rows(move |rows| {
             // Retired targets can still fill. Their venue ID is a hash of the
             // local key, so compare it only among eligible recovery candidates.
@@ -2001,7 +1987,7 @@ impl OkxEngine {
                     REACHED_EXIT_UNCONFIRMED,
                     &|order| {
                         is_reached_exit(order)
-                            && client_ids.contains(&to_cl_ord_id(&order.client_order_id))
+                            && client_ids.contains(&venue.client_order_id(&order.client_order_id))
                     },
                 )?
             {
@@ -2081,10 +2067,11 @@ impl OkxEngine {
                 return self.close_row(row, REPLACED).await;
             }
         }
+        let parent_client_id = self.deps.venue.client_order_id(&parent.client_order_id);
         let remote = self
             .deps
-            .client
-            .get_order(&inst_id, &to_cl_ord_id(&parent.client_order_id))
+            .venue
+            .get_order(&row.symbol, &parent_client_id)
             .await?;
         let needs_replacement_stop =
             if parent.status == OrderStatus::Canceled && parent.attached_stop_loss.is_some() {
@@ -2115,7 +2102,9 @@ impl OkxEngine {
             PositionSide::Long
         };
         let closes = (row.side == OrderSide::Sell) != short;
-        let order_trade = remote.as_ref().and_then(last_trade_id);
+        let order_trade = remote
+            .as_ref()
+            .and_then(|remote| last_trade_id(&remote.trade_id));
         let (Some(entry_trade), Some(position_trade), Some(position_updated_at)) = (
             order_trade,
             position_trade_id(position),
@@ -2236,10 +2225,7 @@ impl OkxEngine {
         let contract_value = dec(&registry.get(&row.symbol)?.venue_contract_value)?;
         let expected = expected.div(&contract_value).map_err(decimal_error)?;
         let filled = {
-            let Some(order_id) = remote
-                .get("ordId")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
+            let Some(order_id) = strict(&remote.exchange_order_id).filter(|id| !id.is_empty())
             else {
                 return self
                     .close_row(
@@ -2248,7 +2234,7 @@ impl OkxEngine {
                     )
                     .await;
             };
-            let fills = self.deps.client.recent_fills(&inst_id).await?;
+            let fills = self.deps.venue.recent_fills(&row.symbol).await?;
             let unresolved: HashSet<_> = context
                 .open_orders
                 .iter()
@@ -2258,12 +2244,12 @@ impl OkxEngine {
                         && is_reached_exit(other)
                         && other.exchange_order_id.as_deref().is_none_or(str::is_empty)
                 })
-                .map(|other| to_cl_ord_id(&other.client_order_id))
+                .map(|other| self.deps.venue.client_order_id(&other.client_order_id))
                 .collect();
             let first_entry_trade = fills
                 .iter()
-                .filter(|fill| fill.get("ordId").and_then(Value::as_str) == Some(order_id))
-                .filter_map(last_trade_id)
+                .filter(|fill| strict(&fill.exchange_order_id) == Some(order_id))
+                .filter_map(|fill| last_trade_id(&fill.trade_id))
                 .min()
                 .unwrap_or(entry_trade);
             // Only a reduction in this entry's interval can make the unanswered exit
@@ -2273,18 +2259,16 @@ impl OkxEngine {
                 .reached_exit_parents(row, &inst_id, &fills, close_subtype)
                 .await?;
             let unattributed_closings = fills.iter().filter(|fill| {
-                last_trade_id(fill)
+                last_trade_id(&fill.trade_id)
                     .is_some_and(|id| (first_entry_trade..=position_trade).contains(&id))
-                    && fill.get("instId").and_then(Value::as_str) == Some(inst_id.as_str())
-                    && fill.get("posSide").and_then(Value::as_str) == Some("net")
-                    && fill.get("subType").and_then(Value::as_str) == Some(close_subtype)
-                    && fill
-                        .get("ordId")
-                        .and_then(Value::as_str)
+                    && strict(&fill.symbol).map(inst_id_of).as_deref() == Some(inst_id.as_str())
+                    && strict(&fill.position_side) == Some("net")
+                    && strict(&fill.sub_type) == Some(close_subtype)
+                    && strict(&fill.exchange_order_id)
                         .is_none_or(|id| !reached_exit_parents.contains_key(id))
             });
             let awaiting_active = unattributed_closings.clone().any(|fill| {
-                match fill.get("clOrdId").and_then(Value::as_str) {
+                match strict(&fill.client_order_id) {
                     Some(id) if !id.is_empty() => unresolved.contains(id),
                     // Only an active unresolved target can justify waiting on an
                     // anonymous reduction. Retired ones require a matching ID.
@@ -2323,7 +2307,7 @@ impl OkxEngine {
                     let exchange_ids = if fills.len() < RECENT_FILLS_LIMIT {
                         unattributed_closings
                             .clone()
-                            .filter_map(|fill| fill.get("ordId").and_then(Value::as_str))
+                            .filter_map(|fill| strict(&fill.exchange_order_id))
                             .filter(|id| !id.is_empty())
                             .map(str::to_owned)
                             .collect()
@@ -2331,7 +2315,7 @@ impl OkxEngine {
                         Vec::new()
                     };
                     let client_ids = unattributed_closings
-                        .filter_map(|fill| fill.get("clOrdId").and_then(Value::as_str))
+                        .filter_map(|fill| strict(&fill.client_order_id))
                         .filter(|id| {
                             id.len() == 32
                                 && id.bytes().all(|byte| {
@@ -2400,7 +2384,7 @@ impl OkxEngine {
             return Ok(());
         }
         let last = dec(&quote.last)?;
-        let after_fill = fill_time(remote).is_some_and(|at| quote.ts > at);
+        let after_fill = venue_time(&remote.fill_ms).is_some_and(|at| quote.ts > at);
         let reached = |target: &Dec| match side {
             PositionSide::Long => last.gte(target),
             PositionSide::Short => last.lte(target),
@@ -2440,7 +2424,7 @@ impl OkxEngine {
             }
             row.trailing_activation_price = spec.activation_price;
         }
-        let body = algo_body(row, registry)?;
+        let body = algo_body(row, registry, self.deps.venue.as_ref())?;
         row.reject_reason = Some(format!(
             "Awaiting confirmation: deferred {} submission started",
             leg.tag()
@@ -2459,22 +2443,22 @@ impl OkxEngine {
             return Ok(());
         }
         self.handoff_order(row)?;
-        match self.deps.client.place_algo(&body).await {
+        match self.deps.venue.place_algo(body).await {
             Ok(id) => {
                 row.exchange_order_id = Some(id);
                 row.reject_reason = None;
             }
             // These explicit price refusals mean no algo was accepted. Let the next fresh
             // quote decide whether the target has triggered while the request was in flight.
-            Err(OkxError::Rejection { code, .. })
-                if leg == Leg::Tp
-                    && matches!(code.as_str(), "51050" | "51052" | "51277" | "51279") =>
-            {
+            Err(VenueError::Rejection {
+                kind: Some(RejectKind::TriggerWouldFireNow),
+                ..
+            }) if leg == Leg::Tp => {
                 row.reject_reason = Some(DEFERRED_TP.into());
             }
-            Err(OkxError::Rejection { code, message }) => {
+            Err(rejection @ VenueError::Rejection { .. }) => {
                 row.status = OrderStatus::Rejected;
-                row.reject_reason = Some(OkxError::Rejection { code, message }.to_string());
+                row.reject_reason = Some(rejection.to_string());
             }
             Err(error) => {
                 row.reject_reason = Some(format!("Awaiting confirmation: {error}"));
@@ -2517,17 +2501,16 @@ impl OkxEngine {
             marker: Box::new(row.clone()),
         })?;
         self.save(row.clone()).await?;
-        let client_id = to_cl_ord_id(&row.client_order_id);
-        let body = to_body(row, inst_id, &client_id, contracts.to_fixed());
+        let body = to_body(row, self.deps.venue.as_ref(), contracts.to_fixed());
         if !self
             .recheck_deferred_dispatch(row, snapshot, inst_id)
             .await?
         {
             return Ok(());
         }
-        match self.send(row, inst_id, &body).await {
+        match self.send(row, body).await {
             Err(error @ EngineError::SessionRetired) => return Err(error),
-            Err(error @ EngineError::Okx(OkxError::Rejection { .. })) => {
+            Err(error @ EngineError::Venue(VenueError::Rejection { .. })) => {
                 row.status = OrderStatus::Rejected;
                 row.reject_reason = Some(error.to_string());
                 return self.save(row.clone()).await;
@@ -2566,7 +2549,12 @@ impl OkxEngine {
 
     /// A temporary refusal cannot establish whether the algo is still live.
     async fn lookup_algo(&self, id: &str) -> Result<Option<VenueAlgo>, EngineError> {
-        match self.deps.venue.get_algo(&to_algo_cl_ord_id(id)).await {
+        match self
+            .deps
+            .venue
+            .get_algo(&self.deps.venue.client_algo_id(id))
+            .await
+        {
             Ok(found) => Ok(found),
             Err(VenueError::Rejection { code, .. }) if code == ORDER_NOT_FOUND => Ok(None),
             Err(error) => Err(error.into()),
@@ -2743,7 +2731,7 @@ impl OkxEngine {
         let mut ours: HashMap<String, usize> = rows
             .iter()
             .enumerate()
-            .map(|(i, row)| (to_algo_cl_ord_id(&row.id), i))
+            .map(|(i, row)| (self.deps.venue.client_algo_id(&row.id), i))
             .collect();
         // A live algo with a client id but no row in that window may be ours from further back,
         // most often a cancel OKX refused and newer orders have since pushed out. It is looked up
@@ -2759,7 +2747,7 @@ impl OkxEngine {
                 .rows(move |rows| Ok(rows.find_orders_by_exchange_ids(&account_id, &unmatched)?))
                 .await?;
             for row in older.into_iter().filter(is_leg) {
-                let key = to_algo_cl_ord_id(&row.id);
+                let key = self.deps.venue.client_algo_id(&row.id);
                 if let std::collections::hash_map::Entry::Vacant(slot) = ours.entry(key) {
                     slot.insert(rows.len());
                     rows.push(row);
@@ -3143,11 +3131,11 @@ impl OkxEngine {
         match self.place(&mut row, registry).await {
             Ok(()) => Ok(()),
             // Unknown outcome: never placed again; a later sync looks it up.
-            Err(EngineError::Okx(OkxError::Unknown(message))) => {
+            Err(EngineError::Venue(VenueError::Unknown(message))) => {
                 row.reject_reason = Some(format!("Awaiting confirmation: {message}"));
                 self.save(row).await
             }
-            Err(error @ (EngineError::Okx(_) | EngineError::Message(_))) => {
+            Err(error @ (EngineError::Venue(_) | EngineError::Message(_))) => {
                 row.status = OrderStatus::Rejected;
                 row.reject_reason = Some(error.to_string());
                 row.updated_at = self.now();

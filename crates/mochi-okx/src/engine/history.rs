@@ -352,7 +352,7 @@ fn record_of(
             .filter(|id| !id.is_empty())
             .ok_or_else(|| missing("instId"))?,
         closed_at: venue_time(&row.updated_ms).ok_or_else(|| missing("uTime"))?,
-        realized_pnl: dec(&realized)?.to_fixed(),
+        realized_pnl: dec(realized)?.to_fixed(),
         close_type: nullish(&row.close_type).unwrap_or_default().to_owned(),
         opening_side: match (isolated_net(row), strict(&row.direction)) {
             (true, Some("long")) => Some("BUY".into()),

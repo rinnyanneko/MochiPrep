@@ -29,12 +29,13 @@ use mochi_domain::{
 use protection::{Held, Miss, ProtectionMap};
 use tokio::sync::oneshot;
 
-use mochi_exchange::venue::{strict, VenueAdapter, VenueError, VenuePosition};
-
-use crate::client::{
-    AttachAlgoOrd, BoxFuture, OkxClient, OkxError, OrdType, PlaceOrderBody, Side, TdMode, Venue,
+use mochi_exchange::venue::{
+    strict, BoxFuture, VenueAdapter, VenueAttachedAlgo, VenueError, VenueMarginMode,
+    VenueOrderType, VenuePlaceOrder, VenuePosition,
 };
-use crate::ids::{to_algo_cl_ord_id, to_cl_ord_id, to_inst_id};
+
+use crate::client::Venue;
+use crate::ids::to_inst_id;
 
 /// Longest gap since the last good sync before new exposure is refused.
 const MAX_SNAPSHOT_AGE_MS: i64 = 30_000;
@@ -322,9 +323,8 @@ pub struct OkxEngineDeps {
     pub account_id: String,
     /// OKX Demo or live; the adapter below talks to the same one.
     pub environment: Venue,
-    /// The exchange the engine reads through. `client` stays for the writes until they move here.
+    /// The exchange the engine reads from and sends orders through.
     pub venue: Arc<dyn VenueAdapter>,
-    pub client: OkxClient,
     pub store: Arc<dyn StoreAccess>,
     pub get_quote: QuoteSource,
     pub now: Now,
@@ -347,7 +347,7 @@ pub enum EngineError {
         after: Option<Box<Protection>>,
     },
     #[error(transparent)]
-    Okx(#[from] OkxError),
+    Venue(#[from] VenueError),
     #[error(transparent)]
     Store(#[from] StoreFailure),
     /// The store's owner stopped before the work could run.
@@ -358,23 +358,12 @@ pub enum EngineError {
     #[error("NOT_ARMED: real-money orders are switched off for this account")]
     OpeningDisarmed,
     #[error(transparent)]
-    LeverageSetup(OkxError),
+    LeverageSetup(VenueError),
     /// A selected-position reduction refused before anything reached OKX, with any
     /// staged row already recorded as rejected. The caller may correct and resubmit
     /// under a new client order ID.
     #[error("{0}")]
     RefusedBeforeDispatch(String),
-}
-
-/// Back to the OKX error the adapter made it from, so every text stays as it was.
-impl From<VenueError> for EngineError {
-    fn from(error: VenueError) -> Self {
-        EngineError::Okx(match error {
-            VenueError::Rejection { code, message, .. } => OkxError::Rejection { code, message },
-            VenueError::Unknown(text) => OkxError::Unknown(text),
-            VenueError::Invalid(text) => OkxError::Invalid(text),
-        })
-    }
 }
 
 impl EngineError {
@@ -1318,13 +1307,11 @@ impl OkxEngine {
                     ));
                 }
                 engine.check_dispatch()?;
+                let client_id = engine.deps.venue.client_order_id(&order.client_order_id);
                 engine
                     .deps
-                    .client
-                    .cancel_order(
-                        &to_inst_id(&order.symbol),
-                        &to_cl_ord_id(&order.client_order_id),
-                    )
+                    .venue
+                    .cancel_order(&order.symbol, &client_id)
                     .await?;
                 engine.sync_order(&mut order, &registry).await
             })
@@ -1461,9 +1448,7 @@ impl OkxEngine {
         self.insert_submission(order.clone(), close_selection)
             .await?;
 
-        let inst_id = to_inst_id(&order.symbol);
-        let cl_ord_id = to_cl_ord_id(&order.client_order_id);
-        let body = to_body(&order, &inst_id, &cl_ord_id, contracts.to_fixed());
+        let body = to_body(&order, self.deps.venue.as_ref(), contracts.to_fixed());
         if let Some(selected) = fresh_position {
             // OKX's order endpoint has no position-version condition. Recheck just before
             // dispatch to narrow the window in which a concurrent trade can change the position.
@@ -1484,14 +1469,14 @@ impl OkxEngine {
                 return Err(error);
             }
         }
-        match self.send(&mut order, &inst_id, &body).await {
+        match self.send(&mut order, body).await {
             Ok(()) => {}
             Err(error @ EngineError::SessionRetired) => return Err(error),
             Err(error @ (EngineError::OpeningDisarmed | EngineError::LeverageSetup(_))) => {
                 return self.finish_unsent(order, error.to_string()).await;
             }
-            Err(EngineError::Okx(OkxError::Rejection { code, message })) => {
-                let reason = OkxError::Rejection { code, message }.to_string();
+            Err(EngineError::Venue(rejection @ VenueError::Rejection { .. })) => {
+                let reason = rejection.to_string();
                 return self.finish_rejected(order, reason).await;
             }
             // Unknown outcome, or an answer that could not be read: the order stays OPEN and is
@@ -1528,27 +1513,22 @@ impl OkxEngine {
     }
 
     /// Node's `try` block: leverage for an opening order, the order, and the saved ordId.
-    async fn send(
-        &self,
-        order: &mut Order,
-        inst_id: &str,
-        body: &PlaceOrderBody,
-    ) -> Result<(), EngineError> {
-        let client = &self.deps.client;
+    async fn send(&self, order: &mut Order, body: VenuePlaceOrder) -> Result<(), EngineError> {
+        let venue = &self.deps.venue;
         if !order.reduce_only {
             self.check_dispatch()?;
             if !(self.deps.is_armed)() {
                 return Err(EngineError::OpeningDisarmed);
             }
             // An uncertain leverage result still means the order itself never went out.
-            client
-                .set_leverage(inst_id, order.leverage)
+            venue
+                .set_leverage(&order.symbol, order.leverage)
                 .await
                 .map_err(EngineError::LeverageSetup)?;
         }
         // Stop All can disarm this account while the leverage request is in flight.
         self.handoff_order(order)?;
-        order.exchange_order_id = Some(client.place_order(body).await?);
+        order.exchange_order_id = Some(venue.place_order(body).await?);
         let row = order.clone();
         self.rows(move |rows| Ok(rows.save_order(&row)?)).await
     }
@@ -1788,26 +1768,26 @@ fn to_contracts(order: &Order, registry: &Registry) -> Result<Dec, EngineError> 
 }
 
 /// The trailing fields OKX takes: exactly one callback, and the activation price when set.
-fn trailing_fields(spec: &TrailingStopSpec, leg: &mut AttachAlgoOrd) {
+fn trailing_fields(spec: &TrailingStopSpec, leg: &mut VenueAttachedAlgo) {
     match spec.kind {
         TrailingKind::Ratio => leg.callback_ratio = Some(spec.callback.clone()),
         TrailingKind::Spread => leg.callback_spread = Some(spec.callback.clone()),
     }
-    leg.active_px = spec.activation_price.clone().filter(|p| !p.is_empty());
+    leg.activation_price = spec.activation_price.clone().filter(|p| !p.is_empty());
 }
 
 /// Attach one protective leg. In particular, a single fixed stop remains eligible
 /// for exchange placement when a partial fill is followed by cancellation.
-fn to_body(order: &Order, inst_id: &str, cl_ord_id: &str, sz: String) -> PlaceOrderBody {
+fn to_body(order: &Order, venue: &dyn VenueAdapter, size: String) -> VenuePlaceOrder {
     let mut algo = Vec::new();
     if !order.reduce_only {
-        let tag = |leg: &str| Some(to_algo_cl_ord_id(&format!("{}:{leg}", order.id)));
+        let tag = |leg: &str| Some(venue.client_algo_id(&format!("{}:{leg}", order.id)));
         // Node's truthiness: an empty price attaches nothing.
         if let Some(stop) = order.attached_stop_loss.clone().filter(|p| !p.is_empty()) {
-            algo.push(AttachAlgoOrd {
-                attach_algo_cl_ord_id: tag("sl"),
-                sl_trigger_px: Some(stop),
-                sl_ord_px: Some("-1".into()),
+            algo.push(VenueAttachedAlgo {
+                client_algo_id: tag("sl"),
+                sl_trigger_price: Some(stop),
+                sl_order_price: Some("-1".into()),
                 ..Default::default()
             });
         }
@@ -1816,10 +1796,10 @@ fn to_body(order: &Order, inst_id: &str, cl_ord_id: &str, sz: String) -> PlaceOr
             .clone()
             .filter(|p| !p.is_empty() && !protection::defer_tp(order))
         {
-            algo.push(AttachAlgoOrd {
-                attach_algo_cl_ord_id: tag("tp"),
-                tp_trigger_px: Some(target),
-                tp_ord_px: Some("-1".into()),
+            algo.push(VenueAttachedAlgo {
+                client_algo_id: tag("tp"),
+                tp_trigger_price: Some(target),
+                tp_order_price: Some("-1".into()),
                 ..Default::default()
             });
         }
@@ -1828,8 +1808,8 @@ fn to_body(order: &Order, inst_id: &str, cl_ord_id: &str, sz: String) -> PlaceOr
             .as_ref()
             .filter(|_| !protection::defer_trailing(order))
         {
-            let mut leg = AttachAlgoOrd {
-                attach_algo_cl_ord_id: tag("trail"),
+            let mut leg = VenueAttachedAlgo {
+                client_algo_id: tag("trail"),
                 ..Default::default()
             };
             trailing_fields(spec, &mut leg);
@@ -1837,23 +1817,20 @@ fn to_body(order: &Order, inst_id: &str, cl_ord_id: &str, sz: String) -> PlaceOr
         }
     }
     let limit = order.order_type == OrderType::Limit;
-    PlaceOrderBody {
-        inst_id: inst_id.to_string(),
-        td_mode: TdMode::Isolated,
-        side: match order.side {
-            OrderSide::Buy => Side::Buy,
-            OrderSide::Sell => Side::Sell,
-        },
-        ord_type: if limit {
-            OrdType::Limit
+    VenuePlaceOrder {
+        symbol: order.symbol.clone(),
+        margin_mode: VenueMarginMode::Isolated,
+        side: order.side,
+        order_type: if limit {
+            VenueOrderType::Limit
         } else {
-            OrdType::Market
+            VenueOrderType::Market
         },
-        sz,
-        cl_ord_id: cl_ord_id.to_string(),
-        px: if limit { order.price.clone() } else { None },
+        size,
+        client_order_id: venue.client_order_id(&order.client_order_id),
+        price: if limit { order.price.clone() } else { None },
         reduce_only: order.reduce_only.then_some(true),
-        attach_algo_ords: (!algo.is_empty()).then_some(algo),
+        attached_algos: (!algo.is_empty()).then_some(algo),
     }
 }
 
