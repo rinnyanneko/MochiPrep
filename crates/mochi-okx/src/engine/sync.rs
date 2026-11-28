@@ -1,6 +1,5 @@
 //! Bringing local rows and the cached account in line with OKX.
 
-use mochi_domain::jsnum::js_string_to_number;
 use std::collections::{HashMap, HashSet};
 
 use mochi_domain::{EquityPoint, Fill, Liquidity, Order, OrderStatus, PositionSide};
@@ -27,18 +26,6 @@ pub(super) fn inst_id_of(symbol: &str) -> String {
         String::new()
     } else {
         to_inst_id(symbol)
-    }
-}
-
-/// Node's `Number(value)` for an OKX field.
-pub(super) fn js_number(value: Option<&Value>) -> f64 {
-    match value {
-        None => f64::NAN,
-        Some(Value::Null) => 0.0,
-        Some(Value::Bool(flag)) => f64::from(u8::from(*flag)),
-        Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
-        Some(Value::String(text)) => js_string_to_number(text),
-        Some(_) => f64::NAN,
     }
 }
 

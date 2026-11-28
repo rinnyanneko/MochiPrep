@@ -5,13 +5,14 @@
 use std::collections::HashMap;
 
 use mochi_domain::{ExchangePositionRecord, OrderSide};
-use mochi_exchange::venue::{self, nullish, strict, truthy, VenueField, VenueOrder, VenuePosition};
-
-use super::sync::{inst_id_of, js_number};
-use super::{dec, is_leg, EngineError, OkxEngine, Registry};
-use crate::client::{
-    nullish_text, truthy_text, Row, EXECUTION_HISTORY_PAGE, POSITIONS_HISTORY_PAGE,
+use mochi_exchange::venue::{
+    self, nullish, strict, truthy, VenueBill, VenueClosedPosition, VenueField, VenueOrder,
+    VenuePosition,
 };
+
+use super::sync::inst_id_of;
+use super::{dec, is_leg, EngineError, OkxEngine, Registry};
+use crate::client::{EXECUTION_HISTORY_PAGE, POSITIONS_HISTORY_PAGE};
 use crate::ids::to_inst_id;
 
 /// How often the history is read.
@@ -133,12 +134,11 @@ impl OkxEngine {
                 .scan_after
                 .as_deref()
                 .and_then(|id| id.parse::<u64>().ok());
-            let page = self.deps.client.get_execution_history(after).await?;
+            let page = self.deps.venue.execution_history(after).await?;
             let bills = page
                 .iter()
                 .map(|row| {
-                    row.get("billId")
-                        .and_then(|id| id.as_str())
+                    strict(&row.bill_id)
                         .and_then(|id| id.parse::<u64>().ok())
                         .ok_or_else(|| {
                             EngineError::message("OKX execution history is missing a bill ID")
@@ -189,7 +189,7 @@ impl OkxEngine {
                         }
                         let mut ids: Vec<_> = page
                             .iter()
-                            .filter_map(|r| nullish_text(r.get("ordId")))
+                            .filter_map(|r| nullish(&r.exchange_order_id).map(str::to_owned))
                             .filter(|id| !id.is_empty())
                             .collect();
                         ids.sort_unstable();
@@ -211,10 +211,10 @@ impl OkxEngine {
                         // Reprocess the overlapping page: an order may now have an exchange ID
                         // that it lacked on the previous pass. The execution primary key dedupes it.
                         for fill in &page {
-                            let Some(id) = fill.get("ordId").and_then(|v| v.as_str()) else {
+                            let Some(id) = strict(&fill.exchange_order_id) else {
                                 continue;
                             };
-                            let Some(inst) = nullish_text(fill.get("instId")) else {
+                            let Some(inst) = nullish(&fill.symbol).map(inst_id_of) else {
                                 continue;
                             };
                             let Some(order) = by_identity.get(&(id, inst)) else {
@@ -225,8 +225,8 @@ impl OkxEngine {
                             } else {
                                 "sell"
                             };
-                            if fill.get("posSide").and_then(|v| v.as_str()) != Some("net")
-                                || fill.get("side").and_then(|v| v.as_str()) != Some(side)
+                            if strict(&fill.position_side) != Some("net")
+                                || strict(&fill.side) != Some(side)
                             {
                                 continue;
                             }
@@ -266,7 +266,7 @@ impl OkxEngine {
                 });
             }
             *budget -= 1;
-            let page = self.deps.client.get_positions_history(after).await?;
+            let page = self.deps.venue.positions_history(after).await?;
             let mut oldest: Option<i64> = None;
             for row in &page {
                 let record = record_of(row, account_id)?;
@@ -303,11 +303,8 @@ enum Read {
     Stopped(i64),
 }
 
-pub(super) fn execution_of(row: &Row) -> Option<(String, i64)> {
-    execution_from(
-        row.get("tradeId")?.as_str()?,
-        row.get("fillTime")?.as_str()?,
-    )
+fn execution_of(row: &VenueBill) -> Option<(String, i64)> {
+    execution_from(strict(&row.trade_id)?, strict(&row.fill_ms)?)
 }
 
 /// [`execution_of`] for an order lookup.
@@ -321,12 +318,7 @@ fn execution_from(trade_id: &str, fill_time: &str) -> Option<(String, i64)> {
     (trade_id > 0 && executed_at > 0).then(|| (trade_id.to_string(), executed_at))
 }
 
-/// A whole number of milliseconds from an OKX time field.
-pub(super) fn okx_time(row: &Row, field: &str) -> Option<i64> {
-    whole_ms(js_number(row.get(field)))
-}
-
-/// [`okx_time`] for a neutral field.
+/// A whole number of milliseconds from a neutral time field.
 fn venue_time(field: &Option<VenueField>) -> Option<i64> {
     whole_ms(venue::js_number(field))
 }
@@ -335,33 +327,34 @@ fn whole_ms(value: f64) -> Option<i64> {
     (value.is_finite() && value > 0.0 && value.fract() == 0.0).then_some(value as i64)
 }
 
-fn isolated_net(row: &Row) -> bool {
-    row.get("mgnMode").and_then(|v| v.as_str()) == Some("isolated")
-        && row.get("posSide").and_then(|v| v.as_str()) == Some("net")
+fn isolated_net(row: &VenueClosedPosition) -> bool {
+    strict(&row.margin_mode) == Some("isolated") && strict(&row.position_side) == Some("net")
 }
 
 /// One history row, kept whether or not its pair is in the registry.
-fn record_of(row: &Row, account_id: &str) -> Result<ExchangePositionRecord, EngineError> {
+fn record_of(
+    row: &VenueClosedPosition,
+    account_id: &str,
+) -> Result<ExchangePositionRecord, EngineError> {
     let missing = |field: &str| {
         EngineError::message(format!("OKX reported a closed position without {field}"))
     };
-    let realized = truthy_text(row.get("realizedPnl")).ok_or_else(|| missing("realizedPnl"))?;
+    let realized = truthy(&row.realized_pnl).ok_or_else(|| missing("realizedPnl"))?;
     Ok(ExchangePositionRecord {
         account_id: account_id.to_string(),
-        pos_id: nullish_text(row.get("posId"))
+        pos_id: nullish(&row.position_id)
             .filter(|id| !id.is_empty())
+            .map(str::to_owned)
             .ok_or_else(|| missing("posId"))?,
-        opened_at: okx_time(row, "cTime").ok_or_else(|| missing("cTime"))?,
-        inst_id: nullish_text(row.get("instId"))
+        opened_at: venue_time(&row.created_ms).ok_or_else(|| missing("cTime"))?,
+        inst_id: nullish(&row.symbol)
+            .map(inst_id_of)
             .filter(|id| !id.is_empty())
             .ok_or_else(|| missing("instId"))?,
-        closed_at: okx_time(row, "uTime").ok_or_else(|| missing("uTime"))?,
+        closed_at: venue_time(&row.updated_ms).ok_or_else(|| missing("uTime"))?,
         realized_pnl: dec(&realized)?.to_fixed(),
-        close_type: nullish_text(row.get("type")).unwrap_or_default(),
-        opening_side: match (
-            isolated_net(row),
-            row.get("direction").and_then(|v| v.as_str()),
-        ) {
+        close_type: nullish(&row.close_type).unwrap_or_default().to_owned(),
+        opening_side: match (isolated_net(row), strict(&row.direction)) {
             (true, Some("long")) => Some("BUY".into()),
             (true, Some("short")) => Some("SELL".into()),
             _ => None,
