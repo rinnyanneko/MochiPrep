@@ -8,6 +8,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::venue::{
+    nullish, plain_number, strict, truthy, RejectKind, VenueAdapter, VenueAlgo, VenueAlgoOrderType,
+    VenueBalance, VenueCancelAlgo, VenueError, VenueField, VenueFill, VenueMarginMode,
+    VenuePlaceAlgo, VenuePosition,
+};
 use mochi_core::paper::{validate_trailing, ProtectionResult};
 use mochi_core::protection_change::{
     classify_protection_change, same_price, same_trailing, ProtectionChangeClass,
@@ -18,18 +23,12 @@ use mochi_domain::{
     Order, OrderSide, OrderStatus, OrderType, PositionSide, PositionView, Protection, RiskSettings,
     TrailingStopSpec, CANCEL_PENDING_PREFIX,
 };
-use serde_json::Value;
 
 use super::sync::{isolated_net, PositionSnapshot, VenueWrites};
 use super::{
-    align, align_trailing, dec, is_leg, side_text, to_body, to_contracts, EngineError, LiveRows,
-    OkxEngine, Registry, NEVER_ARRIVED_AFTER_MS,
+    align, align_trailing, dec, is_leg, side_text, to_body, to_contracts, EngineError,
+    ExchangeEngine, LiveRows, Registry, NEVER_ARRIVED_AFTER_MS,
 };
-use crate::client::{
-    nullish_text, truthy_text, AlgoOrdType, AlgoOrderBody, CancelAlgo, OkxError, Row, Side, TdMode,
-    ORDER_NOT_FOUND, RECENT_FILLS_LIMIT,
-};
-use crate::ids::{to_algo_cl_ord_id, to_cl_ord_id, to_inst_id};
 
 /// How far back sync looks for our own algo ids. Older ones read as external, which is the safe
 /// side.
@@ -41,9 +40,14 @@ const ALIVE_STATES: [&str; 2] = ["live", "partially_effective"];
 const REPLACED: &str = "Replaced";
 const REMOVED: &str = "Removed";
 const POSITION_CLOSED: &str = "Position closed";
-pub(super) const ALGO_NOT_ARRIVED: &str = "OKX has no record of this algo";
-pub(super) const REACHED_EXIT_UNCONFIRMED: &str =
-    "OKX has no record of this market take profit; check its outcome in OKX";
+/// Stored as an algo row's reason, like [`super::order_unconfirmed`].
+pub(super) fn algo_not_arrived(venue: &str) -> String {
+    format!("{venue} has no record of this algo")
+}
+/// Stored as a reached target's reason and matched as text when recovering it.
+pub(super) fn reached_exit_unconfirmed(venue: &str) -> String {
+    format!("{venue} has no record of this market take profit; check its outcome in {venue}")
+}
 // These durable markers identify an unsent intent. Clearing them before sending permits
 // only lookup after a crash, never another send.
 const DEFERRED_TRAILING: &str = "Pending entry fill: trailing stop not yet sent";
@@ -259,20 +263,27 @@ impl Held {
     }
 }
 
-pub(super) fn last_trade_id(row: &Row) -> Option<u64> {
-    row.get("tradeId")
-        .and_then(Value::as_str)?
-        .parse()
-        .ok()
-        .filter(|id| *id > 0)
+/// An order's or fill's last trade, when it is a positive id.
+fn last_trade_id(field: &Option<VenueField>) -> Option<u64> {
+    trade_id(strict(field))
 }
 
-fn fill_time(row: &Row) -> Option<i64> {
-    exchange_time(row, "fillTime")
+/// [`last_trade_id`] for a position.
+pub(super) fn position_trade_id(position: &VenuePosition) -> Option<u64> {
+    trade_id(strict(&position.trade_id))
 }
 
-fn exchange_time(row: &Row, field: &str) -> Option<i64> {
-    row.get(field)?.as_str()?.parse().ok().filter(|at| *at > 0)
+fn trade_id(text: Option<&str>) -> Option<u64> {
+    text?.parse().ok().filter(|id| *id > 0)
+}
+
+/// An exchange time in ms, when it is a positive number sent as a string.
+fn venue_time(field: &Option<VenueField>) -> Option<i64> {
+    time_of(strict(field)?)
+}
+
+fn time_of(text: &str) -> Option<i64> {
+    text.parse().ok().filter(|at| *at > 0)
 }
 
 pub(super) fn is_reached_exit(row: &Order) -> bool {
@@ -290,8 +301,9 @@ fn is_confirmed_reached_exit(order: &Order, symbol: &str, side: OrderSide) -> bo
 }
 
 struct PositionHistory<'a> {
+    venue: &'a dyn VenueAdapter,
     inst_id: &'a str,
-    fills: &'a [Row],
+    fills: &'a [VenueFill],
     trade: u64,
     updated_at: i64,
     side: PositionSide,
@@ -314,19 +326,23 @@ enum EntryInterval {
 }
 
 impl PositionHistory<'_> {
-    fn trade_row(&self, id: u64) -> Option<&Row> {
-        self.fills.iter().find(|row| last_trade_id(row) == Some(id))
+    fn trade_row(&self, id: u64) -> Option<&VenueFill> {
+        self.fills
+            .iter()
+            .find(|row| last_trade_id(&row.trade_id) == Some(id))
     }
 
     fn last_trade_accounts_for_update(&self) -> bool {
         // Fill records can be generated after later position changes. Only the
         // execution time can account for the update directly.
-        self.trade_row(self.trade).and_then(fill_time) == Some(self.updated_at)
+        self.trade_row(self.trade)
+            .and_then(|row| venue_time(&row.fill_ms))
+            == Some(self.updated_at)
     }
 
     fn entry_interval(&self, first_trade: u64, parent: &str) -> Option<EntryInterval> {
-        let first = fill_time(self.trade_row(first_trade)?)?;
-        let last = fill_time(self.trade_row(self.trade)?)?;
+        let first = venue_time(&self.trade_row(first_trade)?.fill_ms)?;
+        let last = venue_time(&self.trade_row(self.trade)?.fill_ms)?;
         if first > last || last > self.updated_at {
             return None;
         }
@@ -336,8 +352,8 @@ impl PositionHistory<'_> {
         };
         let mut changes = Vec::new();
         for row in self.fills {
-            let at = fill_time(row)?;
-            let trade = last_trade_id(row);
+            let at = venue_time(&row.fill_ms)?;
+            let trade = last_trade_id(&row.trade_id);
             // Liquidation and ADL have negative IDs and can change the position
             // after its last ordinary trade without advancing that trade ID.
             if at < first
@@ -351,8 +367,11 @@ impl PositionHistory<'_> {
                 // A system fill is visible before the position snapshot caught up.
                 return None;
             }
-            if row.get("instId").and_then(Value::as_str) != Some(self.inst_id)
-                || row.get("posSide").and_then(Value::as_str) != Some("net")
+            if strict(&row.symbol)
+                .map(|id| self.venue.instrument_id(id))
+                .as_deref()
+                != Some(self.inst_id)
+                || strict(&row.position_side) != Some("net")
             {
                 return Some(EntryInterval::Different { system: false });
             }
@@ -360,23 +379,18 @@ impl PositionHistory<'_> {
             // fills. Until the fill's margin mode is known, the interval stays unresolved
             // rather than splitting the entry into a smaller allocation.
             if trade.is_some()
-                && row
-                    .get("ordId")
-                    .and_then(Value::as_str)
+                && strict(&row.exchange_order_id)
                     .is_none_or(|id| !self.isolated_orders.contains(id))
             {
                 return None;
             }
-            let opening = row.get("subType").and_then(Value::as_str) == Some(open_type);
+            let opening = strict(&row.sub_type) == Some(open_type);
             let own_exit = if opening {
                 false
             } else {
-                let source = row
-                    .get("ordId")
-                    .and_then(Value::as_str)
-                    .and_then(|id| self.reached_exit_parents.get(id));
-                let Some(source) = source
-                    .filter(|_| row.get("subType").and_then(Value::as_str) == Some(close_type))
+                let source =
+                    strict(&row.exchange_order_id).and_then(|id| self.reached_exit_parents.get(id));
+                let Some(source) = source.filter(|_| strict(&row.sub_type) == Some(close_type))
                 else {
                     return Some(EntryInterval::Different {
                         system: trade.is_none(),
@@ -398,7 +412,7 @@ impl PositionHistory<'_> {
             if !contracts.gt(&super::zero()) {
                 return Some(EntryInterval::Different { system: false });
             }
-            let size = dec(row.get("fillSz")?.as_str()?).ok()?;
+            let size = dec(strict(&row.fill_size)?).ok()?;
             if !size.gt(&super::zero()) {
                 return None;
             }
@@ -427,7 +441,7 @@ fn proven_entry_contracts(
     entry_trade: u64,
     expected: &Dec,
 ) -> Option<Dec> {
-    if history.fills.len() >= RECENT_FILLS_LIMIT {
+    if history.fills.len() >= history.venue.recent_fills_page() {
         return None;
     }
     let mut total = super::zero();
@@ -436,14 +450,14 @@ fn proven_entry_contracts(
     let mut trades = HashSet::new();
     let (mut split_by_system, mut continuous) = (false, false);
     for fill in history.fills {
-        if fill.get("ordId").and_then(Value::as_str) != Some(order_id) {
+        if strict(&fill.exchange_order_id) != Some(order_id) {
             continue;
         }
-        let trade = last_trade_id(fill)?;
+        let trade = last_trade_id(&fill.trade_id)?;
         if trade > entry_trade || !trades.insert(trade) {
             return None;
         }
-        let size = dec(fill.get("fillSz")?.as_str()?).ok()?;
+        let size = dec(strict(&fill.fill_size)?).ok()?;
         if !size.gt(&super::zero()) {
             return None;
         }
@@ -472,16 +486,20 @@ fn proven_entry_contracts(
 }
 
 pub(super) fn isolated_net_position<'a>(
-    positions: &'a [Row],
+    venue: &dyn VenueAdapter,
+    positions: &'a [VenuePosition],
     inst_id: &str,
-) -> Option<(&'a Row, Dec)> {
+) -> Option<(&'a VenuePosition, Dec)> {
     positions.iter().find_map(|position| {
-        if position.get("instId").and_then(Value::as_str) != Some(inst_id)
+        if strict(&position.symbol)
+            .map(|id| venue.instrument_id(id))
+            .as_deref()
+            != Some(inst_id)
             || !isolated_net(position)
         {
             return None;
         }
-        let size = dec(position.get("pos")?.as_str()?).ok()?;
+        let size = dec(strict(&position.size)?).ok()?;
         (!size.is_zero()).then_some((position, size))
     })
 }
@@ -529,63 +547,54 @@ fn same_leg(leg: Leg, a: &Protection, b: &Protection) -> Result<bool, EngineErro
 }
 
 /// Exchange text never reaches the model: only fields that parse as plain numbers are kept.
-fn num(value: Option<&serde_json::Value>) -> Option<String> {
-    let text = truthy_text(value)?;
-    let (whole, fraction) = match text.split_once('.') {
-        Some((whole, fraction)) => (whole, Some(fraction)),
-        None => (text.as_str(), None),
-    };
-    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-    if !digits(whole) || fraction.is_some_and(|f| !digits(f)) {
-        return None;
-    }
-    Dec::parse(&text).ok().map(|d| d.to_fixed())
+fn num(field: &Option<VenueField>) -> Option<String> {
+    plain_number(field)
 }
 
-fn live_trigger(row: &Order, algo: &Row) -> Option<String> {
+fn is_alive(algo: &VenueAlgo) -> bool {
+    strict(&algo.state).is_some_and(|state| ALIVE_STATES.contains(&state))
+}
+
+fn live_trigger(row: &Order, algo: &VenueAlgo) -> Option<String> {
     let field = match leg_of(row)? {
-        Leg::Sl => "slTriggerPx",
-        Leg::Tp => "tpTriggerPx",
+        Leg::Sl => &algo.sl_trigger_price,
+        Leg::Tp => &algo.tp_trigger_price,
         Leg::Trail => return None,
     };
-    num(algo.get(field)).filter(|price| price != "0")
+    num(field).filter(|price| price != "0")
 }
 
-fn live_algo_matches(algo: &Row, leg: Leg, order: &Order) -> Result<bool, EngineError> {
-    if !algo
-        .get("state")
-        .and_then(Value::as_str)
-        .is_some_and(|state| ALIVE_STATES.contains(&state))
-    {
+fn live_algo_matches(algo: &VenueAlgo, leg: Leg, order: &Order) -> Result<bool, EngineError> {
+    if !is_alive(algo) {
         return Ok(false);
     }
-    let price_matches = |field, expected| {
-        let remote = truthy_text(algo.get(field)).filter(|value| value != "0");
-        same_price(expected, remote.as_deref()).map_err(decimal_error)
+    let price_matches = |field: &Option<VenueField>, expected| {
+        let remote = truthy(field).filter(|value| *value != "0");
+        same_price(expected, remote).map_err(decimal_error)
     };
     match leg {
-        Leg::Sl => price_matches("slTriggerPx", order.trigger_price.as_deref()),
-        Leg::Tp => price_matches("tpTriggerPx", order.trigger_price.as_deref()),
+        Leg::Sl => price_matches(&algo.sl_trigger_price, order.trigger_price.as_deref()),
+        Leg::Tp => price_matches(&algo.tp_trigger_price, order.trigger_price.as_deref()),
         Leg::Trail => {
             let Some(spec) = spec_of(order) else {
                 return Ok(false);
             };
             let field = match spec.kind {
-                mochi_domain::TrailingKind::Ratio => "callbackRatio",
-                mochi_domain::TrailingKind::Spread => "callbackSpread",
+                mochi_domain::TrailingKind::Ratio => &algo.callback_ratio,
+                mochi_domain::TrailingKind::Spread => &algo.callback_spread,
             };
             Ok(price_matches(field, Some(&spec.callback))?
-                && price_matches("activePx", spec.activation_price.as_deref())?)
+                && price_matches(&algo.activation_price, spec.activation_price.as_deref())?)
         }
     }
 }
 
 /// What an algo is, for display, built only from its numeric fields.
-pub(crate) fn external_of(algo: &Row) -> Vec<ExternalProtection> {
-    if algo.get("ordType").and_then(|v| v.as_str()) == Some("move_order_stop") {
-        let ratio = num(algo.get("callbackRatio"));
-        let spread = num(algo.get("callbackSpread"));
-        let from = num(algo.get("activePx"));
+pub(crate) fn external_of(algo: &VenueAlgo) -> Vec<ExternalProtection> {
+    if strict(&algo.order_type) == Some("move_order_stop") {
+        let ratio = num(&algo.callback_ratio);
+        let spread = num(&algo.callback_spread);
+        let from = num(&algo.activation_price);
         let distance = match ratio {
             Some(ratio) => {
                 let hundred = Dec::parse("100").expect("100 is a decimal");
@@ -597,20 +606,28 @@ pub(crate) fn external_of(algo: &Row) -> Vec<ExternalProtection> {
         let from = from.map(|f| format!(" from {f}")).unwrap_or_default();
         return vec![ExternalProtection {
             kind: ExternalProtectionKind::Trailing,
-            trigger_price: num(algo.get("moveTriggerPx")),
+            trigger_price: num(&algo.move_trigger_price),
             detail: format!("trailing {distance}{from}"),
         }];
     }
     let mut found = Vec::new();
     let legs = [
-        (ExternalProtectionKind::StopLoss, "SL", "slTriggerPx"),
-        (ExternalProtectionKind::TakeProfit, "TP", "tpTriggerPx"),
+        (
+            ExternalProtectionKind::StopLoss,
+            "SL",
+            &algo.sl_trigger_price,
+        ),
+        (
+            ExternalProtectionKind::TakeProfit,
+            "TP",
+            &algo.tp_trigger_price,
+        ),
     ];
     for (kind, label, field) in legs {
-        if truthy_text(algo.get(field)).is_none() {
+        if truthy(field).is_none() {
             continue;
         }
-        let price = num(algo.get(field));
+        let price = num(field);
         let shown = price.clone().unwrap_or_else(|| "unknown".into());
         found.push(ExternalProtection {
             kind,
@@ -728,37 +745,38 @@ pub(crate) fn record_attached(
 }
 
 /// Net mode is required at connect, so no posSide, exactly as entry orders are sent.
-fn algo_body(row: &Order, registry: &Registry) -> Result<AlgoOrderBody, EngineError> {
-    let mut body = AlgoOrderBody {
-        inst_id: to_inst_id(&row.symbol),
-        td_mode: TdMode::Isolated,
-        side: match row.side {
-            OrderSide::Buy => Side::Buy,
-            OrderSide::Sell => Side::Sell,
-        },
-        algo_cl_ord_id: to_algo_cl_ord_id(&row.id),
-        sz: to_contracts(row, registry)?.to_fixed(),
+fn algo_body(
+    row: &Order,
+    registry: &Registry,
+    venue: &dyn VenueAdapter,
+) -> Result<VenuePlaceAlgo, EngineError> {
+    let mut body = VenuePlaceAlgo {
+        symbol: row.symbol.clone(),
+        margin_mode: VenueMarginMode::Isolated,
+        side: row.side,
+        client_algo_id: venue.client_algo_id(&row.id),
+        size: to_contracts(row, registry)?.to_fixed(),
         reduce_only: true,
-        ord_type: AlgoOrdType::Conditional,
-        sl_trigger_px: None,
-        sl_ord_px: None,
-        tp_trigger_px: None,
-        tp_ord_px: None,
+        order_type: VenueAlgoOrderType::Conditional,
+        sl_trigger_price: None,
+        sl_order_price: None,
+        tp_trigger_price: None,
+        tp_order_price: None,
         callback_ratio: None,
         callback_spread: None,
-        active_px: None,
+        activation_price: None,
     };
     match row.order_type {
         OrderType::StopMarket => {
-            body.sl_trigger_px = row.trigger_price.clone();
-            body.sl_ord_px = Some("-1".into());
+            body.sl_trigger_price = row.trigger_price.clone();
+            body.sl_order_price = Some("-1".into());
         }
         OrderType::TakeProfitMarket => {
-            body.tp_trigger_px = row.trigger_price.clone();
-            body.tp_ord_px = Some("-1".into());
+            body.tp_trigger_price = row.trigger_price.clone();
+            body.tp_order_price = Some("-1".into());
         }
         _ => {
-            body.ord_type = AlgoOrdType::MoveOrderStop;
+            body.order_type = VenueAlgoOrderType::Trailing;
             // A row without a spec sends neither callback, which the client refuses before
             // anything is signed.
             if let Some(spec) = spec_of(row) {
@@ -768,7 +786,7 @@ fn algo_body(row: &Order, registry: &Registry) -> Result<AlgoOrderBody, EngineEr
                         body.callback_spread = Some(spec.callback)
                     }
                 }
-                body.active_px = spec.activation_price.filter(|p| !p.is_empty());
+                body.activation_price = spec.activation_price.filter(|p| !p.is_empty());
             }
         }
     }
@@ -777,14 +795,14 @@ fn algo_body(row: &Order, registry: &Registry) -> Result<AlgoOrderBody, EngineEr
 
 /// A row's size in contracts as OKX listed it in `algo`, and as the row records it (for an
 /// attached row, what its entry filled), each when it reads.
-fn sizes(row: &Order, algo: &Row, registry: &Registry) -> (Option<Dec>, Option<Dec>) {
-    let listed = num(algo.get("sz")).and_then(|sz| Dec::parse(&sz).ok());
+fn sizes(row: &Order, algo: &VenueAlgo, registry: &Registry) -> (Option<Dec>, Option<Dec>) {
+    let listed = num(&algo.size).and_then(|sz| Dec::parse(&sz).ok());
     (listed, to_contracts(row, registry).ok())
 }
 
 fn covers_with_reported_size(
     order: &Order,
-    algo: &Row,
+    algo: &VenueAlgo,
     contracts: &Dec,
     registry: &Registry,
 ) -> bool {
@@ -795,11 +813,11 @@ fn covers_with_reported_size(
 
 fn stop_precedes_liquidation(
     stop: &str,
-    position: &Row,
+    position: &VenuePosition,
     side: PositionSide,
 ) -> Result<bool, EngineError> {
     let stop = dec(stop)?;
-    let liquidation = dec(&truthy_text(position.get("liqPx")).unwrap_or_else(|| "0".into()))?;
+    let liquidation = dec(truthy(&position.liquidation_price).unwrap_or("0"))?;
     Ok(liquidation.is_zero()
         || match side {
             PositionSide::Long => stop.gt(&liquidation),
@@ -810,7 +828,7 @@ fn stop_precedes_liquidation(
 /// Whether `row`, whose algo OKX listed as `algo`, covers a position of `contracts`. It takes the
 /// smaller of OKX's `sz` and the row's own size: older stops are retired on this, so a size OKX
 /// reports above what was filled or sent is never trusted.
-fn covers(row: &Order, algo: &Row, contracts: &Dec, registry: &Registry) -> bool {
+fn covers(row: &Order, algo: &VenueAlgo, contracts: &Dec, registry: &Registry) -> bool {
     let size = match sizes(row, algo, registry) {
         (Some(listed), Some(own)) => Some(listed.min(&own)),
         (listed, own) => listed.or(own),
@@ -828,7 +846,7 @@ fn is_per_fill(row: &Order) -> bool {
 /// counts as its own size, and each later per-fill row adds its fill. It takes the larger of
 /// OKX's `sz` and the row's own, since a cover sized to it must not fall short. `None` when a
 /// size does not read.
-fn group_claim(members: &[(usize, Row)], rows: &[Order], registry: &Registry) -> Option<Dec> {
+fn group_claim(members: &[(usize, VenueAlgo)], rows: &[Order], registry: &Registry) -> Option<Dec> {
     let mut claim = super::zero();
     for (i, algo) in members {
         let size = match sizes(&rows[*i], algo, registry) {
@@ -919,7 +937,7 @@ struct Context {
     open_orders: Vec<Order>,
 }
 
-impl OkxEngine {
+impl ExchangeEngine {
     /// Our protection that OKX listed as pending on the last sync, as the runner and risk engine
     /// see it. External algos are not included.
     pub fn protection_of(&self, symbol: &str) -> Protection {
@@ -1048,10 +1066,11 @@ impl OkxEngine {
             .cloned()
             .unwrap_or_default();
         let position_changed = || {
+            let name = self.deps.venue.name();
             EngineError::message(if checked.is_some() {
-                "The OKX position or protection changed after the agent's risk check"
+                format!("The {name} position or protection changed after the agent's risk check")
             } else {
-                "The OKX position changed while checking the stop loss"
+                format!("The {name} position changed while checking the stop loss")
             })
         };
         if let Some(checked) = &checked {
@@ -1227,7 +1246,7 @@ impl OkxEngine {
                 // Unknown outcome: never placed again. A sync looks it up by algoClOrdId; if OKX
                 // shows it live, the placement is known to have succeeded and the change carries
                 // on.
-                Err(EngineError::Okx(OkxError::Unknown(message))) => {
+                Err(EngineError::Venue(VenueError::Unknown(message))) => {
                     row.reject_reason = Some(format!("Awaiting confirmation: {message}"));
                     self.save(row.clone()).await?;
                     let _ = self.sync_without_deferred_orders().await;
@@ -1375,10 +1394,11 @@ impl OkxEngine {
         stop: Option<&str>,
         changed: &impl Fn() -> EngineError,
     ) -> Result<Dec, EngineError> {
+        let venue = self.deps.venue.as_ref();
         let position = &position.position;
-        let remote = self.deps.client.get_positions().await?;
+        let remote = self.deps.venue.positions().await?;
         let (row, side, contracts) =
-            super::select_close(&remote, &position.symbol, Some(&position.id))
+            super::select_close(venue, &remote, &position.symbol, Some(&position.id))
                 .map_err(|_| changed())?;
         let size = dec(&position.quantity)?;
         if !size.eq_value(&contracts.mul(&dec(&spec.venue_contract_value)?)) {
@@ -1414,9 +1434,12 @@ impl OkxEngine {
     async fn protection_edit_error(&self, symbol: &str, error: EngineError) -> EngineError {
         let confirmed = self.sync_without_deferred_orders().await.is_ok();
         let note = if confirmed {
-            ""
+            String::new()
         } else {
-            "; current protection not yet confirmed from OKX"
+            format!(
+                "; current protection not yet confirmed from {}",
+                self.deps.venue.name()
+            )
         };
         EngineError::ProtectionChange {
             message: format!("{error}{note}"),
@@ -1439,7 +1462,7 @@ impl OkxEngine {
         };
         Ok(Some(
             live_algo_matches(&algo, Leg::Tp, target)?
-                && algo.get("tpOrdPx").and_then(Value::as_str) == Some("-1")
+                && strict(&algo.tp_order_price) == Some("-1")
                 && listed.min(&recorded).gte(contracts),
         ))
     }
@@ -1454,7 +1477,7 @@ impl OkxEngine {
             return Ok(false);
         };
         Ok(live_algo_matches(&algo, Leg::Sl, fixed)?
-            && algo.get("slOrdPx").and_then(Value::as_str) == Some("-1")
+            && strict(&algo.sl_order_price) == Some("-1")
             && covers_with_reported_size(fixed, &algo, contracts, registry))
     }
 
@@ -1463,9 +1486,10 @@ impl OkxEngine {
         snapshot: &mut PositionSnapshot,
         inst_id: &str,
     ) -> Result<bool, EngineError> {
-        let fresh = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
-        let before = isolated_net_position(&snapshot.open, inst_id);
-        let after = isolated_net_position(&fresh.open, inst_id);
+        let venue = self.deps.venue.as_ref();
+        let fresh = PositionSnapshot::new(venue, self.deps.venue.positions().await?)?;
+        let before = isolated_net_position(venue, &snapshot.open, inst_id);
+        let after = isolated_net_position(venue, &fresh.open, inst_id);
         let same = before
             .zip(after)
             .is_some_and(|((before, size), (after, fresh_size))| {
@@ -1475,9 +1499,9 @@ impl OkxEngine {
                     PositionSide::Long
                 };
                 size.eq_value(&fresh_size)
-                && super::views::position_id(before, side) == super::views::position_id(after, side)
+                && super::views::position_id(venue, before, side) == super::views::position_id(venue, after, side)
                 // Some system reductions do not change tradeId.
-                && before.get("uTime") == after.get("uTime")
+                && before.updated_ms == after.updated_ms
             });
         snapshot.update_positions(fresh);
         Ok(same)
@@ -1500,15 +1524,16 @@ impl OkxEngine {
         if !live_algo_matches(&algo, Leg::Sl, fixed)? {
             return Err(changed());
         }
-        if algo.get("slOrdPx").and_then(Value::as_str) != Some("-1") {
+        if strict(&algo.sl_order_price) != Some("-1") {
             return Err(EngineError::message(
                 "The fixed stop loss must be a market order to remove the trailing stop",
             ));
         }
         if !covers_with_reported_size(fixed, &algo, &contracts, registry) {
-            return Err(EngineError::message(
-                "The fixed stop loss does not cover the entire OKX position",
-            ));
+            return Err(EngineError::message(format!(
+                "The fixed stop loss does not cover the entire {} position",
+                self.deps.venue.name()
+            )));
         }
         self.check_protection_position(position, spec, fixed.trigger_price.as_deref(), changed)
             .await?;
@@ -1559,22 +1584,17 @@ impl OkxEngine {
             let retire = if check_exchange && parent.status == OrderStatus::Open {
                 // The current position may already contain some or all of this
                 // order. Truly unfilled entries keep their own future take profit.
+                let client_id = self.deps.venue.client_order_id(&parent.client_order_id);
                 let remote = self
                     .deps
-                    .client
-                    .get_order(
-                        &to_inst_id(&parent.symbol),
-                        &to_cl_ord_id(&parent.client_order_id),
-                    )
+                    .venue
+                    .get_order(&parent.symbol, &client_id)
                     .await?;
-                let state = remote
-                    .as_ref()
-                    .and_then(|row| row.get("state"))
-                    .and_then(Value::as_str);
+                let state = remote.as_ref().and_then(|row| strict(&row.state));
                 let filled = remote
                     .as_ref()
-                    .and_then(|row| truthy_text(row.get("accFillSz")))
-                    .map(|size| dec(&size))
+                    .and_then(|row| truthy(&row.filled_size))
+                    .map(dec)
                     .transpose()?;
                 matches!(
                     state,
@@ -1604,9 +1624,9 @@ impl OkxEngine {
 
     /// Node's `try` block for one leg: the body, the placement and the saved algoId.
     async fn place(&self, row: &mut Order, registry: &Registry) -> Result<(), EngineError> {
-        let body = algo_body(row, registry)?;
+        let body = algo_body(row, registry, self.deps.venue.as_ref())?;
         self.check_dispatch()?;
-        row.exchange_order_id = Some(self.deps.client.place_algo(&body).await?);
+        row.exchange_order_id = Some(self.deps.venue.place_algo(body).await?);
         row.updated_at = self.now();
         self.save(row.clone()).await
     }
@@ -1629,10 +1649,10 @@ impl OkxEngine {
                 && o.exchange_order_id.as_deref().is_none_or(str::is_empty)
         });
         if unresolved {
-            return Ok(Some(
-                "PROTECTION_PENDING: an earlier protection change is awaiting confirmation from OKX"
-                    .into(),
-            ));
+            return Ok(Some(format!(
+                "PROTECTION_PENDING: an earlier protection change is awaiting confirmation from {}",
+                self.deps.venue.name()
+            )));
         }
         if !(self.deps.is_armed)()
             && classify_protection_change(side, before, target).map_err(decimal_error)?
@@ -1682,7 +1702,8 @@ impl OkxEngine {
             (state.balance.is_some(), state.sync_error.clone())
         };
         if !healthy || !has_balance {
-            let why = sync_error.unwrap_or_else(|| "no recent sync with OKX".into());
+            let why = sync_error
+                .unwrap_or_else(|| format!("no recent sync with {}", self.deps.venue.name()));
             return Ok(Err(format!("EXCHANGE_NOT_SYNCED: {why}")));
         }
         let Some(quote) = (self.deps.get_quote)(symbol) else {
@@ -1706,13 +1727,13 @@ impl OkxEngine {
         rows: Vec<Order>,
         reason: Option<&'static str>,
     ) -> Result<Option<String>, EngineError> {
-        let sent: Vec<CancelAlgo> = rows
+        let sent: Vec<VenueCancelAlgo> = rows
             .iter()
             .filter_map(|row| {
-                let algo_id = row.exchange_order_id.clone().filter(|id| !id.is_empty())?;
-                Some(CancelAlgo {
-                    inst_id: to_inst_id(&row.symbol),
-                    algo_id,
+                let exchange_algo_id = row.exchange_order_id.clone().filter(|id| !id.is_empty())?;
+                Some(VenueCancelAlgo {
+                    symbol: row.symbol.clone(),
+                    exchange_algo_id,
                 })
             })
             .collect();
@@ -1727,9 +1748,12 @@ impl OkxEngine {
                 retirement = Some(error);
                 break;
             }
-            dispatched.extend(batch.iter().map(|item| item.algo_id.as_str()));
-            if let Err(error) = self.deps.client.cancel_algos(batch).await {
-                failure = Some(format!("Could not cancel an OKX algo order: {error}"));
+            dispatched.extend(batch.iter().map(|item| item.exchange_algo_id.as_str()));
+            if let Err(error) = self.deps.venue.cancel_algos(batch.to_vec()).await {
+                failure = Some(format!(
+                    "Could not cancel an {} algo order: {error}",
+                    self.deps.venue.name()
+                ));
             }
         }
         let now = self.now();
@@ -1781,6 +1805,7 @@ impl OkxEngine {
         registry: &Registry,
         snapshot: &mut PositionSnapshot,
     ) -> Result<bool, EngineError> {
+        let venue = self.deps.venue.as_ref();
         let Some(completion) = linked_replacements.iter().rev().find(|order| {
             order.status == OrderStatus::Open
                 && order.symbol == row.symbol
@@ -1833,37 +1858,40 @@ impl OkxEngine {
             }
             _ => return Ok(false),
         };
-        let inst = to_inst_id(&row.symbol);
+        let inst = venue.instrument_id(&row.symbol);
         let side = match fixed.side {
             OrderSide::Buy => PositionSide::Short,
             OrderSide::Sell => PositionSide::Long,
         };
         snapshot.update_positions(PositionSnapshot::new(
-            self.deps.client.get_positions().await?,
+            venue,
+            self.deps.venue.positions().await?,
         )?);
-        let Some((position, original_size)) = isolated_net_position(&snapshot.open, &inst) else {
+        let Some((position, original_size)) = isolated_net_position(venue, &snapshot.open, &inst)
+        else {
             return Ok(false);
         };
         if (side == PositionSide::Short) != original_size.is_negative() {
             return Ok(false);
         }
-        let original_id = super::views::position_id(position, side);
+        let original_id = super::views::position_id(venue, position, side);
         let Some(algo) = self.lookup_algo(&fixed.id).await? else {
             return Ok(true);
         };
-        if !live_algo_matches(&algo, Leg::Sl, &fixed)?
-            || algo.get("slOrdPx").and_then(Value::as_str) != Some("-1")
+        if !live_algo_matches(&algo, Leg::Sl, &fixed)? || strict(&algo.sl_order_price) != Some("-1")
         {
             return Ok(false);
         }
         snapshot.update_positions(PositionSnapshot::new(
-            self.deps.client.get_positions().await?,
+            venue,
+            self.deps.venue.positions().await?,
         )?);
-        let Some((position, signed_size)) = isolated_net_position(&snapshot.open, &inst) else {
+        let Some((position, signed_size)) = isolated_net_position(venue, &snapshot.open, &inst)
+        else {
             return Ok(false);
         };
         if !original_size.eq_value(&signed_size)
-            || super::views::position_id(position, side) != original_id
+            || super::views::position_id(venue, position, side) != original_id
         {
             return Ok(true);
         }
@@ -1890,13 +1918,19 @@ impl OkxEngine {
         &self,
         row: &Order,
         inst_id: &str,
-        fills: &[Row],
+        fills: &[VenueFill],
         entry_order_id: &str,
     ) -> Result<HashSet<String>, EngineError> {
+        let venue = self.deps.venue.as_ref();
         let mut ids: Vec<String> = fills
             .iter()
-            .filter(|fill| fill.get("instId").and_then(Value::as_str) == Some(inst_id))
-            .filter_map(|fill| fill.get("ordId").and_then(Value::as_str))
+            .filter(|fill| {
+                strict(&fill.symbol)
+                    .map(|id| venue.instrument_id(id))
+                    .as_deref()
+                    == Some(inst_id)
+            })
+            .filter_map(|fill| strict(&fill.exchange_order_id))
             .filter(|id| !id.is_empty() && *id != entry_order_id)
             .map(str::to_owned)
             .collect();
@@ -1922,22 +1956,26 @@ impl OkxEngine {
         &self,
         row: &Order,
         inst_id: &str,
-        fills: &[Row],
+        fills: &[VenueFill],
         close_subtype: &str,
     ) -> Result<HashMap<String, String>, EngineError> {
+        let venue = self.deps.venue.as_ref();
         // The proof below requires a complete page. Only look up IDs from fills
         // that could belong to a reached exit on this instrument and side.
-        if fills.len() >= RECENT_FILLS_LIMIT {
+        if fills.len() >= self.deps.venue.recent_fills_page() {
             return Ok(HashMap::new());
         }
         let mut ids: Vec<_> = fills
             .iter()
             .filter(|fill| {
-                fill.get("instId").and_then(Value::as_str) == Some(inst_id)
-                    && fill.get("posSide").and_then(Value::as_str) == Some("net")
-                    && fill.get("subType").and_then(Value::as_str) == Some(close_subtype)
+                strict(&fill.symbol)
+                    .map(|id| venue.instrument_id(id))
+                    .as_deref()
+                    == Some(inst_id)
+                    && strict(&fill.position_side) == Some("net")
+                    && strict(&fill.sub_type) == Some(close_subtype)
             })
-            .filter_map(|fill| fill.get("ordId").and_then(Value::as_str))
+            .filter_map(|fill| strict(&fill.exchange_order_id))
             .filter(|id| !id.is_empty())
             .map(str::to_owned)
             .collect();
@@ -1978,6 +2016,7 @@ impl OkxEngine {
         let account_id = row.account_id.clone();
         let symbol = row.symbol.clone();
         let side = row.side;
+        let venue = self.deps.venue.clone();
         self.rows(move |rows| {
             // Retired targets can still fill. Their venue ID is a hash of the
             // local key, so compare it only among eligible recovery candidates.
@@ -1986,10 +2025,10 @@ impl OkxEngine {
                     &account_id,
                     &symbol,
                     side,
-                    REACHED_EXIT_UNCONFIRMED,
+                    &reached_exit_unconfirmed(venue.name()),
                     &|order| {
                         is_reached_exit(order)
-                            && client_ids.contains(&to_cl_ord_id(&order.client_order_id))
+                            && client_ids.contains(&venue.client_order_id(&order.client_order_id))
                     },
                 )?
             {
@@ -2011,6 +2050,7 @@ impl OkxEngine {
         registry: &Registry,
         snapshot: &mut PositionSnapshot,
     ) -> Result<(), EngineError> {
+        let venue = self.deps.venue.as_ref();
         let leg =
             leg_of(row).ok_or_else(|| EngineError::message("Invalid deferred protection leg"))?;
         let parent_id = deferred_parent_id(row, leg)
@@ -2043,7 +2083,7 @@ impl OkxEngine {
                 .close_row(row, "Deferred protection canceled: entry did not fill")
                 .await;
         }
-        let inst_id = to_inst_id(&row.symbol);
+        let inst_id = venue.instrument_id(&row.symbol);
         let confirming = self.now().saturating_sub(parent.updated_at) < POSITION_MISSING_MS;
         let context = self.context().await?;
         let replacement = context.open_orders.iter().rev().find(|other| {
@@ -2069,29 +2109,28 @@ impl OkxEngine {
                 return self.close_row(row, REPLACED).await;
             }
         }
+        let parent_client_id = self.deps.venue.client_order_id(&parent.client_order_id);
         let remote = self
             .deps
-            .client
-            .get_order(&inst_id, &to_cl_ord_id(&parent.client_order_id))
+            .venue
+            .get_order(&row.symbol, &parent_client_id)
             .await?;
         let needs_replacement_stop =
             if parent.status == OrderStatus::Canceled && parent.attached_stop_loss.is_some() {
                 // Single attached stops also apply to a partial fill when the remainder is
                 // canceled. Confirm the fixed stop appeared before placing optional exits.
                 let stop = self.lookup_algo(&format!("{}:sl", parent.id)).await?;
-                !stop
-                    .as_ref()
-                    .and_then(|algo| algo.get("state"))
-                    .and_then(Value::as_str)
-                    .is_some_and(|state| ALIVE_STATES.contains(&state))
+                !stop.as_ref().is_some_and(is_alive)
             } else {
                 false
             };
         // Read fresh after the parent/stop calls, which may have outlived the earlier snapshot.
         snapshot.update_positions(PositionSnapshot::new(
-            self.deps.client.get_positions().await?,
+            venue,
+            self.deps.venue.positions().await?,
         )?);
-        let Some((position, signed_size)) = isolated_net_position(&snapshot.open, &inst_id) else {
+        let Some((position, signed_size)) = isolated_net_position(venue, &snapshot.open, &inst_id)
+        else {
             if confirming {
                 return Ok(());
             }
@@ -2109,11 +2148,13 @@ impl OkxEngine {
             PositionSide::Long
         };
         let closes = (row.side == OrderSide::Sell) != short;
-        let order_trade = remote.as_ref().and_then(last_trade_id);
+        let order_trade = remote
+            .as_ref()
+            .and_then(|remote| last_trade_id(&remote.trade_id));
         let (Some(entry_trade), Some(position_trade), Some(position_updated_at)) = (
             order_trade,
-            last_trade_id(position),
-            exchange_time(position, "uTime"),
+            position_trade_id(position),
+            venue_time(&position.updated_ms),
         ) else {
             if confirming {
                 return Ok(());
@@ -2149,8 +2190,8 @@ impl OkxEngine {
                 signed_size.clone()
             },
             trade_id: Some(position_trade),
-            position_id: super::views::position_id(position, side),
-            updated_at: nullish_text(position.get("uTime")),
+            position_id: super::views::position_id(venue, position, side),
+            updated_at: nullish(&position.updated_ms).map(str::to_owned),
         };
         if needs_replacement_stop {
             // An SL-only edit may have superseded the attached stop while leaving
@@ -2181,7 +2222,7 @@ impl OkxEngine {
                     if !self.refresh_matching_position(snapshot, &inst_id).await? {
                         return Ok(());
                     }
-                    let (position, _) = isolated_net_position(&snapshot.open, &inst_id)
+                    let (position, _) = isolated_net_position(venue, &snapshot.open, &inst_id)
                         .expect("the fresh position matched");
                     confirmed = stop_precedes_liquidation(stop, position, side)?;
                 }
@@ -2190,7 +2231,11 @@ impl OkxEngine {
                 if confirming {
                     return Ok(());
                 }
-                return self.close_row(row, "Deferred protection canceled: OKX did not confirm the fixed stop for the partial fill").await;
+                let reason = format!(
+                    "Deferred protection canceled: {} did not confirm the fixed stop for the partial fill",
+                    self.deps.venue.name()
+                );
+                return self.close_row(row, &reason).await;
             }
         }
         if let Some(replacement) = replacement {
@@ -2230,10 +2275,7 @@ impl OkxEngine {
         let contract_value = dec(&registry.get(&row.symbol)?.venue_contract_value)?;
         let expected = expected.div(&contract_value).map_err(decimal_error)?;
         let filled = {
-            let Some(order_id) = remote
-                .get("ordId")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
+            let Some(order_id) = strict(&remote.exchange_order_id).filter(|id| !id.is_empty())
             else {
                 return self
                     .close_row(
@@ -2242,7 +2284,7 @@ impl OkxEngine {
                     )
                     .await;
             };
-            let fills = self.deps.client.recent_fills(&inst_id).await?;
+            let fills = self.deps.venue.recent_fills(&row.symbol).await?;
             let unresolved: HashSet<_> = context
                 .open_orders
                 .iter()
@@ -2252,12 +2294,12 @@ impl OkxEngine {
                         && is_reached_exit(other)
                         && other.exchange_order_id.as_deref().is_none_or(str::is_empty)
                 })
-                .map(|other| to_cl_ord_id(&other.client_order_id))
+                .map(|other| self.deps.venue.client_order_id(&other.client_order_id))
                 .collect();
             let first_entry_trade = fills
                 .iter()
-                .filter(|fill| fill.get("ordId").and_then(Value::as_str) == Some(order_id))
-                .filter_map(last_trade_id)
+                .filter(|fill| strict(&fill.exchange_order_id) == Some(order_id))
+                .filter_map(|fill| last_trade_id(&fill.trade_id))
                 .min()
                 .unwrap_or(entry_trade);
             // Only a reduction in this entry's interval can make the unanswered exit
@@ -2267,18 +2309,19 @@ impl OkxEngine {
                 .reached_exit_parents(row, &inst_id, &fills, close_subtype)
                 .await?;
             let unattributed_closings = fills.iter().filter(|fill| {
-                last_trade_id(fill)
+                last_trade_id(&fill.trade_id)
                     .is_some_and(|id| (first_entry_trade..=position_trade).contains(&id))
-                    && fill.get("instId").and_then(Value::as_str) == Some(inst_id.as_str())
-                    && fill.get("posSide").and_then(Value::as_str) == Some("net")
-                    && fill.get("subType").and_then(Value::as_str) == Some(close_subtype)
-                    && fill
-                        .get("ordId")
-                        .and_then(Value::as_str)
+                    && strict(&fill.symbol)
+                        .map(|id| venue.instrument_id(id))
+                        .as_deref()
+                        == Some(inst_id.as_str())
+                    && strict(&fill.position_side) == Some("net")
+                    && strict(&fill.sub_type) == Some(close_subtype)
+                    && strict(&fill.exchange_order_id)
                         .is_none_or(|id| !reached_exit_parents.contains_key(id))
             });
             let awaiting_active = unattributed_closings.clone().any(|fill| {
-                match fill.get("clOrdId").and_then(Value::as_str) {
+                match strict(&fill.client_order_id) {
                     Some(id) if !id.is_empty() => unresolved.contains(id),
                     // Only an active unresolved target can justify waiting on an
                     // anonymous reduction. Retired ones require a matching ID.
@@ -2287,6 +2330,7 @@ impl OkxEngine {
             });
             let isolated_orders = self.own_order_ids(row, &inst_id, &fills, order_id).await?;
             let history = PositionHistory {
+                venue: self.deps.venue.as_ref(),
                 inst_id: &inst_id,
                 fills: &fills,
                 trade: position_trade,
@@ -2314,10 +2358,10 @@ impl OkxEngine {
                     return Ok(());
                 }
                 _ => {
-                    let exchange_ids = if fills.len() < RECENT_FILLS_LIMIT {
+                    let exchange_ids = if fills.len() < self.deps.venue.recent_fills_page() {
                         unattributed_closings
                             .clone()
-                            .filter_map(|fill| fill.get("ordId").and_then(Value::as_str))
+                            .filter_map(|fill| strict(&fill.exchange_order_id))
                             .filter(|id| !id.is_empty())
                             .map(str::to_owned)
                             .collect()
@@ -2325,7 +2369,7 @@ impl OkxEngine {
                         Vec::new()
                     };
                     let client_ids = unattributed_closings
-                        .filter_map(|fill| fill.get("clOrdId").and_then(Value::as_str))
+                        .filter_map(|fill| strict(&fill.client_order_id))
                         .filter(|id| {
                             id.len() == 32
                                 && id.bytes().all(|byte| {
@@ -2394,7 +2438,7 @@ impl OkxEngine {
             return Ok(());
         }
         let last = dec(&quote.last)?;
-        let after_fill = fill_time(remote).is_some_and(|at| quote.ts > at);
+        let after_fill = venue_time(&remote.fill_ms).is_some_and(|at| quote.ts > at);
         let reached = |target: &Dec| match side {
             PositionSide::Long => last.gte(target),
             PositionSide::Short => last.lte(target),
@@ -2434,17 +2478,20 @@ impl OkxEngine {
             }
             row.trailing_activation_price = spec.activation_price;
         }
-        let body = algo_body(row, registry)?;
+        let body = algo_body(row, registry, self.deps.venue.as_ref())?;
         row.reject_reason = Some(format!(
             "Awaiting confirmation: deferred {} submission started",
             leg.tag()
         ));
         row.created_at = self.now();
         row.updated_at = self.now();
-        let _staged = self.stage_order(super::UnsentOrder::Deferred {
-            original: Box::new(unsent),
-            marker: Box::new(row.clone()),
-        })?;
+        let _staged = self.stage_order(super::UnsentOrder::new(
+            self.deps.venue.as_ref(),
+            super::Unsent::Deferred {
+                original: Box::new(unsent),
+                marker: Box::new(row.clone()),
+            },
+        ))?;
         self.save(row.clone()).await?;
         if !self
             .recheck_deferred_dispatch(row, snapshot, &inst_id)
@@ -2453,22 +2500,22 @@ impl OkxEngine {
             return Ok(());
         }
         self.handoff_order(row)?;
-        match self.deps.client.place_algo(&body).await {
+        match self.deps.venue.place_algo(body).await {
             Ok(id) => {
                 row.exchange_order_id = Some(id);
                 row.reject_reason = None;
             }
             // These explicit price refusals mean no algo was accepted. Let the next fresh
             // quote decide whether the target has triggered while the request was in flight.
-            Err(OkxError::Rejection { code, .. })
-                if leg == Leg::Tp
-                    && matches!(code.as_str(), "51050" | "51052" | "51277" | "51279") =>
-            {
+            Err(VenueError::Rejection {
+                kind: Some(RejectKind::TriggerWouldFireNow),
+                ..
+            }) if leg == Leg::Tp => {
                 row.reject_reason = Some(DEFERRED_TP.into());
             }
-            Err(OkxError::Rejection { code, message }) => {
+            Err(rejection @ VenueError::Rejection { .. }) => {
                 row.status = OrderStatus::Rejected;
-                row.reject_reason = Some(OkxError::Rejection { code, message }.to_string());
+                row.reject_reason = Some(rejection.to_string());
             }
             Err(error) => {
                 row.reject_reason = Some(format!("Awaiting confirmation: {error}"));
@@ -2488,6 +2535,7 @@ impl OkxEngine {
         side: PositionSide,
         snapshot: &mut PositionSnapshot,
     ) -> Result<(), EngineError> {
+        let venue = self.deps.venue.as_ref();
         let prepared = self.prepare(&row.account_id, &row.client_order_id).await?;
         if let Some(reason) = self.pre_trade_refusal(row, Some(side), &prepared)? {
             return self.close_row(row, &reason).await;
@@ -2506,22 +2554,24 @@ impl OkxEngine {
             Some("Awaiting confirmation: reached take profit submission started".into());
         row.created_at = self.now();
         row.updated_at = self.now();
-        let _staged = self.stage_order(super::UnsentOrder::Deferred {
-            original: Box::new(unsent),
-            marker: Box::new(row.clone()),
-        })?;
+        let _staged = self.stage_order(super::UnsentOrder::new(
+            self.deps.venue.as_ref(),
+            super::Unsent::Deferred {
+                original: Box::new(unsent),
+                marker: Box::new(row.clone()),
+            },
+        ))?;
         self.save(row.clone()).await?;
-        let client_id = to_cl_ord_id(&row.client_order_id);
-        let body = to_body(row, inst_id, &client_id, contracts.to_fixed());
+        let body = to_body(row, self.deps.venue.as_ref(), contracts.to_fixed());
         if !self
             .recheck_deferred_dispatch(row, snapshot, inst_id)
             .await?
         {
             return Ok(());
         }
-        match self.send(row, inst_id, &body).await {
+        match self.send(row, body).await {
             Err(error @ EngineError::SessionRetired) => return Err(error),
-            Err(error @ EngineError::Okx(OkxError::Rejection { .. })) => {
+            Err(error @ EngineError::Venue(VenueError::Rejection { .. })) => {
                 row.status = OrderStatus::Rejected;
                 row.reject_reason = Some(error.to_string());
                 return self.save(row.clone()).await;
@@ -2537,7 +2587,8 @@ impl OkxEngine {
         }
         self.sync_order(row, registry).await?;
         snapshot.update_positions(PositionSnapshot::new(
-            self.deps.client.get_positions().await?,
+            venue,
+            self.deps.venue.positions().await?,
         )?);
         Ok(())
     }
@@ -2561,10 +2612,18 @@ impl OkxEngine {
     }
 
     /// A temporary refusal cannot establish whether the algo is still live.
-    async fn lookup_algo(&self, id: &str) -> Result<Option<Row>, EngineError> {
-        match self.deps.client.get_algo(&to_algo_cl_ord_id(id)).await {
+    async fn lookup_algo(&self, id: &str) -> Result<Option<VenueAlgo>, EngineError> {
+        match self
+            .deps
+            .venue
+            .get_algo(&self.deps.venue.client_algo_id(id))
+            .await
+        {
             Ok(found) => Ok(found),
-            Err(OkxError::Rejection { code, .. }) if code == ORDER_NOT_FOUND => Ok(None),
+            Err(VenueError::Rejection {
+                kind: Some(RejectKind::NotFound),
+                ..
+            }) => Ok(None),
             Err(error) => Err(error.into()),
         }
     }
@@ -2601,12 +2660,12 @@ impl OkxEngine {
     async fn confirm(
         &self,
         row: &mut Order,
-        algo: &Row,
+        algo: &VenueAlgo,
         at: i64,
-        alive: &mut Vec<(usize, Row)>,
+        alive: &mut Vec<(usize, VenueAlgo)>,
         index: usize,
     ) -> Result<(), EngineError> {
-        let algo_id = nullish_text(algo.get("algoId"));
+        let algo_id = nullish(&algo.exchange_algo_id).map(str::to_owned);
         let trigger = live_trigger(row, algo);
         if row.exchange_order_id != algo_id
             || row.reject_reason.as_deref().is_some_and(|r| !r.is_empty())
@@ -2658,11 +2717,12 @@ impl OkxEngine {
     /// Deferred per-entry targets and trailing stops stay distinct.
     pub(super) async fn reconcile_protection(
         &self,
-        algos: Vec<Row>,
+        algos: Vec<VenueAlgo>,
         snapshot: &mut PositionSnapshot,
-        balance: &mut Option<Row>,
+        balance: &mut Option<VenueBalance>,
         writes: VenueWrites,
     ) -> Result<ProtectionMap, EngineError> {
+        let venue = self.deps.venue.as_ref();
         match self
             .reconcile_protection_pass(algos, snapshot, writes)
             .await?
@@ -2671,12 +2731,12 @@ impl OkxEngine {
             None => {
                 // An exit or a position change can invalidate the earlier algo list.
                 let refreshed = self.pending_protection().await;
-                let post_exit = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
+                let post_exit = PositionSnapshot::new(venue, self.deps.venue.positions().await?)?;
                 let position_changed = snapshot.held != post_exit.held;
                 snapshot.update_positions(post_exit);
                 let refreshed = if position_changed {
                     let refreshed = self.pending_protection().await?;
-                    let latest = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
+                    let latest = PositionSnapshot::new(venue, self.deps.venue.positions().await?)?;
                     let changed_again = snapshot.held != latest.held;
                     snapshot.update_positions(latest);
                     if changed_again {
@@ -2688,13 +2748,14 @@ impl OkxEngine {
                 } else {
                     refreshed?
                 };
-                let post_exit_balance = self.deps.client.get_usdt_balance().await?;
+                let post_exit_balance = self.deps.venue.balance().await?;
                 // The balance must describe the positions published with it. A change
                 // during the balance read leaves both stale for the next sync.
-                let after_balance = PositionSnapshot::new(self.deps.client.get_positions().await?)?;
+                let after_balance =
+                    PositionSnapshot::new(venue, self.deps.venue.positions().await?)?;
                 // Cross-margin positions are published too, so they must also agree.
                 if snapshot.held != after_balance.held
-                    || snapshot.identity() != after_balance.identity()
+                    || snapshot.identity(venue) != after_balance.identity(venue)
                 {
                     return Err(EngineError::message(
                         "Position changed while reading the post-exit balance",
@@ -2711,10 +2772,11 @@ impl OkxEngine {
 
     async fn reconcile_protection_pass(
         &self,
-        algos: Vec<Row>,
+        algos: Vec<VenueAlgo>,
         snapshot: &mut PositionSnapshot,
         writes: VenueWrites,
     ) -> Result<Option<ProtectionMap>, EngineError> {
+        let venue = self.deps.venue.as_ref();
         let at = self.now();
         let account_id = self.deps.account_id.clone();
         let (open, recent, registry) = self
@@ -2739,17 +2801,15 @@ impl OkxEngine {
         let mut ours: HashMap<String, usize> = rows
             .iter()
             .enumerate()
-            .map(|(i, row)| (to_algo_cl_ord_id(&row.id), i))
+            .map(|(i, row)| (self.deps.venue.client_algo_id(&row.id), i))
             .collect();
         // A live algo with a client id but no row in that window may be ours from further back,
         // most often a cancel OKX refused and newer orders have since pushed out. It is looked up
         // by algoId, so it is still cancelled rather than shown as someone else's.
         let unmatched: Vec<String> = algos
             .iter()
-            .filter(|algo| {
-                truthy_text(algo.get("algoClOrdId")).is_some_and(|id| !ours.contains_key(&id))
-            })
-            .filter_map(|algo| truthy_text(algo.get("algoId")))
+            .filter(|algo| truthy(&algo.client_algo_id).is_some_and(|id| !ours.contains_key(id)))
+            .filter_map(|algo| truthy(&algo.exchange_algo_id).map(str::to_owned))
             .collect();
         if !unmatched.is_empty() {
             let account_id = self.deps.account_id.clone();
@@ -2757,7 +2817,7 @@ impl OkxEngine {
                 .rows(move |rows| Ok(rows.find_orders_by_exchange_ids(&account_id, &unmatched)?))
                 .await?;
             for row in older.into_iter().filter(is_leg) {
-                let key = to_algo_cl_ord_id(&row.id);
+                let key = self.deps.venue.client_algo_id(&row.id);
                 if let std::collections::hash_map::Entry::Vacant(slot) = ours.entry(key) {
                     slot.insert(rows.len());
                     rows.push(row);
@@ -2766,14 +2826,16 @@ impl OkxEngine {
         }
 
         let mut result = ProtectionMap::new();
-        let mut alive: Vec<(usize, Row)> = Vec::new();
-        let mut strays: Vec<(usize, Row)> = Vec::new();
+        let mut alive: Vec<(usize, VenueAlgo)> = Vec::new();
+        let mut strays: Vec<(usize, VenueAlgo)> = Vec::new();
         for algo in algos {
-            let index = truthy_text(algo.get("algoClOrdId")).and_then(|id| ours.get(&id).copied());
+            let index = truthy(&algo.client_algo_id).and_then(|id| ours.get(id).copied());
             match index {
                 None => {
-                    let inst_id = nullish_text(algo.get("instId")).unwrap_or_default();
-                    if let Some(spec) = registry.symbol_of_inst_id(&inst_id) {
+                    let inst_id = nullish(&algo.symbol)
+                        .map(|id| venue.instrument_id(id))
+                        .unwrap_or_default();
+                    if let Some(spec) = registry.symbol_of_inst_id(venue, &inst_id) {
                         result
                             .entry(spec.symbol.clone())
                             .or_default()
@@ -2809,11 +2871,7 @@ impl OkxEngine {
                         && slot.status != OrderStatus::Rejected);
                 if is_leg(slot) && slot.status == OrderStatus::Open && !is_deferred(slot) {
                     if let Some(remote) = self.lookup_algo(&slot.id).await? {
-                        if remote
-                            .get("state")
-                            .and_then(Value::as_str)
-                            .is_some_and(|s| ALIVE_STATES.contains(&s))
-                        {
+                        if is_alive(&remote) {
                             self.confirm(slot, &remote, at, &mut alive, i).await?;
                         }
                     }
@@ -2821,11 +2879,7 @@ impl OkxEngine {
                 continue;
             }
             let remote = self.lookup_algo(&slot.id).await?;
-            let live = remote.as_ref().is_some_and(|r| {
-                r.get("state")
-                    .and_then(|s| s.as_str())
-                    .is_some_and(|s| ALIVE_STATES.contains(&s))
-            });
+            let live = remote.as_ref().is_some_and(is_alive);
             let row = slot;
             if let (true, Some(remote)) = (live, &remote) {
                 self.confirm(row, remote, at, &mut alive, i).await?;
@@ -2837,14 +2891,19 @@ impl OkxEngine {
             {
                 if let Some(id) = remote
                     .as_ref()
-                    .and_then(|algo| truthy_text(algo.get("algoId")))
+                    .and_then(|algo| truthy(&algo.exchange_algo_id).map(str::to_owned))
                 {
                     row.exchange_order_id = Some(id);
                 }
-                self.close_row(row, "Gone from OKX").await?;
+                let reason = format!("Gone from {}", self.deps.venue.name());
+                self.close_row(row, &reason).await?;
             } else if at - row.created_at >= NEVER_ARRIVED_AFTER_MS {
-                self.expire_unconfirmed_order(row, ALGO_NOT_ARRIVED, self.now())
-                    .await?;
+                self.expire_unconfirmed_order(
+                    row,
+                    algo_not_arrived(self.deps.venue.name()),
+                    self.now(),
+                )
+                .await?;
             }
         }
         if refresh_readback || snapshot.post_exit_unverified {
@@ -2854,17 +2913,18 @@ impl OkxEngine {
         let held = &snapshot.held;
         // Compared by instId, which every row maps to, so a symbol missing from the registry
         // still counts as held.
-        let is_held = |row: &Order| held.contains_key(&to_inst_id(&row.symbol));
+        let is_held = |row: &Order| held.contains_key(&venue.instrument_id(&row.symbol));
         let closes_held = |row: &Order| {
-            held.get(&to_inst_id(&row.symbol)).is_some_and(|held| {
-                (held.side == PositionSide::Long) == (row.side == OrderSide::Sell)
-            })
+            held.get(&venue.instrument_id(&row.symbol))
+                .is_some_and(|held| {
+                    (held.side == PositionSide::Long) == (row.side == OrderSide::Sell)
+                })
         };
         let other_side = |row: &Order| is_held(row) && !closes_held(row);
         let key_of = |row: &Order| format!("{}:{:?}", row.symbol, leg_of(row));
 
-        let mut cancel: Vec<(usize, Row, Option<&'static str>)> = Vec::new();
-        let mut groups: Vec<(String, Vec<(usize, Row)>)> = Vec::new();
+        let mut cancel: Vec<(usize, VenueAlgo, Option<&'static str>)> = Vec::new();
+        let mut groups: Vec<(String, Vec<(usize, VenueAlgo)>)> = Vec::new();
         let mut ranked = alive.clone();
         ranked.sort_by_key(|(i, _)| *i);
         for (i, algo) in ranked {
@@ -2886,7 +2946,7 @@ impl OkxEngine {
         {
             let prior = self.state().missing_position.clone();
             for i in alive.iter().chain(strays.iter()).map(|(i, _)| *i) {
-                let inst_id = to_inst_id(&rows[i].symbol);
+                let inst_id = venue.instrument_id(&rows[i].symbol);
                 if held.contains_key(&inst_id) || missing.contains_key(&inst_id) {
                     continue;
                 }
@@ -2905,7 +2965,7 @@ impl OkxEngine {
         }
         let position_gone = |row: &Order| {
             missing
-                .get(&to_inst_id(&row.symbol))
+                .get(&venue.instrument_id(&row.symbol))
                 .is_some_and(|m| m.count >= 2 && at - m.since >= POSITION_MISSING_MS)
         };
 
@@ -2915,7 +2975,7 @@ impl OkxEngine {
         // let a later same-side position take the algo up.
         for (i, algo) in strays {
             let observed = rows[i].clone();
-            rows[i].exchange_order_id = nullish_text(algo.get("algoId"));
+            rows[i].exchange_order_id = nullish(&algo.exchange_algo_id).map(str::to_owned);
             let key = key_of(&rows[i]);
             let row = &rows[i];
             let closed_for_good = matches!(
@@ -2933,12 +2993,7 @@ impl OkxEngine {
             } else {
                 // The pending list may predate a replacement that has since triggered or
                 // gone. Reopen only a stop OKX still lists live now, over the row as read.
-                let Some(live) = self.lookup_algo(&row.id).await?.filter(|remote| {
-                    remote
-                        .get("state")
-                        .and_then(Value::as_str)
-                        .is_some_and(|state| ALIVE_STATES.contains(&state))
-                }) else {
+                let Some(live) = self.lookup_algo(&row.id).await?.filter(is_alive) else {
                     continue;
                 };
                 let mut row = row.clone();
@@ -2959,7 +3014,7 @@ impl OkxEngine {
         let mut uncovered: Vec<(Vec<usize>, Option<Dec>)> = Vec::new();
         for (_, members) in &groups {
             let first = &rows[members[0].0];
-            let Some(position) = held.get(&to_inst_id(&first.symbol)) else {
+            let Some(position) = held.get(&venue.instrument_id(&first.symbol)) else {
                 if position_gone(first) {
                     for (i, algo) in members {
                         cancel.push((*i, algo.clone(), Some(POSITION_CLOSED)));
@@ -2987,7 +3042,7 @@ impl OkxEngine {
             let entry = result.entry(effective.symbol.clone()).or_default();
             entry.set(leg, effective.clone());
             if leg == Leg::Trail {
-                entry.trail_trigger = num(last.1.get("moveTriggerPx"));
+                entry.trail_trigger = num(&last.1.move_trigger_price);
             }
         }
 
@@ -3024,7 +3079,7 @@ impl OkxEngine {
             if awaiting {
                 continue;
             }
-            let Some(position) = held.get(&to_inst_id(&newest.symbol)) else {
+            let Some(position) = held.get(&venue.instrument_id(&newest.symbol)) else {
                 continue;
             };
             // A size that does not read leaves the per-fill rows as they are.
@@ -3154,11 +3209,11 @@ impl OkxEngine {
         match self.place(&mut row, registry).await {
             Ok(()) => Ok(()),
             // Unknown outcome: never placed again; a later sync looks it up.
-            Err(EngineError::Okx(OkxError::Unknown(message))) => {
+            Err(EngineError::Venue(VenueError::Unknown(message))) => {
                 row.reject_reason = Some(format!("Awaiting confirmation: {message}"));
                 self.save(row).await
             }
-            Err(error @ (EngineError::Okx(_) | EngineError::Message(_))) => {
+            Err(error @ (EngineError::Venue(_) | EngineError::Message(_))) => {
                 row.status = OrderStatus::Rejected;
                 row.reject_reason = Some(error.to_string());
                 row.updated_at = self.now();

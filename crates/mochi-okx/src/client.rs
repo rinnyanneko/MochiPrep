@@ -2,8 +2,6 @@
 //! byte for byte, the same reading of every answer, and the same error texts.
 
 use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -246,7 +244,8 @@ pub struct CancelAlgo {
 
 // ---- transport ------------------------------------------------------------------------------
 
-pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+/// Shared with every exchange adapter; re-exported so `mochi_okx::BoxFuture` still names it.
+pub use mochi_exchange::venue::BoxFuture;
 
 /// A signed request. The key, passphrase and signature headers are wiped on drop and never shown
 /// by `Debug`.

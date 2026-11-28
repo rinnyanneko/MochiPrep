@@ -11,6 +11,15 @@ pub fn to_inst_id(symbol: &str) -> String {
     format!("{base}-USDT-SWAP")
 }
 
+/// `BTC-USDT-SWAP` -> `BTCUSDT`, the inverse of [`to_inst_id`]. Anything that is not a USDT swap
+/// stays as OKX wrote it, so it never matches a registered pair yet stays distinct.
+pub fn from_inst_id(inst_id: &str) -> String {
+    match inst_id.strip_suffix("-USDT-SWAP") {
+        Some(base) => format!("{base}USDT"),
+        None => inst_id.to_string(),
+    }
+}
+
 /// clOrdId allows only 32 alphanumerics. Hashing keeps it deterministic for any local key.
 pub fn to_cl_ord_id(client_order_id: &str) -> String {
     hex32(client_order_id)

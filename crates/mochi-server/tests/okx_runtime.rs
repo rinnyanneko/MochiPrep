@@ -13,8 +13,9 @@ use http_body_util::BodyExt;
 use mochi_ai::{AiProvider, AiRequest, AiResponse, CompletionFuture, ProviderKind};
 use mochi_core::paper::{CreateAccountArgs, PaperStore};
 use mochi_domain::{
-    default_risk_settings, Candle, DataSource, FeedState, FeedStatus, OrderRequest, PaperAccount,
-    Quote, ServerEvent, Timeframe, ToastLevel, Topic, VaultStatus,
+    default_account_config, default_live_limits, default_risk_settings, AccountVenue, Candle,
+    DataSource, Environment, ExchangeId, FeedState, FeedStatus, OrderRequest, PaperAccount, Quote,
+    ServerEvent, Timeframe, ToastLevel, Topic, VaultStatus,
 };
 use mochi_okx::fake::{FakeOkx, API_KEY, PASSPHRASE, SECRET_KEY};
 use mochi_server::config::{config_from, Config};
@@ -704,6 +705,135 @@ async fn an_exchange_account_without_a_session_says_it_is_not_connected() {
         )
         .await;
     assert_eq!((status, body), (200, json!([])));
+    w.rt.shutdown().await;
+}
+
+const NO_BYBIT: &str = "No exchange support installed for BYBIT";
+
+/// An account row on an exchange this build has no support for, written straight to the store.
+async fn insert_bybit_account(w: &World) -> PaperAccount {
+    let account = PaperAccount {
+        id: "acct_bybit".into(),
+        name: "Bybit".into(),
+        source: DataSource::Live,
+        venue: AccountVenue::Exchange {
+            exchange: ExchangeId::new("bybit").unwrap(),
+            environment: Environment::Live,
+        },
+        exchange_uid: Some("77".into()),
+        live_limits: None,
+        is_demo: false,
+        initial_balance: "0".into(),
+        wallet_balance: "0".into(),
+        used_margin: "0".into(),
+        realized_pnl: "0".into(),
+        fees_paid: "0".into(),
+        funding_paid: "0".into(),
+        config: default_account_config(),
+        created_at: 1,
+    };
+    let row = account.clone();
+    w.rt.call(move |r| r.engine().store().insert_account(&row).unwrap())
+        .await
+        .unwrap();
+    account
+}
+
+#[tokio::test]
+async fn unknown_exchange_lists_but_refuses_connect() {
+    let w = World::new().await;
+    let account = insert_bybit_account(&w).await;
+
+    let (status, body) = w.send("GET", "/api/accounts", None).await;
+    assert_eq!(status, 200);
+    let listed = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == "acct_bybit")
+        .expect("the Bybit account is listed")
+        .clone();
+    assert_eq!(listed["venue"], "BYBIT_LIVE");
+
+    // A trade, through the route and the runtime.
+    let (status, body) = w
+        .send(
+            "POST",
+            "/api/orders",
+            Some(json!({
+                "accountId": account.id, "clientOrderId": "x", "symbol": "BTCUSDT", "side": "BUY",
+                "type": "MARKET", "quantity": "0.001", "leverage": 3, "stopLoss": "74000",
+            })),
+        )
+        .await;
+    assert_eq!((status, body), (400, json!({ "error": NO_BYBIT })));
+    let error =
+        w.rt.call(|r| r.execution_target("acct_bybit").err().unwrap())
+            .await
+            .unwrap();
+    assert_eq!(error.message(), NO_BYBIT);
+
+    // A connect aimed at it, as a reconnect would.
+    let input = OkxConnectInput {
+        api_key: API_KEY.into(),
+        secret_key: SECRET_KEY.into(),
+        passphrase: PASSPHRASE.into(),
+        name: "Bybit".into(),
+        environment: account.venue.clone(),
+        limits: default_live_limits(),
+        remember: false,
+    };
+    let error =
+        w.rt.connect_okx(input, Some(account.id.clone()))
+            .await
+            .unwrap_err();
+    assert_eq!((error.status().as_u16(), error.message()), (400, NO_BYBIT));
+    assert!(w.okx.state().calls.is_empty(), "nothing was sent to OKX");
+
+    // The rest of the runtime reads it without falling over.
+    let (status, body) = w
+        .send("GET", "/api/accounts/acct_bybit/positions", None)
+        .await;
+    assert_eq!((status, body), (200, json!([])));
+    w.rt.sync_exchanges().await.unwrap();
+    let statuses = w.statuses().await;
+    assert_eq!(statuses.len(), 1);
+    assert_eq!(statuses[0]["venue"], "BYBIT_LIVE");
+    assert_eq!(statuses[0]["connected"], false);
+    assert_eq!(statuses[0]["armed"], false);
+    let (status, _) = w.send("GET", "/api/accounts", None).await;
+    assert_eq!(status, 200);
+    w.rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn unlock_skips_a_saved_key_whose_account_is_on_an_unknown_exchange() {
+    let mut w = World::new().await;
+    enable(&w).await;
+    let account = w.connect_with("OKX_LIVE", true).await.unwrap();
+    w.restart().await;
+    let id = account.id.clone();
+    w.rt.call(move |r| {
+        r.connection()
+            .execute(
+                "UPDATE accounts SET venue='BYBIT_LIVE' WHERE id=?",
+                [id.as_str()],
+            )
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    let calls = w.okx.state().calls.len();
+    let mut events = w.rt.subscribe();
+    let outcome = w.rt.unlock(PASSWORD.into()).await.unwrap();
+    assert_eq!(outcome.status, VaultStatus::Unlocked);
+    assert_eq!(outcome.failed, vec!["OKX".to_string()]);
+    assert_eq!(w.okx.state().calls.len(), calls, "nothing was sent to OKX");
+    assert!(toasts(&mut events).contains(&(
+        ToastLevel::Error,
+        format!("OKX: could not reconnect to OKX. {NO_BYBIT}")
+    )));
+    assert_eq!(w.statuses().await[0]["connected"], false);
     w.rt.shutdown().await;
 }
 

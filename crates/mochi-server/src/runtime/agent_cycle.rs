@@ -493,8 +493,8 @@ impl Runtime {
                 }
                 self.read_account(c, closed);
             }
-            ExecutionTarget::Okx(_) if stale.is_empty() => self.read_account(c, closed),
-            ExecutionTarget::Okx(_) => {
+            ExecutionTarget::Exchange(_) if stale.is_empty() => self.read_account(c, closed),
+            ExecutionTarget::Exchange(_) => {
                 let engine = self.engine_for(target);
                 self.agents.pending.push(Box::pin(async move {
                     let mut result = Ok(());
@@ -1211,8 +1211,8 @@ impl Runtime {
                 }
                 self.read_batch(b, closed);
             }
-            ExecutionTarget::Okx(_) if stale.is_empty() => self.read_batch(b, closed),
-            ExecutionTarget::Okx(_) => {
+            ExecutionTarget::Exchange(_) if stale.is_empty() => self.read_batch(b, closed),
+            ExecutionTarget::Exchange(_) => {
                 let engine = self.engine_for(target);
                 self.agents.pending.push(Box::pin(async move {
                     let mut failed: Vec<(String, ApiError)> = Vec::new();

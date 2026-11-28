@@ -10,12 +10,15 @@ use std::sync::Arc;
 use futures_util::future::BoxFuture;
 use mochi_core::paper::{DailyRisk, PaperStore, ProtectionResult};
 use mochi_domain::{
-    AccountBalance, AccountVenue, Order, OrderRequest, OrderResult, PaperAccount, PositionView,
-    Protection, Topic,
+    AccountBalance, AccountVenue, Environment, ExchangeId, Order, OrderRequest, OrderResult,
+    PaperAccount, PositionView, Protection, Topic,
 };
-use mochi_okx::engine::{
-    EngineError, OkxEngine, OkxEngineDeps, Rows, StoreAccess, StoreWork, UnsentOrder,
+use mochi_exchange::engine::{
+    EngineDeps, EngineError, ExchangeEngine, Rows, StoreAccess, StoreWork, UnsentOrder,
 };
+use mochi_exchange::venue::VenueAdapter;
+#[cfg(feature = "test-seams")]
+use mochi_okx::OkxAdapter;
 use mochi_okx::{Clock, Credentials, NetTransport, OkxClient, Transport, Venue};
 use tokio::sync::{broadcast, mpsc};
 use zeroize::Zeroizing;
@@ -33,7 +36,7 @@ pub struct ProtectionMeta {
     /// the same serialized step as the change, so a concurrent trailing edit is never undone.
     pub keep_trailing: bool,
     pub keep_take_profit: bool,
-    pub checked: Option<mochi_okx::engine::CheckedProtection>,
+    pub checked: Option<mochi_exchange::engine::CheckedProtection>,
 }
 
 /// A refused protection change. `after` is Node's `ProtectionChangeError.after`: set when the
@@ -105,7 +108,7 @@ pub trait ExecutionEngine: Send + Sync {
 #[derive(Clone)]
 pub enum ExecutionTarget {
     Paper,
-    Okx(Arc<OkxEngine>),
+    Exchange(Arc<ExchangeEngine>),
 }
 
 /// How OKX is reached. Tests inject an in-process fake and a fixed clock.
@@ -149,11 +152,13 @@ impl OkxOptions {
 
 /// A connected exchange account. Sessions live in memory only, so a restart forgets them.
 pub(super) struct ExchangeSession {
-    pub engine: Arc<OkxEngine>,
+    pub engine: Arc<ExchangeEngine>,
+    /// OKX Demo or live, from the account's venue; fixed for the session's life.
+    pub venue: Venue,
     pub armed: Arc<AtomicBool>,
-    /// The key, secret and passphrase (Node's `session.secrets`), so every text that leaves the
-    /// runtime has them removed. Wiped when the session goes.
-    pub secrets: [Zeroizing<String>; 3],
+    /// The key's values (Node's `session.secrets`; for OKX the key, secret and passphrase), so
+    /// every text that leaves the runtime has them removed. Wiped when the session goes.
+    pub secrets: Vec<Zeroizing<String>>,
     /// Whether the last sync succeeded: only the change to unhealthy pauses agents.
     pub was_healthy: bool,
     /// What its engine's store writes are checked against.
@@ -190,29 +195,39 @@ impl ExchangeSession {
     }
 }
 
-/// The venue an exchange account trades on.
-pub(super) fn okx_venue(venue: AccountVenue) -> Option<Venue> {
+/// The OKX venue an exchange account trades on; `None` for paper. An account on an exchange
+/// this build has no support for is refused here, so nothing builds an OKX client for it.
+pub(super) fn okx_venue(venue: &AccountVenue) -> Result<Option<Venue>, ApiError> {
     match venue {
-        AccountVenue::OkxDemo => Some(Venue::OkxDemo),
-        AccountVenue::OkxLive => Some(Venue::OkxLive),
-        AccountVenue::Paper => None,
+        AccountVenue::Paper => Ok(None),
+        AccountVenue::Exchange {
+            exchange,
+            environment,
+        } if *exchange == ExchangeId::okx() => Ok(Some(match environment {
+            Environment::Demo => Venue::OkxDemo,
+            Environment::Live => Venue::OkxLive,
+        })),
+        AccountVenue::Exchange { exchange, .. } => Err(ApiError::bad_request(format!(
+            "No exchange support installed for {}",
+            exchange.as_str().to_ascii_uppercase()
+        ))),
     }
 }
 
-/// Node's `new OkxExecutionEngine({...})` for one account. Arming is read through `armed`.
-pub(super) fn okx_engine(
+/// Node's `new OkxExecutionEngine({...})` for one account, trading through `venue`. Arming is
+/// read through `armed`.
+pub(super) fn exchange_engine(
     runtime: WeakRuntimeHandle,
     account_id: &str,
-    client: OkxClient,
+    venue: Arc<dyn VenueAdapter>,
     options: &OkxOptions,
     live: Arc<dyn LiveFeed>,
     armed: Arc<AtomicBool>,
     link: Arc<SessionLink>,
-) -> Arc<OkxEngine> {
-    OkxEngine::new(OkxEngineDeps {
+) -> Arc<ExchangeEngine> {
+    ExchangeEngine::new(EngineDeps {
         account_id: account_id.to_string(),
-        venue: client.venue(),
-        client,
+        venue,
         store: Arc::new(ActorStore { runtime, link }),
         get_quote: Arc::new(move |symbol: &str| live.get_quote(symbol)),
         now: options.now.clone(),
@@ -224,11 +239,11 @@ pub(super) fn okx_engine(
 impl Runtime {
     /// Node's `execution(accountId)`. An exchange account without a session cannot trade.
     pub fn execution(&self, account: &PaperAccount) -> Result<ExecutionTarget, ApiError> {
-        if account.venue == AccountVenue::Paper {
+        if okx_venue(&account.venue)?.is_none() {
             return Ok(ExecutionTarget::Paper);
         }
         match self.exchanges.get(&account.id) {
-            Some(session) => Ok(ExecutionTarget::Okx(session.engine.clone())),
+            Some(session) => Ok(ExecutionTarget::Exchange(session.engine.clone())),
             None => Err(ApiError::bad_request(format!(
                 "{} is not connected to OKX. Enter its API key in Settings.",
                 account.name
@@ -343,7 +358,7 @@ fn execution_engine(
 ) -> Arc<dyn ExecutionEngine> {
     match target {
         ExecutionTarget::Paper => Arc::new(PaperExecution { runtime }),
-        ExecutionTarget::Okx(engine) => Arc::new(OkxExecution { engine, runtime }),
+        ExecutionTarget::Exchange(engine) => Arc::new(ExchangeExecution { engine, runtime }),
     }
 }
 
@@ -615,12 +630,12 @@ impl ExecutionEngine for PaperExecution {
     }
 }
 
-struct OkxExecution {
-    engine: Arc<OkxEngine>,
+struct ExchangeExecution {
+    engine: Arc<ExchangeEngine>,
     runtime: WeakRuntimeHandle,
 }
 
-impl OkxExecution {
+impl ExchangeExecution {
     /// A thrown engine error, as Node's handler answers it: 400, secrets removed on the task,
     /// the exchange keys included.
     async fn refused(&self, error: EngineError) -> ApiError {
@@ -640,7 +655,7 @@ impl OkxExecution {
     }
 }
 
-impl ExecutionEngine for OkxExecution {
+impl ExecutionEngine for ExchangeExecution {
     fn place_order(&self, request: OrderRequest) -> BoxFuture<'_, Result<OrderResult, ApiError>> {
         Box::pin(async move { self.answer(self.engine.place_order(request).await).await })
     }
@@ -729,8 +744,8 @@ impl ExecutionEngine for OkxExecution {
                     &account_id,
                     &symbol,
                     protection,
-                    mochi_okx::engine::ProtectionOrderOptions {
-                        retain: mochi_okx::engine::ProtectionRetention {
+                    mochi_exchange::engine::ProtectionOrderOptions {
+                        retain: mochi_exchange::engine::ProtectionRetention {
                             trailing_stop: meta.keep_trailing,
                             take_profit: meta.keep_take_profit,
                         },
@@ -792,25 +807,25 @@ impl RuntimeHandle {
         let (venue, options, live, epoch) = self
             .call(move |r| {
                 let account = r.require_account(&id)?;
-                let venue = okx_venue(account.venue)
+                let venue = okx_venue(&account.venue)?
                     .ok_or_else(|| ApiError::bad_request("Not an exchange account"))?;
                 r.restore_retired_order(&id)
                     .map_err(|error| r.api_error(error))?;
                 Ok((venue, r.okx.clone(), r.live(), r.session_seq))
             })
             .await??;
-        let secrets = [
+        let secrets = vec![
             Zeroizing::new(credentials.api_key().to_string()),
             Zeroizing::new(credentials.secret_key().to_string()),
             Zeroizing::new(credentials.passphrase().to_string()),
         ];
-        let client = options.client(credentials, venue);
+        let adapter = Arc::new(OkxAdapter::new(options.client(credentials, venue)));
         let flag = Arc::new(AtomicBool::new(armed));
         let link = SessionLink::new(account_id, epoch);
-        let engine = okx_engine(
+        let engine = exchange_engine(
             self.downgrade(),
             account_id,
-            client,
+            adapter,
             &options,
             live,
             flag.clone(),
@@ -824,6 +839,7 @@ impl RuntimeHandle {
         self.call(move |r| {
             let session = ExchangeSession {
                 engine,
+                venue,
                 armed: flag,
                 secrets,
                 was_healthy: true,

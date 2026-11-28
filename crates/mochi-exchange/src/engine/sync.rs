@@ -1,35 +1,23 @@
-//! Bringing local rows and the cached account in line with OKX.
+//! Bringing local rows and the cached account in line with the exchange.
 
-use mochi_domain::jsnum::js_string_to_number;
 use std::collections::{HashMap, HashSet};
 
+use crate::venue::{
+    nullish, strict, truthy, AlgoKind, VenueAdapter, VenueAlgo, VenueField, VenueOrder,
+    VenuePosition,
+};
 use mochi_domain::{EquityPoint, Fill, Liquidity, Order, OrderStatus, PositionSide};
-use serde_json::Value;
 
 use super::protection::{
-    is_reached_exit, last_trade_id, record_attached, Held, REACHED_EXIT_UNCONFIRMED,
+    is_reached_exit, position_trade_id, reached_exit_unconfirmed, record_attached, Held,
 };
 use super::{
-    dec, is_leg, EngineError, OkxEngine, Registry, EQUITY_EVERY_MS, NEVER_ARRIVED_AFTER_MS,
+    dec, is_leg, EngineError, ExchangeEngine, Registry, EQUITY_EVERY_MS, NEVER_ARRIVED_AFTER_MS,
 };
-use crate::client::{nullish_text, truthy_text, PendingAlgoType, Row, RECENT_FILLS_LIMIT};
-use crate::ids::{to_cl_ord_id, to_inst_id};
-
-/// Node's `Number(value)` for an OKX field.
-pub(super) fn js_number(value: Option<&Value>) -> f64 {
-    match value {
-        None => f64::NAN,
-        Some(Value::Null) => 0.0,
-        Some(Value::Bool(flag)) => f64::from(u8::from(*flag)),
-        Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
-        Some(Value::String(text)) => js_string_to_number(text),
-        Some(_) => f64::NAN,
-    }
-}
 
 /// `d(value || 0)`.
-fn dec_or_zero(value: Option<&Value>) -> Result<mochi_decimal::Dec, EngineError> {
-    dec(&truthy_text(value).unwrap_or_else(|| "0".into()))
+fn dec_or_zero(field: &Option<VenueField>) -> Result<mochi_decimal::Dec, EngineError> {
+    dec(truthy(field).unwrap_or("0"))
 }
 
 /// Which protection changes a reconciliation may send to OKX. Order lookups and
@@ -64,7 +52,7 @@ impl VenueWrites {
 
 #[derive(Clone)]
 pub(super) struct PositionSnapshot {
-    pub(super) open: Vec<Row>,
+    pub(super) open: Vec<VenuePosition>,
     pub(super) held: HashMap<String, Held>,
     pub(super) post_exit_unverified: bool,
 }
@@ -75,11 +63,14 @@ impl PositionSnapshot {
         self.held = snapshot.held;
     }
 
-    pub(super) fn new(rows: Vec<Row>) -> Result<Self, EngineError> {
+    pub(super) fn new(
+        venue: &dyn VenueAdapter,
+        rows: Vec<VenuePosition>,
+    ) -> Result<Self, EngineError> {
         let mut open = Vec::new();
         let mut held = HashMap::new();
         for row in rows {
-            let size = dec_or_zero(row.get("pos"))?;
+            let size = dec_or_zero(&row.size)?;
             if size.is_zero() {
                 continue;
             }
@@ -88,16 +79,18 @@ impl PositionSnapshot {
             } else {
                 (PositionSide::Long, size)
             };
-            let inst_id = nullish_text(row.get("instId")).unwrap_or_default();
+            let inst_id = nullish(&row.symbol)
+                .map(|id| venue.instrument_id(id))
+                .unwrap_or_default();
             if isolated_net(&row) {
                 held.insert(
                     inst_id,
                     Held {
                         side,
                         contracts,
-                        trade_id: last_trade_id(&row),
-                        position_id: super::views::position_id(&row, side),
-                        updated_at: nullish_text(row.get("uTime")),
+                        trade_id: position_trade_id(&row),
+                        position_id: super::views::position_id(venue, &row, side),
+                        updated_at: nullish(&row.updated_ms).map(str::to_owned),
                     },
                 );
             }
@@ -112,28 +105,39 @@ impl PositionSnapshot {
 
     /// Every open position as it would be published, cross-margin ones included, in a
     /// stable order. Two readbacks with the same identity describe the same account.
-    pub(super) fn identity(&self) -> Vec<[Option<String>; 5]> {
+    pub(super) fn identity(&self, venue: &dyn VenueAdapter) -> Vec<[Option<String>; 5]> {
         let mut identity: Vec<_> = self
             .open
             .iter()
             .map(|row| {
-                ["instId", "mgnMode", "posSide", "pos", "uTime"]
-                    .map(|field| nullish_text(row.get(field)))
+                [
+                    nullish(&row.symbol).map(|id| venue.instrument_id(id)),
+                    nullish(&row.margin_mode).map(str::to_owned),
+                    nullish(&row.position_side).map(str::to_owned),
+                    nullish(&row.size).map(str::to_owned),
+                    nullish(&row.updated_ms).map(str::to_owned),
+                ]
             })
             .collect();
         identity.sort();
         identity
     }
 
-    fn protection_keys(&self, registry: &Registry) -> HashMap<String, String> {
+    fn protection_keys(
+        &self,
+        venue: &dyn VenueAdapter,
+        registry: &Registry,
+    ) -> HashMap<String, String> {
         let mut keys = HashMap::new();
         let mut seen = HashSet::new();
         for row in &self.open {
             if !isolated_net(row) {
                 continue;
             }
-            let inst_id = nullish_text(row.get("instId")).unwrap_or_default();
-            let Some(spec) = registry.symbol_of_inst_id(&inst_id) else {
+            let inst_id = nullish(&row.symbol)
+                .map(|id| venue.instrument_id(id))
+                .unwrap_or_default();
+            let Some(spec) = registry.symbol_of_inst_id(venue, &inst_id) else {
                 continue;
             };
             if !seen.insert(&spec.symbol) {
@@ -150,18 +154,17 @@ impl PositionSnapshot {
     }
 }
 
-pub(super) fn isolated_net(row: &Row) -> bool {
-    row.get("mgnMode").and_then(Value::as_str) == Some("isolated")
-        && row.get("posSide").and_then(Value::as_str) == Some("net")
+pub(super) fn isolated_net(row: &VenuePosition) -> bool {
+    strict(&row.margin_mode) == Some("isolated") && strict(&row.position_side) == Some("net")
 }
 
-impl OkxEngine {
-    pub(super) async fn pending_protection(&self) -> Result<Vec<Row>, EngineError> {
-        let client = &self.deps.client;
+impl ExchangeEngine {
+    pub(super) async fn pending_protection(&self) -> Result<Vec<VenueAlgo>, EngineError> {
+        let venue = self.deps.venue.as_ref();
         let (conditional, oco, trailing) = tokio::try_join!(
-            client.get_pending_algos(PendingAlgoType::Conditional),
-            client.get_pending_algos(PendingAlgoType::Oco),
-            client.get_pending_algos(PendingAlgoType::MoveOrderStop),
+            venue.pending_algos(AlgoKind::Conditional),
+            venue.pending_algos(AlgoKind::Oco),
+            venue.pending_algos(AlgoKind::Trailing),
         )?;
         Ok(conditional.into_iter().chain(oco).chain(trailing).collect())
     }
@@ -173,9 +176,8 @@ impl OkxEngine {
         order: &mut Order,
         registry: &Registry,
     ) -> Result<(), EngineError> {
-        let inst_id = to_inst_id(&order.symbol);
-        let client_id = to_cl_ord_id(&order.client_order_id);
-        let remote = self.deps.client.get_order(&inst_id, &client_id).await?;
+        let client_id = self.deps.venue.client_order_id(&order.client_order_id);
+        let remote = self.deps.venue.get_order(&order.symbol, &client_id).await?;
         let at = self.now();
         let Some(remote) = remote else {
             // Only OKX's own "order does not exist", and only once the order has had time to
@@ -196,28 +198,28 @@ impl OkxEngine {
                     if age < RECENT_FILL_WINDOW {
                         let fills =
                             self.deps
-                                .client
-                                .recent_fills(&inst_id)
+                                .venue
+                                .recent_fills(&order.symbol)
                                 .await
                                 .map_err(|error| {
                                     EngineError::message(format!(
                                         "Could not verify deferred market exit: {error}"
                                     ))
                                 })?;
-                        if fills.len() >= RECENT_FILLS_LIMIT
-                            || fills.iter().any(|row| {
-                                row.get("clOrdId").and_then(Value::as_str)
-                                    == Some(client_id.as_str())
-                            })
+                        if fills.len() >= self.deps.venue.recent_fills_page()
+                            || fills
+                                .iter()
+                                .any(|row| strict(&row.client_order_id) == Some(client_id.as_str()))
                         {
                             return Ok(());
                         }
                     }
                 }
+                let name = self.deps.venue.name();
                 let reason = if is_reached_exit(order) {
-                    REACHED_EXIT_UNCONFIRMED
+                    reached_exit_unconfirmed(name)
                 } else {
-                    super::ORDER_UNCONFIRMED
+                    super::order_unconfirmed(name)
                 };
                 self.expire_unconfirmed_order(order, reason, at).await?;
             }
@@ -226,22 +228,22 @@ impl OkxEngine {
         let observed = order.clone();
         let mut row = observed.clone();
         let spec = registry.get(&row.symbol)?;
-        row.exchange_order_id = nullish_text(remote.get("ordId"));
+        row.exchange_order_id = nullish(&remote.exchange_order_id).map(str::to_owned);
         row.reject_reason = None;
-        let filled = dec_or_zero(remote.get("accFillSz"))?.mul(&dec(&spec.venue_contract_value)?);
+        let filled = dec_or_zero(&remote.filled_size)?.mul(&dec(&spec.venue_contract_value)?);
         row.filled_quantity = filled.to_fixed();
-        if let Some(average) = truthy_text(remote.get("avgPx")) {
-            row.avg_fill_price = Some(average);
+        if let Some(average) = truthy(&remote.average_price) {
+            row.avg_fill_price = Some(average.to_owned());
         }
         row.updated_at = at;
-        match remote.get("state").and_then(Value::as_str) {
+        match strict(&remote.state) {
             Some("filled") => row.status = OrderStatus::Filled,
             Some("canceled" | "mmp_canceled") => row.status = OrderStatus::Canceled,
             // Live or partly filled: still working on OKX.
             _ => row.status = OrderStatus::Open,
         }
         let execution = if filled.gt(&super::zero()) && row.agent_id.is_some() {
-            super::history::execution_of(&remote)
+            super::history::order_execution(&remote)
         } else {
             None
         };
@@ -250,7 +252,7 @@ impl OkxEngine {
         // A final status is only saved with its fill: only OPEN orders are synced, so a filled
         // order without its fill row would drop out of the ledger, History and Arena for good.
         // The order stays as it was and is looked up again on the next sync.
-        let fill = match fill_of(&row, &remote, &filled, at) {
+        let fill = match fill_of(self.deps.venue.as_ref(), &row, &remote, &filled, at) {
             Some(Ok(fill)) => Some(fill),
             Some(Err(error)) => return Err(error),
             None => None,
@@ -320,7 +322,7 @@ impl OkxEngine {
     pub(super) async fn expire_unconfirmed_order(
         &self,
         row: &mut Order,
-        reason: &'static str,
+        reason: String,
         at: i64,
     ) -> Result<(), EngineError> {
         let observed = row.clone();
@@ -333,7 +335,7 @@ impl OkxEngine {
                         // A connection's readback can overlap the active session restoring
                         // a known-unsent order. Its late lookup may only expire what it saw.
                         order.status = OrderStatus::Canceled;
-                        order.reject_reason = Some(reason.into());
+                        order.reject_reason = Some(reason.clone());
                         order.updated_at = at;
                         rows.save_order(order)?;
                     }
@@ -377,14 +379,20 @@ impl OkxEngine {
     async fn reconcile(&self, writes: VenueWrites) -> Result<(), EngineError> {
         let _ = self.finalize_unsent_rejections().await;
         let account_id = self.deps.account_id.clone();
+        let name = self.deps.venue.name();
+        let (reached_unconfirmed, order_unconfirmed) = (
+            reached_exit_unconfirmed(name),
+            super::order_unconfirmed(name),
+        );
         let (open, registry) = {
             let account_id = account_id.clone();
+            let reasons = [reached_unconfirmed.clone(), order_unconfirmed.clone()];
             self.rows(move |rows| {
                 let mut pending = rows.list_open_orders(&account_id)?;
                 // A locally retired target stays lookup-only. Protection can
                 // wait on matching fill evidence while lookup catches up.
                 const RECOVERY_BATCH: usize = 10;
-                for reason in [REACHED_EXIT_UNCONFIRMED, super::ORDER_UNCONFIRMED] {
+                for reason in &reasons {
                     pending.extend(rows.list_canceled_orders_for_recovery(
                         &account_id,
                         reason,
@@ -400,10 +408,11 @@ impl OkxEngine {
         // stays OPEN and is tried again next sync, nothing resent; it fails this sync, but not
         // before the other orders, positions and protection are brought in line. Only an OKX or
         // shutdown failure stops the pass at once.
-        let mut order_error =
-            self.dispatch().restore_order.is_some().then(|| {
-                EngineError::message("An unsent OKX protection order is awaiting recovery")
-            });
+        let mut order_error = self.dispatch().restore_order.is_some().then(|| {
+            EngineError::message(format!(
+                "An unsent {name} protection order is awaiting recovery"
+            ))
+        });
         // An order refused before dispatch has nothing at OKX to look up.
         for mut order in open
             .into_iter()
@@ -413,27 +422,19 @@ impl OkxEngine {
             let recovering = (order.status == OrderStatus::Canceled)
                 .then_some(order.reject_reason.as_deref())
                 .flatten()
-                .filter(|reason| {
-                    [REACHED_EXIT_UNCONFIRMED, super::ORDER_UNCONFIRMED].contains(reason)
-                })
-                .map(|reason| {
-                    if reason == REACHED_EXIT_UNCONFIRMED {
-                        REACHED_EXIT_UNCONFIRMED
-                    } else {
-                        super::ORDER_UNCONFIRMED
-                    }
-                });
+                .filter(|reason| *reason == reached_unconfirmed || *reason == order_unconfirmed)
+                .map(str::to_owned);
             let mut answered = false;
             match self.sync_order(&mut order, &registry).await {
                 Ok(()) => answered = true,
                 Err(error @ EngineError::Stopped) => return Err(error),
                 // A recovery lookup must not stop the readback of orders still open.
-                Err(error @ EngineError::Okx(_)) if !reached_exit && recovering.is_none() => {
+                Err(error @ EngineError::Venue(_)) if !reached_exit && recovering.is_none() => {
                     return Err(error)
                 }
                 Err(error) => {
                     order_error.get_or_insert(EngineError::Message(format!(
-                        "Could not record OKX order {}: {error}",
+                        "Could not record {name} order {}: {error}",
                         order.id
                     )));
                 }
@@ -445,12 +446,16 @@ impl OkxEngine {
                 // window starts at the local expiry, the row's last update.
                 if answered
                     && order.status == OrderStatus::Canceled
-                    && order.reject_reason.as_deref() == Some(super::ORDER_UNCONFIRMED)
+                    && order.reject_reason.as_deref() == Some(order_unconfirmed.as_str())
                     && checked_at.saturating_sub(order.updated_at) >= super::UNCONFIRMED_LOOKUP_MS
                 {
                     // Long past any delay in OKX's records: OKX never had this order.
                     if let Err(error) = self
-                        .expire_unconfirmed_order(&mut order, super::ORDER_NOT_ARRIVED, checked_at)
+                        .expire_unconfirmed_order(
+                            &mut order,
+                            super::order_not_arrived(name),
+                            checked_at,
+                        )
                         .await
                     {
                         if matches!(error, EngineError::Stopped) {
@@ -464,7 +469,7 @@ impl OkxEngine {
                 // Keep this checkpoint across restarts without changing the order's status.
                 if let Err(error) = self
                     .rows(move |rows| {
-                        Ok(rows.mark_order_recovery_checked(&order.id, reason, checked_at)?)
+                        Ok(rows.mark_order_recovery_checked(&order.id, &reason, checked_at)?)
                     })
                     .await
                 {
@@ -476,14 +481,14 @@ impl OkxEngine {
                 }
             }
         }
-        let client = &self.deps.client;
+        let venue = self.deps.venue.as_ref();
         let (usdt, remote, algos) = tokio::join!(
-            client.get_usdt_balance(),
-            client.get_positions(),
+            venue.balance(),
+            venue.positions(),
             self.pending_protection(),
         );
         let mut usdt = usdt?;
-        let mut snapshot = PositionSnapshot::new(remote?)?;
+        let mut snapshot = PositionSnapshot::new(venue, remote?)?;
         let pre_protection = snapshot.clone();
         let protection = match algos {
             Ok(algos) => {
@@ -497,7 +502,7 @@ impl OkxEngine {
         if snapshot.post_exit_unverified {
             snapshot = pre_protection;
         }
-        let keys = snapshot.protection_keys(&registry);
+        let keys = snapshot.protection_keys(venue, &registry);
         let protection = match protection {
             Ok(protection) => protection,
             Err(error) => {
@@ -520,13 +525,16 @@ impl OkxEngine {
         let (positions, open_results, balance) = {
             let account_id = account_id.clone();
             let now = self.now();
+            let shared = self.deps.venue.clone();
             self.rows(move |rows| {
+                let venue = shared.as_ref();
                 let registry = Registry(rows.instruments());
                 let mut positions = Vec::new();
                 let mut open_results = Vec::new();
                 for p in &snapshot.open {
-                    open_results.extend(super::history::open_result_of(p, &registry)?);
+                    open_results.extend(super::history::open_result_of(venue, p, &registry)?);
                     positions.extend(Self::to_view(
+                        venue,
                         p,
                         rows,
                         &registry,
@@ -573,30 +581,35 @@ impl OkxEngine {
 /// The fill for an order that is done and filled at least partly, `None` otherwise. Whether one
 /// is already recorded is checked against the store.
 fn fill_of(
+    venue: &dyn VenueAdapter,
     order: &Order,
-    remote: &Row,
+    remote: &VenueOrder,
     filled: &mochi_decimal::Dec,
     at: i64,
 ) -> Option<Result<Fill, EngineError>> {
     if order.status == OrderStatus::Open || !filled.gt(&super::zero()) {
         return None;
     }
-    Some(build_fill(order, remote, filled, at))
+    Some(build_fill(venue, order, remote, filled, at))
 }
 
 fn build_fill(
+    venue: &dyn VenueAdapter,
     order: &Order,
-    remote: &Row,
+    remote: &VenueOrder,
     filled: &mochi_decimal::Dec,
     at: i64,
 ) -> Result<Fill, EngineError> {
-    let ord_id = nullish_text(remote.get("ordId")).unwrap_or_else(|| "undefined".into());
+    let ord_id = nullish(&remote.exchange_order_id).unwrap_or("undefined");
     // OKX sends an empty avgPx until something fills; a fill must never get an invented or
     // empty price.
-    let price = truthy_text(remote.get("avgPx"))
+    let price = truthy(&remote.average_price)
         .filter(|price| dec(price).is_ok_and(|price| price.gt(&super::zero())))
-        .ok_or_else(|| EngineError::Message("OKX reported a fill without a price".into()))?;
-    let fee = dec_or_zero(remote.get("fee"))?;
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            EngineError::Message(format!("{} reported a fill without a price", venue.name()))
+        })?;
+    let fee = dec_or_zero(&remote.fee)?;
     let fee = if fee.is_negative() { fee.neg() } else { fee };
     Ok(Fill {
         id: format!("fill_okx_{ord_id}"),
@@ -607,7 +620,7 @@ fn build_fill(
         quantity: filled.to_fixed(),
         price,
         fee: fee.to_fixed(),
-        realized_pnl: truthy_text(remote.get("pnl")).unwrap_or_else(|| "0".into()),
+        realized_pnl: truthy(&remote.realized_pnl).unwrap_or("0").to_owned(),
         liquidity: Liquidity::Taker,
         ts: at,
     })

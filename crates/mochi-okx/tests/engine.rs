@@ -11,7 +11,7 @@ use mochi_domain::{
     InstrumentSpecification, OrderRequest, OrderSide, OrderStatus, PaperAccount, Quote,
     RiskSettings,
 };
-use mochi_okx::engine::{OkxEngine, OkxEngineDeps, Rows, StoreAccess, StoreWork};
+use mochi_exchange::engine::{EngineDeps, ExchangeEngine, Rows, StoreAccess, StoreWork};
 use mochi_okx::fake::{self, FakeOkx, Refusal};
 use mochi_okx::{BoxFuture, HttpReply, HttpRequest, OkxClient, Transport, Venue};
 use mochi_store::{open_in_memory, SqlitePaperStore};
@@ -73,7 +73,7 @@ struct Prices {
 
 struct Harness {
     okx: Arc<FakeOkx>,
-    engine: Arc<OkxEngine>,
+    engine: Arc<ExchangeEngine>,
     store: Arc<Local>,
     clock: Arc<AtomicI64>,
     armed: Arc<AtomicBool>,
@@ -87,7 +87,7 @@ fn account(limits: RiskSettings) -> PaperAccount {
         id: ACCOUNT.into(),
         name: "OKX".into(),
         source: DataSource::Live,
-        venue: AccountVenue::OkxLive,
+        venue: AccountVenue::okx_live(),
         exchange_uid: Some("42".into()),
         live_limits: Some(limits),
         is_demo: false,
@@ -139,10 +139,9 @@ async fn connect(limits: RiskSettings, extra: Vec<InstrumentSpecification>) -> H
         .with_base_url("https://okx.invalid")
         .with_clock(move || ticks.load(Ordering::SeqCst));
     let ids = Arc::new(AtomicU64::new(0));
-    let engine = OkxEngine::new(OkxEngineDeps {
+    let engine = ExchangeEngine::new(EngineDeps {
         account_id: ACCOUNT.into(),
-        venue: Venue::OkxLive,
-        client,
+        venue: Arc::new(mochi_okx::OkxAdapter::new(client)),
         store: store.clone(),
         get_quote: {
             let (clock, age, prices) = (clock.clone(), quote_age_ms.clone(), prices.clone());

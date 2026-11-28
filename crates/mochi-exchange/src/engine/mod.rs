@@ -1,4 +1,5 @@
-//! Trades through OKX: a port of `packages/exchanges/src/okx-engine.ts`. The exchange is the source
+//! Trades through a [`VenueAdapter`] (OKX is the only one): a port of
+//! `packages/exchanges/src/okx-engine.ts`. The exchange is the source
 //! of truth for balances and positions; local rows record what MochiPrep asked for, so nothing here
 //! pretends to be a ledger of the real account.
 //!
@@ -29,25 +30,28 @@ use mochi_domain::{
 use protection::{Held, Miss, ProtectionMap};
 use tokio::sync::oneshot;
 
-use crate::client::{
-    AttachAlgoOrd, BoxFuture, OkxClient, OkxError, OrdType, PlaceOrderBody, Row, Side, TdMode,
-    Venue,
+use crate::venue::{
+    strict, BoxFuture, VenueAdapter, VenueAttachedAlgo, VenueError, VenueMarginMode,
+    VenueOrderType, VenuePlaceOrder, VenuePosition,
 };
-use crate::ids::{to_algo_cl_ord_id, to_cl_ord_id, to_inst_id};
 
 /// Longest gap since the last good sync before new exposure is refused.
 const MAX_SNAPSHOT_AGE_MS: i64 = 30_000;
-/// An order OKX still has no record of after this long never arrived.
+/// An order the exchange still has no record of after this long never arrived.
 const NEVER_ARRIVED_AFTER_MS: i64 = 60_000;
-/// Why a readback finally closes an order OKX never recorded, once
-/// [`ORDER_UNCONFIRMED`] has been looked up for [`UNCONFIRMED_LOOKUP_MS`].
-pub(super) const ORDER_NOT_ARRIVED: &str = "OKX has no record of this order";
-/// A local expiry, not an OKX cancellation: OKX had no record of the order after
+/// Why a readback finally closes an order the exchange never recorded, once
+/// [`order_unconfirmed`] has been looked up for [`UNCONFIRMED_LOOKUP_MS`]. Stored as the
+/// order's reason and matched as text, so it must stay fixed for a venue.
+pub(super) fn order_not_arrived(venue: &str) -> String {
+    format!("{venue} has no record of this order")
+}
+/// A local expiry, not an exchange cancellation: the exchange had no record of the order after
 /// [`NEVER_ARRIVED_AFTER_MS`], so it leaves the open list but is still looked up, and a
 /// later answer (live, filled or canceled) replaces this state. The web UI keeps its
 /// retry key for this reason.
-pub(super) const ORDER_UNCONFIRMED: &str =
-    "OKX has no record of this order yet; check its outcome in OKX";
+pub(super) fn order_unconfirmed(venue: &str) -> String {
+    format!("{venue} has no record of this order yet; check its outcome in {venue}")
+}
 /// How long an unconfirmed order keeps being looked up, from its local expiry.
 pub(super) const UNCONFIRMED_LOOKUP_MS: i64 = 3 * 24 * 60 * 60 * 1_000;
 const EQUITY_EVERY_MS: i64 = 60_000;
@@ -317,10 +321,10 @@ pub type NewId = Arc<dyn Fn(&str) -> String + Send + Sync>;
 
 /// Node's `OkxEngineDeps`. Live limits are not a dependency: they are re-read from the account
 /// row on every call, as Node's `limits()` callback does.
-pub struct OkxEngineDeps {
+pub struct EngineDeps {
     pub account_id: String,
-    pub venue: Venue,
-    pub client: OkxClient,
+    /// The exchange the engine reads from and sends orders through.
+    pub venue: Arc<dyn VenueAdapter>,
     pub store: Arc<dyn StoreAccess>,
     pub get_quote: QuoteSource,
     pub now: Now,
@@ -343,7 +347,7 @@ pub enum EngineError {
         after: Option<Box<Protection>>,
     },
     #[error(transparent)]
-    Okx(#[from] OkxError),
+    Venue(#[from] VenueError),
     #[error(transparent)]
     Store(#[from] StoreFailure),
     /// The store's owner stopped before the work could run.
@@ -354,7 +358,7 @@ pub enum EngineError {
     #[error("NOT_ARMED: real-money orders are switched off for this account")]
     OpeningDisarmed,
     #[error(transparent)]
-    LeverageSetup(OkxError),
+    LeverageSetup(VenueError),
     /// A selected-position reduction refused before anything reached OKX, with any
     /// staged row already recorded as rejected. The caller may correct and resubmit
     /// under a new client order ID.
@@ -406,9 +410,9 @@ struct State {
     leftovers: HashSet<String>,
 }
 
-/// One account's OKX trading. Cheap to share: callers hold it in an `Arc`.
-pub struct OkxEngine {
-    deps: OkxEngineDeps,
+/// One exchange account's trading. Cheap to share: callers hold it in an `Arc`.
+pub struct ExchangeEngine {
+    deps: EngineDeps,
     state: Mutex<State>,
     dispatch: Arc<Mutex<DispatchState>>,
     /// Node's `serialized`: one operation at a time, in arrival order (tokio's mutex is fair), so
@@ -432,7 +436,13 @@ enum DeferredRestore {
 }
 
 /// In-memory proof of non-dispatch for a staged order that needs finalizing.
-pub enum UnsentOrder {
+pub struct UnsentOrder {
+    /// The venue's name, which the stored reasons it matches and writes carry.
+    venue: String,
+    kind: Unsent,
+}
+
+enum Unsent {
     Submission(String),
     /// A submission refused before dispatch, with the refusal to record.
     Rejection {
@@ -446,10 +456,17 @@ pub enum UnsentOrder {
 }
 
 impl UnsentOrder {
+    fn new(venue: &dyn VenueAdapter, kind: Unsent) -> Self {
+        UnsentOrder {
+            venue: venue.name().to_string(),
+            kind,
+        }
+    }
+
     fn id(&self) -> &str {
-        match self {
-            Self::Submission(id) | Self::Rejection { id, .. } => id,
-            Self::Deferred { original, .. } => &original.id,
+        match &self.kind {
+            Unsent::Submission(id) | Unsent::Rejection { id, .. } => id,
+            Unsent::Deferred { original, .. } => &original.id,
         }
     }
 
@@ -485,34 +502,34 @@ impl UnsentOrder {
         }
         // A connection candidate cannot see this proof, so its readback may already have
         // expired the never-sent order. The proof is the accurate record.
+        let venue = self.venue.as_str();
         let expired_unsent = order.status == OrderStatus::Canceled
-            && matches!(
-                order.reject_reason.as_deref(),
-                Some(ORDER_NOT_ARRIVED | ORDER_UNCONFIRMED)
-            );
-        match self {
-            Self::Submission(_) if order.status == OrderStatus::Open || expired_unsent => {
+            && order.reject_reason.as_ref().is_some_and(|reason| {
+                *reason == order_not_arrived(venue) || *reason == order_unconfirmed(venue)
+            });
+        match &self.kind {
+            Unsent::Submission(_) if order.status == OrderStatus::Open || expired_unsent => {
                 order.status = OrderStatus::Rejected;
                 order.reject_reason = Some(EngineError::SessionRetired.to_string());
                 order.updated_at = now;
             }
-            Self::Rejection { reason, .. }
+            Unsent::Rejection { reason, .. }
                 if order.status == OrderStatus::Open || expired_unsent =>
             {
                 order.status = OrderStatus::Rejected;
                 order.reject_reason = Some(reason.clone());
                 order.updated_at = now;
             }
-            Self::Deferred { original, marker } => {
+            Unsent::Deferred { original, marker } => {
                 if *order != **marker {
                     // A connection's readback may already have expired this marker.
                     // Confirm it is still the same attempt before restoring its intent.
                     let mut expired = marker.as_ref().clone();
                     expired.status = OrderStatus::Canceled;
                     expired.reject_reason = Some(if marker.order_type == OrderType::Market {
-                        protection::REACHED_EXIT_UNCONFIRMED.into()
+                        protection::reached_exit_unconfirmed(venue)
                     } else {
-                        protection::ALGO_NOT_ARRIVED.into()
+                        protection::algo_not_arrived(venue)
                     });
                     expired.updated_at = order.updated_at;
                     if *order != expired {
@@ -558,10 +575,14 @@ impl Registry {
     }
 
     /// Node's `fromInstId`: unknown instIds are not ours to show.
-    pub(crate) fn symbol_of_inst_id(&self, inst_id: &str) -> Option<&InstrumentSpecification> {
+    pub(crate) fn symbol_of_inst_id(
+        &self,
+        venue: &dyn VenueAdapter,
+        inst_id: &str,
+    ) -> Option<&InstrumentSpecification> {
         self.0
             .iter()
-            .find(|spec| to_inst_id(&spec.symbol) == inst_id)
+            .find(|spec| venue.instrument_id(&spec.symbol) == inst_id)
     }
 }
 
@@ -628,9 +649,9 @@ impl Prepared {
     }
 }
 
-impl OkxEngine {
-    pub fn new(deps: OkxEngineDeps) -> Arc<Self> {
-        Arc::new(OkxEngine {
+impl ExchangeEngine {
+    pub fn new(deps: EngineDeps) -> Arc<Self> {
+        Arc::new(ExchangeEngine {
             deps,
             state: Mutex::new(State::default()),
             dispatch: Arc::new(Mutex::new(DispatchState::default())),
@@ -750,10 +771,6 @@ impl OkxEngine {
         &self.deps.account_id
     }
 
-    pub fn venue(&self) -> Venue {
-        self.deps.venue
-    }
-
     fn state(&self) -> MutexGuard<'_, State> {
         // Nothing panics halfway through updating the state, so a poisoned lock is still whole.
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
@@ -829,15 +846,19 @@ impl OkxEngine {
             work(engine.clone()).await
         })
         .await
-        .map_err(|_| EngineError::message("The OKX operation failed unexpectedly"))?
+        .map_err(|_| {
+            EngineError::message(format!(
+                "The {} operation failed unexpectedly",
+                self.deps.venue.name()
+            ))
+        })?
     }
 
     /// Node's `getBalance`.
     pub fn balance(&self) -> Result<AccountBalance, EngineError> {
-        self.state()
-            .balance
-            .clone()
-            .ok_or_else(|| EngineError::message("No balance from OKX yet"))
+        self.state().balance.clone().ok_or_else(|| {
+            EngineError::message(format!("No balance from {} yet", self.deps.venue.name()))
+        })
     }
 
     /// Last synced balance, for read models that must not fail while disconnected.
@@ -904,15 +925,18 @@ impl OkxEngine {
                         }) {
                             // The key already names a selected reduction, so this is not
                             // a refusal before dispatch.
-                            return Err(EngineError::message(CLOSE_CHANGED));
+                            return Err(EngineError::message(close_changed_text(
+                                engine.deps.venue.as_ref(),
+                            )));
                         }
                     }
                     return Ok(prior);
                 }
                 if request.reduce_only == Some(true) {
-                    return Err(EngineError::message(
-                        "Select an OKX position for this reduce-only order",
-                    ));
+                    return Err(EngineError::message(format!(
+                        "Select an {} position for this reduce-only order",
+                        engine.deps.venue.name()
+                    )));
                 }
                 engine.submit(request, None, prepared).await
             })
@@ -1197,15 +1221,16 @@ impl OkxEngine {
         selection: CloseSelection,
         registry: &Registry,
     ) -> Result<(SelectedClose, u32), EngineError> {
+        let venue = self.deps.venue.as_ref();
         let spec = registry.get(symbol)?;
         // The cached size can predate a fill or an unanswered reduce-only order.
-        let positions = self.deps.client.get_positions().await?;
+        let positions = self.deps.venue.positions().await?;
         let (position, side, contracts) =
-            select_close(&positions, symbol, selection.position_id.as_deref())?;
+            select_close(venue, &positions, symbol, selection.position_id.as_deref())?;
         let held = contracts.mul(&dec(&spec.venue_contract_value)?);
         Ok((
             SelectedClose {
-                id: views::position_id(position, side),
+                id: views::position_id(venue, position, side),
                 side,
                 contracts,
                 held,
@@ -1298,18 +1323,17 @@ impl OkxEngine {
                 }
                 // A protective algo is not an order on OKX, and removing one may need arming.
                 if is_leg(&order) {
-                    return Err(EngineError::message(
-                        "Change protection on OKX through the protection settings",
-                    ));
+                    return Err(EngineError::message(format!(
+                        "Change protection on {} through the protection settings",
+                        engine.deps.venue.name()
+                    )));
                 }
                 engine.check_dispatch()?;
+                let client_id = engine.deps.venue.client_order_id(&order.client_order_id);
                 engine
                     .deps
-                    .client
-                    .cancel_order(
-                        &to_inst_id(&order.symbol),
-                        &to_cl_ord_id(&order.client_order_id),
-                    )
+                    .venue
+                    .cancel_order(&order.symbol, &client_id)
                     .await?;
                 engine.sync_order(&mut order, &registry).await
             })
@@ -1348,7 +1372,7 @@ impl OkxEngine {
         .await
     }
 
-    /// Starts a history pass as a task of its own (see [`OkxEngine::sync_position_history`]).
+    /// Starts a history pass as a task of its own (see [`ExchangeEngine::sync_position_history`]).
     /// Only the arena reads the history, so a failure must not make the account unhealthy (that
     /// pauses its agents); the pass is tried again after the next sync.
     pub fn spawn_position_history(self: &Arc<Self>) {
@@ -1399,6 +1423,7 @@ impl OkxEngine {
         fresh_position: Option<SelectedClose>,
         prepared: Prepared,
     ) -> Result<OrderResult, EngineError> {
+        let venue = self.deps.venue.as_ref();
         let close_selection = fresh_position
             .as_ref()
             .map(|position| position.selection.clone());
@@ -1442,21 +1467,23 @@ impl OkxEngine {
 
         // Written before anything is sent, so a crash can never leave an order we do not know
         // about.
-        let _staged = self.stage_order(UnsentOrder::Submission(order.id.clone()))?;
+        let _staged = self.stage_order(UnsentOrder::new(
+            venue,
+            Unsent::Submission(order.id.clone()),
+        ))?;
         self.insert_submission(order.clone(), close_selection)
             .await?;
 
-        let inst_id = to_inst_id(&order.symbol);
-        let cl_ord_id = to_cl_ord_id(&order.client_order_id);
-        let body = to_body(&order, &inst_id, &cl_ord_id, contracts.to_fixed());
+        let body = to_body(&order, self.deps.venue.as_ref(), contracts.to_fixed());
         if let Some(selected) = fresh_position {
             // OKX's order endpoint has no position-version condition. Recheck just before
             // dispatch to narrow the window in which a concurrent trade can change the position.
             let checked = async {
-                let positions = self.deps.client.get_positions().await?;
-                let (_, _, current) = select_close(&positions, &order.symbol, Some(&selected.id))?;
+                let positions = self.deps.venue.positions().await?;
+                let (_, _, current) =
+                    select_close(venue, &positions, &order.symbol, Some(&selected.id))?;
                 if !current.eq_value(&selected.contracts) {
-                    return Err(close_changed());
+                    return Err(close_changed(venue));
                 }
                 Ok::<_, EngineError>(())
             }
@@ -1469,14 +1496,14 @@ impl OkxEngine {
                 return Err(error);
             }
         }
-        match self.send(&mut order, &inst_id, &body).await {
+        match self.send(&mut order, body).await {
             Ok(()) => {}
             Err(error @ EngineError::SessionRetired) => return Err(error),
             Err(error @ (EngineError::OpeningDisarmed | EngineError::LeverageSetup(_))) => {
                 return self.finish_unsent(order, error.to_string()).await;
             }
-            Err(EngineError::Okx(OkxError::Rejection { code, message })) => {
-                let reason = OkxError::Rejection { code, message }.to_string();
+            Err(EngineError::Venue(rejection @ VenueError::Rejection { .. })) => {
+                let reason = rejection.to_string();
                 return self.finish_rejected(order, reason).await;
             }
             // Unknown outcome, or an answer that could not be read: the order stays OPEN and is
@@ -1513,27 +1540,22 @@ impl OkxEngine {
     }
 
     /// Node's `try` block: leverage for an opening order, the order, and the saved ordId.
-    async fn send(
-        &self,
-        order: &mut Order,
-        inst_id: &str,
-        body: &PlaceOrderBody,
-    ) -> Result<(), EngineError> {
-        let client = &self.deps.client;
+    async fn send(&self, order: &mut Order, body: VenuePlaceOrder) -> Result<(), EngineError> {
+        let venue = self.deps.venue.as_ref();
         if !order.reduce_only {
             self.check_dispatch()?;
             if !(self.deps.is_armed)() {
                 return Err(EngineError::OpeningDisarmed);
             }
             // An uncertain leverage result still means the order itself never went out.
-            client
-                .set_leverage(inst_id, order.leverage)
+            venue
+                .set_leverage(&order.symbol, order.leverage)
                 .await
                 .map_err(EngineError::LeverageSetup)?;
         }
         // Stop All can disarm this account while the leverage request is in flight.
         self.handoff_order(order)?;
-        order.exchange_order_id = Some(client.place_order(body).await?);
+        order.exchange_order_id = Some(venue.place_order(body).await?);
         let row = order.clone();
         self.rows(move |rows| Ok(rows.save_order(&row)?)).await
     }
@@ -1631,9 +1653,10 @@ impl OkxEngine {
                 .is_some_and(|pending| pending.id() == id)
             {
                 dispatch.staged_order = None;
-                dispatch
-                    .unsent_rejections
-                    .push(UnsentOrder::Rejection { id, reason });
+                dispatch.unsent_rejections.push(UnsentOrder::new(
+                    self.deps.venue.as_ref(),
+                    Unsent::Rejection { id, reason },
+                ));
             }
         }
         result
@@ -1657,12 +1680,17 @@ impl OkxEngine {
     }
 }
 
-const CLOSE_CHANGED: &str = "The selected OKX position has changed. Refresh and try again.";
+fn close_changed_text(venue: &dyn VenueAdapter) -> String {
+    format!(
+        "The selected {} position has changed. Refresh and try again.",
+        venue.name()
+    )
+}
 
 /// Raised only before dispatch: by the first position read, or by the final recheck
 /// once its rejection is recorded.
-fn close_changed() -> EngineError {
-    EngineError::RefusedBeforeDispatch(CLOSE_CHANGED.into())
+fn close_changed(venue: &dyn VenueAdapter) -> EngineError {
+    EngineError::RefusedBeforeDispatch(close_changed_text(venue))
 }
 
 fn close_retry_changed() -> EngineError {
@@ -1670,19 +1698,24 @@ fn close_retry_changed() -> EngineError {
 }
 
 fn select_close<'a>(
-    positions: &'a [Row],
+    venue: &dyn VenueAdapter,
+    positions: &'a [VenuePosition],
     symbol: &str,
     position_id: Option<&str>,
-) -> Result<(&'a Row, PositionSide, Dec), EngineError> {
-    let inst_id = to_inst_id(symbol);
+) -> Result<(&'a VenuePosition, PositionSide, Dec), EngineError> {
+    let inst_id = venue.instrument_id(symbol);
     let mut matches = positions.iter().filter_map(|p| {
-        if p.get("instId").and_then(serde_json::Value::as_str) != Some(inst_id.as_str()) {
+        if strict(&p.symbol)
+            .map(|id| venue.instrument_id(id))
+            .as_deref()
+            != Some(inst_id.as_str())
+        {
             return None;
         }
-        let signed = dec(p.get("pos")?.as_str()?).ok()?;
+        let signed = dec(strict(&p.size)?).ok()?;
         let side = views::position_side(p, signed.is_negative());
         let selected = match position_id {
-            Some(id) => views::position_id(p, side) == id,
+            Some(id) => views::position_id(venue, p, side) == id,
             None => sync::isolated_net(p),
         };
         if !selected || signed.is_zero() {
@@ -1697,20 +1730,22 @@ fn select_close<'a>(
     });
     let found = matches.next().ok_or_else(|| {
         if position_id.is_some() {
-            close_changed()
+            close_changed(venue)
         } else {
             EngineError::message(format!("No open {symbol} position"))
         }
     })?;
     if matches.next().is_some() {
-        return Err(EngineError::message(
-            "Several OKX positions match. Select a position to close.",
-        ));
+        return Err(EngineError::message(format!(
+            "Several {} positions match. Select a position to close.",
+            venue.name()
+        )));
     }
     if !sync::isolated_net(found.0) {
-        return Err(EngineError::message(
-            "Only isolated net positions can be closed in MochiPrep. Close this position in OKX.",
-        ));
+        return Err(EngineError::message(format!(
+            "Only isolated net positions can be closed in MochiPrep. Close this position in {}.",
+            venue.name()
+        )));
     }
     Ok(found)
 }
@@ -1773,26 +1808,26 @@ fn to_contracts(order: &Order, registry: &Registry) -> Result<Dec, EngineError> 
 }
 
 /// The trailing fields OKX takes: exactly one callback, and the activation price when set.
-fn trailing_fields(spec: &TrailingStopSpec, leg: &mut AttachAlgoOrd) {
+fn trailing_fields(spec: &TrailingStopSpec, leg: &mut VenueAttachedAlgo) {
     match spec.kind {
         TrailingKind::Ratio => leg.callback_ratio = Some(spec.callback.clone()),
         TrailingKind::Spread => leg.callback_spread = Some(spec.callback.clone()),
     }
-    leg.active_px = spec.activation_price.clone().filter(|p| !p.is_empty());
+    leg.activation_price = spec.activation_price.clone().filter(|p| !p.is_empty());
 }
 
 /// Attach one protective leg. In particular, a single fixed stop remains eligible
 /// for exchange placement when a partial fill is followed by cancellation.
-fn to_body(order: &Order, inst_id: &str, cl_ord_id: &str, sz: String) -> PlaceOrderBody {
+fn to_body(order: &Order, venue: &dyn VenueAdapter, size: String) -> VenuePlaceOrder {
     let mut algo = Vec::new();
     if !order.reduce_only {
-        let tag = |leg: &str| Some(to_algo_cl_ord_id(&format!("{}:{leg}", order.id)));
+        let tag = |leg: &str| Some(venue.client_algo_id(&format!("{}:{leg}", order.id)));
         // Node's truthiness: an empty price attaches nothing.
         if let Some(stop) = order.attached_stop_loss.clone().filter(|p| !p.is_empty()) {
-            algo.push(AttachAlgoOrd {
-                attach_algo_cl_ord_id: tag("sl"),
-                sl_trigger_px: Some(stop),
-                sl_ord_px: Some("-1".into()),
+            algo.push(VenueAttachedAlgo {
+                client_algo_id: tag("sl"),
+                sl_trigger_price: Some(stop),
+                sl_order_price: Some("-1".into()),
                 ..Default::default()
             });
         }
@@ -1801,10 +1836,10 @@ fn to_body(order: &Order, inst_id: &str, cl_ord_id: &str, sz: String) -> PlaceOr
             .clone()
             .filter(|p| !p.is_empty() && !protection::defer_tp(order))
         {
-            algo.push(AttachAlgoOrd {
-                attach_algo_cl_ord_id: tag("tp"),
-                tp_trigger_px: Some(target),
-                tp_ord_px: Some("-1".into()),
+            algo.push(VenueAttachedAlgo {
+                client_algo_id: tag("tp"),
+                tp_trigger_price: Some(target),
+                tp_order_price: Some("-1".into()),
                 ..Default::default()
             });
         }
@@ -1813,8 +1848,8 @@ fn to_body(order: &Order, inst_id: &str, cl_ord_id: &str, sz: String) -> PlaceOr
             .as_ref()
             .filter(|_| !protection::defer_trailing(order))
         {
-            let mut leg = AttachAlgoOrd {
-                attach_algo_cl_ord_id: tag("trail"),
+            let mut leg = VenueAttachedAlgo {
+                client_algo_id: tag("trail"),
                 ..Default::default()
             };
             trailing_fields(spec, &mut leg);
@@ -1822,23 +1857,20 @@ fn to_body(order: &Order, inst_id: &str, cl_ord_id: &str, sz: String) -> PlaceOr
         }
     }
     let limit = order.order_type == OrderType::Limit;
-    PlaceOrderBody {
-        inst_id: inst_id.to_string(),
-        td_mode: TdMode::Isolated,
-        side: match order.side {
-            OrderSide::Buy => Side::Buy,
-            OrderSide::Sell => Side::Sell,
-        },
-        ord_type: if limit {
-            OrdType::Limit
+    VenuePlaceOrder {
+        symbol: order.symbol.clone(),
+        margin_mode: VenueMarginMode::Isolated,
+        side: order.side,
+        order_type: if limit {
+            VenueOrderType::Limit
         } else {
-            OrdType::Market
+            VenueOrderType::Market
         },
-        sz,
-        cl_ord_id: cl_ord_id.to_string(),
-        px: if limit { order.price.clone() } else { None },
+        size,
+        client_order_id: venue.client_order_id(&order.client_order_id),
+        price: if limit { order.price.clone() } else { None },
         reduce_only: order.reduce_only.then_some(true),
-        attach_algo_ords: (!algo.is_empty()).then_some(algo),
+        attached_algos: (!algo.is_empty()).then_some(algo),
     }
 }
 
@@ -1851,7 +1883,10 @@ mod web_contract {
         let page = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../apps/web/src/pages/Paper.tsx");
         let page = std::fs::read_to_string(page).unwrap();
-        let expected = format!("const UNCONFIRMED_EXPIRY = '{}';", super::ORDER_UNCONFIRMED);
+        let expected = format!(
+            "const UNCONFIRMED_EXPIRY = '{}';",
+            super::order_unconfirmed("OKX")
+        );
         assert!(
             page.contains(&expected),
             "Paper.tsx must declare {expected}"

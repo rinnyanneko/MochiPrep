@@ -180,7 +180,7 @@ fn never_touches_the_open_orders_of_an_okx_account_on_a_live_quote() {
             id: "acct_okx".into(),
             name: "OKX".into(),
             source: DataSource::Live,
-            venue: AccountVenue::OkxLive,
+            venue: AccountVenue::okx_live(),
             exchange_uid: Some("42".into()),
             live_limits: Some(default_live_limits()),
             is_demo: false,

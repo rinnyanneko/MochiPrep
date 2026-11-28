@@ -1,0 +1,16 @@
+[package]
+name = "mochi-exchange"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mochi-core = { path = "../mochi-core" }
+mochi-decimal = { path = "../mochi-decimal" }
+mochi-domain = { path = "../mochi-domain" }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+mochi-store = { path = "../mochi-store" }

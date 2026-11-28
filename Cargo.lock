@@ -2543,6 +2543,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mochi-exchange"
+version = "0.1.1"
+dependencies = [
+ "mochi-core",
+ "mochi-decimal",
+ "mochi-domain",
+ "mochi-store",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "mochi-launcher"
 version = "0.1.1"
 dependencies = [
@@ -2607,6 +2619,7 @@ dependencies = [
  "mochi-core",
  "mochi-decimal",
  "mochi-domain",
+ "mochi-exchange",
  "mochi-market",
  "mochi-okx",
  "mochi-store",
@@ -2634,6 +2647,7 @@ dependencies = [
  "mochi-core",
  "mochi-decimal",
  "mochi-domain",
+ "mochi-exchange",
  "mochi-launcher-core",
  "mochi-market",
  "mochi-okx",

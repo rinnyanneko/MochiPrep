@@ -8,16 +8,16 @@ use mochi_decimal::Dec;
 use mochi_domain::jsnum::{js_number_string, js_to_fixed};
 use mochi_domain::{Order, OrderSide, OrderStatus, OrderType, PositionSide};
 
-use super::{day_start_equity, dec, is_leg, side_text, EngineError, OkxEngine, Prepared};
-use crate::ids::to_inst_id;
+use super::{day_start_equity, dec, is_leg, side_text, EngineError, ExchangeEngine, Prepared};
 
-impl OkxEngine {
+impl ExchangeEngine {
     pub(super) fn pre_trade_refusal(
         &self,
         order: &Order,
         position: Option<PositionSide>,
         prepared: &Prepared,
     ) -> Result<Option<String>, EngineError> {
+        let venue = self.deps.venue.as_ref();
         // An exit only needs a position to reduce: no arming, sync, quote or limit checks, so a
         // disarmed or unhealthy account can always get out.
         if order.reduce_only {
@@ -47,7 +47,7 @@ impl OkxEngine {
             )
         };
         let Some(balance) = balance.filter(|_| healthy) else {
-            let why = sync_error.unwrap_or_else(|| "no recent sync with OKX".into());
+            let why = sync_error.unwrap_or_else(|| format!("no recent sync with {}", venue.name()));
             return Ok(Some(format!("EXCHANGE_NOT_SYNCED: {why}")));
         };
 
@@ -78,7 +78,10 @@ impl OkxEngine {
         }
         // The previous position's algos would otherwise count as the new one's protection, or
         // close it.
-        let leftover = self.state().leftovers.contains(&to_inst_id(&order.symbol))
+        let leftover = self
+            .state()
+            .leftovers
+            .contains(&venue.instrument_id(&order.symbol))
             || prepared.open_orders.iter().any(|o| {
                 o.symbol == order.symbol && is_leg(o) && !super::protection::is_deferred(o)
             });
